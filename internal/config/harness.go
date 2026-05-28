@@ -13,6 +13,17 @@ type Harness struct {
 	Policy Policy           `yaml:"policy"`
 }
 
+// Stage kinds for non-agent stages. An agent stage names a Role instead; a stage is
+// exactly one or the other (see Stage and validateDAG).
+const (
+	// StageKindHuman is the trusted, non-sandboxed requirements stage: a human authors
+	// specs and seed issues. The orchestrator never dispatches it to a runner.
+	StageKindHuman = "human"
+	// StageKindTrustedMerge is the integrate stage: the orchestrator itself merges a
+	// verified candidate to main (the trusted merge queue), never an agent.
+	StageKindTrustedMerge = "trusted-merge"
+)
+
 // Stage is one node in the workflow DAG, keyed by stage name in the DAG map. A
 // stage is either an agent stage — it names a Role that souls fulfill and may carry
 // guards — or a non-agent stage with Kind set ("human" for requirements,

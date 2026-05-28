@@ -23,6 +23,13 @@ const (
 // proposal; the orchestrator validates and applies it (see
 // specs/components/agent.md, specs/components/orchestrator.md).
 type Result struct {
+	// IssueID is the beads issue this Result answers. It is stamped by the runner — the
+	// trusted component that received the dispatched Brief — NOT self-reported by the
+	// agent, so the orchestrator can correlate a Result to an issue without trusting
+	// sandboxed code to address its own work (see specs/components/runner.md). It is the
+	// only reliable correlator for a failed/escalated Result, which carries no candidate
+	// branch to derive the issue from.
+	IssueID  string
 	Status   ResultStatus // the self-reported outcome
 	Branch   Branch       // the candidate branch the agent produced
 	Evidence Evidence     // proof for the gate and the provenance trail

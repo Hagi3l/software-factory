@@ -100,15 +100,18 @@ type issueJSON struct {
 	ID          string                     `json:"id"`
 	Title       string                     `json:"title"`
 	Description string                     `json:"description"`
+	Status      string                     `json:"status"`
 	Metadata    map[string]json.RawMessage `json:"metadata"`
 }
 
 func (r issueJSON) toCore() core.Issue {
 	return core.Issue{
-		ID:    r.ID,
-		Title: r.Title,
-		Body:  r.Description,
-		Role:  metaString(r.Metadata, MetadataKeyRole),
+		ID:      r.ID,
+		Title:   r.Title,
+		Body:    r.Description,
+		Role:    metaString(r.Metadata, MetadataKeyRole),
+		Status:  r.Status,
+		Attempt: metaInt(r.Metadata, MetadataKeyRetries),
 	}
 }
 
@@ -125,6 +128,21 @@ func metaString(m map[string]json.RawMessage, key string) string {
 		return ""
 	}
 	return s
+}
+
+// metaInt returns the integer value of a metadata key, or 0 if absent or not a
+// number. Lenient for the same reason as metaString: foreign metadata must never
+// fail a read.
+func metaInt(m map[string]json.RawMessage, key string) int {
+	raw, ok := m[key]
+	if !ok {
+		return 0
+	}
+	var n int
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return 0
+	}
+	return n
 }
 
 // decodeIssues parses bd's JSON array of issues. bd emits a JSON array for ready,

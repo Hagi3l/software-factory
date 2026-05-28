@@ -225,6 +225,11 @@ func (r *Runner) handle(ctx context.Context, role string, msg jetstream.Msg) {
 		return
 	}
 
+	// Stamp the issue correlation from the trusted dispatch, not from agent self-report:
+	// the orchestrator must be able to map this Result back to its issue (especially a
+	// failed/escalated one with no candidate branch) without trusting sandboxed code.
+	res.IssueID = brief.Issue.ID
+
 	if err := r.publishResult(ctx, role, res); err != nil {
 		r.log.Error("runner: publish result failed, redelivering", "role", role, "issue", brief.Issue.ID, "err", err)
 		_ = msg.Nak()

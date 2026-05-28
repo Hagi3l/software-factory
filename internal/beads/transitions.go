@@ -20,6 +20,14 @@ import (
 // is modeled explicitly in metadata.
 const MetadataKeyLease = "lease_until"
 
+// MetadataKeyRetries holds an issue's on_failure retry generation (an integer). A
+// freshly seeded or produced issue has none (treated as 0); each on_failure route
+// creates a new fix issue carrying its predecessor's count plus one. It is the
+// persistent counter the orchestrator enforces the retry cap against — the primary
+// termination guarantee, since acyclicity alone does not guarantee termination (see
+// specs/workflow.md).
+const MetadataKeyRetries = "retries"
+
 // The transitions below are the orchestrator's single-writer interface to beads:
 // only the orchestrator mutates the work graph, so funneling every status change
 // and proposal application through these methods is what enforces the single-writer
@@ -66,6 +74,42 @@ func (c *Client) Close(ctx context.Context, id string) error {
 // DLQ alert event is the orchestrator's job (T1.19); this is the beads-side write.
 func (c *Client) Block(ctx context.Context, id string) error {
 	return c.setStatus(ctx, id, "blocked")
+}
+
+// ListStranded returns the IDs of in_progress issues whose lease has expired as of
+// now (or that carry no lease at all). It is the input to the orchestrator's
+// reconcile sweep: a runner that died mid-task leaves its issue in_progress, and the
+// lease — not orchestrator memory — is the durable record of that, so a restarted
+// orchestrator re-derives the stranded set by reading beads (see
+// specs/components/orchestrator.md). The orchestrator releases each back to ready.
+func (c *Client) ListStranded(ctx context.Context, now time.Time) ([]string, error) {
+	out, err := c.run(ctx, []string{"list", "--status", "in_progress", "--json", "--limit", "0"})
+	if err != nil {
+		return nil, fmt.Errorf("beads: list in_progress: %w", err)
+	}
+	data := bytes.TrimSpace(out)
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var raw []issueJSON
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return nil, fmt.Errorf("beads: decode in_progress issues: %w", err)
+	}
+	var stranded []string
+	for _, r := range raw {
+		lease := metaString(r.Metadata, MetadataKeyLease)
+		if lease == "" {
+			// An in_progress issue with no lease is anomalous (Claim always stamps one);
+			// treat it as stranded so it cannot wedge in_progress forever.
+			stranded = append(stranded, r.ID)
+			continue
+		}
+		until, perr := time.Parse(time.RFC3339, lease)
+		if perr != nil || !until.After(now) {
+			stranded = append(stranded, r.ID)
+		}
+	}
+	return stranded, nil
 }
 
 func (c *Client) setStatus(ctx context.Context, id, status string, extra ...string) error {
@@ -137,12 +181,21 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 	if issue.Body != "" {
 		args = append(args, "--description", issue.Body)
 	}
-	if issue.Role != "" {
-		meta, err := json.Marshal(map[string]string{MetadataKeyRole: issue.Role})
+	if issue.Role != "" || issue.Attempt > 0 {
+		meta := map[string]any{}
+		if issue.Role != "" {
+			meta[MetadataKeyRole] = issue.Role
+		}
+		// Only stamp retries when nonzero so a fresh issue's metadata stays {"role":...}
+		// (a 0 generation is the absence of the key, decoded back as 0 by metaInt).
+		if issue.Attempt > 0 {
+			meta[MetadataKeyRetries] = issue.Attempt
+		}
+		b, err := json.Marshal(meta)
 		if err != nil {
 			return "", err
 		}
-		args = append(args, "--metadata", string(meta))
+		args = append(args, "--metadata", string(b))
 	}
 	out, err := c.run(ctx, args)
 	if err != nil {

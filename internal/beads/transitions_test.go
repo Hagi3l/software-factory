@@ -314,6 +314,71 @@ func TestApplyRollbackIntegration(t *testing.T) {
 	}
 }
 
+// ListStranded must return in_progress issues whose lease has expired (or is absent)
+// and exclude those with a future lease, against the real bd metadata round-trip.
+func TestListStrandedIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+
+	// expired: claimed with a tiny ttl that is already in the past by check time.
+	expired := quickCreate(t, dir, "stranded")
+	runBD(t, dir, "update", expired, "--status", "in_progress",
+		"--set-metadata", "lease_until=2000-01-01T00:00:00Z")
+	// fresh: a future lease — held by a live runner, not stranded.
+	fresh := quickCreate(t, dir, "held")
+	if _, err := c.Claim(context.Background(), fresh, time.Hour); err != nil {
+		t.Fatalf("Claim fresh: %v", err)
+	}
+	// noLease: in_progress with no lease metadata at all — treated as stranded.
+	noLease := quickCreate(t, dir, "no lease")
+	runBD(t, dir, "update", noLease, "--status", "in_progress")
+
+	stranded, err := c.ListStranded(context.Background(), time.Now().UTC())
+	if err != nil {
+		t.Fatalf("ListStranded: %v", err)
+	}
+	got := map[string]bool{}
+	for _, id := range stranded {
+		got[id] = true
+	}
+	if !got[expired] {
+		t.Errorf("expired issue %s not reported stranded; got %v", expired, stranded)
+	}
+	if !got[noLease] {
+		t.Errorf("lease-less issue %s not reported stranded; got %v", noLease, stranded)
+	}
+	if got[fresh] {
+		t.Errorf("freshly-leased issue %s reported stranded; got %v", fresh, stranded)
+	}
+}
+
+// The retry generation written via Apply (Issue.Attempt) must round-trip through bd
+// metadata and decode back on Get — this counter is what the retry cap is enforced
+// against.
+func TestRetriesRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+
+	created, err := c.Apply(context.Background(), []core.Proposal{
+		{Issue: core.Issue{Title: "retry me", Role: "implement", Attempt: 3}},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got, err := c.Get(context.Background(), created[0].ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Attempt != 3 {
+		t.Errorf("Attempt = %d, want 3 (round-tripped via metadata)", got.Attempt)
+	}
+	if got.Role != "implement" {
+		t.Errorf("Role = %q, want implement (must survive alongside retries)", got.Role)
+	}
+}
+
 // allIssues returns every issue id in the db (including closed) for count assertions.
 func allIssues(t *testing.T, dir string) []string {
 	t.Helper()

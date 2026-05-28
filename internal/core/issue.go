@@ -13,4 +13,18 @@ type Issue struct {
 	Title string
 	Body  string
 	Role  string // the role/stage this issue is dispatched to
+
+	// Status is the beads lifecycle status (open/in_progress/blocked/closed),
+	// populated when an issue is read back. It is read-only to everything but the
+	// orchestrator's single-writer transitions. The orchestrator reads it to stay
+	// idempotent: a Result is acted on only while its issue is in_progress, so a
+	// duplicate or stale redelivery for an already-processed issue is ignored (see
+	// specs/components/orchestrator.md).
+	Status string
+
+	// Attempt is the on_failure retry generation: 0 for a freshly seeded or produced
+	// issue, incremented each time the orchestrator routes a failure into a new fix
+	// issue. It is the persistent counter the retry cap is enforced against — half of
+	// the termination guarantee — and rides in beads metadata (see specs/workflow.md).
+	Attempt int
 }

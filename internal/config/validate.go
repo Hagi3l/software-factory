@@ -106,6 +106,8 @@ func (c *Config) validateDAG(add func(string, ...any)) {
 			add("stage %q sets both role %q and kind %q; a stage is one or the other", name, st.Role, st.Kind)
 		case !agent && !nonAgent:
 			add("stage %q sets neither role nor kind; it is neither an agent nor a non-agent stage", name)
+		case nonAgent && st.Kind != StageKindHuman && st.Kind != StageKindTrustedMerge:
+			add("stage %q has unknown kind %q (want %q or %q)", name, st.Kind, StageKindHuman, StageKindTrustedMerge)
 		}
 
 		for _, target := range st.Produces {
