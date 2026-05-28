@@ -11,7 +11,6 @@ import (
 // an accidental rename of an underlying value can't silently change routing.
 func TestRoleWireValues(t *testing.T) {
 	want := map[Role]string{
-		RoleSystem:    "system",
 		RoleUser:      "user",
 		RoleAssistant: "assistant",
 		RoleTool:      "tool",

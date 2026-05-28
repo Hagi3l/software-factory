@@ -71,8 +71,8 @@ func TestCompleteRoundTrip(t *testing.T) {
 	c := pipeClient(NewServer(h, WithAllowlist(allDestinations)))
 
 	req := model.Request{
+		System: "be helpful",
 		Messages: []model.Message{
-			{Role: model.RoleSystem, Text: "be helpful"},
 			{Role: model.RoleUser, Text: "hi"},
 		},
 		Tools: []model.ToolDef{
