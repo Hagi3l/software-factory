@@ -1,0 +1,353 @@
+package runner
+
+import (
+	"context"
+	"encoding/json"
+	"sync"
+	"sync/atomic"
+	"testing"
+	"time"
+
+	"github.com/nats-io/nats.go"
+
+	"github.com/Loxstomper/harness/internal/broker"
+	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/harness/internal/messaging"
+	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/harness/internal/sandbox"
+)
+
+// --- fakes -------------------------------------------------------------------
+
+type fakeSandbox struct {
+	id       string
+	tornDown atomic.Bool
+}
+
+func (s *fakeSandbox) ID() string { return s.id }
+func (s *fakeSandbox) Exec(context.Context, sandbox.Command) (sandbox.ExecResult, error) {
+	return sandbox.ExecResult{}, nil
+}
+func (s *fakeSandbox) Teardown(context.Context) error {
+	s.tornDown.Store(true)
+	return nil
+}
+
+type fakeBackend struct {
+	mu       sync.Mutex
+	lastSpec sandbox.Spec
+	sandbox  *fakeSandbox
+	err      error
+}
+
+func (b *fakeBackend) Provision(_ context.Context, spec sandbox.Spec) (sandbox.Sandbox, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.lastSpec = spec
+	if b.err != nil {
+		return nil, b.err
+	}
+	b.sandbox = &fakeSandbox{id: "sb-1"}
+	return b.sandbox, nil
+}
+
+func (b *fakeBackend) spec() sandbox.Spec {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.lastSpec
+}
+
+// fakeHandler is a no-op broker.Handler; T1.11 only wires the broker lifecycle, the
+// relay logic is T1.12.
+type fakeHandler struct{}
+
+func (fakeHandler) Complete(context.Context, model.Request) (model.Response, error) {
+	return model.Response{}, nil
+}
+func (fakeHandler) GitPush(context.Context, broker.GitPushRequest) (broker.GitPushResult, error) {
+	return broker.GitPushResult{}, nil
+}
+func (fakeHandler) PublishEvent(context.Context, broker.PublishRequest) error { return nil }
+
+// fakeInvoker records the briefs it ran and can fail a configurable number of times
+// first (to exercise the Nak/redelivery lease path).
+type fakeInvoker struct {
+	mu        sync.Mutex
+	got       []core.Brief
+	gotSb     sandbox.Sandbox
+	called    chan struct{}
+	failFirst int32
+	result    core.Result
+	err       error
+}
+
+func (i *fakeInvoker) Invoke(_ context.Context, sb sandbox.Sandbox, brief core.Brief) (core.Result, error) {
+	i.mu.Lock()
+	i.got = append(i.got, brief)
+	i.gotSb = sb
+	i.mu.Unlock()
+	if i.called != nil {
+		i.called <- struct{}{}
+	}
+	if atomic.AddInt32(&i.failFirst, -1) >= 0 {
+		return core.Result{}, i.err
+	}
+	return i.result, nil
+}
+
+func (i *fakeInvoker) briefs() []core.Brief {
+	i.mu.Lock()
+	defer i.mu.Unlock()
+	return append([]core.Brief(nil), i.got...)
+}
+
+// --- harness -----------------------------------------------------------------
+
+func testBrief() core.Brief {
+	return core.Brief{
+		Issue: core.Issue{ID: "iss-1", Title: "do the thing", Role: "implement"},
+		Base:  "main",
+		Soul:  core.Soul{Name: "implementor-go", Role: "implement", Sandbox: "go-toolchain"},
+	}
+}
+
+func newRunner(t *testing.T, b *fakeBackend, inv *fakeInvoker) (*Runner, *nats.Conn) {
+	t.Helper()
+	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{})
+	if err != nil {
+		t.Fatalf("embedded server: %v", err)
+	}
+	t.Cleanup(srv.Shutdown)
+	nc, err := srv.Connect()
+	if err != nil {
+		t.Fatalf("connect: %v", err)
+	}
+	t.Cleanup(nc.Close)
+	js, err := messaging.JetStream(nc)
+	if err != nil {
+		t.Fatalf("jetstream: %v", err)
+	}
+	if err := messaging.SetupStreams(context.Background(), js); err != nil {
+		t.Fatalf("setup streams: %v", err)
+	}
+
+	r, err := New(Options{
+		Roles:     []string{"implement"},
+		Repo:      "/repo",
+		SocketDir: t.TempDir(),
+		Limits:    config.SandboxLimits{CPU: 1, Mem: "1Gi", Wall: config.Duration(time.Minute)},
+		Allowlist: []string{"llm-api"},
+		AckWait:   2 * time.Second,
+	}, b, fakeHandler{}, inv, js)
+	if err != nil {
+		t.Fatalf("New runner: %v", err)
+	}
+	return r, nc
+}
+
+func publishWork(t *testing.T, nc *nats.Conn, brief core.Brief) {
+	t.Helper()
+	js, err := messaging.JetStream(nc)
+	if err != nil {
+		t.Fatalf("jetstream: %v", err)
+	}
+	data, err := json.Marshal(brief)
+	if err != nil {
+		t.Fatalf("marshal brief: %v", err)
+	}
+	if _, err := js.Publish(context.Background(), messaging.WorkSubject(brief.Issue.Role), data); err != nil {
+		t.Fatalf("publish work: %v", err)
+	}
+}
+
+// --- tests -------------------------------------------------------------------
+
+func TestRunProvisionsInvokesPublishesAndAcks(t *testing.T) {
+	b := &fakeBackend{}
+	inv := &fakeInvoker{
+		called: make(chan struct{}, 4),
+		result: core.Result{Status: core.StatusDone, Branch: core.Branch{Ref: "candidate/iss-1"}},
+	}
+	r, nc := newRunner(t, b, inv)
+
+	// Subscribe to the result subject before publishing work so we catch the harvest.
+	resultSub, err := nc.SubscribeSync(messaging.ResultSubject("implement"))
+	if err != nil {
+		t.Fatalf("subscribe results: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+
+	publishWork(t, nc, testBrief())
+
+	select {
+	case <-inv.called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("invoker was never called")
+	}
+
+	// The harvested Result is published on the role's result subject.
+	msg, err := resultSub.NextMsg(5 * time.Second)
+	if err != nil {
+		t.Fatalf("waiting for published result: %v", err)
+	}
+	var got core.Result
+	if err := json.Unmarshal(msg.Data, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if got.Status != core.StatusDone || got.Branch.Ref != "candidate/iss-1" {
+		t.Errorf("published result = %+v, want StatusDone candidate/iss-1", got)
+	}
+
+	// The Spec carried the Brief's base ref, soul sandbox profile, configured repo,
+	// limits, and a unix broker endpoint.
+	spec := b.spec()
+	if spec.Profile != "go-toolchain" {
+		t.Errorf("spec profile = %q, want go-toolchain", spec.Profile)
+	}
+	if spec.Workspace.BaseRef != "main" || spec.Workspace.Repo != "/repo" {
+		t.Errorf("spec workspace = %+v, want repo=/repo base=main", spec.Workspace)
+	}
+	if spec.Broker.Network != "unix" || spec.Broker.Address == "" {
+		t.Errorf("spec broker = %+v, want unix socket", spec.Broker)
+	}
+	if spec.Limits.CPU != 1 {
+		t.Errorf("spec limits = %+v, want CPU=1", spec.Limits)
+	}
+
+	// The sandbox was reaped after the invocation.
+	b.mu.Lock()
+	sb := b.sandbox
+	b.mu.Unlock()
+	if sb == nil || !waitTrue(func() bool { return sb.tornDown.Load() }) {
+		t.Error("sandbox was not torn down after invocation")
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("Run returned error: %v", err)
+	}
+}
+
+func TestNakOnInvokeErrorRedelivers(t *testing.T) {
+	b := &fakeBackend{}
+	inv := &fakeInvoker{
+		called:    make(chan struct{}, 8),
+		failFirst: 1, // fail the first delivery, succeed the redelivery
+		err:       context.DeadlineExceeded,
+		result:    core.Result{Status: core.StatusDone},
+	}
+	r, nc := newRunner(t, b, inv)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+
+	publishWork(t, nc, testBrief())
+
+	// First invoke fails (Nak), second (redelivery) succeeds: expect ≥2 calls.
+	for i := 0; i < 2; i++ {
+		select {
+		case <-inv.called:
+		case <-time.After(8 * time.Second):
+			t.Fatalf("expected redelivery, only got %d invoke call(s)", i)
+		}
+	}
+	if got := len(inv.briefs()); got < 2 {
+		t.Errorf("invoke calls = %d, want ≥2 (Nak should redeliver)", got)
+	}
+
+	cancel()
+	<-done
+}
+
+func TestTeardownRunsEvenWhenInvokeErrors(t *testing.T) {
+	b := &fakeBackend{}
+	inv := &fakeInvoker{
+		called:    make(chan struct{}, 8),
+		failFirst: 100, // always fail
+		err:       context.DeadlineExceeded,
+	}
+	r, nc := newRunner(t, b, inv)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+
+	publishWork(t, nc, testBrief())
+	select {
+	case <-inv.called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("invoker was never called")
+	}
+
+	b.mu.Lock()
+	sb := b.sandbox
+	b.mu.Unlock()
+	if sb == nil || !waitTrue(func() bool { return sb.tornDown.Load() }) {
+		t.Error("sandbox must be torn down even when the invocation errors")
+	}
+
+	cancel()
+	<-done
+}
+
+func TestTermOnPoisonMessage(t *testing.T) {
+	b := &fakeBackend{}
+	inv := &fakeInvoker{
+		called: make(chan struct{}, 4),
+		result: core.Result{Status: core.StatusDone},
+	}
+	r, nc := newRunner(t, b, inv)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+
+	// Publish undecodable bytes, then a valid brief.
+	js, _ := messaging.JetStream(nc)
+	if _, err := js.Publish(context.Background(), messaging.WorkSubject("implement"), []byte("{not json")); err != nil {
+		t.Fatalf("publish poison: %v", err)
+	}
+	publishWork(t, nc, testBrief())
+
+	// The valid brief must be processed; the poison one must not block or loop the runner.
+	select {
+	case <-inv.called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("valid brief was not processed after a poison message")
+	}
+	if got := len(inv.briefs()); got != 1 {
+		t.Errorf("invoke calls = %d, want exactly 1 (poison message should not invoke)", got)
+	}
+
+	cancel()
+	<-done
+}
+
+func TestNewValidatesOptions(t *testing.T) {
+	_, err := New(Options{}, &fakeBackend{}, fakeHandler{}, &fakeInvoker{}, nil)
+	if err == nil {
+		t.Fatal("New with empty options: want error, got nil")
+	}
+}
+
+// waitTrue polls cond for up to a second; teardown happens in a deferred goroutine
+// path so it may lag the invoke-call signal slightly.
+func waitTrue(cond func() bool) bool {
+	deadline := time.Now().Add(time.Second)
+	for time.Now().Before(deadline) {
+		if cond() {
+			return true
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	return cond()
+}
