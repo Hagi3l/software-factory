@@ -23,11 +23,11 @@ var _ runner.Invoker = (*Loop)(nil)
 // fakeConn is the brokered connection: it scripts model responses and records the
 // requests the loop sent, plus any git push / event calls the tools made.
 type fakeConn struct {
-	mu        sync.Mutex
-	responses []model.Response // returned in order; the last repeats once exhausted
+	mu          sync.Mutex
+	responses   []model.Response // returned in order; the last repeats once exhausted
 	completeErr error
-	gotReqs   []model.Request
-	calls     int
+	gotReqs     []model.Request
+	calls       int
 }
 
 func (c *fakeConn) Complete(_ context.Context, req model.Request) (model.Response, error) {

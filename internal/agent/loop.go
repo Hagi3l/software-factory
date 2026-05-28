@@ -21,10 +21,16 @@ const DefaultMaxTurns = 50
 
 // Budget bounds one invocation so the loop always terminates — budgets ARE the halting
 // guarantee, not merely cost control (see specs/workflow.md, CLAUDE.md). The loop
-// enforces these caps here; wiring them to config.Policy and routing a breach to the
-// dead-letter queue is the orchestrator/budget work (plan T1.16/T1.19). A breach is not
-// an error: the loop returns a `failed` Result so the runner harvests it and the
-// orchestrator dead-letters it, rather than redelivering the work to loop forever.
+// enforces these per-invocation caps from tallied Usage; BudgetFromPolicy maps the
+// operator's config.Policy onto them.
+//
+// A breach is not an error and is not, by itself, a dead-letter: the loop returns a
+// `failed` Result so the runner harvests it cleanly (rather than redelivering the work
+// to loop forever). Whether that failure is retried via on_failure or dead-lettered is
+// the orchestrator's decision, made from the retry cap plus the cumulative per-issue
+// budget — see the reconciliation loop in specs/components/orchestrator.md (plan T1.19).
+// The per-invocation caps here are the secondary guarantee that a single invocation
+// always halts; the cumulative budget + retry cap are the primary termination guarantee.
 type Budget struct {
 	// MaxTurns caps ReAct iterations. 0 → DefaultMaxTurns. Always positive after New.
 	MaxTurns int
