@@ -31,13 +31,15 @@ import (
 const teardownTimeout = 30 * time.Second
 
 // Invoker runs one agent against a provisioned sandbox and returns its Result. It is
-// the seam the agent inner loop (plan T1.13) fills: the runner owns the sandbox
-// lifecycle and the broker, and hands the live sandbox plus the Brief to the agent.
-// The Brief is delivered to the in-process bootstrap loop as a value — that is what
-// "inject the Brief" means while the agent is co-located; physical injection into a
-// separately-running sandboxed agent process arrives with the Firecracker work.
+// the seam the agent inner loop (plan T1.13, internal/agent.Loop) fills: the runner owns
+// the sandbox lifecycle and the broker, and hands the live sandbox, the Brief, and the
+// broker endpoint to the agent. The Brief is delivered to the in-process bootstrap loop
+// as a value — that is what "inject the Brief" means while the agent is co-located;
+// physical injection into a separately-running sandboxed agent process arrives with the
+// Firecracker work. The broker endpoint is the loop's only route out: it dials it for
+// every model call, git push, and event (see specs/models.md, specs/components/runner.md).
 type Invoker interface {
-	Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief) (core.Result, error)
+	Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief, brokerEndpoint sandbox.Endpoint) (core.Result, error)
 }
 
 // AdapterResolver maps an invocation's soul.Model to the provider adapter the runner
@@ -305,7 +307,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	}()
 
 	r.log.Info("runner: provisioned sandbox", "id", sb.ID(), "issue", brief.Issue.ID, "profile", spec.Profile, "base", brief.Base)
-	res, invErr := r.invoker.Invoke(ctx, sb, brief)
+	res, invErr := r.invoker.Invoke(ctx, sb, brief, spec.Broker)
 	u := rel.Usage()
 	r.log.Info("runner: invocation usage", "issue", brief.Issue.ID,
 		"input_tokens", u.InputTokens, "output_tokens", u.OutputTokens,

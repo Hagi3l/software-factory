@@ -83,7 +83,7 @@ type fakeInvoker struct {
 	err       error
 }
 
-func (i *fakeInvoker) Invoke(_ context.Context, sb sandbox.Sandbox, brief core.Brief) (core.Result, error) {
+func (i *fakeInvoker) Invoke(_ context.Context, sb sandbox.Sandbox, brief core.Brief, _ sandbox.Endpoint) (core.Result, error) {
 	i.mu.Lock()
 	i.got = append(i.got, brief)
 	i.gotSb = sb
