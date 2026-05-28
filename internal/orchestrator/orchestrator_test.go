@@ -153,17 +153,20 @@ func (g *fakeGate) called() []gate.Candidate {
 	return append([]gate.Candidate(nil), g.calls...)
 }
 
-// fakeMerger records the candidates it was asked to merge.
+// fakeMerger records the candidates it was asked to merge and the provenance passed
+// with each, so a test can assert the merge trailer is populated from config + evidence.
 type fakeMerger struct {
-	mu   sync.Mutex
-	refs []string
-	err  error
+	mu    sync.Mutex
+	refs  []string
+	provs []Provenance
+	err   error
 }
 
-func (m *fakeMerger) Merge(_ context.Context, _, ref string) (string, error) {
+func (m *fakeMerger) Merge(_ context.Context, _, ref string, prov Provenance) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.refs = append(m.refs, ref)
+	m.provs = append(m.provs, prov)
 	if m.err != nil {
 		return "", m.err
 	}
@@ -174,6 +177,12 @@ func (m *fakeMerger) merged() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.refs...)
+}
+
+func (m *fakeMerger) provenance() []Provenance {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]Provenance(nil), m.provs...)
 }
 
 // --- helpers -----------------------------------------------------------------
@@ -324,6 +333,47 @@ func TestHandleResultAcceptMergesAndCloses(t *testing.T) {
 	_, _, closed, _, _ := bd.snap()
 	if len(closed) != 1 || closed[0] != "iss-1" {
 		t.Errorf("closed = %v, want [iss-1]", closed)
+	}
+}
+
+func TestHandleResultAcceptBuildsProvenance(t *testing.T) {
+	cfg := kernelConfig(2)
+	// Give the implement soul a model so the trailer's Model field is populated.
+	cfg.Souls = []core.Soul{{Name: "implementor-go", Role: "implement", Sandbox: "go-toolchain", Model: "claude-opus-4-7"}}
+	bd := newFakeBeads()
+	bd.put(inProgress("iss-1", "implement", 0))
+	g := &fakeGate{report: gate.Report{Passed: true, Checks: []gate.CheckResult{
+		{Name: "build", Passed: true},
+		{Name: "test", Passed: true},
+	}}}
+	m := &fakeMerger{}
+	o, _ := newOrch(t, cfg, bd, g, m)
+
+	res := core.Result{
+		IssueID:  "iss-1",
+		Status:   core.StatusDone,
+		Branch:   core.Branch{Ref: core.CandidateBranch("iss-1")},
+		Evidence: core.Evidence{PromptSHA: "sha256:9af"},
+	}
+	if _, err := o.handleResult(context.Background(), res); err != nil {
+		t.Fatalf("handleResult: %v", err)
+	}
+
+	provs := m.provenance()
+	if len(provs) != 1 {
+		t.Fatalf("provenance recorded %d times, want 1", len(provs))
+	}
+	p := provs[0]
+	if p.Soul != "implementor-go" || p.Model != "claude-opus-4-7" || p.Issue != "iss-1" || p.PromptSHA != "sha256:9af" {
+		t.Errorf("provenance = %+v, want soul/model/issue/prompt populated", p)
+	}
+	if len(p.Verified) != 2 || p.Verified[0] != "build" || p.Verified[1] != "test" {
+		t.Errorf("provenance Verified = %v, want [build test]", p.Verified)
+	}
+	// The rendered trailer matches the spec's exact two-line format.
+	want := "Soul: implementor-go | Model: claude-opus-4-7\nIssue: iss-1 | Prompt-SHA: sha256:9af | Verified: build,test"
+	if got := p.Trailer(); got != want {
+		t.Errorf("trailer =\n%q\nwant\n%q", got, want)
 	}
 }
 

@@ -42,8 +42,21 @@ type relay struct {
 	// default is pushBundleToRepo.
 	pushBundle func(ctx context.Context, repo, branch string, bundle []byte) (string, error)
 
-	mu    sync.Mutex
-	usage model.Usage // tallied across every completion this invocation (budget input, plan T1.16)
+	mu       sync.Mutex
+	usage    model.Usage      // tallied across every completion this invocation (budget input, plan T1.16)
+	firstReq *model.Request   // the prompt: the first request this invocation ran with (provenance, plan T1.20)
+	turns    []transcriptTurn // every completion this invocation made, in order (the transcript)
+}
+
+// transcriptTurn is one model exchange the relay recorded: the canonical request the
+// agent sent and the canonical response the provider returned. The ordered slice of
+// these is the invocation transcript the runner harvests to the artifact store as
+// provenance evidence (see specs/security.md, specs/observability.md). Because the
+// relay is the trusted egress chokepoint, this transcript is recorded by the runner
+// from the calls it actually relayed — never self-reported by the untrusted agent.
+type transcriptTurn struct {
+	Request  model.Request  `json:"request"`
+	Response model.Response `json:"response"`
 }
 
 var _ broker.Handler = (*relay)(nil)
@@ -98,6 +111,7 @@ func (r *relay) Complete(ctx context.Context, req model.Request) (model.Response
 	}
 
 	r.addUsage(resp.Usage)
+	r.record(req, resp)
 	r.log.Info("broker: model completion",
 		"stop", resp.Stop,
 		"input_tokens", resp.Usage.InputTokens,
@@ -188,6 +202,53 @@ func (r *relay) addUsage(u model.Usage) {
 	r.usage.OutputTokens += u.OutputTokens
 	r.usage.CacheCreationTokens += u.CacheCreationTokens
 	r.usage.CacheReadTokens += u.CacheReadTokens
+}
+
+// record appends one model exchange to the transcript and, on the first call, captures
+// the request as the invocation's prompt. The prompt is the exact input the invocation
+// ran with — system persona + the Brief-built opening turn — and its artifact-store hash
+// becomes the Prompt-SHA in the merge provenance trailer (see specs/security.md). The
+// request is copied so a later mutation of the agent's message slice cannot alter the
+// recorded prompt.
+func (r *relay) record(req model.Request, resp model.Response) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.firstReq == nil {
+		captured := req
+		r.firstReq = &captured
+	}
+	r.turns = append(r.turns, transcriptTurn{Request: req, Response: resp})
+}
+
+// Prompt returns the JSON-encoded prompt (the first request) the invocation ran with,
+// and false if no model call was made (e.g. an invocation that failed before completing
+// a turn) — in which case there is no prompt to harvest.
+func (r *relay) Prompt() ([]byte, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.firstReq == nil {
+		return nil, false
+	}
+	data, err := json.Marshal(r.firstReq)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// Transcript returns the JSON-encoded ordered transcript of every model exchange this
+// invocation made, and false if none was made.
+func (r *relay) Transcript() ([]byte, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.turns) == 0 {
+		return nil, false
+	}
+	data, err := json.Marshal(r.turns)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
 }
 
 // publishEvent emits one live-feed event best-effort; a failure is logged at debug and

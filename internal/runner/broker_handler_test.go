@@ -146,6 +146,55 @@ func TestRelayCompletePropagatesErrorAndDoesNotTally(t *testing.T) {
 	}
 }
 
+func TestRelayCapturesPromptAndTranscript(t *testing.T) {
+	adapter := &recordingAdapter{resp: model.Response{Text: "ok", Stop: model.StopEndTurn}}
+	r := testRelay(adapter, &recordingPublisher{}, &bundleSandbox{})
+
+	// No model call yet: there is nothing to harvest.
+	if _, ok := r.Prompt(); ok {
+		t.Error("Prompt available before any completion")
+	}
+	if _, ok := r.Transcript(); ok {
+		t.Error("Transcript available before any completion")
+	}
+
+	first := model.Request{System: "persona", Messages: []model.Message{{Role: model.RoleUser, Text: "first"}}}
+	if _, err := r.Complete(context.Background(), first); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	// A second turn must not overwrite the captured prompt (the first request).
+	if _, err := r.Complete(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Text: "second"}}}); err != nil {
+		t.Fatalf("second Complete: %v", err)
+	}
+
+	promptData, ok := r.Prompt()
+	if !ok {
+		t.Fatal("Prompt not captured after a completion")
+	}
+	var gotPrompt model.Request
+	if err := json.Unmarshal(promptData, &gotPrompt); err != nil {
+		t.Fatalf("unmarshal prompt: %v", err)
+	}
+	if gotPrompt.System != "persona" || len(gotPrompt.Messages) != 1 || gotPrompt.Messages[0].Text != "first" {
+		t.Errorf("captured prompt = %+v, want the first request", gotPrompt)
+	}
+
+	transcriptData, ok := r.Transcript()
+	if !ok {
+		t.Fatal("Transcript not captured after completions")
+	}
+	var turns []transcriptTurn
+	if err := json.Unmarshal(transcriptData, &turns); err != nil {
+		t.Fatalf("unmarshal transcript: %v", err)
+	}
+	if len(turns) != 2 {
+		t.Fatalf("transcript turns = %d, want 2", len(turns))
+	}
+	if turns[0].Request.Messages[0].Text != "first" || turns[1].Request.Messages[0].Text != "second" {
+		t.Errorf("transcript did not record both turns in order: %+v", turns)
+	}
+}
+
 // --- GitPush -----------------------------------------------------------------
 
 func TestRelayGitPushRefusesNonTaskBranch(t *testing.T) {

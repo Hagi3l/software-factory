@@ -1,6 +1,7 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -16,12 +17,21 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
+	"github.com/Loxstomper/harness/internal/artifact"
 	"github.com/Loxstomper/harness/internal/broker"
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/messaging"
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/sandbox"
+)
+
+// Artifact kinds the runner harvests. kind is free-form metadata recorded on the
+// ArtifactRef (not part of the content address) — these are the single source of truth
+// for the strings the runner writes, so the control room can filter on them.
+const (
+	artifactKindPrompt     = "prompt"
+	artifactKindTranscript = "transcript"
 )
 
 // teardownTimeout bounds the reap of a sandbox. Teardown runs on a fresh context
@@ -93,16 +103,18 @@ type Runner struct {
 	resolver AdapterResolver
 	pub      Publisher
 	invoker  Invoker
+	store    artifact.Store
 	js       jetstream.JetStream
 	log      *slog.Logger
 }
 
 // New builds a Runner from its options and injected collaborators: the sandbox
 // backend (T1.6), the model AdapterResolver and event Publisher the per-invocation
-// broker relay is built from (T1.12), the agent Invoker (T1.13), and the JetStream
+// broker relay is built from (T1.12), the agent Invoker (T1.13), the artifact Store the
+// invocation's prompt + transcript are harvested into (T1.18/T1.20), and the JetStream
 // handle used to pull work and publish results. It validates the options up front
 // (fail loud, consistent with config validation being a startup gate).
-func New(opts Options, backend sandbox.Backend, resolver AdapterResolver, pub Publisher, invoker Invoker, js jetstream.JetStream) (*Runner, error) {
+func New(opts Options, backend sandbox.Backend, resolver AdapterResolver, pub Publisher, invoker Invoker, store artifact.Store, js jetstream.JetStream) (*Runner, error) {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 
@@ -132,6 +144,9 @@ func New(opts Options, backend sandbox.Backend, resolver AdapterResolver, pub Pu
 	if invoker == nil {
 		add("invoker is required")
 	}
+	if store == nil {
+		add("artifact store is required")
+	}
 	if js == nil {
 		add("jetstream handle is required")
 	}
@@ -150,7 +165,7 @@ func New(opts Options, backend sandbox.Backend, resolver AdapterResolver, pub Pu
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return &Runner{opts: opts, backend: backend, resolver: resolver, pub: pub, invoker: invoker, js: js, log: log}, nil
+	return &Runner{opts: opts, backend: backend, resolver: resolver, pub: pub, invoker: invoker, store: store, js: js, log: log}, nil
 }
 
 // Run binds a pull consumer per role and serves each until ctx is canceled. It
@@ -311,7 +326,44 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	r.log.Info("runner: invocation usage", "issue", brief.Issue.ID,
 		"input_tokens", u.InputTokens, "output_tokens", u.OutputTokens,
 		"cache_read_tokens", u.CacheReadTokens, "cache_creation_tokens", u.CacheCreationTokens)
+
+	// Harvest the invocation's evidence into the artifact store while the relay still
+	// holds it. Only on a clean invocation: a failed/redelivered one (invErr != nil) has
+	// its Result discarded and is retried, so there is no envelope to attach evidence to.
+	if invErr == nil {
+		r.harvest(ctx, brief.Issue.ID, rel, &res)
+	}
 	return res, invErr
+}
+
+// harvest writes the invocation's prompt and transcript to the content-addressed
+// artifact store and stamps the references onto the Result's Evidence: the prompt's
+// hash becomes Prompt-SHA (the provenance trailer cites it — see specs/security.md), and
+// the transcript is recorded as an artifact. The runner harvests from the relay (the
+// trusted egress chokepoint), so the evidence reflects the calls actually relayed, never
+// the untrusted agent's self-report.
+//
+// A harvest failure degrades provenance but does not fail the invocation: a good
+// candidate must not be thrown away (and re-run at cost) because a store write hiccuped.
+// It is logged loudly, and the orchestrator merges with whatever evidence is present.
+func (r *Runner) harvest(ctx context.Context, issueID string, rel *relay, res *core.Result) {
+	if prompt, ok := rel.Prompt(); ok {
+		ref, err := r.store.Put(ctx, artifactKindPrompt, bytes.NewReader(prompt))
+		if err != nil {
+			r.log.Error("runner: harvest prompt", "issue", issueID, "err", err)
+		} else {
+			res.Evidence.PromptSHA = ref.Hash
+			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
+		}
+	}
+	if transcript, ok := rel.Transcript(); ok {
+		ref, err := r.store.Put(ctx, artifactKindTranscript, bytes.NewReader(transcript))
+		if err != nil {
+			r.log.Error("runner: harvest transcript", "issue", issueID, "err", err)
+		} else {
+			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
+		}
+	}
 }
 
 // publishResult sends the harvested Result back on the role's result subject for the

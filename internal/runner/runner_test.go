@@ -10,6 +10,8 @@ import (
 
 	"github.com/nats-io/nats.go"
 
+	"github.com/Loxstomper/harness/internal/artifact"
+	"github.com/Loxstomper/harness/internal/broker"
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/messaging"
@@ -103,6 +105,28 @@ func (i *fakeInvoker) briefs() []core.Brief {
 	return append([]core.Brief(nil), i.got...)
 }
 
+// harvestingInvoker dials the broker the runner stood up and makes one model completion,
+// so the relay records a prompt + transcript for the runner to harvest — exercising the
+// full provenance evidence path (plan T1.20).
+type harvestingInvoker struct {
+	called chan struct{}
+	result core.Result
+}
+
+func (i *harvestingInvoker) Invoke(ctx context.Context, _ sandbox.Sandbox, _ core.Brief, ep sandbox.Endpoint) (core.Result, error) {
+	c := broker.NewClient(ep.Network, ep.Address)
+	if _, err := c.Complete(ctx, model.Request{
+		System:   "you are an implementor",
+		Messages: []model.Message{{Role: model.RoleUser, Text: "do the work"}},
+	}); err != nil {
+		return core.Result{}, err
+	}
+	if i.called != nil {
+		i.called <- struct{}{}
+	}
+	return i.result, nil
+}
+
 // --- harness -----------------------------------------------------------------
 
 func testBrief() core.Brief {
@@ -113,7 +137,7 @@ func testBrief() core.Brief {
 	}
 }
 
-func newRunner(t *testing.T, b *fakeBackend, inv *fakeInvoker) (*Runner, *nats.Conn) {
+func newRunner(t *testing.T, b *fakeBackend, inv Invoker) (*Runner, *nats.Conn) {
 	t.Helper()
 	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{})
 	if err != nil {
@@ -133,6 +157,10 @@ func newRunner(t *testing.T, b *fakeBackend, inv *fakeInvoker) (*Runner, *nats.C
 		t.Fatalf("setup streams: %v", err)
 	}
 
+	store, err := artifact.NewFilesStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("artifact store: %v", err)
+	}
 	r, err := New(Options{
 		Roles:     []string{"implement"},
 		Repo:      "/repo",
@@ -140,7 +168,7 @@ func newRunner(t *testing.T, b *fakeBackend, inv *fakeInvoker) (*Runner, *nats.C
 		Limits:    config.SandboxLimits{CPU: 1, Mem: "1Gi", Wall: config.Duration(time.Minute)},
 		Allowlist: []string{"llm-api"},
 		AckWait:   2 * time.Second,
-	}, b, fakeResolver{}, nc, inv, js)
+	}, b, fakeResolver{}, nc, inv, store, js)
 	if err != nil {
 		t.Fatalf("New runner: %v", err)
 	}
@@ -232,6 +260,71 @@ func TestRunProvisionsInvokesPublishesAndAcks(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Errorf("Run returned error: %v", err)
 	}
+}
+
+func TestHarvestStampsEvidence(t *testing.T) {
+	b := &fakeBackend{}
+	inv := &harvestingInvoker{
+		called: make(chan struct{}, 2),
+		result: core.Result{Status: core.StatusDone, Branch: core.Branch{Ref: "candidate/iss-1"}},
+	}
+	r, nc := newRunner(t, b, inv)
+
+	resultSub, err := nc.SubscribeSync(messaging.ResultSubject("implement"))
+	if err != nil {
+		t.Fatalf("subscribe results: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+
+	publishWork(t, nc, testBrief())
+	select {
+	case <-inv.called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("invoker was never called")
+	}
+
+	msg, err := resultSub.NextMsg(5 * time.Second)
+	if err != nil {
+		t.Fatalf("waiting for published result: %v", err)
+	}
+	var got core.Result
+	if err := json.Unmarshal(msg.Data, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	// The harvested prompt's content address is stamped as the Prompt-SHA, and both the
+	// prompt and the transcript are recorded as artifacts pointing into the store.
+	if got.Evidence.PromptSHA == "" {
+		t.Error("Result.Evidence.PromptSHA was not stamped from the harvested prompt")
+	}
+	var kinds []string
+	for _, a := range got.Evidence.Artifacts {
+		kinds = append(kinds, a.Kind)
+		if has, _ := r.store.Has(ctx, a.Hash); !has {
+			t.Errorf("artifact %s (%s) not present in the store", a.Kind, a.Hash)
+		}
+	}
+	if !containsStr(kinds, artifactKindPrompt) || !containsStr(kinds, artifactKindTranscript) {
+		t.Errorf("harvested artifact kinds = %v, want prompt + transcript", kinds)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("Run returned error: %v", err)
+	}
+}
+
+func containsStr(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
 }
 
 func TestNakOnInvokeErrorRedelivers(t *testing.T) {
@@ -334,7 +427,7 @@ func TestTermOnPoisonMessage(t *testing.T) {
 }
 
 func TestNewValidatesOptions(t *testing.T) {
-	_, err := New(Options{}, &fakeBackend{}, fakeResolver{}, (*nats.Conn)(nil), &fakeInvoker{}, nil)
+	_, err := New(Options{}, &fakeBackend{}, fakeResolver{}, (*nats.Conn)(nil), &fakeInvoker{}, nil, nil)
 	if err == nil {
 		t.Fatal("New with empty options: want error, got nil")
 	}

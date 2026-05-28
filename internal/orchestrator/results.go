@@ -137,7 +137,7 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 			return true, fmt.Errorf("gate issue %s: %w", issue.ID, gerr)
 		}
 		if report.Passed {
-			return o.accept(ctx, issue, stage, res)
+			return o.accept(ctx, issue, stage, res, report)
 		}
 		o.log.Info("orchestrator: gate rejected candidate", "issue", issue.ID, "checks_run", len(report.Checks))
 		return o.route(ctx, issue, stage, "gate rejected candidate")
@@ -172,7 +172,7 @@ func (o *Orchestrator) runGate(ctx context.Context, issue core.Issue, res core.R
 // re-advance) — in the bootstrap's single serialized stream this window is narrow and
 // the duplicate-produces risk is accepted, with a processed-marker hardening deferred
 // to Phase 3.
-func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result) (bool, error) {
+func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result, report gate.Report) (bool, error) {
 	if len(res.Proposes) > 0 {
 		if _, err := o.bd.Apply(ctx, res.Proposes); err != nil {
 			return true, fmt.Errorf("apply proposals for issue %s: %w", issue.ID, err)
@@ -186,7 +186,7 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 			// validate guarantees produces targets exist; defense-in-depth.
 			return false, fmt.Errorf("issue %s produces undefined stage %q", issue.ID, target)
 		}
-		if transient, err := o.advance(ctx, issue, target, tstage, res); err != nil {
+		if transient, err := o.advance(ctx, issue, target, tstage, res, report); err != nil {
 			return transient, err
 		}
 	}
@@ -204,13 +204,15 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 // a new ready issue carrying the produced role, dispatched on a later tick. (Handing a
 // produced agent stage the predecessor's candidate to build on is Phase 3; the kernel
 // DAG goes implement -> integrate directly.)
-func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, target string, tstage config.Stage, res core.Result) (bool, error) {
+func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, target string, tstage config.Stage, res core.Result, report gate.Report) (bool, error) {
 	if tstage.Kind == config.StageKindTrustedMerge {
-		commit, err := o.merger.Merge(ctx, o.opts.Repo, res.Branch.Ref)
+		prov := o.provenanceFor(issue, res, report)
+		commit, err := o.merger.Merge(ctx, o.opts.Repo, res.Branch.Ref, prov)
 		if err != nil {
 			return true, fmt.Errorf("merge candidate %s for issue %s: %w", res.Branch.Ref, issue.ID, err)
 		}
-		o.log.Info("orchestrator: merged to main", "issue", issue.ID, "ref", res.Branch.Ref, "commit", commit)
+		o.log.Info("orchestrator: merged to main", "issue", issue.ID, "ref", res.Branch.Ref, "commit", commit,
+			"soul", prov.Soul, "model", prov.Model, "prompt_sha", prov.PromptSHA, "verified", prov.Verified)
 		return false, nil
 	}
 

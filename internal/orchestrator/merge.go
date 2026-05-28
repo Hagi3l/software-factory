@@ -36,26 +36,59 @@ func NewGitMerger(bin string) Merger {
 	return m
 }
 
-// Merge fast-forwards refs/heads/main in repo to the tip of ref and returns the new
-// commit. It refuses a non-fast-forward (main is not an ancestor of the candidate):
-// in the serialized bootstrap queue main does not move under a candidate, so a
-// non-ff means something is wrong rather than a conflict to resolve (rebase/re-gate is
-// Phase 3). It is idempotent — re-merging an already-merged candidate is a no-op
-// fast-forward — so a redelivered Result is safe to re-accept.
-func (m *gitMerger) Merge(ctx context.Context, repo, ref string) (string, error) {
+// Merge lands a verified candidate on main and returns the new main commit. The trailer
+// is the whole point: a plain fast-forward would move main to the agent's own commit,
+// leaving no trusted commit to carry provenance. So the trusted layer creates a
+// provenance commit on top of the candidate — same tree (no file changes), parent the
+// candidate tip, authored by the harness identity, with the provenance trailer as its
+// message — and moves main to it. main's tip is therefore always a trusted, attributable
+// commit, and the candidate's history stays intact below it (see specs/security.md,
+// specs/integration.md).
+//
+// It stays within fast-forward semantics: main must be an ancestor of the candidate (the
+// serialized bootstrap queue never moves main under a candidate; a non-ff means something
+// is wrong rather than a conflict to resolve — rebase/re-gate is Phase 3). It is
+// idempotent: if the candidate is already merged (its tip is an ancestor of main, which
+// holds after a prior merge since the provenance commit's parent is the candidate tip), a
+// redelivered accept is a no-op that returns the current main.
+func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov Provenance) (string, error) {
 	tip, err := m.run(ctx, repo, "rev-parse", "--verify", ref)
 	if err != nil {
 		return "", fmt.Errorf("orchestrator: resolve candidate ref %q: %w", ref, err)
+	}
+	// Already merged? If the candidate tip is an ancestor of (or equal to) main, a prior
+	// accept already landed it; re-accepting must not stack a second provenance commit.
+	if _, err := m.run(ctx, repo, "merge-base", "--is-ancestor", ref, "refs/heads/main"); err == nil {
+		head, herr := m.run(ctx, repo, "rev-parse", "--verify", "refs/heads/main")
+		if herr != nil {
+			return "", fmt.Errorf("orchestrator: resolve main after no-op merge of %q: %w", ref, herr)
+		}
+		return head, nil
 	}
 	// Refuse anything that is not a fast-forward of main. merge-base --is-ancestor exits
 	// 0 when main is an ancestor of (or equal to) the candidate tip.
 	if _, err := m.run(ctx, repo, "merge-base", "--is-ancestor", "refs/heads/main", ref); err != nil {
 		return "", fmt.Errorf("orchestrator: candidate %q is not a fast-forward of main: %w", ref, err)
 	}
-	if _, err := m.run(ctx, repo, "update-ref", "refs/heads/main", tip); err != nil {
-		return "", fmt.Errorf("orchestrator: fast-forward main to %q: %w", ref, err)
+
+	tree, err := m.run(ctx, repo, "rev-parse", "--verify", ref+"^{tree}")
+	if err != nil {
+		return "", fmt.Errorf("orchestrator: resolve candidate tree for %q: %w", ref, err)
 	}
-	return tip, nil
+	// commit-tree writes a commit object with the candidate's tree and the candidate tip
+	// as its sole parent. Identity is forced via -c so the integration commit is the
+	// harness's, not whatever git config the host happens to carry.
+	commit, err := m.run(ctx, repo,
+		"-c", "user.name="+provenanceCommitterName,
+		"-c", "user.email="+provenanceCommitterEmail,
+		"commit-tree", tree, "-p", tip, "-m", prov.CommitMessage())
+	if err != nil {
+		return "", fmt.Errorf("orchestrator: write provenance commit for %q: %w", ref, err)
+	}
+	if _, err := m.run(ctx, repo, "update-ref", "refs/heads/main", commit); err != nil {
+		return "", fmt.Errorf("orchestrator: advance main to provenance commit for %q: %w", ref, err)
+	}
+	return commit, nil
 }
 
 func (m *gitMerger) exec(ctx context.Context, repo string, args ...string) (string, error) {
