@@ -11,10 +11,6 @@ linters:
     - unconvert
     - unparam
   settings:
-    errcheck:
-      exclude-functions:
-        - (*database/sql.Tx).Rollback
-        - (*github.com/jackc/pgx/v5.Tx).Rollback
     gocritic:
       disabled-checks:
         - hugeParam
@@ -37,25 +33,10 @@ linters:
     rules:
       - linters:
           - errcheck
-        path: internal/controlplane/server/
-        text: Render
-      - linters:
-          - bodyclose
-        source: websocket\.Dial
-      - linters:
-          - unparam
-        path: internal/agent/controlplane/wsclient_handlers\.go
-      - linters:
-          - unparam
-        path: internal/controlplane/auth/auth\.go
-        text: generateRandomHex
-      - linters:
-          - errcheck
           - unparam
         path: _test\.go
     paths:
       - .*_templ\.go$
-      - internal/controlplane/store
       - third_party$
       - builtin$
       - examples$
@@ -66,4 +47,3 @@ formatters:
       - third_party$
       - builtin$
       - examples$
-
