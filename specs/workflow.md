@@ -1,0 +1,155 @@
+# Workflow
+
+How a change moves from a human-authored spec to code merged on `main`.
+
+See also: [architecture.md](architecture.md), [verification.md](verification.md),
+[integration.md](integration.md), [components/orchestrator.md](components/orchestrator.md).
+
+---
+
+## The pipeline
+
+```
+requirements (human + LLM)  →  spec(git) + seed epic(beads)        TRUSTED
+      │
+plan          decompose spec into work items + dependency edges    sandboxed
+      │
+author-tests  write FAILING acceptance tests from the spec         sandboxed
+      │
+implement     make the tests pass                                  sandboxed
+      │
+qa / security run gates: tests, mutation, scanners                 sandboxed*
+      │            └─ fail → on_failure → new fix issue (loop)
+integrate     merge queue: rebase, re-gate, fast-forward to main   TRUSTED
+      │
+[future]      promote / deploy                                     gated
+```
+
+\* The qa *agent* may run in a sandbox, but the authoritative [gate](verification.md)
+runs in a separate clean [verification sandbox](glossary.md#verification-sandbox)
+controlled by the orchestrator — producer ≠ verifier.
+
+The terminal state is **merged to `main`**. Production deploy is deliberately out
+of scope for now; it is anticipated as an appended stage behind a promotion/policy
+gate, which the config-driven DAG makes additive.
+
+---
+
+## Stages and roles
+
+Each stage references a [Role](glossary.md#role); [Souls](glossary.md#soul) fulfil
+roles (see [configuration.md](configuration.md)). The stages:
+
+| Stage | Role | Trust | Produces |
+|-------|------|-------|----------|
+| `requirements` | (human) | trusted, **not** sandboxed | spec files + seed issues |
+| `plan` | decomposition planner | sandboxed | `author-tests` issues |
+| `author-tests` | test author | sandboxed | `implement` issues |
+| `implement` | implementor | sandboxed | `qa` issue |
+| `qa` | security/QA | sandboxed | `integrate` issue |
+| `integrate` | (orchestrator) | trusted | merge to `main` |
+
+**Two distinct planners** exist and must not be conflated:
+
+- The **requirements planner** is interactive, human-facing, and *not sandboxed*
+  (it runs no untrusted code — it converses and writes specs + seed issues). It is
+  the one place a human is in the loop, realised as the **Create-Task wizard** in
+  the [control room](control-room.md). See [specs-process.md](specs-process.md).
+- The **decomposition planner** is autonomous and sandboxed. It reads a seed issue
+  plus its spec and breaks it into concrete work items with dependency edges.
+
+Humans set *what/why*; the autonomous planner sets *how/decomposition*.
+
+---
+
+## Emergent within a stage, declarative between stages
+
+This resolves "is the workflow a fixed DAG or emergent?" — it is both, on
+different axes:
+
+- **Breadth is emergent.** A stage decides *how many* sibling issues it produces;
+  this is data-dependent and cannot be known up front. The decomposition planner
+  might emit three `implement` issues or thirty.
+- **Depth is declarative.** Stage→stage transitions are config (`produces:`),
+  applied by the **orchestrator**, never by the agent. When `implement` passes its
+  gate, the *orchestrator* creates the `qa` issue.
+
+Therefore **agents never know what stage comes next.** They do their node and emit
+a Result. This keeps souls fully decoupled from the workflow shape: planners
+create breadth, the orchestrator creates depth.
+
+Emergent breadth is still **validated, not trusted**: a planner *proposes* child
+issues in its Result; the orchestrator checks they are DAG-legal (valid roles,
+edges keep the graph acyclic, within budget) before writing them.
+
+---
+
+## Pre- and post-conditions
+
+Every stage may declare guards, evaluated by the **orchestrator** (the agent does
+the work; the orchestrator decides whether it counts):
+
+- **Precondition** — must hold before an issue may enter a stage. Usually
+  "blockers closed" (a `blocked-by` edge), optionally a predicate.
+- **Postcondition** — must hold for the stage to be considered done. Evaluated in
+  a clean [verification sandbox](verification.md) *before* the issue is accepted.
+- **`on_failure`** — the **mandatory automatic route** when a postcondition fails.
+  Because there is no human in the loop, every gate that can fail needs a defined
+  destination. A failed `qa` routes back to `implement` as a *new* fix issue.
+
+```yaml
+implement:
+  precondition:  blockers-closed
+  postcondition: [tests-red-then-green]
+  on_failure:    implement
+  produces:      [qa]
+qa:
+  postcondition: [tests-pass, "mutation>=0.8", gosec]
+  on_failure:    implement
+  produces:      [integrate]
+```
+
+---
+
+## The feedback loop and termination
+
+`on_failure` makes the [role flow](glossary.md#role-flow) a **bounded feedback
+loop** — `qa → implement → qa → …`. The [issue graph](glossary.md#issue-dependency-graph)
+stays acyclic (each retry is a *new* issue), but the role flow can cycle.
+
+**Acyclicity does not guarantee termination.** A spec the factory cannot satisfy
+would loop forever. Termination is guaranteed only by:
+
+- **Budgets** — caps on tokens / money / wall-clock, at two levels: *within* one
+  invocation (turns/tokens) and *across* the feedback loop (cumulative per
+  issue/epic).
+- **Retry caps** — a maximum number of `on_failure` cycles.
+
+When either is breached, the work is **dead-lettered**: marked blocked, an alert
+event emitted, and left for a human to triage by refining the spec (see the human
+re-entry invariant in [specs-process.md](specs-process.md)). Triage happens through
+the same [control-room wizard](control-room.md) used to create work. A pathological
+issue can never wedge the pipeline — it always terminates into the DLQ.
+
+```yaml
+policy:
+  max_retries: 3
+  budget: { tokens: 2_000_000, usd: 20, wall: 2h }   # per issue
+  epic_budget: { usd: 200 }
+  dead_letter: harness.dlq
+```
+
+---
+
+## Failure taxonomy
+
+Three outcomes of an invocation, handled differently:
+
+| Class | Example | Handling |
+|-------|---------|----------|
+| **Transient** | sandbox crash, LLM 5xx, network blip | retry the *same* issue (JetStream redelivery); no graph change |
+| **Terminal-reject** | gate failed (tests red, mutation low, scanner finding) | `on_failure` route → new fix issue; counts against retry cap |
+| **Escalation** | spec ambiguity, budget breach, max retries, illegal proposal | dead-letter → human spec refinement |
+
+Transient failures lean on [JetStream](messaging.md) at-least-once redelivery, so a
+dead runner's work is simply re-pulled elsewhere.
