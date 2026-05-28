@@ -29,9 +29,10 @@ type SandboxConfig struct {
 
 // SandboxLimits is the per-sandbox resource ceiling enforced by the backend.
 type SandboxLimits struct {
-	CPU  int      `yaml:"cpu"`  // CPU cores
-	Mem  string   `yaml:"mem"`  // memory as a k8s-style quantity, e.g. "2Gi"; parsed by the backend
-	Wall Duration `yaml:"wall"` // wall-clock ceiling for an invocation
+	CPU  int      `yaml:"cpu"`            // CPU cores
+	Mem  string   `yaml:"mem"`            // memory as a k8s-style quantity, e.g. "2Gi"; parsed by the backend
+	Disk string   `yaml:"disk,omitempty"` // disk as a k8s-style quantity, e.g. "8Gi"; parsed by the backend; optional
+	Wall Duration `yaml:"wall"`           // wall-clock ceiling for an invocation
 }
 
 // NATSConfig points runners and the orchestrator at the NATS endpoint. JetStream

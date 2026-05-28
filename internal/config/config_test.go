@@ -261,6 +261,24 @@ func TestLoad(t *testing.T) {
 	}
 }
 
+// The optional disk limit (documented in specs/components/sandbox.md as
+// `disk: 8Gi`) must load; before the Disk field existed, strict parsing rejected it
+// as an unknown key.
+func TestLoadInfraDiskLimit(t *testing.T) {
+	dir := t.TempDir()
+	body := "sandbox:\n  limits: { cpu: 1, mem: 1Gi, disk: 8Gi, wall: 10m }\n"
+	if err := os.WriteFile(filepath.Join(dir, "infra.dev.yaml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	in, err := LoadInfra(filepath.Join(dir, "infra.dev.yaml"))
+	if err != nil {
+		t.Fatalf("LoadInfra: %v", err)
+	}
+	if in.Sandbox.Limits.Disk != "8Gi" {
+		t.Errorf("disk = %q, want 8Gi", in.Sandbox.Limits.Disk)
+	}
+}
+
 func TestPersonaPathAbsolute(t *testing.T) {
 	cfg := &Config{Root: "/cfg"}
 	abs := "/etc/personas/x.md"
