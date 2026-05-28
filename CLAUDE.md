@@ -37,7 +37,9 @@ Prefer LSP over Grep for code navigation (once code exists):
 
 ## Build & test
 `make check` is the full local gate: `go vet`, `golangci-lint run` (needs
-golangci-lint v2 — `brew install golangci-lint`), then unit tests. `make test-*`
+golangci-lint v2 — `brew install golangci-lint`; if it's in `$(go env GOPATH)/bin`
+but not on PATH, run `export PATH="$PATH:$(go env GOPATH)/bin"` first), then unit
+tests. `make test-*`
 targets emit `go test -json` to `test/results/`
 (gitignored) — each target produces a `.json` (ndjson) + `.stderr`. If `jq` can't
 parse the JSON, check the `.stderr` file for compile errors. Triage with `jq`
