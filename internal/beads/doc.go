@@ -3,6 +3,6 @@
 // single-writer status transitions and validated issue-graph mutations.
 //
 // Only the orchestrator writes beads; agents merely propose changes via a Result.
-// Funnelling all access through this one package is what keeps the single-writer
+// Funneling all access through this one package is what keeps the single-writer
 // invariant — and thus the consistency of the work graph — enforceable.
 package beads

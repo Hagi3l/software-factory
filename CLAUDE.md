@@ -36,8 +36,9 @@ Prefer LSP over Grep for code navigation (once code exists):
 - Fall back to Grep only for text patterns, non-code files, or broad keyword sweeps.
 
 ## Build & test
-Build/test wiring lands with the Go module (nothing to run yet). Intended testing
-convention: `make test-*` targets emit `go test -json` to `test/results/`
+`make check` is the full local gate: `go vet`, `golangci-lint run` (needs
+golangci-lint v2 — `brew install golangci-lint`), then unit tests. `make test-*`
+targets emit `go test -json` to `test/results/`
 (gitignored) — each target produces a `.json` (ndjson) + `.stderr`. If `jq` can't
 parse the JSON, check the `.stderr` file for compile errors. Triage with `jq`
 instead of dumping full output (swap in the target you ran):

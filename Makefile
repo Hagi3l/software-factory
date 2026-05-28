@@ -13,9 +13,12 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 RESULTS := test/results
 
-.PHONY: all build vet lint fmt tidy test test-unit clean
+.PHONY: all build vet lint fmt tidy test test-unit check clean
 
 all: build
+
+## check: the full local gate — vet, lint, then unit tests. Run before committing.
+check: vet lint test-unit
 
 ## build: compile the harness binary into bin/ with the version stamped in.
 build:
