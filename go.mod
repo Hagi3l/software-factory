@@ -6,6 +6,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.45.0
 	github.com/nats-io/nats-server/v2 v2.14.1
 	github.com/nats-io/nats.go v1.52.0
+	github.com/openai/openai-go/v3 v3.37.0
 	gopkg.in/yaml.v3 v3.0.1
 )
 
