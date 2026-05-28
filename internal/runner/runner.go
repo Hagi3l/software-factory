@@ -57,12 +57,6 @@ type Publisher interface {
 	Publish(subject string, data []byte) error
 }
 
-// CandidateBranch is the one branch name an invocation for the given issue may push.
-// It is the single source of truth for the task-branch convention: the broker relay
-// refuses any other branch (enforcing "push only the task branch"), and the agent's
-// submit tool (plan T1.13/T1.15) must commit the candidate onto this ref.
-func CandidateBranch(issueID string) string { return "candidate/" + issueID }
-
 // Options configures a Runner. They are the runner-instance knobs (which roles it
 // serves, where it seeds worktrees from) separate from the injected collaborators.
 type Options struct {
@@ -294,7 +288,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	rel := newRelay(adapter, r.pub, sb, relayConfig{
 		eventSubject:  messaging.AgentEventsSubject(invID),
 		repo:          r.opts.Repo,
-		allowedBranch: CandidateBranch(brief.Issue.ID),
+		allowedBranch: core.CandidateBranch(brief.Issue.ID),
 		log:           r.log.With("invocation", invID, "issue", brief.Issue.ID),
 	})
 	srv := broker.NewServer(rel, broker.WithAllowlist(r.opts.Allowlist))

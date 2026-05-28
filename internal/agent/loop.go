@@ -215,7 +215,8 @@ func buildContext(brief core.Brief) string {
 		b.WriteString("\n")
 	}
 
-	fmt.Fprintf(&b, "\n# Base\nBranch your candidate from: %s\n", brief.Base)
+	fmt.Fprintf(&b, "\n# Base\nBranch from: %s\nCommit your work onto branch %q before calling submit; only that branch can be pushed.\n",
+		brief.Base, core.CandidateBranch(brief.Issue.ID))
 
 	if brief.Spec != "" {
 		b.WriteString("\n# Specification (resolved slice)\n")

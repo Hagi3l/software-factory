@@ -37,6 +37,14 @@ type Branch struct {
 	Commits []string // commit SHAs the agent added on the branch
 }
 
+// CandidateBranch is the one branch name an invocation for the given issue may push.
+// It is the single source of truth for the task-branch convention, shared by both ends
+// of the broker: the agent's submit tool commits and pushes onto this ref, and the
+// runner's broker relay refuses any other branch (enforcing "push only the task branch",
+// in particular refusing main). It lives in core so neither side owns it — see
+// specs/components/runner.md, specs/security.md.
+func CandidateBranch(issueID string) string { return "candidate/" + issueID }
+
 // Evidence is the proof attached to a Result. Large items (transcripts, gate
 // output, diffs) are not inlined — they are written to the content-addressed
 // artifact store and referenced by hash, so the proof survives sandbox teardown
