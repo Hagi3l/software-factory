@@ -75,9 +75,20 @@ type OTelConfig struct {
 // adapter and, for OpenAI-compatible backends, an endpoint. API keys are NEVER in
 // config — the runner injects them from the environment (see specs/models.md).
 type ModelProvider struct {
-	Provider string `yaml:"provider"`           // "anthropic" | "openai" | "openai-compat"
+	Provider string `yaml:"provider"`           // one of the Provider* constants
 	Endpoint string `yaml:"endpoint,omitempty"` // base URL for openai-compat backends (Ollama/vLLM)
 }
+
+// Provider identifiers for ModelProvider.Provider. These are the single source of
+// truth shared by config validation (see validate.go) and the runner-side model
+// registry that turns each entry into a provider adapter (see
+// internal/model/registry). OpenAICompat covers any server speaking the OpenAI wire
+// protocol (Ollama, vLLM, Together, …) and so requires an Endpoint.
+const (
+	ProviderAnthropic    = "anthropic"
+	ProviderOpenAI       = "openai"
+	ProviderOpenAICompat = "openai-compat"
+)
 
 // LoadInfra reads and unmarshals an infra.<env>.yaml overlay. It parses strictly
 // (unknown keys are errors). A missing file, malformed YAML, or unknown key fails

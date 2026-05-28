@@ -257,11 +257,18 @@ func (c *Config) validatePersona(s core.Soul, add func(string, ...any)) {
 // fail at first dispatch, so it is caught here instead.
 func (c *Config) validateModels(add func(string, ...any)) {
 	for name, mp := range c.Infra.Models {
-		if mp.Provider == "" {
+		switch mp.Provider {
+		case "":
 			add("model %q has no provider", name)
-		}
-		if mp.Provider == "openai-compat" && mp.Endpoint == "" {
-			add("model %q uses provider openai-compat but has no endpoint", name)
+		case ProviderAnthropic, ProviderOpenAI:
+			// well-formed; no endpoint needed
+		case ProviderOpenAICompat:
+			if mp.Endpoint == "" {
+				add("model %q uses provider %s but has no endpoint", name, ProviderOpenAICompat)
+			}
+		default:
+			add("model %q has unknown provider %q (want one of %s, %s, %s)",
+				name, mp.Provider, ProviderAnthropic, ProviderOpenAI, ProviderOpenAICompat)
 		}
 	}
 	for _, s := range c.Souls {
