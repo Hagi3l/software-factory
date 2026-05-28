@@ -20,6 +20,7 @@ import (
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/messaging"
+	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/sandbox"
 )
 
@@ -38,6 +39,27 @@ const teardownTimeout = 30 * time.Second
 type Invoker interface {
 	Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief) (core.Result, error)
 }
+
+// AdapterResolver maps an invocation's soul.Model to the provider adapter the runner
+// calls on the agent's behalf. It is the model registry (plan T1.10); abstracted here
+// so the broker relay can be exercised with a fake. The runner holds the registry and
+// the API key — the sandbox never does (see specs/models.md, specs/security.md).
+type AdapterResolver interface {
+	Adapter(modelName string) (model.Adapter, error)
+}
+
+// Publisher is the core-NATS publish seam the broker relay uses for the live agent
+// event/token feed (agent events are core NATS, not JetStream — see specs/messaging.md).
+// A *nats.Conn satisfies it; tests supply a recorder.
+type Publisher interface {
+	Publish(subject string, data []byte) error
+}
+
+// CandidateBranch is the one branch name an invocation for the given issue may push.
+// It is the single source of truth for the task-branch convention: the broker relay
+// refuses any other branch (enforcing "push only the task branch"), and the agent's
+// submit tool (plan T1.13/T1.15) must commit the candidate onto this ref.
+func CandidateBranch(issueID string) string { return "candidate/" + issueID }
 
 // Options configures a Runner. They are the runner-instance knobs (which roles it
 // serves, where it seeds worktrees from) separate from the injected collaborators.
@@ -70,20 +92,21 @@ type Options struct {
 // publishes the Result, reaps the sandbox, and acks the work message only after that
 // harvest (ack = the lease). See specs/components/runner.md.
 type Runner struct {
-	opts    Options
-	backend sandbox.Backend
-	handler broker.Handler
-	invoker Invoker
-	js      jetstream.JetStream
-	log     *slog.Logger
+	opts     Options
+	backend  sandbox.Backend
+	resolver AdapterResolver
+	pub      Publisher
+	invoker  Invoker
+	js       jetstream.JetStream
+	log      *slog.Logger
 }
 
 // New builds a Runner from its options and injected collaborators: the sandbox
-// backend (T1.6), the broker Handler that relays agent I/O (T1.12), the agent
-// Invoker (T1.13), and the JetStream handle used to pull work and publish results.
-// It validates the options up front (fail loud, consistent with config validation
-// being a startup gate).
-func New(opts Options, backend sandbox.Backend, handler broker.Handler, invoker Invoker, js jetstream.JetStream) (*Runner, error) {
+// backend (T1.6), the model AdapterResolver and event Publisher the per-invocation
+// broker relay is built from (T1.12), the agent Invoker (T1.13), and the JetStream
+// handle used to pull work and publish results. It validates the options up front
+// (fail loud, consistent with config validation being a startup gate).
+func New(opts Options, backend sandbox.Backend, resolver AdapterResolver, pub Publisher, invoker Invoker, js jetstream.JetStream) (*Runner, error) {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 
@@ -104,8 +127,11 @@ func New(opts Options, backend sandbox.Backend, handler broker.Handler, invoker 
 	if backend == nil {
 		add("sandbox backend is required")
 	}
-	if handler == nil {
-		add("broker handler is required")
+	if resolver == nil {
+		add("adapter resolver is required")
+	}
+	if pub == nil {
+		add("event publisher is required")
 	}
 	if invoker == nil {
 		add("invoker is required")
@@ -128,7 +154,7 @@ func New(opts Options, backend sandbox.Backend, handler broker.Handler, invoker 
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return &Runner{opts: opts, backend: backend, handler: handler, invoker: invoker, js: js, log: log}, nil
+	return &Runner{opts: opts, backend: backend, resolver: resolver, pub: pub, invoker: invoker, js: js, log: log}, nil
 }
 
 // Run binds a pull consumer per role and serves each until ctx is canceled. It
@@ -220,23 +246,25 @@ func (r *Runner) handle(ctx context.Context, role string, msg jetstream.Msg) {
 // to, provision the sandbox (which seeds the worktree at the Brief's base ref), run
 // the agent against it, and reap the sandbox unconditionally afterward.
 func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, error) {
-	sockPath, err := r.socketPath()
+	invID, err := r.invocationID()
 	if err != nil {
 		return core.Result{}, err
 	}
 
+	// Resolve the provider adapter for this invocation's soul up front: the runner
+	// holds the key and the adapter, so the agent's brokered model calls are
+	// provider-unaware. config.Validate already guarantees the model resolves; this is
+	// defense-in-depth, and failing here Naks the work rather than crashing mid-invoke.
+	adapter, err := r.resolver.Adapter(brief.Soul.Model)
+	if err != nil {
+		return core.Result{}, fmt.Errorf("runner: resolve model %q for soul %q: %w", brief.Soul.Model, brief.Soul.Name, err)
+	}
+
+	sockPath := filepath.Join(r.opts.SocketDir, "broker-"+invID+".sock")
 	ln, err := broker.Listen("unix", sockPath)
 	if err != nil {
 		return core.Result{}, fmt.Errorf("runner: listen broker socket: %w", err)
 	}
-	srv := broker.NewServer(r.handler, broker.WithAllowlist(r.opts.Allowlist))
-	brokerCtx, stopBroker := context.WithCancel(ctx)
-	defer stopBroker() // closes ln via Serve's ctx-cancel path
-	go func() {
-		if err := srv.Serve(brokerCtx, ln); err != nil {
-			r.log.Error("runner: broker serve", "err", err)
-		}
-	}()
 
 	spec := sandbox.Spec{
 		Profile:   brief.Soul.Sandbox,
@@ -246,6 +274,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	}
 	sb, err := r.backend.Provision(ctx, spec)
 	if err != nil {
+		_ = ln.Close() // unlinks the unix socket we just bound
 		return core.Result{}, fmt.Errorf("runner: provision sandbox: %w", err)
 	}
 	defer func() {
@@ -256,8 +285,32 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		}
 	}()
 
+	// Build the per-invocation broker relay now that the sandbox exists (it needs the
+	// live handle to extract the candidate branch on push) and serve it on the socket.
+	// The relay is the audited chokepoint: model calls go through the resolved adapter,
+	// events to this invocation's subject, git push only onto this task's branch.
+	rel := newRelay(adapter, r.pub, sb, relayConfig{
+		eventSubject:  messaging.AgentEventsSubject(invID),
+		repo:          r.opts.Repo,
+		allowedBranch: CandidateBranch(brief.Issue.ID),
+		log:           r.log.With("invocation", invID, "issue", brief.Issue.ID),
+	})
+	srv := broker.NewServer(rel, broker.WithAllowlist(r.opts.Allowlist))
+	brokerCtx, stopBroker := context.WithCancel(ctx)
+	defer stopBroker() // closes ln via Serve's ctx-cancel path
+	go func() {
+		if err := srv.Serve(brokerCtx, ln); err != nil {
+			r.log.Error("runner: broker serve", "err", err)
+		}
+	}()
+
 	r.log.Info("runner: provisioned sandbox", "id", sb.ID(), "issue", brief.Issue.ID, "profile", spec.Profile, "base", brief.Base)
-	return r.invoker.Invoke(ctx, sb, brief)
+	res, invErr := r.invoker.Invoke(ctx, sb, brief)
+	u := rel.Usage()
+	r.log.Info("runner: invocation usage", "issue", brief.Issue.ID,
+		"input_tokens", u.InputTokens, "output_tokens", u.OutputTokens,
+		"cache_read_tokens", u.CacheReadTokens, "cache_creation_tokens", u.CacheCreationTokens)
+	return res, invErr
 }
 
 // publishResult sends the harvested Result back on the role's result subject for the
@@ -274,12 +327,14 @@ func (r *Runner) publishResult(ctx context.Context, role string, res core.Result
 	return nil
 }
 
-// socketPath returns a fresh, unique per-invocation broker socket path. Uniqueness
-// avoids collisions between concurrent invocations sharing the socket dir.
-func (r *Runner) socketPath() (string, error) {
+// invocationID returns a fresh, unique per-invocation id. It names the broker socket
+// (avoiding collisions between concurrent invocations sharing the socket dir) and the
+// agent's NATS event subject (harness.agent.<id>.events), and tags the invocation's
+// logs. Random hex keeps it safe as a NATS subject token (no '.').
+func (r *Runner) invocationID() (string, error) {
 	var b [8]byte
 	if _, err := rand.Read(b[:]); err != nil {
-		return "", fmt.Errorf("runner: generate socket name: %w", err)
+		return "", fmt.Errorf("runner: generate invocation id: %w", err)
 	}
-	return filepath.Join(r.opts.SocketDir, "broker-"+hex.EncodeToString(b[:])+".sock"), nil
+	return hex.EncodeToString(b[:]), nil
 }

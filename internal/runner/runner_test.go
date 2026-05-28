@@ -10,7 +10,6 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/Loxstomper/harness/internal/broker"
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/messaging"
@@ -58,17 +57,19 @@ func (b *fakeBackend) spec() sandbox.Spec {
 	return b.lastSpec
 }
 
-// fakeHandler is a no-op broker.Handler; T1.11 only wires the broker lifecycle, the
-// relay logic is T1.12.
-type fakeHandler struct{}
+// fakeAdapter is a no-op model.Adapter; the runner's broker relay resolves and holds
+// it, but these lifecycle tests never make a model call. Relay behavior is covered in
+// broker_handler_test.go.
+type fakeAdapter struct{}
 
-func (fakeHandler) Complete(context.Context, model.Request) (model.Response, error) {
+func (fakeAdapter) Complete(context.Context, model.Request, model.StreamHandler) (model.Response, error) {
 	return model.Response{}, nil
 }
-func (fakeHandler) GitPush(context.Context, broker.GitPushRequest) (broker.GitPushResult, error) {
-	return broker.GitPushResult{}, nil
-}
-func (fakeHandler) PublishEvent(context.Context, broker.PublishRequest) error { return nil }
+
+// fakeResolver returns the same fake adapter for any model name.
+type fakeResolver struct{}
+
+func (fakeResolver) Adapter(string) (model.Adapter, error) { return fakeAdapter{}, nil }
 
 // fakeInvoker records the briefs it ran and can fail a configurable number of times
 // first (to exercise the Nak/redelivery lease path).
@@ -139,7 +140,7 @@ func newRunner(t *testing.T, b *fakeBackend, inv *fakeInvoker) (*Runner, *nats.C
 		Limits:    config.SandboxLimits{CPU: 1, Mem: "1Gi", Wall: config.Duration(time.Minute)},
 		Allowlist: []string{"llm-api"},
 		AckWait:   2 * time.Second,
-	}, b, fakeHandler{}, inv, js)
+	}, b, fakeResolver{}, nc, inv, js)
 	if err != nil {
 		t.Fatalf("New runner: %v", err)
 	}
@@ -333,7 +334,7 @@ func TestTermOnPoisonMessage(t *testing.T) {
 }
 
 func TestNewValidatesOptions(t *testing.T) {
-	_, err := New(Options{}, &fakeBackend{}, fakeHandler{}, &fakeInvoker{}, nil)
+	_, err := New(Options{}, &fakeBackend{}, fakeResolver{}, (*nats.Conn)(nil), &fakeInvoker{}, nil)
 	if err == nil {
 		t.Fatal("New with empty options: want error, got nil")
 	}

@@ -1,0 +1,306 @@
+package runner
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"io"
+	"log/slog"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"sync"
+	"testing"
+
+	"github.com/Loxstomper/harness/internal/broker"
+	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/harness/internal/sandbox"
+)
+
+// --- relay fakes -------------------------------------------------------------
+
+// recordingAdapter streams the configured deltas, returns the configured response (or
+// error), and counts calls so usage-tally accumulation across calls is observable.
+type recordingAdapter struct {
+	deltas []string
+	resp   model.Response
+	err    error
+	calls  int
+}
+
+func (a *recordingAdapter) Complete(_ context.Context, _ model.Request, onEvent model.StreamHandler) (model.Response, error) {
+	a.calls++
+	if a.err != nil {
+		return model.Response{}, a.err
+	}
+	for _, d := range a.deltas {
+		if onEvent != nil {
+			onEvent(model.StreamEvent{TextDelta: d})
+		}
+	}
+	return a.resp, nil
+}
+
+// recordingPublisher captures every published (subject, data) so token/event fan-out
+// can be asserted.
+type recordingPublisher struct {
+	mu   sync.Mutex
+	subj []string
+	data [][]byte
+	err  error
+}
+
+func (p *recordingPublisher) Publish(subject string, data []byte) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.subj = append(p.subj, subject)
+	p.data = append(p.data, append([]byte(nil), data...))
+	return p.err
+}
+
+func (p *recordingPublisher) count() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return len(p.subj)
+}
+
+// bundleSandbox records the Exec command and returns a canned ExecResult, standing in
+// for the in-sandbox `git bundle` without a real container.
+type bundleSandbox struct {
+	gotCmd  sandbox.Command
+	result  sandbox.ExecResult
+	execErr error
+}
+
+func (s *bundleSandbox) ID() string { return "sb-relay" }
+func (s *bundleSandbox) Exec(_ context.Context, cmd sandbox.Command) (sandbox.ExecResult, error) {
+	s.gotCmd = cmd
+	return s.result, s.execErr
+}
+func (s *bundleSandbox) Teardown(context.Context) error { return nil }
+
+func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+
+func testRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox) *relay {
+	return newRelay(adapter, pub, sb, relayConfig{
+		eventSubject:  "harness.agent.inv-1.events",
+		repo:          "/repo",
+		allowedBranch: "candidate/iss-1",
+		log:           discardLogger(),
+	})
+}
+
+// --- Complete ----------------------------------------------------------------
+
+func TestRelayCompleteStreamsDeltasAndTalliesUsage(t *testing.T) {
+	adapter := &recordingAdapter{
+		deltas: []string{"hel", "lo"},
+		resp:   model.Response{Text: "hello", Stop: model.StopEndTurn, Usage: model.Usage{InputTokens: 10, OutputTokens: 5, CacheReadTokens: 2}},
+	}
+	pub := &recordingPublisher{}
+	r := testRelay(adapter, pub, &bundleSandbox{})
+
+	resp, err := r.Complete(context.Background(), model.Request{})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if resp.Text != "hello" {
+		t.Errorf("resp.Text = %q, want hello", resp.Text)
+	}
+
+	// Each non-empty text delta is published to the invocation's event subject.
+	if pub.count() != 2 {
+		t.Fatalf("published events = %d, want 2", pub.count())
+	}
+	if pub.subj[0] != "harness.agent.inv-1.events" {
+		t.Errorf("event subject = %q, want harness.agent.inv-1.events", pub.subj[0])
+	}
+	var ev tokenEvent
+	if err := json.Unmarshal(pub.data[0], &ev); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if ev.Type != "token" || ev.Delta != "hel" {
+		t.Errorf("event = %+v, want {token hel}", ev)
+	}
+
+	// A second completion accumulates onto the running usage tally (the budget input).
+	if _, err := r.Complete(context.Background(), model.Request{}); err != nil {
+		t.Fatalf("second Complete: %v", err)
+	}
+	u := r.Usage()
+	if u.InputTokens != 20 || u.OutputTokens != 10 || u.CacheReadTokens != 4 {
+		t.Errorf("tallied usage = %+v, want input=20 output=10 cacheRead=4", u)
+	}
+}
+
+func TestRelayCompletePropagatesErrorAndDoesNotTally(t *testing.T) {
+	adapter := &recordingAdapter{err: errors.New("model API 503")}
+	r := testRelay(adapter, &recordingPublisher{}, &bundleSandbox{})
+
+	if _, err := r.Complete(context.Background(), model.Request{}); err == nil {
+		t.Fatal("Complete: want error, got nil")
+	}
+	if u := r.Usage(); u != (model.Usage{}) {
+		t.Errorf("usage = %+v, want zero (a failed call tallies nothing)", u)
+	}
+}
+
+// --- GitPush -----------------------------------------------------------------
+
+func TestRelayGitPushRefusesNonTaskBranch(t *testing.T) {
+	sb := &bundleSandbox{}
+	r := testRelay(&recordingAdapter{}, &recordingPublisher{}, sb)
+	pushed := false
+	r.pushBundle = func(context.Context, string, string, []byte) (string, error) {
+		pushed = true
+		return "", nil
+	}
+
+	_, err := r.GitPush(context.Background(), broker.GitPushRequest{Branch: "main"})
+	if err == nil {
+		t.Fatal("GitPush onto main: want error, got nil")
+	}
+	if sb.gotCmd.Path != "" {
+		t.Error("a refused branch must not exec inside the sandbox")
+	}
+	if pushed {
+		t.Error("a refused branch must not reach pushBundle")
+	}
+}
+
+func TestRelayGitPushExtractsBundleAndPushes(t *testing.T) {
+	sb := &bundleSandbox{result: sandbox.ExecResult{ExitCode: 0, Stdout: []byte("BUNDLEBYTES")}}
+	r := testRelay(&recordingAdapter{}, &recordingPublisher{}, sb)
+
+	var gotRepo, gotBranch string
+	var gotBundle []byte
+	r.pushBundle = func(_ context.Context, repo, branch string, bundle []byte) (string, error) {
+		gotRepo, gotBranch, gotBundle = repo, branch, bundle
+		return "deadbeef", nil
+	}
+
+	res, err := r.GitPush(context.Background(), broker.GitPushRequest{Branch: "candidate/iss-1"})
+	if err != nil {
+		t.Fatalf("GitPush: %v", err)
+	}
+	if res.Commit != "deadbeef" {
+		t.Errorf("commit = %q, want deadbeef", res.Commit)
+	}
+
+	// The branch is extracted as a git bundle on stdout from inside the sandbox.
+	want := []string{"bundle", "create", "-", "candidate/iss-1"}
+	if sb.gotCmd.Path != "git" || strings.Join(sb.gotCmd.Args, " ") != strings.Join(want, " ") {
+		t.Errorf("exec = %s %v, want git %v", sb.gotCmd.Path, sb.gotCmd.Args, want)
+	}
+	if gotRepo != "/repo" || gotBranch != "candidate/iss-1" || string(gotBundle) != "BUNDLEBYTES" {
+		t.Errorf("pushBundle got repo=%q branch=%q bundle=%q", gotRepo, gotBranch, string(gotBundle))
+	}
+}
+
+func TestRelayGitPushFailsOnNonZeroBundleExit(t *testing.T) {
+	sb := &bundleSandbox{result: sandbox.ExecResult{ExitCode: 128, Stderr: []byte("not a valid object name")}}
+	r := testRelay(&recordingAdapter{}, &recordingPublisher{}, sb)
+	r.pushBundle = func(context.Context, string, string, []byte) (string, error) {
+		t.Fatal("pushBundle must not run when bundle extraction fails")
+		return "", nil
+	}
+
+	if _, err := r.GitPush(context.Background(), broker.GitPushRequest{Branch: "candidate/iss-1"}); err == nil {
+		t.Fatal("GitPush with failing bundle: want error, got nil")
+	}
+}
+
+// --- PublishEvent ------------------------------------------------------------
+
+func TestRelayPublishEvent(t *testing.T) {
+	pub := &recordingPublisher{}
+	r := testRelay(&recordingAdapter{}, pub, &bundleSandbox{})
+
+	err := r.PublishEvent(context.Background(), broker.PublishRequest{Type: "progress", Payload: json.RawMessage(`{"msg":"hi"}`)})
+	if err != nil {
+		t.Fatalf("PublishEvent: %v", err)
+	}
+	if pub.count() != 1 || pub.subj[0] != "harness.agent.inv-1.events" {
+		t.Fatalf("published %d events on %v, want 1 on the agent event subject", pub.count(), pub.subj)
+	}
+	var got broker.PublishRequest
+	if err := json.Unmarshal(pub.data[0], &got); err != nil {
+		t.Fatalf("unmarshal event: %v", err)
+	}
+	if got.Type != "progress" {
+		t.Errorf("event type = %q, want progress", got.Type)
+	}
+}
+
+// --- host-side bundle apply (real git, no docker) ----------------------------
+
+// TestPushBundleToRepoIntegration drives the real host-side git path: it builds a
+// candidate branch in one repo, bundles it exactly as the in-sandbox exec would, and
+// asserts pushBundleToRepo lands that branch+commit in a separate source repo. This is
+// what makes a candidate reachable to the gate/merge without a bind mount or copy-out.
+func TestPushBundleToRepoIntegration(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not installed")
+	}
+	ctx := context.Background()
+
+	// Source repo the candidate is pushed into (mirrors r.opts.Repo).
+	srcRepo := t.TempDir()
+	mustGit(t, srcRepo, "init", "-q")
+	mustGit(t, srcRepo, "config", "user.email", "t@example.com")
+	mustGit(t, srcRepo, "config", "user.name", "t")
+	writeFile(t, filepath.Join(srcRepo, "base.txt"), "base")
+	mustGit(t, srcRepo, "add", ".")
+	mustGit(t, srcRepo, "commit", "-qm", "base")
+
+	// Candidate repo (mirrors the sandbox worktree): clone src, branch, commit, bundle.
+	candRepo := t.TempDir()
+	mustGit(t, "", "clone", "-q", srcRepo, candRepo)
+	mustGit(t, candRepo, "config", "user.email", "t@example.com")
+	mustGit(t, candRepo, "config", "user.name", "t")
+	mustGit(t, candRepo, "checkout", "-q", "-b", "candidate/iss-1")
+	writeFile(t, filepath.Join(candRepo, "feature.txt"), "feature")
+	mustGit(t, candRepo, "add", ".")
+	mustGit(t, candRepo, "commit", "-qm", "feature")
+	wantSHA := strings.TrimSpace(mustGit(t, candRepo, "rev-parse", "candidate/iss-1"))
+	bundle := []byte(mustGitRaw(t, candRepo, "bundle", "create", "-", "candidate/iss-1"))
+
+	commit, err := pushBundleToRepo(ctx, srcRepo, "candidate/iss-1", bundle)
+	if err != nil {
+		t.Fatalf("pushBundleToRepo: %v", err)
+	}
+	if commit != wantSHA {
+		t.Errorf("returned commit = %q, want %q", commit, wantSHA)
+	}
+	// The branch now exists in the source repo at the candidate head.
+	gotSHA := strings.TrimSpace(mustGit(t, srcRepo, "rev-parse", "refs/heads/candidate/iss-1"))
+	if gotSHA != wantSHA {
+		t.Errorf("source repo branch head = %q, want %q", gotSHA, wantSHA)
+	}
+}
+
+func mustGit(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	return mustGitRaw(t, dir, args...)
+}
+
+func mustGitRaw(t *testing.T, dir string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git %s: %v", strings.Join(args, " "), err)
+	}
+	return string(out)
+}
+
+func writeFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
+}
