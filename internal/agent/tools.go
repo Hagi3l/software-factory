@@ -91,3 +91,16 @@ type brokerConn interface {
 // Compile-time proof the real broker client backs an invocation's brokered calls; if
 // the broker API drifts this fails loud here rather than at the wiring in cmd/harness.
 var _ brokerConn = (*broker.Client)(nil)
+
+// funcTool adapts a definition + closure into a Tool. The concrete workspace (T1.14)
+// and lifecycle (T1.15) tools are built as funcTools over closures that capture the
+// sandbox / broker / brief, keeping each tool a few lines instead of a named type.
+type funcTool struct {
+	def model.ToolDef
+	fn  func(ctx context.Context, args json.RawMessage) (Outcome, error)
+}
+
+func (t funcTool) Def() model.ToolDef { return t.def }
+func (t funcTool) Invoke(ctx context.Context, args json.RawMessage) (Outcome, error) {
+	return t.fn(ctx, args)
+}
