@@ -1,0 +1,9 @@
+# Build output
+/bin/
+
+# Test results (see the test-* convention in CLAUDE.md)
+/test/results/
+
+# Go build/test artifacts
+*.test
+*.out
