@@ -1,0 +1,28 @@
+# Bootstrap workflow (the kernel DAG).
+#
+# Why this shape: bootstrap.md collapses the full requirements -> plan ->
+# author-tests -> implement -> qa -> integrate pipeline down to
+# implement -> integrate for the self-host point. The human performs `plan` by
+# authoring specs and seeding one issue at the `implement` stage; the implementor
+# writes its own tests until the independent `author-tests` stage lands (Phase 2).
+# `integrate` is a trusted-merge executed inline by the orchestrator (never
+# dispatched to a runner), which is the terminal merge-to-main state.
+#
+# `on_failure: implement` routes a rejected candidate back through a fresh implement
+# attempt (a new issue, keeping the issue graph acyclic); `max_retries` bounds how
+# many such cycles run before the work dead-letters for human triage — the primary
+# termination guarantee.
+dag:
+  implement:
+    role: implementor
+    precondition: blockers-closed
+    postcondition: [tests-pass]
+    on_failure: implement
+    produces: [integrate]
+  integrate:
+    kind: trusted-merge
+
+policy:
+  max_retries: 3
+  budget: { tokens: 2_000_000, usd: 20, wall: 2h }   # per issue
+  dead_letter: harness.dlq

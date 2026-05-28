@@ -152,11 +152,17 @@ func bdAvailable(t *testing.T) {
 	}
 }
 
-// bdInit creates a fresh beads database in a temp dir and returns the dir.
+// bdInit creates a fresh beads database in a temp dir and returns the dir. It pins
+// the issue prefix to "harness" so id strings are deterministic across tests: bd
+// 1.0.4 resolves a dependency id whose prefix differs from the db's as an external
+// (federation) reference and does NOT check it exists, whereas a same-prefix id is
+// validated. A stable prefix keeps TestApplyRollbackIntegration's "harness-nonexistent"
+// a genuinely-nonexistent local id (so the rollback path is exercised), rather than a
+// silently-accepted foreign ref. (See IMPLEMENTATION_PLAN.md bd-version findings.)
 func bdInit(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	runBD(t, dir, "init")
+	runBD(t, dir, "init", "--prefix", "harness")
 	return dir
 }
 

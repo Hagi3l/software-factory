@@ -7,3 +7,6 @@
 # Go build/test artifacts
 *.test
 *.out
+
+# Runtime state written by `harness run` (embedded JetStream store, artifact store)
+/.harness/

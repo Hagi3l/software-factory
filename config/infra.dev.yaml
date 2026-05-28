@@ -1,0 +1,24 @@
+# Development infrastructure overlay (env: dev).
+#
+# Docker stands in for Firecracker in the bootstrap (sandbox.md / bootstrap.md); the
+# sandbox is zero-network ("broker-only" egress), so every model call, git push, and
+# event the agent makes is mediated by the runner's broker against the allowlist
+# below. NATS is the in-process embedded server (location transparency — the same
+# code distributes later by pointing `url` at an external cluster). API keys come
+# from the environment / secret store, NEVER from this file.
+sandbox:
+  backend: docker
+  egress:  broker-only
+  limits:  { cpu: 2, mem: 2Gi, wall: 30m }
+nats:
+  url: nats://localhost:4222
+  jetstream: { replicas: 1, max_age: 168h }
+broker:
+  allowlist: [llm-api, nats, git]
+artifacts:
+  backend: files
+  path: ./.harness/artifacts
+otel:
+  endpoint: localhost:4317
+models:
+  claude-opus-4-8: { provider: anthropic }

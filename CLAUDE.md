@@ -11,7 +11,11 @@ A CI/CD pipeline whose build steps are hostile-by-assumption agents.
 - If the design needs to change, **update the spec** — don't just change code.
 
 ## Status
-Bootstrap scaffolding done (T0.1): Go module + `internal/` package layout exist; `make build` and `make test-unit` work. Building the kernel (Phase 1).
+**Phase 1 kernel complete — self-host point reached.** `cmd/harness` exposes
+`validate`/`seed`/`run`; the in-process orchestrator+runner do `spec → implement →
+gate → merge` end-to-end (a live run needs a Docker daemon + `ANTHROPIC_API_KEY`).
+Bootstrap config lives in `config/` (`harness validate --config config`). Next work
+is Phases 2–5, filed as beads issues. See `IMPLEMENTATION_PLAN.md`.
 
 ## Invariants (don't break these in code)
 - **Single-writer beads** — only the orchestrator writes; agents *propose* via Result.
@@ -24,7 +28,10 @@ Bootstrap scaffolding done (T0.1): Go module + `internal/` package layout exist;
 - **Budgets = termination** — retry caps + budgets are the halting guarantee.
 
 ## Stack
-- Go. NATS for all inter-process comms (always). beads (`bd`) as work store.
+- Go. NATS for all inter-process comms (always). beads (`bd`) as work store —
+  install on macOS with `brew install beads` (currently v1.0.4, Dolt backend; a
+  major bump from 0.62.0 — `bd dep add` treats a foreign-prefix dep id as an
+  unvalidated external ref, so tests pin the db prefix via `bd init --prefix harness`).
 - Model layer: canonical types + thin per-provider adapters over official Go SDKs.
   No agent framework.
 - Control room (later): htmx + Alpine + templ + Tailwind standalone CLI + embed.FS.

@@ -1,0 +1,13 @@
+# The single bootstrap soul: the Go implementor. One soul per role in the kernel
+# (selector-based choice among several souls for a role is Phase 3). It binds to the
+# `implement` DAG role, runs in the `go-toolchain` sandbox profile, and boots the
+# persona below. The model name resolves through infra.<env>.yaml's `models` registry
+# to a provider adapter; the API key is supplied from the environment by the runner,
+# never from this file.
+name:    implementor-go
+role:    implementor
+model:   claude-opus-4-8
+persona: souls/prompts/implementor-go.md
+tools:   [fs, shell, git]
+sandbox: go-toolchain
+selector: { lang: go }
