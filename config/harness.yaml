@@ -81,6 +81,26 @@ dag:
     produces: [integrate]
   integrate:
     kind: trusted-merge
+  # `resolve` is the merge-conflict-resolution stage (kind: resolve), run by the
+  # `merge-resolver` soul. It is NOT part of the linear flow and no stage `produces` it:
+  # the orchestrator spawns a resolve issue only when a verified candidate cannot be
+  # cleanly rebased onto the current main (another candidate landed first and they
+  # textually collide). The resolver is seeded at the conflicting candidate, rebases it
+  # onto main and resolves the conflicts, and submits a new candidate. Unlike `plan` it IS
+  # gated: its postcondition re-runs the full qa suite (the same checks that gate qa) so
+  # the *resolved* tree is independently re-verified in a clean sandbox before it can land
+  # — the two-green-branches guard applies to the resolution too (producer != verifier).
+  # On success it `produces: [integrate]`, looping back into the merge queue onto whatever
+  # main has since become; `on_failure: resolve` retries the resolution, bounded by
+  # `max_retries` and the budget so a conflict no rebase resolves eventually dead-letters.
+  # See specs/integration.md.
+  resolve:
+    role: merge-resolver
+    kind: resolve
+    precondition: blockers-closed
+    postcondition: [tests-pass, "mutation>=0.8", gosec, govulncheck, license-scan]
+    on_failure: resolve
+    produces: [integrate]
 
 # The check registry: each command-check postcondition resolves to the shell command the
 # gate runs in the clean verification sandbox (exit 0 = pass; non-zero = findings or a

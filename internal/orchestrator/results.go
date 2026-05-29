@@ -19,9 +19,12 @@ import (
 const statusInProgress = "in_progress"
 
 // errMergeConflictHandled is an internal sentinel: advance returns it when an integrate
-// rebase conflict has already been dead-lettered, so accept stops without closing the
-// now-blocked issue and the message is Acked (redelivery cannot resolve a conflict).
-var errMergeConflictHandled = errors.New("orchestrator: integrate conflict dead-lettered")
+// rebase conflict has already been handled — a sandboxed conflict-resolution issue spawned
+// (the issue closed in its favor) or, if no resolve stage is configured or a cap/budget is
+// spent, dead-lettered (the issue blocked). Either way it tells accept to stop without
+// closing the issue again, and the message is Acked (redelivering the same Result cannot
+// resolve the conflict; the spawned resolution carries the work forward).
+var errMergeConflictHandled = errors.New("orchestrator: integrate conflict handled")
 
 // errMergeRegateRouted is an internal sentinel: advance returns it when the rebased result
 // failed the integrate re-gate and the issue has already been routed to a fix attempt (the
@@ -255,9 +258,10 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 		}
 		if transient, err := o.advance(ctx, issue, stage, target, tstage, res, report); err != nil {
 			if errors.Is(err, errMergeConflictHandled) || errors.Is(err, errMergeRegateRouted) {
-				// advance already terminated the issue: dead-lettered it (an integrate rebase
-				// conflict) or routed it to a fix attempt (a re-gate failure). Either way it is
-				// no longer this accept's to close — stop here and Ack.
+				// advance already disposed of the issue: spawned a conflict-resolution issue (or
+				// dead-lettered) for an integrate rebase conflict, or routed it to a fix attempt
+				// for a re-gate failure. Either way it is no longer this accept's to close —
+				// stop here and Ack.
 				return false, nil
 			}
 			return transient, err
@@ -324,13 +328,16 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage c
 		if err != nil {
 			if errors.Is(err, errRebaseConflict) {
 				// The verified candidate cannot be cleanly rebased onto the current main tip:
-				// another branch landed first and they collide (the two-green-branches case).
-				// Retrying cannot resolve it, so escalate for human triage rather than
-				// redelivering — sandboxed, agent-driven conflict resolution is a later
-				// increment (see specs/integration.md). deadLetter blocks the issue, so signal
-				// accept to stop without also closing it.
-				if _, derr := o.deadLetter(ctx, issue, "integrate: candidate conflicts with current main; rebase needs resolution"); derr != nil {
-					return true, derr
+				// another branch landed first and they textually collide. Retrying the same
+				// candidate cannot help (the conflict is deterministic), so spawn a sandboxed
+				// conflict-resolution issue — a merge-resolver agent rebases the candidate onto
+				// main and resolves the conflicts, producing a new candidate that loops back
+				// through integrate, re-gated like any other (specs/integration.md step 2). The
+				// loop is bounded by the retry cap and budget; with no resolve stage configured
+				// it falls back to dead-lettering. resolveConflict closes (or blocks) this issue,
+				// so signal accept to stop without closing it again.
+				if transient, rerr := o.resolveConflict(ctx, issue, res, "integrate: candidate conflicts with current main; rebase needs resolution"); rerr != nil {
+					return transient, rerr
 				}
 				return false, errMergeConflictHandled
 			}
@@ -395,21 +402,9 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage c
 // attempt's spend (Result.Usage, priced through the selected soul's per-model cost table)
 // to the predecessor's running total and stamps the sum on the fix issue.
 func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result, reason string) (bool, error) {
-	spentTokens := issue.SpentTokens + res.Usage.TotalTokens()
-	spentUSD := issue.SpentUSD + o.priceUsage(issue, res.Usage)
-
-	if issue.Attempt >= o.opts.Config.Harness.Policy.MaxRetries {
-		return o.deadLetter(ctx, issue, fmt.Sprintf("%s; retry cap (%d) exhausted", reason, o.opts.Config.Harness.Policy.MaxRetries))
-	}
-	// A zero budget dimension is uncapped (see config.Budget); only a configured cap that
-	// the cumulative spend has reached dead-letters. Checked before routing so a breach
-	// terminates rather than spawning another attempt that would burn yet more.
-	b := o.opts.Config.Harness.Policy.Budget
-	if b.Tokens > 0 && spentTokens >= b.Tokens {
-		return o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue token budget exhausted (%d >= %d)", reason, spentTokens, b.Tokens))
-	}
-	if b.USD > 0 && spentUSD >= b.USD {
-		return o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue USD budget exhausted ($%.4f >= $%.2f)", reason, spentUSD, b.USD))
+	spentTokens, spentUSD, ok, transient, err := o.chargeAndAuthorize(ctx, issue, res, reason)
+	if !ok {
+		return transient, err
 	}
 	if stage.OnFailure == "" {
 		// Every gate that can fail must have a defined route, or there is nowhere to send
@@ -433,6 +428,101 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	for _, c := range created {
 		o.log.Info("orchestrator: routed failure to fix issue", "from", issue.ID, "to_stage", stage.OnFailure,
 			"new", c.ID, "attempt", issue.Attempt+1, "spent_tokens", spentTokens, "spent_usd", spentUSD, "reason", reason)
+	}
+	return false, nil
+}
+
+// chargeAndAuthorize accumulates the just-finished invocation's spend onto the issue's
+// retry chain and enforces both halves of the termination guarantee before another attempt
+// is spawned: the retry cap (number of attempts) and the cumulative per-issue budget
+// (tokens/dollars those attempts burned). If either is breached it dead-letters and returns
+// ok=false carrying the dead-letter's (transient, err); otherwise it returns the new
+// cumulative spend and ok=true so the caller can thread it onto the next attempt. It is the
+// shared spend-and-check primitive behind both route (on_failure fixes) and resolveConflict
+// (merge-conflict resolution), so the budget half of termination is enforced identically
+// wherever the orchestrator spawns a follow-up attempt — a conflict loop is bounded the same
+// way a fix loop is (see specs/workflow.md, specs/integration.md).
+func (o *Orchestrator) chargeAndAuthorize(ctx context.Context, issue core.Issue, res core.Result, reason string) (spentTokens int, spentUSD float64, ok bool, transient bool, err error) {
+	spentTokens = issue.SpentTokens + res.Usage.TotalTokens()
+	spentUSD = issue.SpentUSD + o.priceUsage(issue, res.Usage)
+
+	if issue.Attempt >= o.opts.Config.Harness.Policy.MaxRetries {
+		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; retry cap (%d) exhausted", reason, o.opts.Config.Harness.Policy.MaxRetries))
+		return spentTokens, spentUSD, false, t, e
+	}
+	// A zero budget dimension is uncapped (see config.Budget); only a configured cap that
+	// the cumulative spend has reached dead-letters. Checked before spawning so a breach
+	// terminates rather than spawning another attempt that would burn yet more.
+	b := o.opts.Config.Harness.Policy.Budget
+	if b.Tokens > 0 && spentTokens >= b.Tokens {
+		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue token budget exhausted (%d >= %d)", reason, spentTokens, b.Tokens))
+		return spentTokens, spentUSD, false, t, e
+	}
+	if b.USD > 0 && spentUSD >= b.USD {
+		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue USD budget exhausted ($%.4f >= $%.2f)", reason, spentUSD, b.USD))
+		return spentTokens, spentUSD, false, t, e
+	}
+	return spentTokens, spentUSD, true, false, nil
+}
+
+// resolveStage finds the DAG stage that handles merge-conflict resolution (kind: resolve),
+// the stage the orchestrator spawns a sandboxed resolution issue into on a rebase conflict.
+// It returns (stage, true) if the config declares one; a config with no resolve stage (the
+// kernel, the spine-e2e fixture) gets (zero, false) and resolveConflict falls back to
+// dead-lettering, preserving the pre-T3.11 behavior. At most one resolve stage is expected;
+// validation does not forbid several, so the first by sorted name is taken deterministically.
+func (o *Orchestrator) resolveStage() (config.Stage, bool) {
+	if o.opts.Config.Harness == nil {
+		return config.Stage{}, false
+	}
+	for _, st := range o.opts.Config.Harness.DAG {
+		if st.Kind == config.StageKindResolve {
+			return st, true
+		}
+	}
+	return config.Stage{}, false
+}
+
+// resolveConflict spawns a sandboxed conflict-resolution issue when a verified candidate
+// cannot be cleanly rebased onto the current main tip (specs/integration.md step 2: spawn a
+// resolution issue, block, loop). Rather than dead-lettering (the kernel's behavior before
+// T3.11), it creates a new issue for the resolve stage seeded at the conflicting candidate
+// (Base = res.Branch.Ref): a merge-resolver agent rebases that candidate onto main in its
+// sandbox, resolves the conflicts, and submits a new candidate which — re-gated like any
+// other (producer != verifier) — produces a fresh integrate attempt onto whatever main has
+// since become. The conflict loop is bounded by the same termination guarantees as route
+// (the retry cap and the cumulative per-issue budget, via chargeAndAuthorize), so a
+// pathological conflict that no rebase resolves eventually dead-letters rather than looping
+// forever. If the config declares no resolve stage, conflict resolution is unavailable and
+// it falls back to dead-lettering for human triage.
+//
+// The trusted layer never hands main to an untrusted agent: the merge-resolver only proposes
+// a rebased candidate; the orchestrator re-gates it and performs the final git write itself.
+func (o *Orchestrator) resolveConflict(ctx context.Context, issue core.Issue, res core.Result, reason string) (bool, error) {
+	rstage, ok := o.resolveStage()
+	if !ok {
+		return o.deadLetter(ctx, issue, reason+"; no resolve stage configured")
+	}
+	spentTokens, spentUSD, ok, transient, err := o.chargeAndAuthorize(ctx, issue, res, reason)
+	if !ok {
+		return transient, err
+	}
+	// Base is the conflicting candidate the resolver must rebase onto main — not issue.Base
+	// (its own base), which is where it branched from. Attempt/spend thread forward like
+	// route so the conflict loop counts against the same caps; Spec/Tags/TraceMap ride along
+	// so the resolution stays on the epic's souls and keeps the traceability chain intact.
+	created, err := o.bd.Apply(ctx, []core.Proposal{{
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: rstage.Role, Attempt: issue.Attempt + 1, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD},
+	}})
+	if err != nil {
+		return true, fmt.Errorf("create conflict-resolution issue from %s: %w", issue.ID, err)
+	}
+	if err := o.bd.Close(ctx, issue.ID); err != nil {
+		return true, fmt.Errorf("close conflicted issue %s: %w", issue.ID, err)
+	}
+	for _, c := range created {
+		o.log.Info("orchestrator: spawned conflict-resolution issue", "from", issue.ID, "new", c.ID,
+			"role", rstage.Role, "base", res.Branch.Ref, "attempt", issue.Attempt+1, "reason", reason)
 	}
 	return false, nil
 }

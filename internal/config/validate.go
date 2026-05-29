@@ -132,12 +132,27 @@ func (c *Config) validateDAG(add func(string, ...any)) {
 			if len(st.Postcondition) > 0 {
 				add("stage %q has kind %q and a postcondition; a plan stage is not sandbox-gated and must declare none", name, st.Kind)
 			}
+		case StageKindResolve:
+			// A resolve stage handles merge-conflict resolution. Like plan it is an agent
+			// stage (it dispatches to a merge-resolver soul, so it must name a role), but
+			// UNLIKE plan it IS sandbox-gated: the agent rebases the conflicting candidate
+			// onto main and the orchestrator re-verifies the resolved tree in a clean sandbox
+			// before it can land (producer != verifier). So it must declare a postcondition —
+			// the suite that re-verifies the rebased result, the two-green-branches guard — or
+			// the gate has nothing to grade. It is spawned by the orchestrator on a rebase
+			// conflict, not reached through a produces edge (see specs/integration.md).
+			if !hasRole {
+				add("stage %q has kind %q but no role; a resolve stage dispatches to a merge-resolver soul", name, st.Kind)
+			}
+			if len(st.Postcondition) == 0 {
+				add("stage %q has kind %q but no postcondition; a resolve stage is gated and must declare the suite that re-verifies the resolved result", name, st.Kind)
+			}
 		case StageKindHuman, StageKindTrustedMerge:
 			if hasRole {
 				add("stage %q sets both role %q and kind %q; a stage is one or the other", name, st.Role, st.Kind)
 			}
 		default:
-			add("stage %q has unknown kind %q (want %q, %q or %q)", name, st.Kind, StageKindHuman, StageKindTrustedMerge, StageKindPlan)
+			add("stage %q has unknown kind %q (want %q, %q, %q or %q)", name, st.Kind, StageKindHuman, StageKindTrustedMerge, StageKindPlan, StageKindResolve)
 		}
 
 		for _, target := range st.Produces {

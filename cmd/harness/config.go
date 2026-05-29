@@ -64,9 +64,14 @@ func roleIsAgentStage(cfg *config.Config, role string) bool {
 }
 
 // entryRole returns the role of the single entry agent stage — an agent stage that
-// no other stage produces (produces-indegree 0). In the kernel DAG that is
-// `implement`. It errors if there is not exactly one, asking the operator to name
-// the role explicitly, so `seed` never guesses which stage a seed issue enters at.
+// no other stage produces (produces-indegree 0). In the shipped DAG that is `plan`.
+// It errors if there is not exactly one, asking the operator to name the role
+// explicitly, so `seed` never guesses which stage a seed issue enters at.
+//
+// A resolve stage (kind: resolve) also has produces-indegree 0 — it is spawned by the
+// orchestrator on a merge conflict, never reached through a produces edge — but it is
+// not a pipeline entry, so it is excluded here; otherwise it would falsely make the
+// pipeline look ambiguous (two unproduced agent stages: plan and resolve).
 func entryRole(cfg *config.Config) (string, error) {
 	if cfg.Harness == nil {
 		return "", errNoHarness
@@ -79,7 +84,7 @@ func entryRole(cfg *config.Config) (string, error) {
 	}
 	var roles []string
 	for name, st := range cfg.Harness.DAG {
-		if st.Role != "" && !produced[name] {
+		if st.Role != "" && !produced[name] && st.Kind != config.StageKindResolve {
 			roles = append(roles, st.Role)
 		}
 	}

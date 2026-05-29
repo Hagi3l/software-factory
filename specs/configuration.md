@@ -66,15 +66,25 @@ policy:
   [workflow.md](workflow.md)). Postconditions evaluate in a clean
   [verification sandbox](verification.md).
 - A stage is an **agent stage** (it names a `role` souls fulfill) or a **non-agent
-  stage** (`kind: human` for requirements, `kind: trusted-merge` for integrate). The one
-  hybrid is `kind: plan`: an *agent* stage (it names a `role` and dispatches to a planner
-  soul) that is **not sandbox-gated**. A plan stage declares **no postcondition** — the
+  stage** (`kind: human` for requirements, `kind: trusted-merge` for integrate). Two
+  kinds are *agent* hybrids that name a `role`: `kind: plan` and `kind: resolve`.
+  `kind: plan` is **not sandbox-gated**: a plan stage declares **no postcondition** — the
   planner writes no candidate to grade; its output is the child issues it proposes
   (emergent breadth), which the orchestrator validates structurally (legal roles within
   the declared `produces`, acyclic edges) and writes. The proposals *are* the production,
   so a plan stage runs no gate and does no depth-advance of its own; `produces:` instead
   declares which roles its proposals may target. Validation rejects a `plan` stage with no
-  role or with a postcondition.
+  role or with a postcondition. `kind: resolve` is the **merge-conflict-resolution** stage
+  (a `merge-resolver` soul): unlike `plan` it **is** sandbox-gated and so **must** declare a
+  postcondition — the suite that re-verifies the *resolved* tree in a clean sandbox (the
+  two-green-branches guard applies to the resolution too, [verification.md](verification.md)).
+  It is never reached through a `produces` edge: the orchestrator spawns a resolve issue only
+  when a verified candidate cannot be cleanly rebased onto the current `main`
+  ([integration.md](integration.md)). It is excluded from the pipeline-entry computation
+  (it shares produces-indegree 0 with the entry stage but is not an entry), and on success it
+  `produces: [integrate]` to loop the resolved candidate back into the merge queue, with
+  `on_failure: resolve` for a bounded retry. Validation rejects a `resolve` stage with no
+  role or no postcondition.
 - `checks:` is the **check registry**: it maps each *command-check* postcondition to
   the shell command that realizes it in the verification sandbox (exit 0 = pass). It
   is the bridge from a declared postcondition name to a runnable gate check, so the

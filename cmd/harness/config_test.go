@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 
 	"github.com/Loxstomper/harness/internal/config"
@@ -31,6 +32,19 @@ func TestEntryRole(t *testing.T) {
 		t.Fatalf("entryRole = %q, want %q", role, "planner")
 	}
 
+	// A resolve stage (kind: resolve) is also unproduced — the orchestrator spawns it on a
+	// conflict, not through a produces edge — but it is NOT a pipeline entry, so it must be
+	// excluded: plan + resolve must still resolve to the single entry `planner`, not error.
+	withResolve := &config.Config{Harness: &config.Harness{DAG: map[string]config.Stage{
+		"plan":     {Role: "planner", Kind: config.StageKindPlan, Produces: []string{"implement"}},
+		"implement": {Role: "implementor", Produces: []string{"integrate"}},
+		"integrate": {Kind: config.StageKindTrustedMerge},
+		"resolve":  {Role: "merge-resolver", Kind: config.StageKindResolve, Produces: []string{"integrate"}},
+	}}}
+	if r, rerr := entryRole(withResolve); rerr != nil || r != "planner" {
+		t.Fatalf("entryRole with a resolve stage = (%q,%v), want (planner,nil) — resolve is not a pipeline entry", r, rerr)
+	}
+
 	// Two unproduced agent stages -> ambiguous, must error.
 	ambiguous := &config.Config{Harness: &config.Harness{DAG: map[string]config.Stage{
 		"a": {Role: "ra"},
@@ -54,8 +68,12 @@ func TestAgentRolesAndRoleIsAgentStage(t *testing.T) {
 	cfg := loadTestConfig(t)
 
 	roles := agentRoles(cfg)
-	if len(roles) != 4 || roles[0] != "implementor" || roles[1] != "planner" || roles[2] != "security" || roles[3] != "test-author" {
-		t.Fatalf("agentRoles = %v, want [implementor planner security test-author]", roles)
+	want := []string{"implementor", "merge-resolver", "planner", "security", "test-author"}
+	if !reflect.DeepEqual(roles, want) {
+		t.Fatalf("agentRoles = %v, want %v", roles, want)
+	}
+	if !roleIsAgentStage(cfg, "merge-resolver") {
+		t.Fatal("merge-resolver should be an agent stage (the resolve role)")
 	}
 	if !roleIsAgentStage(cfg, "implementor") {
 		t.Fatal("implementor should be an agent stage")

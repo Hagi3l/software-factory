@@ -62,8 +62,21 @@ layer does the final `git` write. Untrusted environments never hold the keys to
 
 The queue was built up incrementally: the serialized rebase-onto-current-main (step
 2, with a conflict escalating to the dead-letter queue) landed first; re-gating the
-rebased result (step 3) now follows; sandboxed conflict resolution (the step-2
-conflict branch) is the remaining piece. **Step 3 is realized:** when a candidate is
+rebased result (step 3) followed; **sandboxed conflict resolution (the step-2 conflict
+branch) is now realized too.** On a rebase conflict the orchestrator no longer
+dead-letters: it spawns a sandboxed **resolution issue** for a `resolve` stage (a
+`merge-resolver` soul, [configuration.md](configuration.md)), seeded at the *conflicting
+candidate* as its base. The merge-resolver agent rebases that candidate onto `main` in
+its sandbox, resolves the conflicts to the combined intent of both changes, and submits a
+new candidate — which is gated (the resolve stage's postcondition re-runs the full check
+suite) and then `produces: [integrate]`, re-entering the queue to rebase onto whatever
+`main` has since become and re-gate before landing. The conflict loop is bounded by the
+**same** termination guarantees as a fix loop — the retry cap and the cumulative per-issue
+budget — so a conflict no rebase can resolve eventually dead-letters for human triage
+rather than looping forever; with no `resolve` stage configured (the kernel) the conflict
+falls back to the original dead-letter. The trusted layer never hands `main` to the
+untrusted resolver: it only *proposes* a rebased candidate; the orchestrator re-gates it
+(producer ≠ verifier) and performs the final `git` write itself. **Step 3 is realized:** when a candidate is
 rebased, the trusted layer publishes the rebased result under a temporary
 `refs/heads/integration/<issue-id>` branch (clonable, so a verification sandbox can
 fetch it), re-runs the producing stage's full check suite against *that* tree in a
@@ -123,9 +136,13 @@ the batch, bisect on failure — as large CI merge queues do) can be added later
 
 ## OPEN questions
 
-- Whether `integrate` is its own [Role](glossary.md#role) with a dedicated
+- ~~Whether `integrate` is its own [Role](glossary.md#role) with a dedicated
   integrator soul, or a built-in orchestrator function with sandboxed help only for
-  conflict resolution. Leaning: orchestrator-owned, sandboxed help on demand.
+  conflict resolution.~~ **Decided:** `integrate` stays an **orchestrator-owned**
+  function (the trusted layer performs the rebase + final `git` write to `main`);
+  the *only* part handed to a [Role](glossary.md#role) is **conflict resolution**, via
+  the sandboxed `resolve` stage / `merge-resolver` soul, which merely *proposes* a
+  rebased candidate the orchestrator then re-gates and merges.
 - Branch retention / cleanup policy after merge — TBD. Note that downstream agent
   stages now rely on the predecessor candidate branch persisting (it is the base a
   produced issue branches from — see base threading in [workflow.md](workflow.md)), so

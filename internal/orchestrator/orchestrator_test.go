@@ -426,10 +426,13 @@ func TestHandleResultAcceptMergesAndCloses(t *testing.T) {
 	}
 }
 
-// TestHandleResultIntegrateConflictDeadLetters: when a verified candidate cannot be
-// rebased onto the current main (a merge-queue conflict with a branch that landed first),
-// the merger reports errRebaseConflict and the orchestrator escalates the issue to the DLQ
-// — it does not retry (a conflict is deterministic) and does not close the blocked issue.
+// TestHandleResultIntegrateConflictDeadLetters: the fallback path when no resolve stage is
+// configured (the kernel DAG). When a verified candidate cannot be rebased onto the current
+// main (a merge-queue conflict with a branch that landed first) the merger reports
+// errRebaseConflict; absent a resolve stage to spawn a sandboxed resolution into, the
+// orchestrator escalates the issue to the DLQ — it does not retry the same candidate (a
+// conflict is deterministic) and does not close the blocked issue. With a resolve stage it
+// instead spawns a resolution issue (TestHandleResultIntegrateConflictSpawnsResolution).
 func TestHandleResultIntegrateConflictDeadLetters(t *testing.T) {
 	bd := newFakeBeads()
 	bd.put(inProgress("iss-1", "implement", 0))
@@ -452,6 +455,106 @@ func TestHandleResultIntegrateConflictDeadLetters(t *testing.T) {
 	_, _, closed, blocked, _ := bd.snap()
 	if len(blocked) != 1 || blocked[0] != "iss-1" {
 		t.Errorf("blocked = %v, want [iss-1] (conflict escalated)", blocked)
+	}
+	if len(closed) != 0 {
+		t.Errorf("closed = %v, want none (a dead-lettered issue is blocked, not closed)", closed)
+	}
+}
+
+// conflictResolveConfig is kernelConfig plus a resolve stage (kind: resolve, role
+// merge-resolver) and a soul fulfilling it, so the conflict path spawns a sandboxed
+// resolution issue instead of dead-lettering. implement -> integrate; a conflict at
+// integrate spawns a merge-resolver issue that itself produces integrate.
+func conflictResolveConfig(maxRetries int) *config.Config {
+	cfg := kernelConfig(maxRetries)
+	cfg.Harness.DAG["resolve"] = config.Stage{
+		Kind:          config.StageKindResolve,
+		Role:          "merge-resolver",
+		Postcondition: []string{"tests-pass"},
+		OnFailure:     "resolve",
+		Produces:      []string{"integrate"},
+	}
+	cfg.Souls = append(cfg.Souls, core.Soul{Name: "merge-resolver-go", Role: "merge-resolver", Sandbox: "go-toolchain"})
+	return cfg
+}
+
+// TestHandleResultIntegrateConflictSpawnsResolution: with a resolve stage configured, an
+// integrate rebase conflict spawns a sandboxed conflict-resolution issue rather than
+// dead-lettering. The new issue carries the resolve role, is seeded at the CONFLICTING
+// candidate (Base) so the resolver rebases that branch onto main, and counts as the next
+// attempt; the conflicted issue is closed (its work lives on in the resolution), and nothing
+// is dead-lettered. (specs/integration.md step 2: spawn a resolution issue, block, loop.)
+func TestHandleResultIntegrateConflictSpawnsResolution(t *testing.T) {
+	bd := newFakeBeads()
+	bd.put(inProgress("iss-1", "implement", 0))
+	m := &fakeMerger{err: errRebaseConflict}
+	o, nc := newOrch(t, conflictResolveConfig(2), bd, &fakeGate{report: gate.Report{Passed: true}}, m)
+
+	sub, err := nc.SubscribeSync(messaging.SubjectDLQ)
+	if err != nil {
+		t.Fatalf("subscribe dlq: %v", err)
+	}
+
+	res := core.Result{IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: core.CandidateBranch("iss-1")}}
+	transient, err := o.handleResult(context.Background(), res)
+	if err != nil || transient {
+		t.Fatalf("handleResult = (%v,%v), want (false,nil) — a conflict spawns a resolution, not an error", transient, err)
+	}
+
+	_, _, closed, blocked, applied := bd.snap()
+	if len(blocked) != 0 {
+		t.Errorf("blocked = %v, want none (a resolvable conflict is not dead-lettered)", blocked)
+	}
+	if len(closed) != 1 || closed[0] != "iss-1" {
+		t.Errorf("closed = %v, want [iss-1] (the conflicted issue is closed in favor of the resolution)", closed)
+	}
+	if len(applied) != 1 {
+		t.Fatalf("applied = %+v, want one conflict-resolution issue", applied)
+	}
+	got := applied[0].Issue
+	if got.Role != "merge-resolver" {
+		t.Errorf("resolution role = %q, want merge-resolver", got.Role)
+	}
+	if got.Base != core.CandidateBranch("iss-1") {
+		t.Errorf("resolution base = %q, want %q (rebase the conflicting candidate)", got.Base, core.CandidateBranch("iss-1"))
+	}
+	if got.Attempt != 1 {
+		t.Errorf("resolution attempt = %d, want 1 (the conflict loop counts against the retry cap)", got.Attempt)
+	}
+	// No DLQ alert for a spawned resolution.
+	if _, derr := sub.NextMsg(200 * time.Millisecond); derr == nil {
+		t.Error("a DLQ alert was published; a spawned resolution must not dead-letter")
+	}
+}
+
+// TestHandleResultIntegrateConflictResolveCapExhausted: a conflict whose issue has already
+// exhausted the retry cap dead-letters even with a resolve stage configured — the conflict
+// loop is bounded by the same termination guarantee as the fix loop, so a conflict no rebase
+// resolves cannot spin forever.
+func TestHandleResultIntegrateConflictResolveCapExhausted(t *testing.T) {
+	bd := newFakeBeads()
+	bd.put(inProgress("iss-1", "implement", 2)) // at the cap (maxRetries=2)
+	m := &fakeMerger{err: errRebaseConflict}
+	o, nc := newOrch(t, conflictResolveConfig(2), bd, &fakeGate{report: gate.Report{Passed: true}}, m)
+
+	sub, err := nc.SubscribeSync(messaging.SubjectDLQ)
+	if err != nil {
+		t.Fatalf("subscribe dlq: %v", err)
+	}
+
+	res := core.Result{IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: core.CandidateBranch("iss-1")}}
+	if transient, err := o.handleResult(context.Background(), res); err != nil || transient {
+		t.Fatalf("handleResult = (%v,%v), want (false,nil)", transient, err)
+	}
+	if _, derr := sub.NextMsg(time.Second); derr != nil {
+		t.Errorf("no DLQ alert for a cap-exhausted conflict: %v", derr)
+	}
+	_, _, closed, blocked, applied := bd.snap()
+	if len(blocked) != 1 || blocked[0] != "iss-1" {
+		t.Errorf("blocked = %v, want [iss-1] (cap exhausted -> dead-letter)", blocked)
+	}
+	if len(applied) != 0 {
+		t.Errorf("applied = %+v, want none (no resolution spawned past the cap)", applied)
 	}
 	if len(closed) != 0 {
 		t.Errorf("closed = %v, want none (a dead-lettered issue is blocked, not closed)", closed)

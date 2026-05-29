@@ -46,6 +46,17 @@ const (
 	// therefore declares a role but no postcondition (see specs/workflow.md). It is the
 	// one kind that coexists with a role.
 	StageKindPlan = "plan"
+	// StageKindResolve is the merge-conflict-resolution stage: like plan it is an agent
+	// stage that names a Role (a merge-resolver soul), but UNLIKE plan it IS sandbox-gated.
+	// The orchestrator spawns a resolve issue when a verified candidate cannot be cleanly
+	// rebased onto the current main (specs/integration.md step 2): the agent rebases the
+	// conflicting candidate onto main and resolves the conflicts, producing a new candidate
+	// that the orchestrator re-verifies in a clean sandbox (producer != verifier) before it
+	// can land. It is entered only on a conflict — never reached through a produces edge —
+	// so it is excluded from the pipeline-entry computation (see cmd/harness entryRole). It
+	// must declare a postcondition (the suite re-verifying the resolved tree) and produce
+	// the integrate stage to loop back into the merge queue.
+	StageKindResolve = "resolve"
 )
 
 // Stage is one node in the workflow DAG, keyed by stage name in the DAG map. A
@@ -56,7 +67,7 @@ const (
 // postcondition. Depth between stages is declarative via Produces; breadth within a
 // stage is emergent (see specs/workflow.md).
 type Stage struct {
-	Kind          string   `yaml:"kind,omitempty"`          // non-agent stage: "human" | "trusted-merge"; or "plan" (agent, ungated)
+	Kind          string   `yaml:"kind,omitempty"`          // non-agent stage: "human" | "trusted-merge"; or agent: "plan" (ungated) | "resolve" (gated, conflict-spawned)
 	Role          string   `yaml:"role,omitempty"`          // role souls fulfill for an agent stage
 	Precondition  string   `yaml:"precondition,omitempty"`  // guard that must hold before entry, e.g. "blockers-closed"
 	Postcondition []string `yaml:"postcondition,omitempty"` // guards evaluated in a clean verification sandbox before acceptance

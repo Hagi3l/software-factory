@@ -1,0 +1,33 @@
+# The Go merge-conflict resolver: the soul that fulfills the `resolve` DAG role. The
+# orchestrator dispatches it only on a merge-queue conflict — when a candidate that
+# already passed its qa gate cannot be cleanly rebased onto the current main because
+# another candidate landed first and the two textually collide. It is handed the
+# conflicting candidate as its base; its job is to rebase that candidate onto main,
+# resolve the conflicts while preserving the candidate's behaviour, and submit a new
+# candidate for independent verification.
+#
+# It is *not* the merge. The orchestrator never hands main to an untrusted agent: this
+# soul only *proposes* a rebased candidate. The authoritative gate re-runs the full qa
+# suite against the resolved tree in a clean orchestrator-controlled sandbox (producer !=
+# verifier — the two-green-branches guard applies to the resolution too), and only then
+# does the trusted layer do the final git write to main. A rejected resolution routes
+# back through a fresh `resolve` attempt (see specs/integration.md, specs/verification.md).
+#
+# It runs in the same `go-toolchain` sandbox profile as the implementor/qa souls (it must
+# build and run the tests to confirm its merge). The model resolves through infra.<env>.yaml's
+# `models` registry; the API key is supplied from the environment by the runner, never here.
+#
+# Model tier (T3.4): this soul runs the *frontier* model. Unlike the qa soul (which
+# economizes because its output is fully re-gated), conflict resolution is hard reasoning —
+# the agent must understand two divergent change sets and merge their *semantics*, not just
+# their text — and a wrong resolution that still compiles is exactly what the gate may not
+# catch cheaply. Conflicts are rare, so the cost is minor; correctness is worth the frontier
+# model. The re-gate is the safety net, not a licence to under-power the resolver. Tunable
+# per deployment (see specs/models.md, configuration.md).
+name:    merge-resolver-go
+role:    merge-resolver
+model:   claude-opus-4-8
+persona: souls/prompts/merge-resolver.md
+tools:   [fs, shell, git]
+sandbox: go-toolchain
+selector: { lang: go }
