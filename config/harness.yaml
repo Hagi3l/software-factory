@@ -2,9 +2,9 @@
 #
 # Why this shape: bootstrap.md collapses the full requirements -> plan ->
 # author-tests -> implement -> qa -> integrate pipeline. The human still performs
-# `requirements`/`plan` by authoring specs and seeding one issue; that seed now enters
-# at `author-tests`, the first autonomous stage. `qa` (mutation + scanners) is still
-# folded into the gate and lands as its own stage in Phase 2 (T2.9).
+# `requirements`/`plan` by authoring specs and seeding one issue; that seed enters
+# at `author-tests`, the first autonomous stage. As of T2.9 `qa` is its own live stage
+# between `implement` and `integrate` (it was previously folded into the implement gate).
 #
 # `author-tests` writes the FAILING acceptance tests from the spec (producer != verifier:
 # a different soul than the implementor). Its `tests-red` postcondition proves the tests
@@ -19,14 +19,22 @@
 # refs: they must FAIL on the issue's base — the author-tests candidate that holds the
 # failing tests but no implementation (the orchestrator threads that branch as the gate's
 # base ref) — and PASS on the implement candidate. This proves the implementation actually
-# turned the tests green rather than the tests being vacuous. `integrate` is a trusted-merge
-# executed inline by the orchestrator (never dispatched to a runner), the terminal
-# merge-to-main state.
+# turned the tests green rather than the tests being vacuous. On success it `produces` a
+# `qa` issue (the orchestrator threads the implement candidate as its base).
 #
-# `on_failure` routes a rejected candidate back through a fresh attempt of the same stage
-# (a new issue, keeping the issue graph acyclic); `max_retries` bounds how many such
-# cycles run before the work dead-letters for human triage — the primary termination
-# guarantee.
+# `qa` is the spec-independent defence-in-depth stage, run by the `security` soul — a
+# *different* soul than the implementor (producer != verifier). Its gate re-runs the
+# acceptance tests plus a mutation-adequacy metric and three spec-independent scanners
+# (gosec SAST, govulncheck known-vulnerabilities, license-scan dependency/licence policy)
+# in the clean verification sandbox. mutation>=0.8 is the kernel default mutation
+# threshold (see specs/verification.md). A rejected qa candidate routes `on_failure` back
+# to `implement` — a fresh fix attempt — so a finding is fixed by the implementor and
+# re-gated, not merged. `integrate` is a trusted-merge executed inline by the orchestrator
+# (never dispatched to a runner), the terminal merge-to-main state.
+#
+# `on_failure` routes a rejected candidate back through a fresh attempt of a stage (a new
+# issue, keeping the issue graph acyclic); `max_retries` bounds how many such cycles run
+# before the work dead-letters for human triage — the primary termination guarantee.
 dag:
   author-tests:
     role: test-author
@@ -39,21 +47,45 @@ dag:
     precondition: blockers-closed
     postcondition: [tests-red-then-green]
     on_failure: implement
+    produces: [qa]
+  qa:
+    role: security
+    precondition: blockers-closed
+    postcondition: [tests-pass, "mutation>=0.8", gosec, govulncheck, license-scan]
+    on_failure: implement
     produces: [integrate]
   integrate:
     kind: trusted-merge
 
 # The check registry: each command-check postcondition resolves to the shell command the
-# gate runs in the clean verification sandbox (exit 0 = pass). These are the harness's own
-# make targets — `make test-unit` compiles every package (so a build break also fails the
-# gate) and runs the unit suite. The reserved proofs `tests-red` (author-tests) and
-# `tests-red-then-green` (implement) have no command of their own: they
-# reuse `tests-pass`, run against the candidate and/or its base (the implement red→green
-# proof runs it against both), so the acceptance tests stay a single source of truth.
-# Keeping the commands here (not as flags or code) makes
-# config the single source of truth the gate resolves against; see specs/configuration.md.
+# gate runs in the clean verification sandbox (exit 0 = pass; non-zero = findings or a
+# tool error => fail, closed). These are the harness's own make targets, so "how the
+# harness runs its QA" lives in one reviewable place (the Makefile) — `make test-unit`
+# compiles every package (a build break also fails the gate) and runs the unit suite;
+# `make gosec`/`govulncheck`/`license-scan` are the spec-independent scanners; `make
+# mutation` prints the mutation score the `mutation>=0.8` comparison grades (the gate
+# reads the trailing numeric token of stdout and fails closed if it cannot).
+#
+# The reserved proofs `tests-red` (author-tests) and `tests-red-then-green` (implement)
+# have no command of their own: they reuse `tests-pass`, run against the candidate and/or
+# its base (the implement red→green proof runs it against both), so the acceptance tests
+# stay a single source of truth. The `mutation` comparison resolves the command registered
+# under its metric name (`mutation`). Keeping the commands here (not as flags or code)
+# makes config the single source of truth the gate resolves against; see
+# specs/configuration.md.
+#
+# Offline note: the qa scanners and the mutation tool must be baked into the `security`
+# role's sandbox image so they run under the zero-network invariant — govulncheck in
+# particular needs an offline vulnerability database. The kernel go-toolchain image does
+# not yet carry them; that rootfs composition is T5.3/T5.6 (see
+# deploy/go-toolchain.Dockerfile). Until then the qa gate is wired and dispatched but its
+# scanner/mutation checks fail closed for lack of tooling.
 checks:
-  tests-pass: make test-unit
+  tests-pass:   make test-unit
+  gosec:        make gosec
+  govulncheck:  make govulncheck
+  license-scan: make license-scan
+  mutation:     make mutation
 
 policy:
   max_retries: 3

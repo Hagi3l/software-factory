@@ -1,0 +1,24 @@
+# The Go security/QA reviewer: the soul that fulfills the `qa` DAG role. It is a
+# *different* soul than the implementor (producer != verifier): it is handed the
+# implementor's candidate as its base and subjects it to the spec-independent
+# defence-in-depth pass — SAST (gosec), known-vulnerability scan (govulncheck),
+# dependency/licence policy (license-scan), and test-adequacy (mutation) — hardening
+# what it can without ever weakening the acceptance-test contract it inherited.
+#
+# It is *not* the gate. The authoritative gate re-runs every postcondition in a clean
+# orchestrator-controlled verification sandbox (producer != verifier), so this agent
+# never self-certifies — its candidate is a proposal the independent gate grades, and a
+# rejected one routes back to `implement` (see specs/verification.md, specs/workflow.md).
+#
+# It runs in the same `go-toolchain` sandbox profile as the implementor — the qa
+# scanners and the mutation tool are baked into that role's image so they run offline
+# under the zero-network invariant (see deploy/go-toolchain.Dockerfile, T5.3/T5.6). The
+# model resolves through infra.<env>.yaml's `models` registry; the API key is supplied
+# from the environment by the runner, never from this file.
+name:    security-go
+role:    security
+model:   claude-opus-4-8
+persona: souls/prompts/security.md
+tools:   [fs, shell, git]
+sandbox: go-toolchain
+selector: { lang: go }

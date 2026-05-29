@@ -54,14 +54,17 @@ func TestAgentRolesAndRoleIsAgentStage(t *testing.T) {
 	cfg := loadTestConfig(t)
 
 	roles := agentRoles(cfg)
-	if len(roles) != 2 || roles[0] != "implementor" || roles[1] != "test-author" {
-		t.Fatalf("agentRoles = %v, want [implementor test-author]", roles)
+	if len(roles) != 3 || roles[0] != "implementor" || roles[1] != "security" || roles[2] != "test-author" {
+		t.Fatalf("agentRoles = %v, want [implementor security test-author]", roles)
 	}
 	if !roleIsAgentStage(cfg, "implementor") {
 		t.Fatal("implementor should be an agent stage")
 	}
 	if !roleIsAgentStage(cfg, "test-author") {
 		t.Fatal("test-author should be an agent stage")
+	}
+	if !roleIsAgentStage(cfg, "security") {
+		t.Fatal("security should be an agent stage (the qa role)")
 	}
 	if roleIsAgentStage(cfg, "integrate") {
 		t.Fatal("integrate is a trusted-merge stage (no role), not an agent stage")

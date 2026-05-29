@@ -16,6 +16,13 @@
 #     git's dubious-ownership guard fails (exit 128) and breaks `go build`'s default
 #     VCS stamping — which silently fails the gate. (See IMPLEMENTATION_PLAN.md.)
 #   - A default git identity so the agent can commit its candidate branch in-sandbox.
+#
+# NOT YET baked in (T5.3/T5.6): the `qa` stage (config/harness.yaml) runs gosec,
+# govulncheck, go-licenses, and a mutation tool (gremlins) offline in this image. Those
+# binaries — and govulncheck's vulnerability database, which it otherwise fetches from the
+# network — must be added here before the live qa gate can pass under the zero-network
+# invariant. Until then the qa checks resolve and dispatch but fail closed for lack of
+# tooling. Installing them is rootfs composition (T5.3) plus a vetted offline DB (T5.6).
 FROM golang:1.26
 RUN apt-get update \
  && apt-get install -y --no-install-recommends make git ca-certificates \

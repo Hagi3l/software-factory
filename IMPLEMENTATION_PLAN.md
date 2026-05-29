@@ -329,7 +329,54 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
     `| Traceability: (none)` suffix. Specs updated: `verification.md` (realized mechanism),
     `security.md` + `integration.md` (trailer examples gain the field); `artifact-store.md` already
     listed the map.
-- [ ] **T2.9 `qa` stage + soul** — a `security`/QA role/soul (distinct from the implementor) whose gate runs the mutation + scanner postconditions in the clean verification sandbox; `on_failure: implement`, `produces: integrate`. (needs T2.6, T2.7) ([workflow.md](specs/workflow.md), [verification.md](specs/verification.md))
+- [x] **T2.9 `qa` stage + soul** — *done.* The live `qa` stage now sits between `implement`
+  and `integrate` in the shipped `config/harness.yaml`, fulfilled by a new `security` soul
+  (distinct from the implementor); its gate runs `[tests-pass, "mutation>=0.8", gosec,
+  govulncheck, license-scan]` in the clean verification sandbox, `on_failure: implement`,
+  `produces: [integrate]`. Verified with `make check` green (310 pass). Learnings:
+  - **Pure config + soul + specs increment — no orchestrator or gate code changed.** The
+    orchestrator is fully data-driven (`stageForRole`/`advance`/`route`/`runGate` read the
+    DAG), and its qa routing was *already* covered by tests (`TestHandleResultAcceptProducesAgentStage`,
+    the traceability-through-qa tests build `implement→qa→integrate` configs). The gate already
+    realizes every qa check kind: scanners as command checks (T2.6), the mutation
+    metric-comparison (T2.7). So T2.9 only had to *declare* the stage + soul and the four new
+    check commands. This is the payoff of the generality earned in T2.1/T2.2/T2.6/T2.7.
+  - **Check commands are `make` targets, mirroring `tests-pass: make test-unit`.** Added
+    `make gosec/govulncheck/license-scan/mutation` to the Makefile so "how the harness runs
+    its QA" lives in one reviewable place; `config/harness.yaml` `checks:` points at them.
+    The shipped config deliberately differs from `configuration.md`'s generic example
+    (`gosec ./...` etc.) the same way `tests-pass` already does (`make test-unit` vs
+    `go test ./...`) — the spec example is for any project; the shipped config is the
+    harness's own make-based convention. Test fixtures (`config_test`/`validate_test`) still
+    mirror the spec example verbatim and were left unchanged.
+  - **Entry role unchanged; agentRoles grew.** `author-tests` is still the only indegree-0
+    agent stage, so `entryRole` stays `test-author` (seed entry unmoved). `agentRoles` is now
+    `[implementor, security, test-author]` — `TestAgentRolesAndRoleIsAgentStage` updated. New
+    `TestShippedQAStageWired` pins the live routing/registry as a contract guard.
+  - **The qa *agent* (security soul) ≠ the gate.** Per `agent.md` it runs the same agentic
+    loop; its persona makes it a security/quality *reviewer/hardener* handed the implement
+    candidate as base — it runs the scanners + mutation, fixes findings it safely can
+    (never weakening the acceptance-test contract, may add unit tests to kill surviving
+    mutants), and submits. The orchestrator's gate re-runs everything in a clean sandbox
+    (producer ≠ verifier); a rejected candidate routes `on_failure → implement`. A clean
+    implement candidate is a valid no-op pass-through.
+  - **Decisions made (closing two OPENs):** (1) committed **`mutation>=0.8`** (>=, 0.8) as the
+    kernel default mutation threshold; (2) **kept fail-fast** for the qa gate — deliberate for
+    proof/measurement checks (a mutation score is meaningless when tests are red) and retained
+    for scanners in the kernel; aggregating all independent-scanner findings in one pass is
+    deferred as T2.12 (needs a per-check "independent" config signal). Specs updated
+    (`verification.md`: fail-fast rationale + committed threshold).
+  - **Known gap → T5.3/T5.6 (image, not wiring):** the go-toolchain image does not yet bake
+    gosec/govulncheck/go-licenses/gremlins, and govulncheck needs an offline vuln DB under the
+    zero-network invariant. So the qa gate is *wired and dispatched* but its scanner/mutation
+    checks **fail closed for lack of tooling** until the role image carries them. No automated
+    test runs the full bootstrap pipeline through qa (the spine e2e uses its own
+    `implement→integrate`, `tests-pass: true` fixture), so nothing regressed; a manual live
+    `harness run` against the bootstrap config now stops at qa until T5.3/T5.6 land. Documented
+    in `config/harness.yaml` + `deploy/go-toolchain.Dockerfile`.
+- [ ] **T2.12** *(optional)* Run-all independent scanners — aggregate every independent-scanner
+  finding in one `qa` pass (better DLQ triage) instead of fail-fast, via a per-check
+  "independent" config signal the gate honors (keeps proof/measurement checks fail-fast). See T2.9. ([verification.md](specs/verification.md))
 - [ ] **T2.10 Trusted-dev policy profile** — a lighter policy profile with a human-approval postcondition for the self-hosting transition (a CLI `approve` command satisfies it). *(OPEN, configuration.md.)* ([bootstrap.md](specs/bootstrap.md), [configuration.md](specs/configuration.md))
 - [ ] **T2.11** *(OPEN)* Second, different-model reviewer soul in `qa` (N-version diversity). ([verification.md](specs/verification.md))
 
@@ -394,13 +441,12 @@ store) with the production stack.
 
 These are `OPEN:` in the specs and may reshape tasks above:
 
-- Mutation score threshold + operators — the metric-comparison *expression* and gate
-  kind are decided and implemented (T2.7); only the concrete default score is picked when
-  the `qa` stage lands (T2.9).
-- Gate fail-fast vs. run-all for independent scanners — the gate stops at the first failing
-  check, so a multi-scanner `qa` run surfaces one finding at a time. Aggregating all
-  independent-scanner findings in one pass (better for DLQ triage) needs a config signal to
-  mark a check "independent"; decided when `qa` lands (T2.9). See T2.6.
+- ~~Mutation score threshold + operators~~ — **decided (T2.9):** the kernel commits
+  `mutation>=0.8` (>=, 0.8) on the live qa stage; still config, tunable per role.
+- ~~Gate fail-fast vs. run-all for independent scanners~~ — **decided (T2.9): keep
+  fail-fast.** Deliberate for proof/measurement checks (a mutation score is meaningless on
+  red tests). Aggregating all independent-scanner findings in one pass (better DLQ triage)
+  needs a per-check "independent" config signal and is filed as **T2.12** (optional).
 - `integrate` as its own role/soul vs. orchestrator-owned with sandboxed conflict help (T3.11).
 - HA orchestrator: single instance (fine for v1) vs. leader election (T5.11).
 - Condition-expression language for pre/postconditions (shell exit-code vs. CEL) — affects

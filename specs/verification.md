@@ -135,10 +135,15 @@ Because the verification sandbox is [zero-network](security.md), a scanner that 
 reference data — the vulnerability database for `govulncheck`, licence metadata for
 `license-scan` — must read it from data baked into the role's sandbox image, the same
 offline guarantee the build relies on. A purely static analyser like `gosec` needs no such
-data. The gate runs its checks fail-fast (it stops at the first failure), so today a `qa`
-run that trips one scanner surfaces that finding and re-routes; running every independent
-scanner to aggregate *all* findings in one pass is a natural refinement to weigh when the
-`qa` stage that declares them lands.
+data. The gate runs its checks **fail-fast** (it stops at the first failure), so a `qa`
+run that trips one scanner surfaces that finding and re-routes to `implement` to fix it.
+Fail-fast is deliberate for the proof and measurement checks — a mutation score is
+meaningless on a candidate whose tests are red, so there is no point measuring it — and is
+retained for the scanners too in the kernel: aggregating *all* independent-scanner
+findings in one pass would aid a human triaging the dead-letter queue, but it needs a
+per-check "independent" signal in config so the gate knows which checks are safe to keep
+running past a failure, which is a self-contained refinement left for later rather than
+part of landing the stage.
 
 ### Traceability map
 The test author emits, per test, the **spec heading + sentence** it claims to
@@ -188,12 +193,13 @@ a style issue.
 
 ## OPEN questions
 
-- Minimum mutation score and which mutation operators — still TBD; likely per-role
-  config. The *expression* is now decided — a `metric<op>threshold` postcondition with
-  operators `>=`, `<=`, `==`, `>`, `<`, the threshold living in config — and the gate
-  check kind is implemented; only the concrete default score (and the operator-set the
-  tool exposes) is unsettled, and is chosen when the `qa` stage that declares the
-  postcondition lands (T2.9). The examples carry `mutation>=0.8` as a placeholder, not a
-  committed default.
+- Minimum mutation score and which mutation operators — the *expression* is decided (a
+  `metric<op>threshold` postcondition with operators `>=`, `<=`, `==`, `>`, `<`, the
+  threshold living in config) and the gate check kind is implemented. With the live `qa`
+  stage landed (T2.9) the kernel commits **`mutation>=0.8`** as its default — an 0.8 score
+  with the `>=` operator — declared on the qa stage in `config/harness.yaml`. It remains
+  config, so it is tunable per role/project; which mutation operators the tool exercises is
+  the tool's own configuration, kept out of the gate (which grades only the resulting
+  number).
 - Whether `qa` should include a second, *different-model* reviewer soul as an
   additional independent gate (N-version diversity) — candidate for defence in depth.

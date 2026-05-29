@@ -13,7 +13,8 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 RESULTS := test/results
 
-.PHONY: all build vet lint fmt tidy test test-unit test-e2e-docker check clean
+.PHONY: all build vet lint fmt tidy test test-unit test-e2e-docker check clean \
+	gosec govulncheck license-scan mutation
 
 all: build
 
@@ -58,6 +59,36 @@ test-e2e-docker:
 	$(GO) test -json -tags docker_e2e -run TestSpineE2EDocker ./cmd/harness/ \
 		>$(RESULTS)/test-e2e-docker.json 2>$(RESULTS)/test-e2e-docker.stderr \
 		|| (cat $(RESULTS)/test-e2e-docker.stderr; exit 1)
+
+# --- qa-gate checks ---------------------------------------------------------------
+# The `qa` stage's postconditions (config/harness.yaml) resolve to these targets; the
+# gate runs them in a clean verification sandbox (exit 0 = pass; non-zero = findings or
+# a tool error => fail, closed). They are NOT part of `make check` — they need tools
+# (gosec, govulncheck, go-licenses, gremlins) and reference data baked into the qa role's
+# sandbox image so they run offline under the zero-network invariant (T5.3/T5.6). Run
+# them on a host only with those tools installed.
+
+## gosec: SAST scan of all packages (qa gate). A finding or tool error fails closed.
+gosec:
+	gosec ./...
+
+## govulncheck: known-vulnerability scan (qa gate). In-sandbox this reads an offline
+## vulnerability database baked into the role image (no network); see T5.6.
+govulncheck:
+	govulncheck ./...
+
+## license-scan: dependency/licence policy (qa gate). Rejects disallowed licences.
+license-scan:
+	go-licenses check ./...
+
+## mutation: print the mutation score (0..1) the `mutation>=0.8` gate grades. The gate
+## reads the trailing numeric token of stdout, so emit only the score last and fail
+## closed on anything unparseable. gremlins is the kernel default tool; the exact
+## invocation/field is finalized when the role image bakes it (T5.3).
+mutation:
+	@mkdir -p $(RESULTS)
+	@gremlins unleash --output $(RESULTS)/mutation.json $(PKG) >/dev/null 2>&1 || true
+	@jq -r '.test_efficacy' $(RESULTS)/mutation.json
 
 ## clean: remove build and test output.
 clean:
