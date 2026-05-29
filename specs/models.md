@@ -101,9 +101,25 @@ why autonomous self-hosting still awaits a capable runtime model (see
 
 ---
 
+## Per-role model tiers
+
+Different roles want different model strength. Decomposition, test authoring, and
+implementation are hard reasoning and want a frontier model; a role whose output is
+**independently re-graded** can run a cheaper one, because a weak result is caught
+downstream rather than trusted. There is **no separate "tier" type** — a tier is just
+which model a [soul](components/agent.md) names. A role maps to a set of souls, the
+orchestrator picks one per issue by selector (see [configuration.md](configuration.md)),
+and the chosen soul's `model` is what the runner resolves; the model is therefore
+**resolved per issue**, not globally, and is recorded in the provenance trailer so the
+tier a change ran under is auditable.
+
+The safest place to economize is a role guarded by **producer ≠ verifier**: the kernel's
+`security`/`qa` soul runs a mid-tier model because every byte it produces is re-run by the
+independent gate in a clean sandbox (scanners + mutation + the red→green proof), so a
+mistake costs a rejected candidate, not a bad merge. Which model serves which role is
+config policy, tunable per deployment; the bootstrap commits frontier for
+planner/test-author/implementor and mid-tier for security.
+
 ## OPEN questions
 
-- The model-registry config shape (name → provider + endpoint; keys from env, never
-  in config) — see [configuration.md](configuration.md).
-- Per-role model defaults / cost tiers (cheap model for some roles, frontier for
-  hard reasoning) — config policy, TBD.
+*(none — the registry config shape and per-role tiers above are realized.)*

@@ -15,9 +15,17 @@
 # under the zero-network invariant (see deploy/go-toolchain.Dockerfile, T5.3/T5.6). The
 # model resolves through infra.<env>.yaml's `models` registry; the API key is supplied
 # from the environment by the runner, never from this file.
+#
+# Model tier (T3.4): this soul runs a *mid*-tier model (claude-sonnet-4-6), not the
+# frontier model the planner/test-author/implementor use. This is the lowest-risk place
+# to economize: unlike those roles, every byte this soul produces is re-graded by the
+# independent gate in a clean verification sandbox (all scanners + mutation + the
+# red→green proof re-run), and a rejected candidate routes back to `implement`. Because
+# producer != verifier already catches its mistakes, a cheaper model here trades little
+# safety for real cost savings. Tune per deployment (see specs/models.md, configuration.md).
 name:    security-go
 role:    security
-model:   claude-opus-4-8
+model:   claude-sonnet-4-6
 persona: souls/prompts/security.md
 tools:   [fs, shell, git]
 sandbox: go-toolchain

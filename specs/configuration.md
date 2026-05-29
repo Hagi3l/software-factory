@@ -191,6 +191,14 @@ The `models` registry maps the `model` name a soul declares to a provider adapte
 see [models.md](models.md). Keys are injected from the environment, never written
 into config files.
 
+**Per-role model tiers** are expressed here, not by any separate construct: a soul
+names its `model`, so assigning a cheaper model to one role's soul and a frontier model
+to another's *is* the tier policy. Because the model is resolved from the soul the
+orchestrator selects per issue, the tier is per issue and is recorded in provenance.
+The bootstrap runs the `security`/`qa` soul on a mid-tier model and the rest on the
+frontier model — the qa candidate is re-graded by the independent gate, so a cheaper
+model there is the lowest-risk economy (see [models.md](models.md)).
+
 Dev overlays (e.g. `infra.dev.yaml`) swap Firecracker for Docker without touching
 the workflow or souls.
 

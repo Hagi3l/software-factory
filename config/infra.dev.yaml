@@ -21,4 +21,7 @@ artifacts:
 otel:
   endpoint: localhost:4317
 models:
-  claude-opus-4-8: { provider: anthropic }
+  # Per-role model tiers (T3.4): a soul names its model here; the runner resolves it per
+  # invocation, so cheaper models can serve roles whose output is independently re-gated.
+  claude-opus-4-8:   { provider: anthropic }   # frontier — planner, test-author, implementor
+  claude-sonnet-4-6: { provider: anthropic }   # mid tier — security/qa (candidate re-gated)

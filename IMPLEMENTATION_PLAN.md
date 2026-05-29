@@ -521,7 +521,42 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
   - Specs updated: `configuration.md` (Roles-vs-souls: selection algorithm, label encoding,
     tags thread forward; validation: distinct-selector rule), `components/agent.md`
     (`request_subtask` gains `tags`).
-- [ ] **T3.4 Per-role model tiers** — resolve the model per issue from the selected soul, so cheap models serve easy roles and frontier models the hard ones. (builds on T3.3) ([models.md](specs/models.md), [configuration.md](specs/configuration.md))
+- [x] **T3.4 Per-role model tiers** — *done.* The model an invocation runs under is now the
+  *selected soul's* `model`, resolved per issue, and the bootstrap commits a real 2-tier policy:
+  frontier (`claude-opus-4-8`) for planner/test-author/implementor, mid-tier (`claude-sonnet-4-6`)
+  for security/qa. Verified with `make check` green (359 pass, 2 skip). Learnings for downstream tasks:
+  - **The resolution *mechanism* was already complete before this task — T3.4 was a config-policy +
+    test + docs increment, not new plumbing.** The plan's original "thread the model into the
+    Brief/runner instead of any global default" premise was **stale**: there is no global default
+    anywhere. `buildBrief` already embeds the whole `core.Soul` (incl. `Model`) into `core.Brief`;
+    `runner.invoke` resolves `brief.Soul.Model` through the `registry.Registry` (`AdapterResolver`)
+    to a provider adapter; `provenanceFor` records `soul.Model` on the merge trailer. T3.3's
+    `selectSoul` then made the soul (and thus its model) per-issue. So per-(role×tags) model
+    resolution has been live since the kernel + T3.3. Confirmed by search (no `default model` /
+    fallback exists). **Lesson for T3.5+: search before assuming a plan note's premise still holds.**
+  - **A "tier" is not a new type — it is which model a soul names.** No code/struct was added;
+    `models.md`'s OPEN ("per-role tiers — config policy, TBD") is resolved purely in config:
+    `infra.dev.yaml` registers `claude-sonnet-4-6` alongside `claude-opus-4-8`, and `security.yaml`
+    now names the mid tier. `config.Validate` already enforces every `soul.model ∈ infra.models`,
+    so the new model had to be registered (caught by `TestValidateShippedConfig`); registering it
+    was the only validation touch. **For T3.4-style cost work later: add the model to the registry
+    first or shipped-config validation fails.**
+  - **The tier choice is architecturally principled, not arbitrary:** the cheapest model goes where
+    **producer ≠ verifier** most fully catches its mistakes. The qa/security candidate is re-graded
+    in a clean sandbox (all scanners + mutation + red→green re-run) and a rejection routes back to
+    `implement`, so a weaker model there trades little safety for real savings. planner/test-author/
+    implementor stay frontier (decomposition + the test contract + the hardest role are only
+    structurally/partially verified). Documented as tunable per deployment.
+  - **New contract guard `TestModelTierResolvedPerIssue`** (`internal/orchestrator/modeltier_test.go`):
+    two souls, one role, different models + selectors; an issue's tags pick one and both
+    `buildBrief`'s `Brief.Soul.Model` and `provenanceFor`'s `prov.Model` carry that soul's model.
+    This was the missing test — T3.4's core behavior had no dedicated assertion before. Uses the
+    T3.3 `orchWithSouls` helper.
+  - **For T3.5 (spec-slice):** `Brief.Spec` is still `""` (buildBrief sets it empty); the agent
+    reads the whole `specs/` tree from its worktree. T3.5 populates `Brief.Spec` with the bounded
+    slice. The Brief plumbing T3.4 leaned on (soul embedded whole) is unaffected.
+  - Specs updated: `models.md` (new *Per-role model tiers* section; OPEN questions resolved),
+    `configuration.md` (tier note under the `models` registry).
 - [ ] **T3.5 Spec-slice resolution** — a new `internal/spec` package that builds the bounded slice (referenced file + linked neighbours to a configured depth) and populates `Brief.Spec`, so the agent no longer reads the whole `specs/` tree from the worktree. ([specs-process.md](specs/specs-process.md), [components/agent.md](specs/components/agent.md))
 - [ ] **T3.6 Spec-version pinning** — the Brief pins the content hash of its spec slice; the hash is stored on the issue. (needs T3.5) ([specs-process.md](specs/specs-process.md))
 - [ ] **T3.7 Recompile-the-delta** — on a spec-file edit, the orchestrator diffs which issues referenced it and invalidates / re-derives the affected in-flight issues; already-merged work may spawn new issues for the diff. (needs T3.6) ([specs-process.md](specs/specs-process.md))
