@@ -1,8 +1,10 @@
 package runner
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -325,6 +327,92 @@ func containsStr(s []string, v string) bool {
 		}
 	}
 	return false
+}
+
+// A Result carrying a test↔spec traceability map (the author-tests stage produces one) is
+// harvested to the artifact store under the traceability-map kind, and the structured form
+// is cleared from the envelope so the bulky map travels by hash, not inline (see
+// specs/components/artifact-store.md). The stored bytes are the deterministic rendering.
+func TestHarvestStoresTraceabilityMap(t *testing.T) {
+	entries := []core.TraceEntry{
+		{Test: "TestRejectsNegative", Spec: "orders.md", Heading: "Quantities", Sentence: "reject negative quantities with a 400"},
+		{Test: "TestHappyPath", Heading: "Quantities", Sentence: "accept positive quantities"},
+	}
+	b := &fakeBackend{}
+	inv := &harvestingInvoker{
+		called: make(chan struct{}, 2),
+		result: core.Result{Status: core.StatusDone, Branch: core.Branch{Ref: "candidate/iss-1"}, Trace: entries},
+	}
+	r, nc := newRunner(t, b, inv)
+
+	resultSub, err := nc.SubscribeSync(messaging.ResultSubject("implement"))
+	if err != nil {
+		t.Fatalf("subscribe results: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+
+	publishWork(t, nc, testBrief())
+	select {
+	case <-inv.called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("invoker was never called")
+	}
+
+	msg, err := resultSub.NextMsg(5 * time.Second)
+	if err != nil {
+		t.Fatalf("waiting for published result: %v", err)
+	}
+	var got core.Result
+	if err := json.Unmarshal(msg.Data, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	if len(got.Trace) != 0 {
+		t.Errorf("Result.Trace = %+v, want cleared after harvest (map travels by hash)", got.Trace)
+	}
+	var mapHash string
+	for _, a := range got.Evidence.Artifacts {
+		if a.Kind == core.ArtifactKindTraceabilityMap {
+			mapHash = a.Hash
+		}
+	}
+	if mapHash == "" {
+		t.Fatalf("no %s artifact on Evidence; got %+v", core.ArtifactKindTraceabilityMap, got.Evidence.Artifacts)
+	}
+	rc, err := r.store.Get(ctx, mapHash)
+	if err != nil {
+		t.Fatalf("get traceability map: %v", err)
+	}
+	defer rc.Close()
+	stored, _ := io.ReadAll(rc)
+	if !bytes.Equal(stored, formatTraceabilityMap(entries)) {
+		t.Errorf("stored map =\n%s\nwant\n%s", stored, formatTraceabilityMap(entries))
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("Run returned error: %v", err)
+	}
+}
+
+// formatTraceabilityMap renders a stable, human-readable document, one block per test in
+// emission order, omitting the optional spec line when absent. Determinism is what lets
+// the same map content-address to one hash and the provenance citation be reproducible.
+func TestFormatTraceabilityMap(t *testing.T) {
+	out := string(formatTraceabilityMap([]core.TraceEntry{
+		{Test: "TestA", Spec: "orders.md", Heading: "Quantities", Sentence: "reject negatives"},
+		{Test: "TestB", Heading: "Auth", Sentence: "require a token"},
+	}))
+	want := "# Test ↔ spec traceability map\n" +
+		"\ntest: TestA\nspec: orders.md\nheading: Quantities\nsentence: reject negatives\n" +
+		"\ntest: TestB\nheading: Auth\nsentence: require a token\n"
+	if out != want {
+		t.Errorf("formatTraceabilityMap =\n%q\nwant\n%q", out, want)
+	}
 }
 
 func TestNakOnInvokeErrorRedelivers(t *testing.T) {

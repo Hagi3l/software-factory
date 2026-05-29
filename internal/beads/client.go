@@ -106,13 +106,14 @@ type issueJSON struct {
 
 func (r issueJSON) toCore() core.Issue {
 	return core.Issue{
-		ID:      r.ID,
-		Title:   r.Title,
-		Body:    r.Description,
-		Role:    metaString(r.Metadata, MetadataKeyRole),
-		Status:  r.Status,
-		Attempt: metaInt(r.Metadata, MetadataKeyRetries),
-		Base:    metaString(r.Metadata, MetadataKeyBase),
+		ID:       r.ID,
+		Title:    r.Title,
+		Body:     r.Description,
+		Role:     metaString(r.Metadata, MetadataKeyRole),
+		Status:   r.Status,
+		Attempt:  metaInt(r.Metadata, MetadataKeyRetries),
+		Base:     metaString(r.Metadata, MetadataKeyBase),
+		TraceMap: metaString(r.Metadata, MetadataKeyTraceMap),
 	}
 }
 

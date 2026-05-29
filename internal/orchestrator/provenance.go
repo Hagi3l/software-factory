@@ -24,20 +24,23 @@ const (
 // specs/integration.md). Prompt-SHA is a content address into the artifact store, so the
 // cited prompt cannot be silently altered after the fact.
 type Provenance struct {
-	Soul      string   // the soul that produced the candidate
-	Model     string   // the model that drove it
-	Issue     string   // the beads issue this change answers
-	PromptSHA string   // artifact-store hash of the exact prompt the invocation ran with
-	Verified  []string // gate checks that passed, each cited as name@<evidence-hash> when persisted
+	Soul         string   // the soul that produced the candidate
+	Model        string   // the model that drove it
+	Issue        string   // the beads issue this change answers
+	PromptSHA    string   // artifact-store hash of the exact prompt the invocation ran with
+	Verified     []string // gate checks that passed, each cited as name@<evidence-hash> when persisted
+	Traceability string   // artifact-store hash of the author-tests test↔spec traceability map
 }
 
 // Trailer renders the provenance block exactly as specs/security.md and
 // specs/integration.md specify: two lines of pipe-separated fields. Empty fields render
 // as "(none)" rather than blank so a degraded record (e.g. a prompt that failed to
-// harvest) stays self-describing instead of looking truncated.
+// harvest, or a change merged without an author-tests stage and so no traceability map)
+// stays self-describing instead of looking truncated.
 func (p Provenance) Trailer() string {
-	return fmt.Sprintf("Soul: %s | Model: %s\nIssue: %s | Prompt-SHA: %s | Verified: %s",
-		orNone(p.Soul), orNone(p.Model), orNone(p.Issue), orNone(p.PromptSHA), orNone(strings.Join(p.Verified, ",")))
+	return fmt.Sprintf("Soul: %s | Model: %s\nIssue: %s | Prompt-SHA: %s | Verified: %s | Traceability: %s",
+		orNone(p.Soul), orNone(p.Model), orNone(p.Issue), orNone(p.PromptSHA),
+		orNone(strings.Join(p.Verified, ",")), orNone(p.Traceability))
 }
 
 // CommitMessage is the full message for the integration commit: a one-line subject plus
@@ -58,15 +61,30 @@ func orNone(s string) string {
 // the names of the checks the gate verified.
 func (o *Orchestrator) provenanceFor(issue core.Issue, res core.Result, report gate.Report) Provenance {
 	prov := Provenance{
-		Issue:     issue.ID,
-		PromptSHA: res.Evidence.PromptSHA,
-		Verified:  verifiedChecks(report),
+		Issue:        issue.ID,
+		PromptSHA:    res.Evidence.PromptSHA,
+		Verified:     verifiedChecks(report),
+		Traceability: issue.TraceMap,
 	}
 	if soul, ok := o.soulForRole(issue.Role); ok {
 		prov.Soul = soul.Name
 		prov.Model = soul.Model
 	}
 	return prov
+}
+
+// traceMapHash returns the artifact-store hash of a Result's harvested test↔spec
+// traceability map, or "" if the Result carries none (most roles) or the runner could not
+// persist it. The runner stores the map under core.ArtifactKindTraceabilityMap and clears
+// the structured form, so the hash on Evidence is the canonical reference the orchestrator
+// threads forward (see specs/verification.md).
+func traceMapHash(res core.Result) string {
+	for _, a := range res.Evidence.Artifacts {
+		if a.Kind == core.ArtifactKindTraceabilityMap {
+			return a.Hash
+		}
+	}
+	return ""
 }
 
 // verifiedChecks renders the checks that passed in the gate report for the trailer's

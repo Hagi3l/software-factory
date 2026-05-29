@@ -364,6 +364,50 @@ func (r *Runner) harvest(ctx context.Context, issueID string, rel *relay, res *c
 			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
 		}
 	}
+	// The test↔spec traceability map (author-tests only) is the one piece of evidence the
+	// agent itself produces rather than the relay capturing it: it arrives structured on
+	// the Result. Persist it like the rest, then clear the structured form so the bulky
+	// map travels by hash, not inline, on the result envelope (large evidence is always
+	// referenced, never carried — see specs/components/artifact-store.md). On a store
+	// failure the structured map is kept so the orchestrator at least logs it; the
+	// provenance trailer simply carries no Traceability hash (degraded, self-describing).
+	if len(res.Trace) > 0 {
+		ref, err := r.store.Put(ctx, core.ArtifactKindTraceabilityMap, bytes.NewReader(formatTraceabilityMap(res.Trace)))
+		if err != nil {
+			r.log.Error("runner: harvest traceability map", "issue", issueID, "err", err)
+		} else {
+			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
+			res.Trace = nil
+		}
+	}
+}
+
+// formatTraceabilityMap renders the test↔spec traceability map as a stable, human-readable
+// document, one block per test in the order the author emitted them. Determinism matters:
+// identical entries content-address to the same hash, so the same map is stored once and
+// the provenance citation is reproducible. This is the document the control room's issue
+// detail view renders and the only window a human has into how the test author read the
+// pure-prose spec (see specs/verification.md).
+func formatTraceabilityMap(entries []core.TraceEntry) []byte {
+	var b strings.Builder
+	b.WriteString("# Test ↔ spec traceability map\n")
+	for _, e := range entries {
+		b.WriteString("\ntest: ")
+		b.WriteString(e.Test)
+		b.WriteByte('\n')
+		if e.Spec != "" {
+			b.WriteString("spec: ")
+			b.WriteString(e.Spec)
+			b.WriteByte('\n')
+		}
+		b.WriteString("heading: ")
+		b.WriteString(e.Heading)
+		b.WriteByte('\n')
+		b.WriteString("sentence: ")
+		b.WriteString(e.Sentence)
+		b.WriteByte('\n')
+	}
+	return []byte(b.String())
 }
 
 // publishResult sends the harvested Result back on the role's result subject for the

@@ -44,9 +44,12 @@ trusts in place of a human reviewer. They must:
    later stage. If you find yourself writing the logic under test, stop.
 3. **Trace every test to the spec.** For each test, add a short comment naming the spec
    heading and the sentence it claims to encode (e.g. `// verification.md "Red→green
-   proof": the tests must fail against the pre-implementation base`). This is the only
-   window a human has into how you read the prose; it makes your interpretation
-   auditable when something slips.
+   proof": the tests must fail against the pre-implementation base`), and call the
+   `trace_test` tool with that same test name, spec file, heading, and sentence. The tool
+   call is what records the traceability map into the provenance trail; the comment keeps
+   the same reasoning visible in the code. This is the only window a human has into how you
+   read the prose, so trace honestly: name the sentence the test *actually* encodes, not
+   the one you wish it did. It makes your interpretation auditable when something slips.
 4. Prove they are red. Run the project's acceptance-test command with `run` (e.g.
    `make test-unit`) and read the output: the suite must fail *on your new assertions*.
    Fix tests that fail to compile or fail for the wrong reason.

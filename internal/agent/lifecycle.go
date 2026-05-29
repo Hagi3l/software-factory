@@ -13,18 +13,20 @@ import (
 
 // LifecycleTools are the tools that control the invocation and produce its Result (see
 // specs/components/agent.md): submit (candidate ready → done), escalate (spec ambiguity
-// → needs-spec-clarification), and request_subtask (propose a child issue — emergent
-// breadth). submit and escalate are terminal: they return the Result that ends the loop.
-// request_subtask is not terminal — it accumulates a Proposal and lets the agent keep
-// working; the proposals are folded into whichever terminal Result follows.
+// → needs-spec-clarification), request_subtask (propose a child issue — emergent
+// breadth), and trace_test (record a test↔spec traceability entry). submit and escalate
+// are terminal: they return the Result that ends the loop. request_subtask and trace_test
+// are not terminal — they accumulate (a Proposal, a TraceEntry) and let the agent keep
+// working; the accumulated proposals and trace entries are folded into the terminal
+// Result that follows.
 //
-// They share one lifecycle value so the terminal tools can attach the proposals gathered
+// They share one lifecycle value so the terminal tools can attach what was gathered
 // across the run. They are bound per invocation to the broker (submit pushes the
 // candidate through it) and the Brief (the issue id fixes the task-branch name and is the
 // default dependency for proposed children).
 func LifecycleTools(brief core.Brief, brk BrokerClient) []Tool {
 	lc := &lifecycle{brief: brief, brk: brk}
-	return []Tool{lc.submitTool(), lc.escalateTool(), lc.requestSubtaskTool()}
+	return []Tool{lc.submitTool(), lc.escalateTool(), lc.requestSubtaskTool(), lc.traceTestTool()}
 }
 
 type lifecycle struct {
@@ -33,6 +35,7 @@ type lifecycle struct {
 
 	mu        sync.Mutex
 	proposals []core.Proposal
+	trace     []core.TraceEntry
 }
 
 func (lc *lifecycle) addProposal(p core.Proposal) {
@@ -48,6 +51,21 @@ func (lc *lifecycle) takeProposals() []core.Proposal {
 		return nil
 	}
 	return append([]core.Proposal(nil), lc.proposals...)
+}
+
+func (lc *lifecycle) addTrace(e core.TraceEntry) {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	lc.trace = append(lc.trace, e)
+}
+
+func (lc *lifecycle) takeTrace() []core.TraceEntry {
+	lc.mu.Lock()
+	defer lc.mu.Unlock()
+	if len(lc.trace) == 0 {
+		return nil
+	}
+	return append([]core.TraceEntry(nil), lc.trace...)
 }
 
 // submitTool pushes the candidate branch through the broker and assembles the terminal
@@ -90,6 +108,7 @@ func (lc *lifecycle) submitTool() Tool {
 				Status:   core.StatusDone,
 				Branch:   core.Branch{Ref: branch, Commits: []string{res.Commit}},
 				Proposes: lc.takeProposals(),
+				Trace:    lc.takeTrace(),
 			}
 			return Outcome{Content: "submitted: " + res.Commit, Result: &result}, nil
 		},
@@ -177,6 +196,54 @@ func (lc *lifecycle) requestSubtaskTool() Tool {
 				DependsOn: a.DependsOn,
 			})
 			return Outcome{Content: fmt.Sprintf("subtask proposed: %q (role %s)", a.Title, a.Role)}, nil
+		},
+	}
+}
+
+// traceTestTool records one row of the test↔spec traceability map: for an acceptance
+// test it just wrote, the test author names the spec heading and sentence it claims to
+// encode. It is NOT terminal — the author traces each test as it writes it, the way it
+// proposes subtasks, and the accumulated map is folded into the terminal submit Result,
+// harvested to the artifact store, and cited in the merge's provenance trailer. Specs are
+// pure prose, so this is the author's own account of its interpretation — not a proof of
+// faithfulness (the gate's red→green and mutation checks carry that), but the only window
+// a human has into how the model read the prose, auditable after the fact (see
+// specs/verification.md, specs/specs-process.md).
+func (lc *lifecycle) traceTestTool() Tool {
+	return funcTool{
+		def: model.ToolDef{
+			Name: "trace_test",
+			Description: "Record the spec heading and sentence an acceptance test you wrote claims to encode, " +
+				"so your interpretation of the prose is auditable. Call once per test. Does not end the task.",
+			Params: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"test": {"type": "string", "description": "The test this entry traces, e.g. \"TestRejectsNegativeQuantity\"."},
+					"spec": {"type": "string", "description": "The spec file the heading lives in, e.g. \"verification.md\"."},
+					"heading": {"type": "string", "description": "The spec heading the test claims to encode, e.g. \"Red→green proof\"."},
+					"sentence": {"type": "string", "description": "The spec sentence the test claims to encode."}
+				},
+				"required": ["test", "heading", "sentence"]
+			}`),
+		},
+		fn: func(_ context.Context, args json.RawMessage) (Outcome, error) {
+			var a struct {
+				Test     string `json:"test"`
+				Spec     string `json:"spec"`
+				Heading  string `json:"heading"`
+				Sentence string `json:"sentence"`
+			}
+			if bad := decodeArgs(args, &a); bad != nil {
+				return *bad, nil
+			}
+			if a.Test == "" {
+				return invalid("test is required"), nil
+			}
+			if a.Heading == "" || a.Sentence == "" {
+				return invalid("heading and sentence are required: name the spec heading and the sentence the test encodes"), nil
+			}
+			lc.addTrace(core.TraceEntry{Test: a.Test, Spec: a.Spec, Heading: a.Heading, Sentence: a.Sentence})
+			return Outcome{Content: fmt.Sprintf("traced %s → %q: %q", a.Test, a.Heading, a.Sentence)}, nil
 		},
 	}
 }

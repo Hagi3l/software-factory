@@ -233,8 +233,18 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, target str
 		return false, nil
 	}
 
+	// Thread the test↔spec traceability map forward, like Base. The author-tests result
+	// carries the freshly harvested map; later agent stages (e.g. implement) carry none of
+	// their own, so they propagate the map already threaded onto this issue. Either way the
+	// produced issue inherits it, so it survives to the integrate stage where it is cited
+	// in the merge's provenance trailer (see specs/verification.md).
+	traceMap := traceMapHash(res)
+	if traceMap == "" {
+		traceMap = issue.TraceMap
+	}
+
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: tstage.Role, Base: res.Branch.Ref},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: tstage.Role, Base: res.Branch.Ref, TraceMap: traceMap},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create produced %q issue from %s: %w", target, issue.ID, err)
@@ -266,7 +276,7 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	}
 
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, TraceMap: issue.TraceMap},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create on_failure fix issue from %s: %w", issue.ID, err)

@@ -39,4 +39,15 @@ type Issue struct {
 	// issue. It is the persistent counter the retry cap is enforced against — half of
 	// the termination guarantee — and rides in beads metadata (see specs/workflow.md).
 	Attempt int
+
+	// TraceMap is the artifact-store hash of the test↔spec traceability map produced by
+	// the author-tests stage (see core.Result.Trace, ArtifactKindTraceabilityMap). It is
+	// empty for a freshly seeded issue and stamped when an agent stage produces the next:
+	// the author-tests candidate's map is threaded forward onto the implement issue, just
+	// as Base threads the candidate branch, so it survives to the integrate stage where
+	// the orchestrator cites it in the merge's provenance trailer (`Traceability: <hash>`).
+	// Like Base it rides in beads metadata and is preserved across on_failure retries, so a
+	// re-implemented candidate still traces back to the same author's interpretation (see
+	// specs/verification.md, specs/security.md).
+	TraceMap string
 }

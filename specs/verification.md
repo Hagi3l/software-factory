@@ -146,6 +146,23 @@ encode. This does not prove faithfulness, but it makes interpretation *auditable
 when something slips, and it is the only window a human has into how the model read
 the prose.
 
+Mechanically, the author records each entry with a `trace_test` tool call (test name,
+spec file, heading, sentence) as it writes the test — a non-terminal lifecycle tool that
+accumulates, the same shape as `request_subtask`, folded into the terminal submit Result.
+The runner **harvests** the accumulated map to the [artifact store](components/artifact-store.md)
+as a stable, content-addressed document (kind `traceability-map`) and clears the structured
+form from the result envelope, so the bulky map travels by hash, not inline — the same
+discipline every large artifact (prompt, transcript, gate evidence) follows.
+
+Because the map is produced at `author-tests` but the only provenance surface is the merge
+commit at `integrate`, the orchestrator **threads its hash forward**, exactly as it threads
+the candidate base: the `author-tests` map is stamped onto the `implement` issue it
+produces, propagated across later agent stages, and preserved across `on_failure` retries,
+so a re-implemented candidate still traces back to the same author's interpretation. At the
+merge the trailer cites it as `Traceability: <hash>` (see [security.md](security.md)). A
+change merged without an `author-tests` stage in its lineage simply carries `Traceability:
+(none)` — self-describing, like a missing `Prompt-SHA`, never silently blank.
+
 ---
 
 ## The residual risk (named honestly)

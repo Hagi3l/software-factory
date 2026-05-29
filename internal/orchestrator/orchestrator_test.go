@@ -374,8 +374,9 @@ func TestHandleResultAcceptBuildsProvenance(t *testing.T) {
 	if len(p.Verified) != 2 || p.Verified[0] != "build" || p.Verified[1] != "test" {
 		t.Errorf("provenance Verified = %v, want [build test]", p.Verified)
 	}
-	// The rendered trailer matches the spec's exact two-line format.
-	want := "Soul: implementor-go | Model: claude-opus-4-7\nIssue: iss-1 | Prompt-SHA: sha256:9af | Verified: build,test"
+	// The rendered trailer matches the spec's exact two-line format. This issue carried no
+	// threaded author-tests map (seeded directly at implement), so Traceability is (none).
+	want := "Soul: implementor-go | Model: claude-opus-4-7\nIssue: iss-1 | Prompt-SHA: sha256:9af | Verified: build,test | Traceability: (none)"
 	if got := p.Trailer(); got != want {
 		t.Errorf("trailer =\n%q\nwant\n%q", got, want)
 	}
@@ -707,5 +708,114 @@ func TestConsumeResultsProcessesAndAcks(t *testing.T) {
 	cancel()
 	if err := <-done; err != nil {
 		t.Errorf("consumeResults returned %v, want nil on shutdown", err)
+	}
+}
+
+// When an author-tests stage is accepted, the traceability map it harvested (carried as a
+// traceability-map artifact on the Result) is threaded onto the produced implement issue,
+// like Base — so it survives to the integrate stage where it is cited in provenance.
+func TestHandleResultAcceptThreadsTraceMapFromResult(t *testing.T) {
+	cfg := kernelConfig(2)
+	cfg.Harness.DAG["author-tests"] = config.Stage{Role: "author-tests", Produces: []string{"implement"}, OnFailure: "author-tests"}
+	cfg.Souls = append(cfg.Souls, core.Soul{Name: "test-author-go", Role: "author-tests", Sandbox: "go-toolchain"})
+	bd := newFakeBeads()
+	bd.put(inProgress("iss-1", "author-tests", 0))
+	o, _ := newOrch(t, cfg, bd, &fakeGate{report: gate.Report{Passed: true}}, &fakeMerger{})
+
+	res := core.Result{
+		IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: "candidate/iss-1"},
+		Evidence: core.Evidence{Artifacts: []core.ArtifactRef{{Kind: core.ArtifactKindTraceabilityMap, Hash: "sha256:map"}}},
+	}
+	if _, err := o.handleResult(context.Background(), res); err != nil {
+		t.Fatalf("handleResult: %v", err)
+	}
+	_, _, _, _, applied := bd.snap()
+	if len(applied) != 1 || applied[0].Issue.Role != "implement" {
+		t.Fatalf("applied = %+v, want one implement proposal", applied)
+	}
+	if applied[0].Issue.TraceMap != "sha256:map" {
+		t.Errorf("produced issue TraceMap = %q, want sha256:map (threaded from the result)", applied[0].Issue.TraceMap)
+	}
+}
+
+// A later agent stage (implement) carries no traceability map of its own; accepting it
+// propagates the map already threaded onto the issue forward to the next produced issue,
+// so the author's interpretation reaches integrate regardless of how many stages sit
+// between author-tests and the merge.
+func TestHandleResultAcceptPropagatesThreadedTraceMap(t *testing.T) {
+	cfg := kernelConfig(2)
+	cfg.Harness.DAG["implement"] = config.Stage{Role: "implement", Produces: []string{"qa"}, OnFailure: "implement"}
+	cfg.Harness.DAG["qa"] = config.Stage{Role: "qa", Produces: []string{"integrate"}}
+	cfg.Souls = append(cfg.Souls, core.Soul{Name: "qa-soul", Role: "qa", Sandbox: "go-toolchain"})
+	bd := newFakeBeads()
+	is := inProgress("iss-1", "implement", 0)
+	is.TraceMap = "sha256:map" // threaded earlier from author-tests
+	bd.put(is)
+	o, _ := newOrch(t, cfg, bd, &fakeGate{report: gate.Report{Passed: true}}, &fakeMerger{})
+
+	// The implement result carries no traceability-map artifact of its own.
+	res := core.Result{IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: "candidate/iss-1"}}
+	if _, err := o.handleResult(context.Background(), res); err != nil {
+		t.Fatalf("handleResult: %v", err)
+	}
+	_, _, _, _, applied := bd.snap()
+	if len(applied) != 1 || applied[0].Issue.Role != "qa" {
+		t.Fatalf("applied = %+v, want one qa proposal", applied)
+	}
+	if applied[0].Issue.TraceMap != "sha256:map" {
+		t.Errorf("produced issue TraceMap = %q, want sha256:map (propagated from the issue)", applied[0].Issue.TraceMap)
+	}
+}
+
+// A merged change whose implement issue carries a threaded traceability map cites it in the
+// provenance record, so the human-auditable map is reachable from the commit on main.
+func TestProvenanceCitesThreadedTraceMap(t *testing.T) {
+	cfg := kernelConfig(2)
+	bd := newFakeBeads()
+	is := inProgress("iss-1", "implement", 0)
+	is.TraceMap = "sha256:map"
+	bd.put(is)
+	m := &fakeMerger{}
+	o, _ := newOrch(t, cfg, bd, &fakeGate{report: gate.Report{Passed: true}}, m)
+
+	res := core.Result{IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: core.CandidateBranch("iss-1")}}
+	if _, err := o.handleResult(context.Background(), res); err != nil {
+		t.Fatalf("handleResult: %v", err)
+	}
+	provs := m.provenance()
+	if len(provs) != 1 {
+		t.Fatalf("provenance recorded %d times, want 1", len(provs))
+	}
+	if provs[0].Traceability != "sha256:map" {
+		t.Errorf("provenance Traceability = %q, want sha256:map (the threaded author-tests map)", provs[0].Traceability)
+	}
+}
+
+// A rejected candidate routed via on_failure preserves the threaded traceability map onto
+// the new fix issue, like Base — so a re-implemented candidate still traces back to the same
+// author's interpretation when it eventually merges.
+func TestRoutePreservesTraceMap(t *testing.T) {
+	cfg := kernelConfig(2)
+	bd := newFakeBeads()
+	is := inProgress("iss-1", "implement", 0)
+	is.TraceMap = "sha256:map"
+	is.Base = "candidate/at-1"
+	bd.put(is)
+	o, _ := newOrch(t, cfg, bd, &fakeGate{report: gate.Report{Passed: false}}, &fakeMerger{})
+
+	res := core.Result{IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: "candidate/iss-1"}}
+	if _, err := o.handleResult(context.Background(), res); err != nil {
+		t.Fatalf("handleResult: %v", err)
+	}
+	_, _, _, _, applied := bd.snap()
+	if len(applied) != 1 {
+		t.Fatalf("applied = %+v, want one on_failure fix issue", applied)
+	}
+	fix := applied[0].Issue
+	if fix.TraceMap != "sha256:map" {
+		t.Errorf("fix issue TraceMap = %q, want sha256:map (preserved across the retry)", fix.TraceMap)
+	}
+	if fix.Attempt != 1 || fix.Base != "candidate/at-1" {
+		t.Errorf("fix issue Attempt/Base = %d/%q, want 1/candidate/at-1 (preserved alongside trace map)", fix.Attempt, fix.Base)
 	}
 }

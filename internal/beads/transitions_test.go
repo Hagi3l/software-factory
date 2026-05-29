@@ -406,6 +406,36 @@ func TestBaseRoundTripIntegration(t *testing.T) {
 	}
 }
 
+// TestTraceMapRoundTripIntegration proves an issue's TraceMap — the artifact-store hash of
+// the author-tests test↔spec traceability map — survives the write to beads metadata and
+// decodes back on Get. It is threaded forward like Base so it reaches the integrate stage
+// where the merge provenance trailer cites it; it must round-trip alongside Role, Attempt,
+// and Base (see specs/verification.md).
+func TestTraceMapRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+
+	created, err := c.Apply(context.Background(), []core.Proposal{
+		{Issue: core.Issue{Title: "implement against traced tests", Role: "implement", Attempt: 1,
+			Base: "candidate/harness-1", TraceMap: "sha256:abc123"}},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got, err := c.Get(context.Background(), created[0].ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.TraceMap != "sha256:abc123" {
+		t.Errorf("TraceMap = %q, want sha256:abc123 (round-tripped via metadata)", got.TraceMap)
+	}
+	if got.Base != "candidate/harness-1" || got.Role != "implement" || got.Attempt != 1 {
+		t.Errorf("Base/Role/Attempt = %q/%q/%d, want candidate/harness-1/implement/1 (must survive alongside trace map)",
+			got.Base, got.Role, got.Attempt)
+	}
+}
+
 // allIssues returns every issue id in the db (including closed) for count assertions.
 func allIssues(t *testing.T, dir string) []string {
 	t.Helper()

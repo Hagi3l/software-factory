@@ -146,3 +146,53 @@ func TestRequestSubtaskValidation(t *testing.T) {
 		t.Errorf("missing role = %+v", out)
 	}
 }
+
+// trace_test is non-terminal and accumulates one TraceEntry per call into the terminal
+// submit Result, in emission order — the test↔spec traceability map the author produces so
+// its reading of the pure-prose spec is auditable (see specs/verification.md).
+func TestTraceTestAccumulatesIntoSubmit(t *testing.T) {
+	brk := &recordingBroker{pushCommit: "cafe"}
+	tools := LifecycleTools(lifecycleBrief(), brk)
+
+	out := invoke(t, lcToolByName(t, tools, "trace_test"),
+		`{"test":"TestRejectsNegative","spec":"orders.md","heading":"Quantities","sentence":"reject negative quantities with a 400"}`)
+	if out.Result != nil {
+		t.Errorf("trace_test must not terminate, got %+v", out.Result)
+	}
+	if out.IsError || !strings.Contains(out.Content, "TestRejectsNegative") {
+		t.Errorf("trace_test = %+v", out)
+	}
+	// A second entry, to prove accumulation and order.
+	invoke(t, lcToolByName(t, tools, "trace_test"),
+		`{"test":"TestHappyPath","heading":"Quantities","sentence":"accept positive quantities"}`)
+
+	out = invoke(t, lcToolByName(t, tools, "submit"), `{}`)
+	if out.Result == nil || len(out.Result.Trace) != 2 {
+		t.Fatalf("submit Result should carry 2 trace entries, got %+v", out.Result)
+	}
+	e := out.Result.Trace[0]
+	if e.Test != "TestRejectsNegative" || e.Spec != "orders.md" || e.Heading != "Quantities" ||
+		e.Sentence != "reject negative quantities with a 400" {
+		t.Errorf("trace[0] = %+v, want the first traced test verbatim", e)
+	}
+	if out.Result.Trace[1].Test != "TestHappyPath" {
+		t.Errorf("trace[1] = %+v, want TestHappyPath (emission order preserved)", out.Result.Trace[1])
+	}
+}
+
+// trace_test requires the test name and both the heading and the sentence: an entry that
+// names no spec sentence records no interpretation and is worthless for audit.
+func TestTraceTestValidation(t *testing.T) {
+	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{})
+	tr := lcToolByName(t, tools, "trace_test")
+
+	if out := invoke(t, tr, `{"heading":"H","sentence":"S"}`); !out.IsError || !strings.Contains(out.Content, "test is required") {
+		t.Errorf("missing test = %+v", out)
+	}
+	if out := invoke(t, tr, `{"test":"T","sentence":"S"}`); !out.IsError || !strings.Contains(out.Content, "heading and sentence are required") {
+		t.Errorf("missing heading = %+v", out)
+	}
+	if out := invoke(t, tr, `{"test":"T","heading":"H"}`); !out.IsError || !strings.Contains(out.Content, "heading and sentence are required") {
+		t.Errorf("missing sentence = %+v", out)
+	}
+}

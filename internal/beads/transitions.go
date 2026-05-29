@@ -36,6 +36,13 @@ const MetadataKeyRetries = "retries"
 // specs/workflow.md, specs/verification.md).
 const MetadataKeyBase = "base"
 
+// MetadataKeyTraceMap holds the artifact-store hash of the test↔spec traceability map
+// (core.Issue.TraceMap). A freshly seeded issue has none; the author-tests stage's map is
+// threaded forward onto the issues it produces, like MetadataKeyBase, so it survives to
+// the integrate stage where the orchestrator cites it in the merge provenance trailer
+// (see specs/verification.md, specs/security.md).
+const MetadataKeyTraceMap = "trace_map"
+
 // The transitions below are the orchestrator's single-writer interface to beads:
 // only the orchestrator mutates the work graph, so funneling every status change
 // and proposal application through these methods is what enforces the single-writer
@@ -189,7 +196,7 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 	if issue.Body != "" {
 		args = append(args, "--description", issue.Body)
 	}
-	if issue.Role != "" || issue.Attempt > 0 || issue.Base != "" {
+	if issue.Role != "" || issue.Attempt > 0 || issue.Base != "" || issue.TraceMap != "" {
 		meta := map[string]any{}
 		if issue.Role != "" {
 			meta[MetadataKeyRole] = issue.Role
@@ -203,6 +210,11 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 		// falls back to the pipeline base (main) when building the Brief.
 		if issue.Base != "" {
 			meta[MetadataKeyBase] = issue.Base
+		}
+		// Only stamp the traceability-map hash when set; it appears once the author-tests
+		// stage produces an issue and is threaded forward from there.
+		if issue.TraceMap != "" {
+			meta[MetadataKeyTraceMap] = issue.TraceMap
 		}
 		b, err := json.Marshal(meta)
 		if err != nil {

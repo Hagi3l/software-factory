@@ -34,6 +34,27 @@ type Result struct {
 	Branch   Branch       // the candidate branch the agent produced
 	Evidence Evidence     // proof for the gate and the provenance trail
 	Proposes []Proposal   // proposed child issues (emergent breadth)
+
+	// Trace is the test↔spec traceability map an author-tests agent emits: one entry per
+	// acceptance test naming the spec heading and sentence it claims to encode. It does
+	// not prove faithfulness — the gate's red→green/mutation checks do that — but it makes
+	// the test author's interpretation of pure-prose specs auditable, the only window a
+	// human has into how the model read the prose (see specs/verification.md). Like other
+	// large evidence it is not carried to main on the envelope: the runner harvests it to
+	// the artifact store and the structured form is cleared, leaving only the ArtifactRef
+	// on Evidence; the provenance trailer cites it by hash. Empty for non-author roles.
+	Trace []TraceEntry
+}
+
+// TraceEntry is one row of the test↔spec traceability map: the acceptance test, and the
+// spec heading + sentence the author claims it encodes. The spec is pure prose, so this
+// is the author's own account of its interpretation — auditable after the fact, not a
+// proof (see specs/verification.md, specs/specs-process.md).
+type TraceEntry struct {
+	Test     string // the test this entry traces, e.g. "TestRejectsNegativeQuantity"
+	Spec     string // the spec file the heading lives in, e.g. "verification.md"
+	Heading  string // the spec heading the test claims to encode, e.g. "Red→green proof"
+	Sentence string // the spec sentence the test claims to encode
 }
 
 // Branch identifies the candidate an agent produced. Agents never merge; they
@@ -66,6 +87,13 @@ type ArtifactRef struct {
 	Kind string // what the artifact is, e.g. "transcript", "gate-output", "log", "diff"
 	Hash string // content address into the artifact store
 }
+
+// ArtifactKindTraceabilityMap is the artifact Kind under which the runner stores a
+// harvested test↔spec traceability map (see Result.Trace). It lives in core so the
+// writer (the runner's harvest) and the reader (the orchestrator threading the map's
+// hash into the provenance trailer) agree on the spelling — the same single-source
+// pattern the postcondition/metric identifiers use.
+const ArtifactKindTraceabilityMap = "traceability-map"
 
 // Proposal is a child issue an agent proposes (emergent breadth). The
 // orchestrator validates DAG-legality — valid role, edges keep the graph acyclic,

@@ -293,7 +293,42 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
     remaining slice of T2.7's OPEN). Test fixtures (`config_test`/`validate_test`) carry a
     `mutation` command + a `qa` stage declaring `mutation>=0.8` to exercise the path; `0.8` is a
     placeholder, not a committed default.
-- [ ] **T2.8 Test↔spec traceability map** — the test author emits, per test, the spec heading + sentence it claims to encode; harvested to the artifact store and surfaced in provenance. (needs T2.4) ([verification.md](specs/verification.md), [specs-process.md](specs/specs-process.md))
+- [x] **T2.8 Test↔spec traceability map** — *done.* The test author emits, per test, the spec
+  heading + sentence it claims to encode; the runner harvests the map to the artifact store and
+  the orchestrator threads its hash to the merge commit's provenance trailer (`Traceability:
+  <hash>`). Verified with unit tests across agent/runner/beads/orchestrator + `make check` green
+  (309 pass). Learnings for downstream tasks:
+  - **Emission is a non-terminal lifecycle tool, `trace_test`** (`internal/agent/lifecycle.go`),
+    the same accumulate-then-fold shape as `request_subtask`: each call records a
+    `core.TraceEntry{Test, Spec, Heading, Sentence}` (test + heading + sentence required, spec
+    optional); `submit` folds the accumulated slice into `core.Result.Trace`. It is a *universal*
+    lifecycle tool (added for every soul) but only the `test-author` persona instructs its use —
+    the implementor never calls it, so its results carry no map. The persona now requires both the
+    in-code `// spec "heading": sentence` comment *and* the matching `trace_test` call.
+  - **Harvested like all large evidence, by hash not inline.** The runner (`runner.harvest`)
+    `Put`s `formatTraceabilityMap(res.Trace)` under the shared kind
+    `core.ArtifactKindTraceabilityMap` ("traceability-map"), appends the ref to
+    `Evidence.Artifacts`, and **clears `res.Trace`** so the bulky map travels by hash on the
+    envelope (mirrors the prompt/transcript discipline; a store failure keeps the structured form
+    and logs loudly, degrading to no citation). `formatTraceabilityMap` renders a deterministic,
+    human-readable doc (one block per test, emission order) so it content-addresses stably — the
+    document the control-room issue-detail view (T4.7) will render.
+  - **Surfaced in provenance by threading the hash forward, exactly like `Base`.** The map is
+    produced at `author-tests` but the only provenance surface is the `integrate` merge commit, so:
+    `core.Issue.TraceMap` rides in beads metadata (`MetadataKeyTraceMap`, round-trips via
+    `create`/`toCore` alongside Role/Attempt/Base); `advance` stamps the produced issue's
+    `TraceMap` = the result's harvested map (`traceMapHash(res)`), falling back to the producing
+    issue's threaded value so it **propagates across later agent stages**; `route` preserves it
+    across `on_failure` retries; `provenanceFor` sets `Provenance.Traceability = issue.TraceMap`,
+    rendered as a new `| Traceability: <hash>` segment on the trailer's second line (degrading to
+    `(none)`, like a missing `Prompt-SHA`). Threading-not-Brief because T2.8 is about *audit*, not
+    feeding the implementor — the kernel already feeds the implementor the tests via `Base`.
+  - **Trailer back-compat:** the `Traceability` segment was *appended* after `Verified`, so
+    `strings.Contains(msg, "...Verified: build,test")`-style assertions (merge unit + docker
+    integration, spine e2e) stayed green; only the one exact-match `Trailer()` test needed the
+    `| Traceability: (none)` suffix. Specs updated: `verification.md` (realized mechanism),
+    `security.md` + `integration.md` (trailer examples gain the field); `artifact-store.md` already
+    listed the map.
 - [ ] **T2.9 `qa` stage + soul** — a `security`/QA role/soul (distinct from the implementor) whose gate runs the mutation + scanner postconditions in the clean verification sandbox; `on_failure: implement`, `produces: integrate`. (needs T2.6, T2.7) ([workflow.md](specs/workflow.md), [verification.md](specs/verification.md))
 - [ ] **T2.10 Trusted-dev policy profile** — a lighter policy profile with a human-approval postcondition for the self-hosting transition (a CLI `approve` command satisfies it). *(OPEN, configuration.md.)* ([bootstrap.md](specs/bootstrap.md), [configuration.md](specs/configuration.md))
 - [ ] **T2.11** *(OPEN)* Second, different-model reviewer soul in `qa` (N-version diversity). ([verification.md](specs/verification.md))

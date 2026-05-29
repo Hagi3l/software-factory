@@ -107,7 +107,7 @@ recorded as a commit trailer:
 
 ```
 Soul: implementor-go | Model: claude-opus-4-7
-Issue: bd-1234 | Prompt-SHA: 9af… | Verified: build@sha256:1c2…,test@sha256:8be…,gosec@sha256:0a4…
+Issue: bd-1234 | Prompt-SHA: 9af… | Verified: build@sha256:1c2…,test@sha256:8be…,gosec@sha256:0a4… | Traceability: sha256:7c1…
 ```
 
 This is a SLSA-style provenance record: every autonomous change is attributable to
@@ -115,10 +115,14 @@ the soul, model, prompt, and the evidence that gated it. Each entry in `Verified
 cites a passed check as `<name>@<evidence-hash>`, the hash pointing into the
 content-addressed [artifact store](components/artifact-store.md) at that check's
 captured output — so verification is auditable down to the exact bytes, not merely a
-list of check names. The `Prompt-SHA` and the evidence hashes are both such pointers,
-so a record cannot be silently altered. A check whose evidence failed to persist
-degrades to a bare `<name>` (self-describing, like a missing `Prompt-SHA`), never a
-dropped verdict. Commits/artifacts should be signed with the harness's identity.
+list of check names. `Traceability` cites the [test↔spec traceability map](verification.md)
+the `author-tests` stage produced (threaded forward to the merge), the window into how the
+test author read the pure-prose spec. The `Prompt-SHA`, the evidence hashes, and the
+traceability hash are all such pointers, so a record cannot be silently altered. A check
+whose evidence failed to persist degrades to a bare `<name>`, and a change with no
+`author-tests` stage in its lineage carries `Traceability: (none)` (self-describing, like a
+missing `Prompt-SHA`), never a dropped verdict. Commits/artifacts should be signed with the
+harness's identity.
 
 So the trailer can be vouched for by the trusted layer, the tip of `main` is always
 a **harness-authored provenance commit** sitting on top of the verified candidate,
