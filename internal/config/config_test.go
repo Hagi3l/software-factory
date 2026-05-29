@@ -33,6 +33,7 @@ checks:
   tests-pass: go test ./...
   gosec:      gosec ./...
   deps-scan:  govulncheck ./...
+  mutation:   gremlins unleash --output /tmp/m.json && jq -r .efficacy /tmp/m.json
 
 policy:
   max_retries: 3
@@ -129,7 +130,12 @@ func TestLoadHarness(t *testing.T) {
 
 	// The check registry maps each command-check postcondition to its shell command,
 	// the bridge the gate resolves against (see specs/configuration.md).
-	wantChecks := map[string]string{"tests-pass": "go test ./...", "gosec": "gosec ./...", "deps-scan": "govulncheck ./..."}
+	wantChecks := map[string]string{
+		"tests-pass": "go test ./...",
+		"gosec":      "gosec ./...",
+		"deps-scan":  "govulncheck ./...",
+		"mutation":   "gremlins unleash --output /tmp/m.json && jq -r .efficacy /tmp/m.json",
+	}
 	if !reflect.DeepEqual(h.Checks, wantChecks) {
 		t.Errorf("checks = %v, want %v", h.Checks, wantChecks)
 	}

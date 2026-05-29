@@ -100,6 +100,20 @@ compute to buy assurance is exactly the trade a no-human factory should make.
 > **Decision:** red→green + mutation testing are **first-class postconditions**.
 > The compute cost is accepted; it is what makes no-human-review defensible.
 
+A mutation gate is expressed as a **metric-comparison postcondition** — `mutation>=0.8`:
+a metric name, a comparison operator, and a threshold. It resolves to the measurement
+command registered under its metric name in the [check registry](configuration.md)
+(`checks: { mutation: … }`); the gate runs that command once against the candidate in the
+clean sandbox and reads the score it prints (the trailing numeric token of stdout). The
+check passes only when the command **ran cleanly (exit 0), emitted a parseable score, and
+that score satisfies the comparison**. A nonzero exit (the tool could not measure) or
+unparseable output **fails closed** — an unverifiable score is not a passing one, because
+a gate that carries 100% of the assurance must never read "couldn't tell" as "fine."
+Keeping the tool invocation in config (not hardcoded in the gate) keeps the gate
+tool-agnostic: it grades a number, not a `gremlins` report, so swapping the mutation tool
+is a config edit. The measured score and the comparison are recorded as gate evidence, so
+a passed or failed mutation gate is auditable after the fact.
+
 ### Independent scanners
 The `qa` gate also runs generic, spec-independent checks: SAST (e.g. `gosec`),
 dependency/license/vulnerability scans, policy-as-code. Defence in depth — the
@@ -137,6 +151,12 @@ a style issue.
 
 ## OPEN questions
 
-- Minimum mutation score and which mutation operators — TBD; likely per-role config.
+- Minimum mutation score and which mutation operators — still TBD; likely per-role
+  config. The *expression* is now decided — a `metric<op>threshold` postcondition with
+  operators `>=`, `<=`, `==`, `>`, `<`, the threshold living in config — and the gate
+  check kind is implemented; only the concrete default score (and the operator-set the
+  tool exposes) is unsettled, and is chosen when the `qa` stage that declares the
+  postcondition lands (T2.9). The examples carry `mutation>=0.8` as a placeholder, not a
+  committed default.
 - Whether `qa` should include a second, *different-model* reviewer soul as an
   additional independent gate (N-version diversity) — candidate for defence in depth.

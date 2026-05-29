@@ -218,7 +218,42 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
   - Specs were already aligned (`configuration.md`/`verification.md` document `implement`'s
     `tests-red-then-green` from T2.3); no spec change needed.
 - [ ] **T2.6 Independent scanners as checks** — `gosec` (SAST), `govulncheck` (vuln), dependency/license scan, each a gate check emitting evidence. (needs T2.1, T2.2) ([verification.md](specs/verification.md), [security.md](specs/security.md))
-- [ ] **T2.7 Mutation-testing postcondition** — integrate a Go mutation tool (e.g. `gremlins`), run as a gate check, gate on a minimum score. *(OPEN: score + operators — pick a default.)* (needs T2.1) ([verification.md](specs/verification.md))
+- [x] **T2.7 Mutation-testing postcondition** — *done.* A **metric-comparison** gate check:
+  a `metric<op>threshold` postcondition (e.g. `mutation>=0.8`) resolves to the measurement
+  command registered under its metric name, runs once against the candidate, and grades the
+  numeric score the command prints against the threshold. Built generically (not
+  mutation-specific) so any future scored gate reuses it. Verified with unit fakes
+  (resolve / pass-above / fail-below / tool-errors / unparseable) + `make check` green.
+  Learnings for downstream tasks:
+  - **Parse/compare live in `core` (leaf), policy lives in `config`.** `core.ParseMetricComparison`
+    splits `"mutation>=0.8"` → (metric, op, threshold) and `core.CompareMetric` evaluates it;
+    `core.ComparisonOps` is the shared longest-first operator list (`>=` before `>`) and
+    `core.MetricMutation` the shared metric spelling — same pattern as the proof identifiers, so
+    config-validation and the gate agree on what a comparison *is*. `core` does **not** judge
+    whether the metric is *known*: that's config policy (`knownMetrics`), keeping the gate generic
+    over whatever the validated config asks for. This collapsed the old duplicated
+    `comparisonOps`/`strconv` parse that lived only in `validate.go`.
+  - **A metric comparison binds to a command under its metric name** — unlike the reserved proofs,
+    which reuse `tests-pass`. `Registry.Resolve` looks up `r["mutation"]` for `mutation>=0.8`; a
+    missing command is `unresolved` (gate error) and is **also caught at startup** by a new
+    validate check (mirrors the reused-acceptance-command guard). This corrected a **spec
+    inconsistency**: `configuration.md` had grouped metric comparisons with reserved proofs as
+    "need no `checks` entry" — wrong, since the gate is tool-agnostic and needs *some* command to
+    produce the score. `configuration.md` + `verification.md` updated to document the realized
+    mechanism (command under metric name; score = trailing numeric token of stdout; fail-closed on
+    nonzero exit or unparseable output).
+  - **Fails closed.** `runMetric` passes only on exit 0 **and** a parseable score **and** the
+    comparison holding; a nonzero exit (tool couldn't measure) or unparseable stdout is a fail, not
+    a phantom 0. `logFailure` and `formatEvidence` are metric-aware: a below-threshold fail is exit
+    0, so they log/record the *score* and comparison (`kind: metric`, `score X (want >= Y)`), not
+    just the exit code which would read as a pass. Evidence flows through the generic T2.2 path —
+    cited by hash, auditable, no provenance change.
+  - **Not yet on the live DAG.** The shipped `config/harness.yaml` declares no `mutation` command or
+    `qa` stage — the metric check is capability-complete but dormant; it lands on the pipeline when
+    the **`qa` stage (T2.9)** is wired and picks the concrete default threshold/operators (the
+    remaining slice of T2.7's OPEN). Test fixtures (`config_test`/`validate_test`) carry a
+    `mutation` command + a `qa` stage declaring `mutation>=0.8` to exercise the path; `0.8` is a
+    placeholder, not a committed default.
 - [ ] **T2.8 Test↔spec traceability map** — the test author emits, per test, the spec heading + sentence it claims to encode; harvested to the artifact store and surfaced in provenance. (needs T2.4) ([verification.md](specs/verification.md), [specs-process.md](specs/specs-process.md))
 - [ ] **T2.9 `qa` stage + soul** — a `security`/QA role/soul (distinct from the implementor) whose gate runs the mutation + scanner postconditions in the clean verification sandbox; `on_failure: implement`, `produces: integrate`. (needs T2.6, T2.7) ([workflow.md](specs/workflow.md), [verification.md](specs/verification.md))
 - [ ] **T2.10 Trusted-dev policy profile** — a lighter policy profile with a human-approval postcondition for the self-hosting transition (a CLI `approve` command satisfies it). *(OPEN, configuration.md.)* ([bootstrap.md](specs/bootstrap.md), [configuration.md](specs/configuration.md))
@@ -285,7 +320,9 @@ store) with the production stack.
 
 These are `OPEN:` in the specs and may reshape tasks above:
 
-- Mutation score threshold + operators (T2.7).
+- Mutation score threshold + operators — the metric-comparison *expression* and gate
+  kind are decided and implemented (T2.7); only the concrete default score is picked when
+  the `qa` stage lands (T2.9).
 - `integrate` as its own role/soul vs. orchestrator-owned with sandboxed conflict help (T3.11).
 - HA orchestrator: single instance (fine for v1) vs. leader election (T5.11).
 - Condition-expression language for pre/postconditions (shell exit-code vs. CEL) — affects
@@ -294,6 +331,9 @@ These are `OPEN:` in the specs and may reshape tasks above:
   runs them via `sh -c` (exit 0 = pass). `harness validate` still gates *bare* identifiers
   (reserved proofs, known metrics) against explicit registries that must be extended as new
   built-in check kinds are added. T2.3 added the red→green kind (reuses the `tests-pass`
-  command, run against two refs); T2.7 (mutation `>=` comparisons) still has no gate kind.
+  command, run against two refs); T2.7 added the metric-comparison kind (`mutation>=0.8`
+  parsed by `core.ParseMetricComparison`, the score read from the registered command's
+  stdout and graded by `core.CompareMetric`, failing closed on a nonzero exit or
+  unparseable output).
 - Rootfs / base-image composition per role (T5.3).
 - Exact module set drawn into the TCB boundary — must be pinned before autonomy is switched on for harness work.

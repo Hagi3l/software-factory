@@ -61,10 +61,17 @@ policy:
   the shell command that realizes it in the verification sandbox (exit 0 = pass). It
   is the bridge from a declared postcondition name to a runnable gate check, so the
   command each check runs is config — not code — and is the single source of truth
-  the gate resolves against. Postconditions backed by a built-in check *kind* rather
-  than a command — metric comparisons (`mutation>=0.8`) and reserved proofs
-  (`tests-red-then-green`) — need no `checks` entry of their own; the gate runs them
-  specially. The `tests-red-then-green` proof reuses the **`tests-pass`** acceptance-test
+  the gate resolves against. A **metric comparison** postcondition (`mutation>=0.8`) is
+  backed by a built-in check *kind* for the comparison itself, but it still resolves a
+  command — registered under its **metric name** (here `mutation`) — that the gate runs
+  in the verification sandbox to *produce* the score; the gate then grades the number the
+  command prints against the threshold. The tool invocation (which mutation tool, how to
+  reduce its report to a single number) therefore stays in config, keeping the gate
+  agnostic to the tool: it reads a number, not a `gremlins` report. A comparison whose
+  metric has no registered command is unresolvable — the same config fault as a missing
+  command-check entry — which validation rejects at startup. **Reserved proofs**
+  (`tests-red-then-green`, `tests-red`) are different: they need no `checks` entry of
+  their own. The `tests-red-then-green` proof reuses the **`tests-pass`** acceptance-test
   command, running it against two refs (fail on the base, pass on the candidate — see
   [verification.md](verification.md)); a stage that declares the proof must therefore
   register a `tests-pass` command, which validation enforces. The **`tests-red`** proof

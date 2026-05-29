@@ -9,6 +9,8 @@ import (
 	"io"
 	"log/slog"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Loxstomper/harness/internal/artifact"
@@ -35,13 +37,16 @@ const teardownTimeout = 30 * time.Second
 // naming a kind keeps that meaning. A redGreenProof runs the acceptance tests against
 // two refs — the base (must fail) and the candidate (must pass) — see Run. A redProof
 // runs the acceptance tests once against the candidate, which must FAIL (the
-// author-tests stage's tests are red before any implementation exists).
+// author-tests stage's tests are red before any implementation exists). A metricCheck
+// runs a measurement command once against the candidate and grades a numeric score it
+// prints against a threshold (e.g. mutation>=0.8) — see runMetric.
 type checkKind int
 
 const (
 	cmdCheck checkKind = iota
 	redGreenProof
 	redProof
+	metricCheck
 )
 
 // Check is one verification the gate runs in the clean sandbox. A command check passes
@@ -54,6 +59,10 @@ type Check struct {
 	Name string // the postcondition identifier this check realizes, e.g. "tests-pass"
 	Cmd  string // shell command run via `sh -c` at the worktree root
 	kind checkKind
+	// op and threshold carry the comparison a metricCheck grades against (e.g. ">=" and
+	// 0.8 for "mutation>=0.8"). They are the zero value for every other kind.
+	op        string
+	threshold float64
 }
 
 // Registry is the check registry: postcondition identifier -> shell command. It is
@@ -76,8 +85,14 @@ type Registry map[string]string
 // it to that command here so a stage that asks for the proof without a registered
 // acceptance-test command is a config fault caught before any sandbox is spent. The
 // tests-red proof (core.PostconditionTestsRed) is the same shape run against one ref —
-// the candidate, which must fail — and binds to the same command. Metric comparisons
-// ("mutation>=0.8") have no check kind yet (T2.7) and remain unresolved.
+// the candidate, which must fail — and binds to the same command.
+//
+// A metric comparison ("mutation>=0.8") binds to the measurement command registered under
+// its metric name (here "mutation"), the way a command check binds to its own name: the
+// gate runs that command and grades the score it prints against the threshold (see
+// runMetric). The tool invocation stays in config, so the gate is agnostic to which
+// mutation tool produced the number. A comparison whose metric has no registered command
+// is unresolvable, the same config fault as a missing command-check entry.
 func (r Registry) Resolve(postconditions []string) ([]Check, error) {
 	checks := make([]Check, 0, len(postconditions))
 	var unresolved []string
@@ -93,6 +108,15 @@ func (r Registry) Resolve(postconditions []string) ([]Check, error) {
 				kind = redProof
 			}
 			checks = append(checks, Check{Name: pc, Cmd: cmd, kind: kind})
+			continue
+		}
+		if metric, op, threshold, ok := core.ParseMetricComparison(pc); ok {
+			cmd, found := r[metric]
+			if !found {
+				unresolved = append(unresolved, fmt.Sprintf("%s (no %q command registered)", pc, metric))
+				continue
+			}
+			checks = append(checks, Check{Name: pc, Cmd: cmd, kind: metricCheck, op: op, threshold: threshold})
 			continue
 		}
 		cmd, ok := r[pc]
@@ -157,6 +181,21 @@ type CheckResult struct {
 	// candidate, which must PASS — and Passed is true only when Base failed and the
 	// candidate passed. Base is nil for an ordinary command check.
 	Base *RunResult
+	// Metric, when non-nil, is the parsed result of a metric check (kind == metricCheck):
+	// the score read from the command's stdout and the comparison it was graded against,
+	// kept for the evidence record. It is nil for every other kind.
+	Metric *metricResult
+}
+
+// metricResult is the graded outcome of a metric check: the numeric score the measurement
+// command printed (Parsed is false when the command exited nonzero or its output did not
+// parse to a number — an unverifiable score, which fails closed) and the comparison the
+// gate applied to it.
+type metricResult struct {
+	Score     float64
+	Parsed    bool
+	Op        string
+	Threshold float64
 }
 
 // RunResult captures one execution of a check's command against a single git ref. It
@@ -180,7 +219,9 @@ type Report struct {
 // verification sandbox. It is the gatekeeper's executor: it grades an artifact in a
 // sandbox distinct from the one that produced it, because an untrusted process must
 // never report its own grade (see specs/verification.md). In the kernel the gate runs
-// build + test; mutation testing and scanners are additional postconditions in Phase 2.
+// build + test and the red→green / tests-red proofs; a metric postcondition
+// (mutation>=0.8) grades a measured score against a threshold (T2.7), and spec-independent
+// scanners are command checks layered on in Phase 2.
 type Runner struct {
 	backend   sandbox.Backend
 	registry  Registry
@@ -297,8 +338,11 @@ func requiresBase(checks []Check) bool {
 // and the candidate. A non-nil error means a sandbox could not run the command at all
 // (an infra failure), never a clean fail verdict.
 func runCheck(ctx context.Context, check Check, base, cand sandbox.Sandbox) (CheckResult, error) {
-	if check.kind == redGreenProof {
+	switch check.kind {
+	case redGreenProof:
 		return runRedGreen(ctx, check, base, cand)
+	case metricCheck:
+		return runMetric(ctx, check, cand)
 	}
 	res, err := execCheck(ctx, cand, check.Cmd)
 	if err != nil {
@@ -349,6 +393,51 @@ func runRedGreen(ctx context.Context, check Check, base, cand sandbox.Sandbox) (
 	}, nil
 }
 
+// runMetric realizes a metric check: it runs the measurement command once against the
+// candidate and grades the numeric score the command prints against the check's
+// comparison (e.g. mutation>=0.8). The score is read from stdout — the last
+// whitespace-separated token, parsed as a decimal — so a command may print a label or a
+// report before the number. The check passes only when the command ran cleanly (exit 0),
+// emitted a parseable score, and that score satisfies the comparison: a nonzero exit (the
+// tool could not measure) or unparseable output fails closed, because an unverifiable
+// score is not a passing one. The tool-specific work (how to invoke the mutation tool,
+// how to reduce its report to a number) lives in the registered command, keeping this
+// path agnostic to which tool produced the score.
+func runMetric(ctx context.Context, check Check, cand sandbox.Sandbox) (CheckResult, error) {
+	res, err := execCheck(ctx, cand, check.Cmd)
+	if err != nil {
+		return CheckResult{}, fmt.Errorf("gate: run metric check %q: %w", check.Name, err)
+	}
+	score, parsed := parseScore(res.Stdout)
+	passed := res.ExitCode == 0 && parsed && core.CompareMetric(score, check.op, check.threshold)
+	return CheckResult{
+		Name:     check.Name,
+		Cmd:      check.Cmd,
+		ExitCode: res.ExitCode,
+		Passed:   passed,
+		Stdout:   res.Stdout,
+		Stderr:   res.Stderr,
+		kind:     metricCheck,
+		Metric:   &metricResult{Score: score, Parsed: parsed, Op: check.op, Threshold: check.threshold},
+	}, nil
+}
+
+// parseScore reads a metric score from a measurement command's stdout: the last
+// whitespace-separated token, parsed as a float. ok is false when stdout is empty or its
+// final token is not a number, so the caller fails the check closed rather than treating
+// an unverifiable score as zero.
+func parseScore(stdout []byte) (float64, bool) {
+	fields := strings.Fields(string(stdout))
+	if len(fields) == 0 {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(fields[len(fields)-1], 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
+
 // execCheck runs a check's command once in sb. A nil error means the command ran to an
 // exit code (the caller decides pass/fail); a non-nil error means the sandbox could not
 // run it at all (an infra failure).
@@ -365,6 +454,15 @@ func (r *Runner) logFailure(ref string, check Check, cr CheckResult) {
 			"base_exit", cr.Base.ExitCode, "candidate_exit", cr.ExitCode,
 			"base_stdout_tail", tailString(cr.Base.Stdout, 1000),
 			"candidate_stdout_tail", tailString(cr.Stdout, 1000))
+		return
+	}
+	if cr.Metric != nil {
+		// A metric check can fail with exit 0 (a measured score below threshold), so log the
+		// score and comparison rather than just the exit code, which would read as a pass.
+		r.log.Info("gate: metric check failed", "ref", ref, "check", check.Name,
+			"score", cr.Metric.Score, "parsed", cr.Metric.Parsed,
+			"op", cr.Metric.Op, "threshold", cr.Metric.Threshold, "exit_code", cr.ExitCode,
+			"stdout_tail", tailString(cr.Stdout, 1000), "stderr_tail", tailString(cr.Stderr, 1000))
 		return
 	}
 	r.log.Info("gate: check failed", "ref", ref, "check", check.Name, "exit_code", cr.ExitCode,
@@ -469,6 +567,22 @@ func formatEvidence(cr CheckResult) []byte {
 		// nonzero exit is a pass — spell that out so the record does not read as a
 		// contradiction when triaged.
 		fmt.Fprintf(&b, "check: %s\nkind: tests-red\ncommand: %s\nexit: %d (must be nonzero)\nstatus: %s\n", cr.Name, cr.Cmd, cr.ExitCode, status)
+		b.WriteString("--- stdout ---\n")
+		writeStream(&b, cr.Stdout)
+		b.WriteString("--- stderr ---\n")
+		writeStream(&b, cr.Stderr)
+		return b.Bytes()
+	}
+	if cr.Metric != nil {
+		// Metric check: record the measured score and the comparison it was graded against,
+		// so a human can audit why the gate passed or failed. An unparseable/unmeasured score
+		// is spelled out rather than rendered as 0, which would read as a real measurement.
+		score := "unparseable"
+		if cr.Metric.Parsed {
+			score = strconv.FormatFloat(cr.Metric.Score, 'f', -1, 64)
+		}
+		fmt.Fprintf(&b, "check: %s\nkind: metric\ncommand: %s\nmetric: score %s (want %s %s)\nexit: %d\nstatus: %s\n",
+			cr.Name, cr.Cmd, score, cr.Metric.Op, strconv.FormatFloat(cr.Metric.Threshold, 'f', -1, 64), cr.ExitCode, status)
 		b.WriteString("--- stdout ---\n")
 		writeStream(&b, cr.Stdout)
 		b.WriteString("--- stderr ---\n")

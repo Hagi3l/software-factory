@@ -608,3 +608,148 @@ func TestRunTestsRedProofFailsWhenCandidatePasses(t *testing.T) {
 		t.Errorf("evidence = %q, want status: fail", ev)
 	}
 }
+
+// --- metric check (T2.7) -----------------------------------------------------
+
+// mutationRegistry maps the mutation metric to its measurement command. A "mutation>=X"
+// postcondition resolves to this command under the metric name, the way a command-check
+// postcondition resolves under its own name.
+func mutationRegistry() Registry {
+	return Registry{core.MetricMutation: "measure-mutation"}
+}
+
+// mutationCandidate is a candidate whose only postcondition is a mutation-score threshold.
+// A metric check needs no base ref — it runs once, against the candidate.
+func mutationCandidate() Candidate {
+	c := testCandidate()
+	c.Postconditions = []string{"mutation>=0.8"}
+	c.BaseRef = ""
+	return c
+}
+
+// Resolve binds a metric comparison to the command registered under its metric name and
+// records the operator and threshold, so Run grades the printed score against them.
+func TestResolveMetricCheck(t *testing.T) {
+	checks, err := mutationRegistry().Resolve([]string{"mutation>=0.8"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(checks) != 1 || checks[0].Name != "mutation>=0.8" || checks[0].Cmd != "measure-mutation" {
+		t.Fatalf("Resolve = %+v, want the comparison bound to the mutation command", checks)
+	}
+	if checks[0].kind != metricCheck || checks[0].op != ">=" || checks[0].threshold != 0.8 {
+		t.Errorf("check = %+v, want metricCheck with op >= threshold 0.8", checks[0])
+	}
+}
+
+// A metric comparison whose metric has no registered command is unresolvable — the same
+// config fault as a missing command-check entry — and fails before any sandbox is spent.
+func TestResolveMetricWithoutCommandErrors(t *testing.T) {
+	if _, err := testRegistry().Resolve([]string{"mutation>=0.8"}); err == nil {
+		t.Fatal("Resolve accepted a metric comparison with no registered command, want an error")
+	}
+}
+
+// The metric check passes when the measurement command runs cleanly and prints a score
+// that satisfies the comparison. It spends exactly one sandbox (no base ref), and the
+// evidence records the measured score and the comparison so the verdict is auditable.
+func TestRunMetricPassesAboveThreshold(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"measure-mutation": {ExitCode: 0, Stdout: []byte("mutation score: 0.85\n")},
+	}}
+	be := &fakeBackend{sb: sb}
+	store := testStore(t)
+	g := New(be, mutationRegistry(), store, t.TempDir(), nil)
+
+	report, err := g.Run(context.Background(), mutationCandidate())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !report.Passed || len(report.Checks) != 1 {
+		t.Fatalf("report = %+v, want a single passing metric check", report)
+	}
+	cr := report.Checks[0]
+	if cr.Metric == nil || !cr.Metric.Parsed || cr.Metric.Score != 0.85 {
+		t.Fatalf("metric result = %+v, want parsed score 0.85", cr.Metric)
+	}
+	if be.provisioned != 1 {
+		t.Fatalf("provisioned %d sandboxes, want 1 (candidate only — a metric check needs no base)", be.provisioned)
+	}
+	ev := readArtifact(t, store, cr.Evidence.Hash)
+	for _, want := range []string{"kind: metric", "score 0.85", "want >= 0.8", "status: pass"} {
+		if !bytes.Contains(ev, []byte(want)) {
+			t.Errorf("evidence = %q, want it to contain %q", ev, want)
+		}
+	}
+}
+
+// The metric check fails when the measured score is below the threshold — exactly the
+// weak-test signal mutation testing exists to catch.
+func TestRunMetricFailsBelowThreshold(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"measure-mutation": {ExitCode: 0, Stdout: []byte("0.5")},
+	}}
+	be := &fakeBackend{sb: sb}
+	store := testStore(t)
+	g := New(be, mutationRegistry(), store, t.TempDir(), nil)
+
+	report, err := g.Run(context.Background(), mutationCandidate())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Passed {
+		t.Fatal("report.Passed = true, want false (measured score 0.5 is below the 0.8 threshold)")
+	}
+	if report.Checks[0].Metric.Score != 0.5 {
+		t.Errorf("score = %v, want 0.5", report.Checks[0].Metric.Score)
+	}
+	ev := readArtifact(t, store, report.Checks[0].Evidence.Hash)
+	if !bytes.Contains(ev, []byte("status: fail")) {
+		t.Errorf("evidence = %q, want status: fail", ev)
+	}
+}
+
+// A nonzero exit from the measurement command fails the check closed even when the printed
+// score would pass: the tool could not measure cleanly, so the score is unverifiable and
+// must not gate green.
+func TestRunMetricFailsWhenToolErrors(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"measure-mutation": {ExitCode: 1, Stdout: []byte("0.99"), Stderr: []byte("gremlins: build failed")},
+	}}
+	be := &fakeBackend{sb: sb}
+	g := New(be, mutationRegistry(), testStore(t), t.TempDir(), nil)
+
+	report, err := g.Run(context.Background(), mutationCandidate())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Passed {
+		t.Fatal("report.Passed = true, want false (the tool exited nonzero, so its score is unverifiable)")
+	}
+}
+
+// Output that does not parse to a number fails the check closed: an unmeasurable score is
+// not a passing one, and the evidence says so rather than recording a phantom 0.
+func TestRunMetricFailsOnUnparseableScore(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"measure-mutation": {ExitCode: 0, Stdout: []byte("scan produced no score")},
+	}}
+	be := &fakeBackend{sb: sb}
+	store := testStore(t)
+	g := New(be, mutationRegistry(), store, t.TempDir(), nil)
+
+	report, err := g.Run(context.Background(), mutationCandidate())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Passed {
+		t.Fatal("report.Passed = true, want false (the command printed no parseable score)")
+	}
+	if report.Checks[0].Metric.Parsed {
+		t.Error("Metric.Parsed = true, want false for unparseable output")
+	}
+	ev := readArtifact(t, store, report.Checks[0].Evidence.Hash)
+	if !bytes.Contains(ev, []byte("score unparseable")) {
+		t.Errorf("evidence = %q, want it to record an unparseable score", ev)
+	}
+}

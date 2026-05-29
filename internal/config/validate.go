@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/Loxstomper/harness/internal/core"
@@ -59,13 +58,12 @@ var reusesAcceptanceTests = map[string]bool{
 }
 
 // knownMetrics are the metrics that may appear on the left of a comparison
-// postcondition such as "mutation>=0.8".
+// postcondition such as "mutation>=0.8". An unrecognized metric is a typo that would
+// otherwise resolve to no gate check, so it is rejected at startup; the spelling is shared
+// with core (and the gate) so config and the gate agree on what a metric is.
 var knownMetrics = map[string]bool{
-	"mutation": true,
+	core.MetricMutation: true,
 }
-
-// comparisonOps are recognized in longest-first order so ">=" is matched before ">".
-var comparisonOps = []string{">=", "<=", "==", ">", "<"}
 
 // Validate is the startup gate: it checks the loaded configuration for the
 // cross-file and structural problems the loaders deliberately do not (they only
@@ -148,6 +146,16 @@ func (c *Config) validateDAG(add func(string, ...any)) {
 			// specs/verification.md).
 			if reusesAcceptanceTests[pc] && strings.TrimSpace(c.Harness.Checks[core.CheckAcceptanceTests]) == "" {
 				add("stage %q declares the %q proof but no %q command is registered in checks:", name, pc, core.CheckAcceptanceTests)
+			}
+			// A metric postcondition (e.g. "mutation>=0.8") binds to the measurement command
+			// registered under its metric name; the gate runs that command and grades the score
+			// it prints against the threshold. A missing command is unresolvable at the gate, so
+			// catch it here at startup the way the reused-acceptance-command gap is caught. Only
+			// reached for a known postcondition, so an unknown metric is reported above, not here.
+			if metric, _, _, ok := core.ParseMetricComparison(pc); ok {
+				if strings.TrimSpace(c.Harness.Checks[metric]) == "" {
+					add("stage %q declares the %q metric postcondition but no %q command is registered in checks:", name, pc, metric)
+				}
 			}
 		}
 	}
@@ -338,20 +346,12 @@ func (c *Config) knownPostcondition(pc string) bool {
 }
 
 // isMetricComparison reports whether s is a comparison of a known metric against a
-// numeric threshold, e.g. "mutation>=0.8".
+// numeric threshold, e.g. "mutation>=0.8". The parse (what a comparison looks like) is
+// shared with the gate via core; this layer adds the policy that the metric must be one
+// the harness knows how to gate on.
 func isMetricComparison(s string) bool {
-	for _, op := range comparisonOps {
-		if i := strings.Index(s, op); i > 0 {
-			metric := strings.TrimSpace(s[:i])
-			threshold := strings.TrimSpace(s[i+len(op):])
-			if !knownMetrics[metric] {
-				return false
-			}
-			_, err := strconv.ParseFloat(threshold, 64)
-			return err == nil
-		}
-	}
-	return false
+	metric, _, _, ok := core.ParseMetricComparison(s)
+	return ok && knownMetrics[metric]
 }
 
 // findProducesCycle returns the first produces cycle as a path of stage names

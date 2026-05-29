@@ -40,6 +40,7 @@ func validConfig() *Config {
 				"tests-pass": "go test ./...",
 				"gosec":      "gosec ./...",
 				"deps-scan":  "govulncheck ./...",
+				"mutation":   "gremlins unleash --output /tmp/m.json && jq -r .efficacy /tmp/m.json",
 			},
 			Policy: Policy{MaxRetries: 3, DeadLetter: "harness.dlq"},
 		},
@@ -213,6 +214,17 @@ func TestValidateComparisonCondition(t *testing.T) {
 	st.Postcondition = []string{"mutation>=not-a-number"}
 	c.Harness.DAG["qa"] = st
 	mustContain(t, problems(t, c), `postcondition "mutation>=not-a-number"`)
+}
+
+// A metric postcondition (e.g. "mutation>=0.8") binds to the measurement command
+// registered under its metric name; the gate runs that command and grades the score it
+// prints against the threshold. A stage that declares the comparison without that command
+// registered is unresolvable at the gate, so validation must reject it at startup (T2.7).
+func TestValidateMetricWithoutCommand(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	delete(c.Harness.Checks, "mutation") // qa still declares mutation>=0.8
+	mustContain(t, problems(t, c), `stage "qa" declares the "mutation>=0.8" metric postcondition but no "mutation" command`)
 }
 
 // A produces self-loop is a depth cycle and must fail.
