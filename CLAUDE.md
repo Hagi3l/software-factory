@@ -32,6 +32,10 @@ is Phases 2–5, filed as beads issues. See `IMPLEMENTATION_PLAN.md`.
   install on macOS with `brew install beads` (currently v1.0.4, Dolt backend; a
   major bump from 0.62.0 — `bd dep add` treats a foreign-prefix dep id as an
   unvalidated external ref, so tests pin the db prefix via `bd init --prefix harness`).
+  Note: **the Linux dev sandbox here runs bd v0.62.0**, where `dep add` already rejects
+  nonexistent foreign-prefix targets (the v1.0.4 silent-accept gap is absent) — so
+  `beads.Apply`'s own existence check is what holds against v1.0.4; don't rely on local
+  `dep add` strictness reproducing the macOS behavior.
 - Model layer: canonical types + thin per-provider adapters over official Go SDKs.
   No agent framework.
 - Control room (later): htmx + Alpine + templ + Tailwind standalone CLI + embed.FS.
@@ -80,3 +84,13 @@ jq -rs '
   | group_by(.Test) | .[] | {test: .[0].Test, output: [.[].Output] | join("")}' \
   test/results/test-unit.json
 ```
+
+When **writing** a test that needs a deterministic model (no API key, no Docker), use
+`internal/model/modeltest` — `NewServer(t, []Turn)` is an `httptest` SSE server speaking
+the OpenAI streaming wire format, scripted by request count; it drives the *real* `openai`
+adapter, selected via an `openai-compat` model entry whose endpoint is patched to
+`srv.URL()`. For a full `spec → implement → gate → merge` spine test without Docker, the
+**test-only** non-isolating host-exec sandbox backend (defined in
+`cmd/harness/spine_e2e_test.go`, compiled only under test) is injected through the
+`runOptions.backend` seam in `buildRunComponents`. The Docker e2e variant is behind
+`//go:build docker_e2e` (`make test-e2e-docker`).

@@ -139,6 +139,10 @@ sandbox: go-toolchain                 # a sandbox profile (see infra)
 selector: { lang: go }                # how this soul is chosen for an issue
 ```
 
+The `persona` path is resolved **relative to the config root** (the directory passed
+to `--config`), not to the soul file — hence the `souls/` prefix even though the soul
+itself lives under `souls/`. A bare `prompts/implementor-go.md` would not resolve.
+
 **Roles vs. souls.** The DAG references a *role*; souls *fulfil* it. A role may
 map to a **set** of souls; the orchestrator picks one per issue by matching the
 issue's tags against each soul's `selector`. With a single soul per role this is
