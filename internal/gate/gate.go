@@ -162,7 +162,10 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 		report.Checks = append(report.Checks, cr)
 		if !cr.Passed {
 			report.Passed = false
-			r.log.Info("gate: check failed", "ref", c.Ref, "check", check.Name, "exit_code", res.ExitCode)
+			// Surface the tail of the captured output so a failed gate is triageable from
+			// the log; full evidence persistence into the artifact store is Phase 2.
+			r.log.Info("gate: check failed", "ref", c.Ref, "check", check.Name, "exit_code", res.ExitCode,
+				"stdout_tail", tailString(res.Stdout, 2000), "stderr_tail", tailString(res.Stderr, 2000))
 			break // a failed build makes a later test run meaningless; stop at the first failure
 		}
 		r.log.Debug("gate: check passed", "ref", c.Ref, "check", check.Name)
@@ -170,6 +173,15 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 
 	r.log.Info("gate: verdict", "ref", c.Ref, "passed", report.Passed, "checks_run", len(report.Checks))
 	return report, nil
+}
+
+// tailString returns the last max bytes of b as a string, prefixed with an elision
+// marker when truncated, so a failed check's output is logged without flooding.
+func tailString(b []byte, max int) string {
+	if len(b) <= max {
+		return string(b)
+	}
+	return "…(truncated)…" + string(b[len(b)-max:])
 }
 
 // gateID returns a fresh, unique id naming the per-gate broker socket so concurrent

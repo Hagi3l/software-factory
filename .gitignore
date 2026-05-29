@@ -10,3 +10,6 @@
 
 # Runtime state written by `harness run` (embedded JetStream store, artifact store)
 /.harness/
+
+# Stray bare `go build ./cmd/harness` output (use make build -> /bin/)
+/harness
