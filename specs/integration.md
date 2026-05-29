@@ -34,7 +34,7 @@ one at a time:
 
 ```
 1. pop next integrate issue (beads-topological order)
-2. rebase its branch onto the CURRENT main tip          (in a sandbox)
+2. rebase its branch onto the CURRENT main tip
        └─ conflict? → spawn a sandboxed resolution issue, block, loop
 3. re-run the FULL gate suite in a clean verification sandbox
    against the REBASED result — i.e. against what will actually land
@@ -48,9 +48,23 @@ as originally authored. That is what catches the two-green-branches problem, and
 it reuses the [producer ≠ verifier](verification.md) machinery against the
 *combination* rather than a single branch.
 
-Conflict resolution that needs an LLM still runs **sandboxed** and produces a
-*proposed* rebase; the trusted layer does the final `git` write. Untrusted
-environments never hold the keys to `main`.
+**A clean rebase is a deterministic git computation, not an agent task.** It runs
+on objects the orchestrator already holds in the integration repo (runners pushed
+the candidate branches there), and applying a diff with `git rebase` executes no
+code from the candidate — its own hooks and filters are never installed. So the
+trusted layer performs a clean rebase directly; it does not need a sandbox, because
+correctness is re-established by the step-3 re-gate (the rebased tree may be broken
+even when it merged textually clean — that is exactly the two-green-branches case),
+not by trusting the rebase. The sandbox is for the *other* case: conflict resolution
+that needs an LLM runs **sandboxed** and produces a *proposed* rebase; the trusted
+layer does the final `git` write. Untrusted environments never hold the keys to
+`main`.
+
+The queue is built up incrementally: the serialized rebase-onto-current-main (step
+2, with a conflict escalating to the dead-letter queue) lands first; re-gating the
+rebased result (step 3) and sandboxed conflict resolution (the step-2 conflict
+branch) follow. Until step 3 exists, the rebased result is merged on the trust of
+the original gate plus the determinism of a clean rebase.
 
 ---
 

@@ -404,6 +404,38 @@ func TestHandleResultAcceptMergesAndCloses(t *testing.T) {
 	}
 }
 
+// TestHandleResultIntegrateConflictDeadLetters: when a verified candidate cannot be
+// rebased onto the current main (a merge-queue conflict with a branch that landed first),
+// the merger reports errRebaseConflict and the orchestrator escalates the issue to the DLQ
+// — it does not retry (a conflict is deterministic) and does not close the blocked issue.
+func TestHandleResultIntegrateConflictDeadLetters(t *testing.T) {
+	bd := newFakeBeads()
+	bd.put(inProgress("iss-1", "implement", 0))
+	m := &fakeMerger{err: errRebaseConflict}
+	o, nc := newOrch(t, kernelConfig(2), bd, &fakeGate{report: gate.Report{Passed: true}}, m)
+
+	sub, err := nc.SubscribeSync(messaging.SubjectDLQ)
+	if err != nil {
+		t.Fatalf("subscribe dlq: %v", err)
+	}
+
+	res := core.Result{IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: core.CandidateBranch("iss-1")}}
+	transient, err := o.handleResult(context.Background(), res)
+	if err != nil || transient {
+		t.Fatalf("handleResult = (%v,%v), want (false,nil) — a conflict is dead-lettered, not retried", transient, err)
+	}
+	if _, derr := sub.NextMsg(time.Second); derr != nil {
+		t.Errorf("no DLQ alert published for the integrate conflict: %v", derr)
+	}
+	_, _, closed, blocked, _ := bd.snap()
+	if len(blocked) != 1 || blocked[0] != "iss-1" {
+		t.Errorf("blocked = %v, want [iss-1] (conflict escalated)", blocked)
+	}
+	if len(closed) != 0 {
+		t.Errorf("closed = %v, want none (a dead-lettered issue is blocked, not closed)", closed)
+	}
+}
+
 func TestHandleResultAcceptBuildsProvenance(t *testing.T) {
 	cfg := kernelConfig(2)
 	// Give the implement soul a model so the trailer's Model field is populated.

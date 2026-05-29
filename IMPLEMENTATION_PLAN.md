@@ -714,9 +714,82 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
   must stamp elapsed time and the orchestrator thread/accumulate it like Spent*. The per-invocation
   wall ceiling (sandbox limit) already exists; this is the cumulative cross-loop cap. (needs T3.8)
   ([workflow.md](specs/workflow.md))
-- [ ] **T3.9 Merge queue: serialized rebase onto `main`** — pop `integrate` issues in issue-graph topological order and rebase each candidate onto the *current* `main` tip in a sandbox (replaces the kernel's bare provenance-commit advance). ([integration.md](specs/integration.md))
-- [ ] **T3.10 Re-gate the merged result** — after rebase, re-run the full gate suite in a clean verification sandbox against the *rebased* result before advancing `main` (catches two-green-branches breakage). (needs T3.9) ([integration.md](specs/integration.md))
-- [ ] **T3.11 Conflict-resolution issue** — on a rebase conflict, spawn a sandboxed resolution issue (proposes a rebase), block, loop. *(OPEN: `integrate` as its own role vs. orchestrator function.)* (needs T3.9) ([integration.md](specs/integration.md))
+- [x] **T3.9 Merge queue: serialized rebase onto `main`** — *done.* The trusted merge now
+  rebases each verified candidate onto the **current** `main` tip before writing the provenance
+  commit, instead of refusing a non-fast-forward. Independently-based green branches therefore
+  integrate one at a time onto whatever `main` has become (the merge train), replacing the
+  kernel's bare fast-forward-only advance. Verified with `make check` green (389 pass, 2 skip)
+  incl. a real-git integration test driving FF / clean-rebase / conflict / idempotency.
+  Learnings for downstream tasks:
+  - **The "serialized queue" is the orchestrator's existing serial Result loop, not a new
+    queue.** `consumeResults` pulls and processes Results one at a time in a single goroutine
+    (single-writer invariant), and `integrate` is handled **inline** at accept time
+    (`advance`'s `trusted-merge` branch), not as a dispatched issue. Dependent work is already
+    serialized by beads `blocked-by` edges (a dependent stage can't reach qa-pass before its
+    predecessor merges), so inline-rebase-at-accept respects issue-graph order without a
+    separate topological pop. The OPEN "integrate as its own role vs. orchestrator function"
+    (integration.md) stays resolved as **orchestrator-owned**. The change was therefore
+    localized to `gitMerger` + a small `advance`/`accept` conflict path — no scheduler or new
+    stage-kind work.
+  - **`gitMerger.Merge` now rebases in a scratch detached worktree** (`rebaseOntoMain`): if
+    `main` is no longer an ancestor of the candidate (its base moved), `git worktree add
+    --detach` at the candidate tip, `git rebase refs/heads/main` there, read the rebased tip,
+    then build the provenance commit on *that* tip and advance `main` (a fast-forward by
+    construction — `main` is an ancestor of the rebased tip). The worktree cleanup is **deferred
+    until after `update-ref main`** so the rebased commits stay anchored (reachable) through
+    `commit-tree`/`update-ref`; an early `worktree remove` would orphan them. The integration
+    repo's own `main` checkout is never touched (moved by ref-update only), exactly as before.
+  - **A clean rebase runs on the host (trusted layer), NOT in a sandbox.** `git rebase` applies
+    diffs to objects already in the integration repo and executes no candidate code (the
+    candidate's hooks/filters are never installed), so a clean rebase is a deterministic git
+    computation; correctness of the *merged tree* is re-established by the step-3 re-gate (T3.10),
+    not by trusting the rebase. The sandbox is reserved for **agent-driven conflict resolution**
+    (T3.11). Spec refined: `integration.md` dropped the "(in a sandbox)" annotation on the rebase
+    step and added the clean-rebase-is-deterministic-git rationale + the incremental-build note
+    (rebase lands first; re-gate and sandboxed conflict resolution follow).
+  - **Idempotency moved from an ancestor check to an issue-id trailer grep.** A rebase rewrites
+    the candidate's commits to new SHAs, so the original candidate tip is *not* an ancestor of a
+    `main` it merged onto via rebase — the old `merge-base --is-ancestor ref main` no-op check
+    would miss a rebase merge and stack a duplicate provenance commit on a crash-window
+    redelivery. Replaced with `git log refs/heads/main --fixed-strings --grep="Issue: <id> |"`:
+    a provenance commit citing this issue anywhere in `main`'s history ⇒ already merged ⇒ no-op
+    return `main`. Robust to FF *or* rebase and to delivery reordering (keys on the unique issue
+    id in the trailer, not commit ancestry). A `landed == main` guard additionally no-ops a
+    candidate whose changes are already fully present. (Cost: a history grep per merge — fine for
+    the kernel; optimize later if integration becomes the measured bottleneck, per integration.md.)
+  - **A rebase conflict escalates (dead-letter), it does not retry.** `rebaseOntoMain` aborts the
+    conflicted rebase and signals via a `conflict bool` return (not the error channel, which is
+    reserved for infra faults); `Merge` returns the sentinel `errRebaseConflict`. `advance`
+    detects it with `errors.Is`, dead-letters the issue (the conflict is deterministic — retrying
+    can't help), and returns the internal sentinel `errMergeConflictHandled` so `accept` stops
+    **without also closing** the now-blocked issue and the message is Acked. **T3.11 will replace
+    the dead-letter with a sandboxed resolution issue** at this exact seam (`advance`'s
+    `errRebaseConflict` branch).
+  - **Known gap for T3.10 (by design):** the *rebased* tree is merged on the trust of the original
+    qa gate + clean-rebase determinism — it is **not yet re-gated**. This is strictly better than
+    the kernel (which refused the second candidate outright, wedging parallel integration), and the
+    two-green-branches correctness hole is closed by T3.10 (re-run the full gate suite against the
+    rebased result before advancing `main`, citing the re-gate's checks in the provenance trailer).
+  - **Tests:** `internal/orchestrator/merge_test.go` rewritten — `TestGitMergerWritesProvenanceCommit`
+    (FF-as-is), `TestGitMergerRebasesWhenBaseMoved`, `TestGitMergerRebaseConflictReported`,
+    `TestGitMergerIdempotentReMerge` (grep-based); `merge_integration_test.go` rewritten to drive real
+    git with file changes through A (FF) → B (clean rebase over A, combined linearly) → C (conflict on
+    B's lines → `errRebaseConflict`, `main` untouched) → idempotent re-merge of A. Orchestrator:
+    `TestHandleResultIntegrateConflictDeadLetters` (conflict ⇒ DLQ alert + blocked, not closed, not
+    retried). The old `TestGitMergerRefusesNonFastForward` was removed — non-FF is now rebased, not
+    refused.
+- [ ] **T3.10 Re-gate the merged result** — after rebase, re-run the full gate suite in a clean
+  verification sandbox against the *rebased* result before advancing `main` (catches
+  two-green-branches breakage), and cite the re-gate's checks in the provenance trailer. Seam from
+  T3.9: `gitMerger` produces the rebased tip; the re-gate must run on *that* tree, between
+  `rebaseOntoMain` and the provenance commit. Likely needs the merge path to surface the rebased
+  ref so the orchestrator's gate (`o.gate.Run`) can verify it, and the merge to consume the
+  re-gate report for the trailer (today `advance` passes the *original* qa report's `Verified`
+  through). (needs T3.9) ([integration.md](specs/integration.md))
+- [ ] **T3.11 Conflict-resolution issue** — on a rebase conflict, spawn a sandboxed resolution
+  issue (proposes a rebase), block, loop — replacing T3.9's dead-letter at `advance`'s
+  `errRebaseConflict` branch. *(OPEN: `integrate` as its own role vs. orchestrator function —
+  T3.9 kept it orchestrator-owned.)* (needs T3.9) ([integration.md](specs/integration.md))
 
 ## Phase 4 — Control room
 

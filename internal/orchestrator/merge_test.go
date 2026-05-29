@@ -27,26 +27,32 @@ func isAncestor(args []string) (x, y string, ok bool) {
 	return "", "", false
 }
 
-// scriptedGit records git invocations and replies per subcommand, so the merger's
-// fast-forward control flow is testable without a real repo.
+// isGrep reports whether args is the idempotency log --grep probe.
+func isGrep(args []string) bool { return len(args) > 0 && args[0] == "log" && hasArg(args, "--fixed-strings") }
+
+// scriptedGit records git invocations and replies per subcommand, so the merge-queue
+// control flow is testable without a real repo.
 func scriptedGit(reply func(args []string) (string, error)) (*gitMerger, *[][]string) {
 	var calls [][]string
 	m := &gitMerger{bin: "git"}
-	m.run = func(_ context.Context, repo string, args ...string) (string, error) {
-		calls = append(calls, append([]string{repo}, args...))
+	m.run = func(_ context.Context, dir string, args ...string) (string, error) {
+		calls = append(calls, append([]string{dir}, args...))
 		return reply(args)
 	}
 	return m, &calls
 }
 
+// TestGitMergerWritesProvenanceCommit drives the fast-forward-able case: main is still an
+// ancestor of the candidate (its base has not moved), so no rebase is needed and a trusted
+// provenance commit is written on top of the candidate tip.
 func TestGitMergerWritesProvenanceCommit(t *testing.T) {
 	m, calls := scriptedGit(func(args []string) (string, error) {
+		if isGrep(args) {
+			return "", nil // no provenance commit for this issue yet
+		}
 		if x, y, ok := isAncestor(args); ok {
-			switch {
-			case x == "candidate/iss-1" && y == "refs/heads/main":
-				return "", errors.New("exit status 1") // not yet merged
-			case x == "refs/heads/main" && y == "candidate/iss-1":
-				return "", nil // main is an ancestor: fast-forward is legal
+			if x == "refs/heads/main" && y == "candidate/iss-1" {
+				return "", nil // main is an ancestor of the candidate: lands as-is, no rebase
 			}
 			return "", errors.New("unexpected merge-base")
 		}
@@ -57,6 +63,9 @@ func TestGitMergerWritesProvenanceCommit(t *testing.T) {
 		case "rev-parse":
 			if strings.HasSuffix(args[len(args)-1], "^{tree}") {
 				return "tree123", nil
+			}
+			if args[len(args)-1] == "refs/heads/main" {
+				return "mainhead", nil
 			}
 			return "abc123", nil // candidate tip
 		case "update-ref":
@@ -76,12 +85,13 @@ func TestGitMergerWritesProvenanceCommit(t *testing.T) {
 
 	var commitTree, updateRef []string
 	for _, c := range *calls {
-		switch c[1] {
-		case "commit-tree", "-c": // commit-tree call carries leading -c identity flags
-			if hasArg(c, "commit-tree") {
-				commitTree = c
-			}
-		case "update-ref":
+		if hasArg(c, "rebase") || hasArg(c, "worktree") {
+			t.Errorf("rebased a fast-forward-able candidate; call = %v", c)
+		}
+		switch {
+		case hasArg(c, "commit-tree"):
+			commitTree = c
+		case len(c) > 1 && c[1] == "update-ref":
 			updateRef = c
 		}
 	}
@@ -106,10 +116,121 @@ func TestGitMergerWritesProvenanceCommit(t *testing.T) {
 	}
 }
 
+// TestGitMergerRebasesWhenBaseMoved drives the merge-queue case: main has moved under the
+// candidate (another branch merged first), so the candidate is rebased onto the current
+// main in a scratch worktree and the provenance commit is written on the rebased tip.
+func TestGitMergerRebasesWhenBaseMoved(t *testing.T) {
+	m, calls := scriptedGit(func(args []string) (string, error) {
+		if isGrep(args) {
+			return "", nil // not merged
+		}
+		if x, y, ok := isAncestor(args); ok && x == "refs/heads/main" && y == "candidate/iss-1" {
+			return "", errors.New("exit status 1") // main is NOT an ancestor → rebase needed
+		}
+		if hasArg(args, "rebase") {
+			return "", nil // clean rebase
+		}
+		if hasArg(args, "worktree") {
+			return "", nil
+		}
+		if hasArg(args, "commit-tree") {
+			return "prov-rebased", nil
+		}
+		switch args[0] {
+		case "rev-parse":
+			switch {
+			case strings.HasSuffix(args[len(args)-1], "^{tree}"):
+				return "rebasedtree", nil
+			case args[len(args)-1] == "refs/heads/main":
+				return "newmain", nil
+			case args[len(args)-1] == "HEAD":
+				return "rebasedtip", nil // the rebased tip in the worktree
+			}
+			return "candtip", nil // candidate tip
+		case "update-ref":
+			return "", nil
+		}
+		return "", errors.New("unexpected")
+	})
+
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance())
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if commit != "prov-rebased" {
+		t.Errorf("commit = %q, want prov-rebased", commit)
+	}
+
+	var addedWorktree, rebased, commitTree []string
+	for _, c := range *calls {
+		switch {
+		case hasSeq(c, "worktree", "add"):
+			addedWorktree = c
+		case hasArg(c, "rebase") && !hasArg(c, "--abort"):
+			rebased = c
+		case hasArg(c, "commit-tree"):
+			commitTree = c
+		}
+	}
+	if addedWorktree == nil {
+		t.Errorf("no scratch worktree was added for the rebase; calls = %v", *calls)
+	}
+	if rebased == nil || !hasArg(rebased, "refs/heads/main") {
+		t.Errorf("candidate was not rebased onto main; got %v", rebased)
+	}
+	// The provenance commit is built on the REBASED tip and tree, not the original candidate.
+	if commitTree == nil || !hasArg(commitTree, "rebasedtree") || !hasSeq(commitTree, "-p", "rebasedtip") {
+		t.Errorf("provenance commit not built on the rebased result; got %v", commitTree)
+	}
+}
+
+// TestGitMergerRebaseConflictReported: a rebase that fails to apply (a collision with what
+// already merged) is reported as errRebaseConflict and mutates nothing on main.
+func TestGitMergerRebaseConflictReported(t *testing.T) {
+	m, calls := scriptedGit(func(args []string) (string, error) {
+		if isGrep(args) {
+			return "", nil
+		}
+		if x, y, ok := isAncestor(args); ok && x == "refs/heads/main" && y == "candidate/iss-1" {
+			return "", errors.New("exit status 1") // rebase needed
+		}
+		if hasArg(args, "rebase") && !hasArg(args, "--abort") {
+			return "", errors.New("CONFLICT (content): merge conflict") // the rebase conflicts
+		}
+		if hasArg(args, "rebase") || hasArg(args, "worktree") {
+			return "", nil // --abort, worktree remove/prune
+		}
+		if args[0] == "rev-parse" {
+			if args[len(args)-1] == "refs/heads/main" {
+				return "newmain", nil
+			}
+			return "candtip", nil
+		}
+		return "", errors.New("unexpected")
+	})
+
+	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance())
+	if !errors.Is(err, errRebaseConflict) {
+		t.Fatalf("Merge err = %v, want errRebaseConflict", err)
+	}
+	for _, c := range *calls {
+		if hasArg(c, "commit-tree") || (len(c) > 1 && c[1] == "update-ref") {
+			t.Errorf("repo was mutated on a rebase conflict; call = %v", c)
+		}
+		if hasArg(c, "rebase") && hasArg(c, "--abort") {
+			return // aborted the conflicted rebase: good
+		}
+	}
+	t.Error("the conflicted rebase was not aborted")
+}
+
+// TestGitMergerIdempotentReMerge: a candidate whose issue already has a provenance commit
+// in main's history is a no-op — robust whether the prior merge fast-forwarded or rebased,
+// since it keys on the issue id in the trailer rather than commit ancestry.
 func TestGitMergerIdempotentReMerge(t *testing.T) {
 	m, calls := scriptedGit(func(args []string) (string, error) {
-		if x, y, ok := isAncestor(args); ok && x == "candidate/iss-1" && y == "refs/heads/main" {
-			return "", nil // already merged: candidate tip is an ancestor of main
+		if isGrep(args) {
+			return "prov-existing", nil // a provenance commit for iss-1 is already on main
 		}
 		if args[0] == "rev-parse" {
 			if args[len(args)-1] == "refs/heads/main" {
@@ -128,30 +249,8 @@ func TestGitMergerIdempotentReMerge(t *testing.T) {
 		t.Errorf("commit = %q, want current main head mainhead", commit)
 	}
 	for _, c := range *calls {
-		if c[1] == "commit-tree" || c[1] == "update-ref" {
+		if hasArg(c, "commit-tree") || hasArg(c, "rebase") || (len(c) > 1 && c[1] == "update-ref") {
 			t.Errorf("re-merge of an already-merged candidate mutated the repo; calls = %v", *calls)
-		}
-	}
-}
-
-func TestGitMergerRefusesNonFastForward(t *testing.T) {
-	m, calls := scriptedGit(func(args []string) (string, error) {
-		if _, _, ok := isAncestor(args); ok {
-			return "", errors.New("exit status 1") // neither already-merged nor a fast-forward
-		}
-		if args[0] == "rev-parse" {
-			return "abc123", nil
-		}
-		return "", errors.New("unexpected")
-	})
-
-	if _, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance()); err == nil {
-		t.Fatal("Merge accepted a non-fast-forward candidate")
-	}
-	// It must refuse before touching the ref.
-	for _, c := range *calls {
-		if c[1] == "update-ref" || c[1] == "commit-tree" {
-			t.Errorf("repo was mutated on a non-fast-forward; calls = %v", *calls)
 		}
 	}
 }

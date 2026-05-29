@@ -18,6 +18,11 @@ import (
 // keeps Result processing idempotent under at-least-once redelivery.
 const statusInProgress = "in_progress"
 
+// errMergeConflictHandled is an internal sentinel: advance returns it when an integrate
+// rebase conflict has already been dead-lettered, so accept stops without closing the
+// now-blocked issue and the message is Acked (redelivery cannot resolve a conflict).
+var errMergeConflictHandled = errors.New("orchestrator: integrate conflict dead-lettered")
+
 // consumeResults is the event-driven half of the loop: it pulls Result envelopes off
 // the orchestrator's durable consumer and processes each. Ack/Nak encode the outcome:
 //   - a fully-processed Result (accepted, routed, or dead-lettered) is Acked.
@@ -207,6 +212,11 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 			return false, fmt.Errorf("issue %s produces undefined stage %q", issue.ID, target)
 		}
 		if transient, err := o.advance(ctx, issue, target, tstage, res, report); err != nil {
+			if errors.Is(err, errMergeConflictHandled) {
+				// advance already dead-lettered the issue (an integrate rebase conflict). Stop
+				// here without closing the now-blocked issue, and Ack: redelivery cannot help.
+				return false, nil
+			}
 			return transient, err
 		}
 	}
@@ -269,6 +279,18 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, target str
 		prov := o.provenanceFor(issue, res, report)
 		commit, err := o.merger.Merge(ctx, o.opts.Repo, res.Branch.Ref, prov)
 		if err != nil {
+			if errors.Is(err, errRebaseConflict) {
+				// The verified candidate cannot be cleanly rebased onto the current main tip:
+				// another branch landed first and they collide (the two-green-branches case).
+				// Retrying cannot resolve it, so escalate for human triage rather than
+				// redelivering — sandboxed, agent-driven conflict resolution is a later
+				// increment (see specs/integration.md). deadLetter blocks the issue, so signal
+				// accept to stop without also closing it.
+				if _, derr := o.deadLetter(ctx, issue, "integrate: candidate conflicts with current main; rebase needs resolution"); derr != nil {
+					return true, derr
+				}
+				return false, errMergeConflictHandled
+			}
 			return true, fmt.Errorf("merge candidate %s for issue %s: %w", res.Branch.Ref, issue.ID, err)
 		}
 		o.log.Info("orchestrator: merged to main", "issue", issue.ID, "ref", res.Branch.Ref, "commit", commit,

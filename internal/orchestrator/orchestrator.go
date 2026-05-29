@@ -54,10 +54,12 @@ type Gate interface {
 	Run(ctx context.Context, c gate.Candidate) (gate.Report, error)
 }
 
-// Merger fast-forwards a verified candidate branch onto main in the integration repo.
-// In the bootstrap the merge queue is trivial — a single serialized stream, no rebase
-// or re-gate — so a fast-forward is the whole of integration (see
-// specs/integration.md, specs/bootstrap.md). gitMerger is the default implementation.
+// Merger lands a verified candidate branch onto main in the integration repo as a
+// serialized merge queue: each candidate is rebased onto the current main tip (so
+// independently-based green branches integrate one at a time) and a trusted provenance
+// commit is written on top. A rebase conflict is reported, not retried. gitMerger is the
+// default implementation (see specs/integration.md, specs/bootstrap.md). Re-gating the
+// rebased result before advancing main is a following increment.
 type Merger interface {
 	Merge(ctx context.Context, repo, ref string, prov Provenance) (commit string, err error)
 }
