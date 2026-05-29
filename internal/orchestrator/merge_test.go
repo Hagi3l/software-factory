@@ -28,7 +28,9 @@ func isAncestor(args []string) (x, y string, ok bool) {
 }
 
 // isGrep reports whether args is the idempotency log --grep probe.
-func isGrep(args []string) bool { return len(args) > 0 && args[0] == "log" && hasArg(args, "--fixed-strings") }
+func isGrep(args []string) bool {
+	return len(args) > 0 && args[0] == "log" && hasArg(args, "--fixed-strings")
+}
 
 // scriptedGit records git invocations and replies per subcommand, so the merge-queue
 // control flow is testable without a real repo.
@@ -74,7 +76,7 @@ func TestGitMergerWritesProvenanceCommit(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance())
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -153,7 +155,7 @@ func TestGitMergerRebasesWhenBaseMoved(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance())
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -184,6 +186,142 @@ func TestGitMergerRebasesWhenBaseMoved(t *testing.T) {
 	}
 }
 
+// TestGitMergerReGatesRebasedResult: when the candidate is rebased onto a moved main, the
+// merger publishes the rebased result under a clonable temp ref, hands that ref to the
+// ReGate (specs/integration.md step 3), and — on a passing verdict — writes the provenance
+// the ReGate returns (citing the combination's own checks, since the rebased tree is what
+// lands) then deletes the temp ref once main has advanced.
+func TestGitMergerReGatesRebasedResult(t *testing.T) {
+	m, calls := scriptedGit(func(args []string) (string, error) {
+		if isGrep(args) {
+			return "", nil
+		}
+		if x, y, ok := isAncestor(args); ok && x == "refs/heads/main" && y == "candidate/iss-1" {
+			return "", errors.New("exit status 1") // main is NOT an ancestor → rebase needed
+		}
+		if hasArg(args, "rebase") || hasArg(args, "worktree") {
+			return "", nil
+		}
+		if hasArg(args, "commit-tree") {
+			return "prov-rebased", nil
+		}
+		switch args[0] {
+		case "rev-parse":
+			switch {
+			case strings.HasSuffix(args[len(args)-1], "^{tree}"):
+				return "rebasedtree", nil
+			case args[len(args)-1] == "refs/heads/main":
+				return "newmain", nil
+			case args[len(args)-1] == "HEAD":
+				return "rebasedtip", nil
+			}
+			return "candtip", nil
+		case "update-ref":
+			return "", nil
+		}
+		return "", errors.New("unexpected")
+	})
+
+	regateProv := testProvenance()
+	regateProv.Verified = []string{"regate-build", "regate-test"} // distinct from the branch gate
+	var gotRef string
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(),
+		func(_ context.Context, landedRef string) (Provenance, bool, error) {
+			gotRef = landedRef
+			return regateProv, true, nil
+		})
+	if err != nil {
+		t.Fatalf("Merge: %v", err)
+	}
+	if commit != "prov-rebased" {
+		t.Errorf("commit = %q, want prov-rebased", commit)
+	}
+	// The re-gate graded the PUBLISHED ref (a clonable refs/heads/ branch a verification
+	// sandbox clone can fetch), not the original candidate.
+	if gotRef != "refs/heads/integration/iss-1" {
+		t.Errorf("re-gate ref = %q, want refs/heads/integration/iss-1 (the published rebased result)", gotRef)
+	}
+
+	var commitTree, published, deletedRef []string
+	for _, c := range *calls {
+		switch {
+		case hasArg(c, "commit-tree"):
+			commitTree = c
+		case hasSeq(c, "update-ref", "refs/heads/integration/iss-1"):
+			published = c
+		case hasSeq(c, "update-ref", "-d"):
+			deletedRef = c
+		}
+	}
+	if commitTree == nil {
+		t.Fatalf("no commit-tree call; calls = %v", *calls)
+	}
+	// The provenance commit carries the RE-GATE's trailer, since the combination is what landed.
+	if msg := argAfter(commitTree, "-m"); !strings.Contains(msg, "Verified: regate-build,regate-test") {
+		t.Errorf("provenance commit does not cite the re-gate's checks; got %q", msg)
+	}
+	if published == nil {
+		t.Errorf("rebased result was not published under a clonable ref; calls = %v", *calls)
+	}
+	if deletedRef == nil {
+		t.Errorf("temp ref was not cleaned up after main advanced; calls = %v", *calls)
+	}
+}
+
+// TestGitMergerReGateRejectionAbortsMerge: when the ReGate rejects the rebased result (the
+// two-green-branches case — the combination is broken), Merge returns errReGateFailed and
+// never advances main (no provenance commit, no update-ref on main) so the caller can route
+// a fix; the published temp ref is still cleaned up on the way out.
+func TestGitMergerReGateRejectionAbortsMerge(t *testing.T) {
+	m, calls := scriptedGit(func(args []string) (string, error) {
+		if isGrep(args) {
+			return "", nil
+		}
+		if x, y, ok := isAncestor(args); ok && x == "refs/heads/main" && y == "candidate/iss-1" {
+			return "", errors.New("exit status 1") // rebase needed
+		}
+		if hasArg(args, "rebase") || hasArg(args, "worktree") {
+			return "", nil
+		}
+		switch args[0] {
+		case "rev-parse":
+			if args[len(args)-1] == "refs/heads/main" {
+				return "newmain", nil
+			}
+			if args[len(args)-1] == "HEAD" {
+				return "rebasedtip", nil
+			}
+			return "candtip", nil
+		case "update-ref":
+			return "", nil
+		}
+		return "", errors.New("unexpected")
+	})
+
+	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(),
+		func(_ context.Context, _ string) (Provenance, bool, error) {
+			return Provenance{}, false, nil // the combination failed the re-gate
+		})
+	if !errors.Is(err, errReGateFailed) {
+		t.Fatalf("Merge err = %v, want errReGateFailed", err)
+	}
+	var deleted bool
+	for _, c := range *calls {
+		if hasArg(c, "commit-tree") {
+			t.Errorf("a provenance commit was written despite a failed re-gate; call = %v", c)
+		}
+		if hasSeq(c, "update-ref", "refs/heads/main") {
+			t.Errorf("main was advanced despite a failed re-gate; call = %v", c)
+		}
+		if hasSeq(c, "update-ref", "-d") {
+			deleted = true
+		}
+	}
+	if !deleted {
+		t.Errorf("temp ref not cleaned up after the aborted merge; calls = %v", *calls)
+	}
+}
+
 // TestGitMergerRebaseConflictReported: a rebase that fails to apply (a collision with what
 // already merged) is reported as errRebaseConflict and mutates nothing on main.
 func TestGitMergerRebaseConflictReported(t *testing.T) {
@@ -209,7 +347,7 @@ func TestGitMergerRebaseConflictReported(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance())
+	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil)
 	if !errors.Is(err, errRebaseConflict) {
 		t.Fatalf("Merge err = %v, want errRebaseConflict", err)
 	}
@@ -241,7 +379,7 @@ func TestGitMergerIdempotentReMerge(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance())
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil)
 	if err != nil {
 		t.Fatalf("Merge (idempotent): %v", err)
 	}

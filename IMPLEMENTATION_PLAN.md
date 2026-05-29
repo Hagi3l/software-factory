@@ -778,14 +778,49 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
     `TestHandleResultIntegrateConflictDeadLetters` (conflict ⇒ DLQ alert + blocked, not closed, not
     retried). The old `TestGitMergerRefusesNonFastForward` was removed — non-FF is now rebased, not
     refused.
-- [ ] **T3.10 Re-gate the merged result** — after rebase, re-run the full gate suite in a clean
-  verification sandbox against the *rebased* result before advancing `main` (catches
-  two-green-branches breakage), and cite the re-gate's checks in the provenance trailer. Seam from
-  T3.9: `gitMerger` produces the rebased tip; the re-gate must run on *that* tree, between
-  `rebaseOntoMain` and the provenance commit. Likely needs the merge path to surface the rebased
-  ref so the orchestrator's gate (`o.gate.Run`) can verify it, and the merge to consume the
-  re-gate report for the trailer (today `advance` passes the *original* qa report's `Verified`
-  through). (needs T3.9) ([integration.md](specs/integration.md))
+- [x] **T3.10 Re-gate the merged result** — *done.* After a rebase, the merger re-runs the
+  producing stage's full check suite in a fresh producer-distinct sandbox against the *rebased*
+  result before advancing `main` (catches two-green-branches breakage) and cites the re-gate's own
+  checks in the provenance trailer. Verified with `make check`-equivalent (vet + golangci-lint v2 +
+  full unit suite) green; new unit + real-git integration tests drive pass/reject end-to-end.
+  Learnings for downstream tasks:
+  - **The merge↔re-gate boundary is a `ReGate` callback, not a returned ref.** `Merger.Merge`
+    gained a `regate ReGate` param (`func(ctx, landedRef string) (Provenance, bool, error)`); the
+    orchestrator passes `o.reGate(issue, srcStage, res)` and the merger invokes it *inside* `Merge`
+    after a clean rebase, before `commit-tree`. This keeps the merger owning the ref's lifecycle
+    (publish → re-gate → land → delete) in one place rather than surfacing a half-merged ref to the
+    caller. A **fast-forward skips re-gating** (it lands the exact tree the branch gate graded — the
+    `rebased` flag gates the call) and a **nil `ReGate` skips it** (pure-git merge tests pass nil).
+  - **The rebased result is published under `refs/heads/integration/<issue-id>` so a sandbox clone
+    can fetch it.** `rebaseOntoMain` now `update-ref`s the rebased tip to that clonable branch
+    (a clone fetches only `refs/heads/*` + tags, so a detached scratch-worktree tip is unreachable to
+    the gate's clone-seeded sandbox), drops the scratch worktree eagerly (the ref now anchors the
+    commits), and returns a `cleanup` that deletes the temp ref — deferred in `Merge` until *after*
+    `main` advances, so the commits stay reachable through re-gate/commit-tree/update-ref. Keyed by
+    issue id (integration is serialized, so ≤1 in flight; per-issue naming self-identifies a
+    crash-leaked ref and lets the next attempt overwrite cleanly). `rebaseOntoMain`'s signature gained
+    `issueID` and now returns `(landed, tmpRef, cleanup, conflict, err)`; on conflict/error it tears
+    the worktree down internally and leaves no ref.
+  - **The re-gate reuses the branch-gate machinery via a shared `gateCandidate(issue, stage, ref)`.**
+    Extracted from `runGate`; the only thing that differs between the branch gate and the re-gate is
+    the `ref` under test (candidate branch vs. published rebased result) — same stage postconditions,
+    same profile, same fresh sandbox, so **producer ≠ verifier** holds for the combination too.
+    `o.reGate` runs the *producing* stage's checks (the `srcStage` threaded into `advance`), returns
+    provenance citing the re-gate's checks on a pass (the combination's verification is what landed),
+    `(_, false, nil)` on a clean reject, and an error on an infra fault the merger propagates.
+  - **A re-gate failure ROUTES, it does not dead-letter** (unlike a rebase conflict). `Merge` returns
+    the new sentinel `errReGateFailed`; `advance` detects it and calls `route(issue, srcStage, …)` —
+    a fix through the normal retry/budget machinery, because the combination may pass against a
+    different `main` (it is not deterministic the way a textual conflict is). `route` closes the
+    original and spawns the fix, so `advance` returns the internal sentinel `errMergeRegateRouted` to
+    tell `accept` to stop without closing the issue again (mirrors `errMergeConflictHandled`).
+    `advance` gained a `srcStage config.Stage` param (the producing stage) for both the re-gate and
+    the route target; its one caller in `accept` was updated.
+  - **For T3.11 (conflict resolution):** the re-gate seam is now the template — `advance`'s
+    `errRebaseConflict` branch (still a dead-letter) is where a sandboxed resolution issue replaces
+    it; the published-ref + cleanup discipline here is reusable for handing a conflicted state to an
+    agent. Specs updated: `integration.md` (step 3 realized: published temp ref, re-gate-then-advance,
+    route-not-dead-letter on failure, FF skips it).
 - [ ] **T3.11 Conflict-resolution issue** — on a rebase conflict, spawn a sandboxed resolution
   issue (proposes a rebase), block, loop — replacing T3.9's dead-letter at `advance`'s
   `errRebaseConflict` branch. *(OPEN: `integrate` as its own role vs. orchestrator function —

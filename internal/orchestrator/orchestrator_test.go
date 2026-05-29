@@ -170,18 +170,24 @@ func (f *fakeBeads) snap() (claimed, released, closed, blocked []string, applied
 		append([]core.Proposal(nil), f.applied...)
 }
 
-// fakeGate returns a canned report (or error).
+// fakeGate returns a canned report (or error). reportFn, when set, computes the report from
+// the candidate instead — used to make the initial branch gate and the integrate re-gate
+// (which grade different refs) return different verdicts in one test.
 type fakeGate struct {
-	mu     sync.Mutex
-	report gate.Report
-	err    error
-	calls  []gate.Candidate
+	mu       sync.Mutex
+	report   gate.Report
+	err      error
+	reportFn func(c gate.Candidate) (gate.Report, error)
+	calls    []gate.Candidate
 }
 
 func (g *fakeGate) Run(_ context.Context, c gate.Candidate) (gate.Report, error) {
 	g.mu.Lock()
 	defer g.mu.Unlock()
 	g.calls = append(g.calls, c)
+	if g.reportFn != nil {
+		return g.reportFn(c)
+	}
 	return g.report, g.err
 }
 
@@ -193,21 +199,37 @@ func (g *fakeGate) called() []gate.Candidate {
 
 // fakeMerger records the candidates it was asked to merge and the provenance passed
 // with each, so a test can assert the merge trailer is populated from config + evidence.
+// When regateRef is set it invokes the supplied ReGate with that ref (simulating a rebase
+// that published the result there), so a test can drive the orchestrator's re-gate path;
+// the provenance recorded is then the one the re-gate returned, mirroring production.
 type fakeMerger struct {
-	mu    sync.Mutex
-	refs  []string
-	provs []Provenance
-	err   error
+	mu        sync.Mutex
+	refs      []string
+	provs     []Provenance
+	err       error
+	regateRef string
 }
 
-func (m *fakeMerger) Merge(_ context.Context, _, ref string, prov Provenance) (string, error) {
+func (m *fakeMerger) Merge(ctx context.Context, _, ref string, prov Provenance, regate ReGate) (string, error) {
 	m.mu.Lock()
-	defer m.mu.Unlock()
 	m.refs = append(m.refs, ref)
-	m.provs = append(m.provs, prov)
+	m.mu.Unlock()
 	if m.err != nil {
 		return "", m.err
 	}
+	if m.regateRef != "" && regate != nil {
+		regated, accepted, err := regate(ctx, m.regateRef)
+		if err != nil {
+			return "", err
+		}
+		if !accepted {
+			return "", errReGateFailed
+		}
+		prov = regated
+	}
+	m.mu.Lock()
+	m.provs = append(m.provs, prov)
+	m.mu.Unlock()
 	return "deadbeef", nil
 }
 
@@ -433,6 +455,82 @@ func TestHandleResultIntegrateConflictDeadLetters(t *testing.T) {
 	}
 	if len(closed) != 0 {
 		t.Errorf("closed = %v, want none (a dead-lettered issue is blocked, not closed)", closed)
+	}
+}
+
+// TestHandleResultIntegrateReGatePasses: when a candidate rebases onto a moved main, the
+// merger re-gates the rebased result before advancing main (specs/integration.md step 3).
+// On a passing re-gate the issue merges and closes, and the provenance recorded cites the
+// RE-GATE's checks — the combination's verification is the truth that landed, not the
+// branch gate's. (The fakeMerger drives the ReGate with regateRef, standing in for the
+// temp ref a real rebase publishes.)
+func TestHandleResultIntegrateReGatePasses(t *testing.T) {
+	bd := newFakeBeads()
+	bd.put(inProgress("iss-1", "implement", 0))
+	// Branch gate (ref candidate/iss-1) and re-gate (ref integration/iss-1) both pass, but
+	// cite different checks so the test can tell which verdict reached the trailer.
+	g := &fakeGate{reportFn: func(c gate.Candidate) (gate.Report, error) {
+		if c.Ref == "integration/iss-1" {
+			return gate.Report{Passed: true, Checks: []gate.CheckResult{{Name: "regate-check", Passed: true}}}, nil
+		}
+		return gate.Report{Passed: true, Checks: []gate.CheckResult{{Name: "branch-check", Passed: true}}}, nil
+	}}
+	m := &fakeMerger{regateRef: "integration/iss-1"}
+	o, _ := newOrch(t, kernelConfig(2), bd, g, m)
+
+	res := core.Result{IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: core.CandidateBranch("iss-1")}}
+	if transient, err := o.handleResult(context.Background(), res); err != nil || transient {
+		t.Fatalf("handleResult = (%v,%v), want (false,nil)", transient, err)
+	}
+
+	// The gate ran twice: once on the branch, once on the rebased result.
+	if got := g.called(); len(got) != 2 {
+		t.Fatalf("gate called %d times, want 2 (branch + re-gate)", len(got))
+	}
+	provs := m.provenance()
+	if len(provs) != 1 {
+		t.Fatalf("provenance recorded %d times, want 1", len(provs))
+	}
+	if len(provs[0].Verified) != 1 || provs[0].Verified[0] != "regate-check" {
+		t.Errorf("provenance Verified = %v, want [regate-check] (the re-gate's checks landed)", provs[0].Verified)
+	}
+	_, _, closed, _, _ := bd.snap()
+	if len(closed) != 1 || closed[0] != "iss-1" {
+		t.Errorf("closed = %v, want [iss-1]", closed)
+	}
+}
+
+// TestHandleResultIntegrateReGateFailRoutesFix: a candidate that rebases cleanly but whose
+// rebased result fails the re-gate (two branches green in isolation, broken together) is NOT
+// merged. Unlike a conflict — which dead-letters, being deterministic — a re-gate failure is
+// routed through the normal retry machinery (a different main may pass), closing the original
+// and spawning a fix at on_failure. Nothing lands on main.
+func TestHandleResultIntegrateReGateFailRoutesFix(t *testing.T) {
+	bd := newFakeBeads()
+	bd.put(inProgress("iss-1", "implement", 0))
+	g := &fakeGate{reportFn: func(c gate.Candidate) (gate.Report, error) {
+		if c.Ref == "integration/iss-1" {
+			return gate.Report{Passed: false}, nil // the combination is broken
+		}
+		return gate.Report{Passed: true}, nil // the branch alone is green
+	}}
+	m := &fakeMerger{regateRef: "integration/iss-1"}
+	o, _ := newOrch(t, kernelConfig(2), bd, g, m)
+
+	res := core.Result{IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: core.CandidateBranch("iss-1")}}
+	if transient, err := o.handleResult(context.Background(), res); err != nil || transient {
+		t.Fatalf("handleResult = (%v,%v), want (false,nil) — a re-gate failure is routed, not surfaced", transient, err)
+	}
+
+	if got := m.provenance(); len(got) != 0 {
+		t.Errorf("provenance recorded %v, want none (re-gate rejected the rebased result)", got)
+	}
+	_, _, closed, _, applied := bd.snap()
+	if len(closed) != 1 || closed[0] != "iss-1" {
+		t.Errorf("closed = %v, want [iss-1] (the routed issue is closed)", closed)
+	}
+	if len(applied) != 1 || applied[0].Issue.Role != "implement" || applied[0].Issue.Attempt != 1 {
+		t.Errorf("applied = %+v, want one implement fix issue at attempt 1", applied)
 	}
 }
 

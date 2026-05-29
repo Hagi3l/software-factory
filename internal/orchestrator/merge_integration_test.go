@@ -68,6 +68,13 @@ func TestGitMergerIntegration(t *testing.T) {
 	git("add", "-A")
 	git("commit", "-q", "-m", "C work")
 
+	// Candidate D off the SAME base: adds a disjoint file so it rebases cleanly over main,
+	// used to drive a re-gate REJECTION (the two-green-branches case) end-to-end.
+	git("checkout", "-q", "-b", "candidate/iss-4", m0)
+	write("d.txt", "D\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "D work")
+
 	// Detach HEAD so update-ref is the only thing that can move main.
 	git("checkout", "-q", "--detach", m0)
 
@@ -77,7 +84,7 @@ func TestGitMergerIntegration(t *testing.T) {
 	}
 
 	// --- A: base unmoved → fast-forward-able; a trusted provenance commit on the candidate.
-	cA, err := m.Merge(context.Background(), repo, "candidate/iss-1", provFor("iss-1"))
+	cA, err := m.Merge(context.Background(), repo, "candidate/iss-1", provFor("iss-1"), nil)
 	if err != nil {
 		t.Fatalf("merge A: %v", err)
 	}
@@ -97,11 +104,35 @@ func TestGitMergerIntegration(t *testing.T) {
 		t.Errorf("A trailer missing from commit message; got:\n%s", msg)
 	}
 
-	// --- B: main moved under it (A merged first) → rebased onto main, then a provenance
-	// commit. The rebase is what makes the final advance a fast-forward again.
-	cB, err := m.Merge(context.Background(), repo, "candidate/iss-2", provFor("iss-2"))
+	// --- B: main moved under it (A merged first) → rebased onto main, re-gated against the
+	// rebased result, then a provenance commit. The rebase is what makes the final advance a
+	// fast-forward again. A real ReGate runs here: it must be handed a resolvable ref whose
+	// tree is the *combination* (A's file + B's edit) — i.e. what will actually land, not the
+	// branch as authored — and the provenance it returns is what gets committed.
+	var regatedRef, regatedBase string
+	regateProvB := provFor("iss-2")
+	regateProvB.Verified = []string{"build@sha256:re", "test@sha256:re"} // the re-gate's own checks
+	cB, err := m.Merge(context.Background(), repo, "candidate/iss-2", provFor("iss-2"),
+		func(_ context.Context, landedRef string) (Provenance, bool, error) {
+			regatedRef = git("rev-parse", "--verify", landedRef) // must resolve: the rebased result is published
+			regatedBase = git("show", landedRef+":base.txt")     // must be the combined tree
+			return regateProvB, true, nil
+		})
 	if err != nil {
 		t.Fatalf("merge B (should rebase cleanly over A): %v", err)
+	}
+	if regatedRef == "" {
+		t.Error("re-gate was not handed a resolvable ref for the rebased result")
+	}
+	if regatedBase != "base\nfrom B" {
+		t.Errorf("re-gate saw base.txt = %q, want the combined tree's B edit", regatedBase)
+	}
+	if msg := git("log", "-1", "--format=%B", "refs/heads/main"); !strings.Contains(msg, "Verified: build@sha256:re,test@sha256:re") {
+		t.Errorf("merge did not record the re-gate's provenance; got:\n%s", msg)
+	}
+	// The published temp ref is deleted once main has advanced (it is redundant — main reaches it).
+	if exec.Command("git", "-C", repo, "rev-parse", "--verify", "refs/heads/integration/iss-2").Run() == nil {
+		t.Error("the published rebased-result ref was not cleaned up after main advanced")
 	}
 	if got := git("rev-parse", "refs/heads/main"); got != cB {
 		t.Errorf("main = %s, want B's provenance commit %s", got, cB)
@@ -120,17 +151,33 @@ func TestGitMergerIntegration(t *testing.T) {
 
 	// --- C: edits base.txt where B already did → rebase conflict, reported not retried, and
 	// main is left untouched.
-	if _, err := m.Merge(context.Background(), repo, "candidate/iss-3", provFor("iss-3")); !errors.Is(err, errRebaseConflict) {
+	if _, err := m.Merge(context.Background(), repo, "candidate/iss-3", provFor("iss-3"), nil); !errors.Is(err, errRebaseConflict) {
 		t.Fatalf("merge C err = %v, want errRebaseConflict", err)
 	}
 	if got := git("rev-parse", "refs/heads/main"); got != cB {
 		t.Errorf("main moved on a conflicting candidate: %s != %s", got, cB)
 	}
 
+	// --- D: rebases cleanly over main (disjoint file) but the re-gate REJECTS the rebased
+	// result (the two-green-branches case). Merge returns errReGateFailed, main is untouched,
+	// and the published temp ref is cleaned up — the orchestrator routes a fix from here.
+	if _, err := m.Merge(context.Background(), repo, "candidate/iss-4", provFor("iss-4"),
+		func(_ context.Context, _ string) (Provenance, bool, error) {
+			return Provenance{}, false, nil // the combination broke something
+		}); !errors.Is(err, errReGateFailed) {
+		t.Fatalf("merge D err = %v, want errReGateFailed", err)
+	}
+	if got := git("rev-parse", "refs/heads/main"); got != cB {
+		t.Errorf("main moved on a re-gate-rejected candidate: %s != %s", got, cB)
+	}
+	if exec.Command("git", "-C", repo, "rev-parse", "--verify", "refs/heads/integration/iss-4").Run() == nil {
+		t.Error("the published rebased-result ref was not cleaned up after a rejected re-gate")
+	}
+
 	// --- Idempotent: re-merging A (whose provenance commit is still in main's history below
 	// B) is a no-op that returns the current main, even though A's tip is no longer an
 	// ancestor of main via a simple chain.
-	again, err := m.Merge(context.Background(), repo, "candidate/iss-1", provFor("iss-1"))
+	again, err := m.Merge(context.Background(), repo, "candidate/iss-1", provFor("iss-1"), nil)
 	if err != nil {
 		t.Errorf("re-merge of an already-merged candidate failed: %v", err)
 	}

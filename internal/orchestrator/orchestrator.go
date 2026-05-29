@@ -56,12 +56,13 @@ type Gate interface {
 
 // Merger lands a verified candidate branch onto main in the integration repo as a
 // serialized merge queue: each candidate is rebased onto the current main tip (so
-// independently-based green branches integrate one at a time) and a trusted provenance
-// commit is written on top. A rebase conflict is reported, not retried. gitMerger is the
-// default implementation (see specs/integration.md, specs/bootstrap.md). Re-gating the
-// rebased result before advancing main is a following increment.
+// independently-based green branches integrate one at a time), the rebased result is
+// re-gated against what will actually land, and a trusted provenance commit is written on
+// top. A rebase conflict is reported, not retried. The regate callback re-verifies the
+// rebased result (see ReGate); a fast-forward, or a nil callback, skips it. gitMerger is
+// the default implementation (see specs/integration.md, specs/bootstrap.md).
 type Merger interface {
-	Merge(ctx context.Context, repo, ref string, prov Provenance) (commit string, err error)
+	Merge(ctx context.Context, repo, ref string, prov Provenance, regate ReGate) (commit string, err error)
 }
 
 // Options configures an Orchestrator. They are the instance knobs (which config it

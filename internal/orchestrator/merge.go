@@ -18,6 +18,26 @@ import (
 // specs/integration.md). Callers detect it with errors.Is.
 var errRebaseConflict = errors.New("orchestrator: candidate conflicts with current main and cannot be cleanly rebased")
 
+// errReGateFailed signals that the rebased result failed the re-gate (specs/integration.md
+// step 3): the candidate was rebased cleanly onto the current main, but re-running the full
+// gate suite against the *combined* tree found it broken — the two-green-branches case,
+// where two branches each pass their own gate in isolation yet break main together. Unlike
+// a conflict this is not necessarily deterministic across a different main, so the
+// orchestrator routes a fix issue through the normal retry/budget machinery rather than
+// dead-lettering. Callers detect it with errors.Is.
+var errReGateFailed = errors.New("orchestrator: rebased result failed re-gate")
+
+// ReGate re-verifies the rebased result before main is advanced (specs/integration.md step
+// 3). The merger calls it with a gradable git ref pointing at the rebased tree that will
+// land — i.e. against what will actually become main, not the branch as originally
+// authored. It returns the provenance to record on the merge commit (citing the re-gate's
+// own checks, since the rebased combination is what landed) and whether the result passed.
+// A clean rejection (accepted=false) makes Merge return errReGateFailed without advancing
+// main, so the caller can route a fix issue; a non-nil error is an infrastructure fault the
+// caller retries. A nil ReGate skips re-gating (a fast-forward lands the exact tree the
+// branch gate already graded, and pure-git merge tests pass nil).
+type ReGate func(ctx context.Context, landedRef string) (prov Provenance, accepted bool, err error)
+
 // gitMerger is the default Merger. It lands a verified candidate on main as a serialized
 // merge queue (a merge train): each candidate is rebased onto the CURRENT main tip before
 // a trusted provenance commit is written on top, so independently-based green branches
@@ -27,8 +47,9 @@ var errRebaseConflict = errors.New("orchestrator: candidate conflicts with curre
 // deterministic git computation on objects already present there, so the trusted layer
 // performs it directly (no untrusted code runs during a rebase — the candidate's own
 // hooks/filters are never installed); only conflict resolution that needs an agent runs
-// sandboxed. The rebased result is what will actually land, so it is the tree a re-gate
-// must grade (the re-gate against the rebased result is a following increment).
+// sandboxed. The rebased result is what will actually land, so it is the tree the re-gate
+// grades before main advances (specs/integration.md step 3): the merger publishes the
+// rebased result under a temporary ref and hands it to the caller's ReGate.
 type gitMerger struct {
 	bin string
 	run gitRunFunc // seam for tests; defaults to exec
@@ -73,7 +94,13 @@ func NewGitMerger(bin string) Merger {
 // issue id in the trailer is robust where an ancestor check is not: a rebase rewrites the
 // candidate's commits to new SHAs, so the original candidate tip is not an ancestor of a
 // main it merged onto via rebase.
-func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov Provenance) (string, error) {
+//
+// When a rebase occurs, the rebased result is re-gated before it lands (specs/integration.md
+// step 3) via the regate callback: the merger publishes the rebased tree under a temporary
+// ref and asks regate to verify it, landing only an accepted result and recording the
+// provenance regate returns. A fast-forward skips the re-gate — it lands the exact tree the
+// branch gate already verified, so there is nothing new to grade. A nil regate also skips it.
+func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov Provenance, regate ReGate) (string, error) {
 	mainTip, err := m.run(ctx, repo, "rev-parse", "--verify", "refs/heads/main")
 	if err != nil {
 		return "", fmt.Errorf("orchestrator: resolve main tip: %w", err)
@@ -96,11 +123,14 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov Provenance
 	// on top of main and lands as-is. Otherwise main moved under it — rebase the candidate
 	// onto the current main so the result is, again, a fast-forward of main.
 	landed := tip
+	landedRef := ref
+	rebased := false
 	if _, ffErr := m.run(ctx, repo, "merge-base", "--is-ancestor", "refs/heads/main", ref); ffErr != nil {
-		rebased, cleanup, conflict, rerr := m.rebaseOntoMain(ctx, repo, ref)
+		rebasedTip, tmpRef, cleanup, conflict, rerr := m.rebaseOntoMain(ctx, repo, ref, prov.Issue)
 		if cleanup != nil {
-			// Defer removal until after main is advanced, so the rebased commits stay
-			// anchored (reachable) when commit-tree/update-ref run below.
+			// Defer the temp-ref deletion until after main is advanced, so the rebased
+			// commits stay anchored (reachable) through the re-gate, commit-tree and
+			// update-ref below; once main reaches them the ref is redundant.
 			defer cleanup()
 		}
 		if conflict {
@@ -109,7 +139,9 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov Provenance
 		if rerr != nil {
 			return "", rerr
 		}
-		landed = rebased
+		landed = rebasedTip
+		landedRef = tmpRef
+		rebased = true
 	}
 
 	// Nothing new to integrate (the candidate's changes are already in main, e.g. a rebase
@@ -117,6 +149,21 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov Provenance
 	// commit.
 	if landed == mainTip {
 		return mainTip, nil
+	}
+
+	// Step 3: re-gate the rebased result against the tree that will actually land before
+	// advancing main. Only a rebase can make the landed tree differ from the one the branch
+	// gate already graded (a fast-forward lands that exact tree), so re-gating is confined to
+	// the rebase path — that is where the two-green-branches breakage can hide.
+	if rebased && regate != nil {
+		regated, accepted, gerr := regate(ctx, landedRef)
+		if gerr != nil {
+			return "", fmt.Errorf("orchestrator: re-gate rebased result for %q: %w", ref, gerr)
+		}
+		if !accepted {
+			return "", errReGateFailed
+		}
+		prov = regated
 	}
 
 	tree, err := m.run(ctx, repo, "rev-parse", "--verify", landed+"^{tree}")
@@ -140,41 +187,72 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov Provenance
 }
 
 // rebaseOntoMain replays the candidate's commits onto the current main tip in a scratch
-// detached worktree and returns the rebased tip. The worktree isolates the rebase from
-// the integration repo's own checkout (main is moved by ref update, never by checkout).
-// On any rebase failure it aborts and reports conflict=true (the candidate collides with
-// what already merged). cleanup removes the worktree and is returned even on failure; the
-// caller defers it until after main is advanced so the rebased commits stay anchored.
-func (m *gitMerger) rebaseOntoMain(ctx context.Context, repo, ref string) (landed string, cleanup func(), conflict bool, err error) {
+// detached worktree, publishes the rebased result under a temporary ref, and returns the
+// rebased tip plus that ref. The worktree isolates the rebase from the integration repo's
+// own checkout (main is moved by ref update, never by checkout). On any rebase failure it
+// aborts and reports conflict=true (the candidate collides with what already merged).
+//
+// The rebased result is published as a branch under refs/heads/ so the re-gate's sandbox —
+// which seeds by cloning the integration repo, and a clone fetches only refs/heads/* and
+// tags — can check it out; this is also what keeps the rebased commits reachable after the
+// scratch worktree is removed (done eagerly here, since the ref now anchors them). cleanup
+// deletes that temp ref and is returned only on the success path; the caller defers it
+// until after main has advanced, at which point main reaches the commits and the ref is
+// redundant. On conflict/error the worktree is torn down internally and no ref is left.
+func (m *gitMerger) rebaseOntoMain(ctx context.Context, repo, ref, issueID string) (landed, tmpRef string, cleanup func(), conflict bool, err error) {
 	parent, err := os.MkdirTemp("", "harness-rebase-")
 	if err != nil {
-		return "", nil, false, fmt.Errorf("orchestrator: create rebase worktree dir: %w", err)
+		return "", "", nil, false, fmt.Errorf("orchestrator: create rebase worktree dir: %w", err)
 	}
 	// git worktree add requires a non-existent path; use a subdir of the temp parent.
 	wt := filepath.Join(parent, "wt")
-	cleanup = func() {
+	removeWorktree := func() {
 		_, _ = m.run(ctx, repo, "worktree", "remove", "--force", wt)
 		_ = os.RemoveAll(parent)
 		_, _ = m.run(ctx, repo, "worktree", "prune")
 	}
 
 	if _, err := m.run(ctx, repo, "worktree", "add", "--detach", wt, ref); err != nil {
-		return "", cleanup, false, fmt.Errorf("orchestrator: add rebase worktree for %q: %w", ref, err)
+		removeWorktree()
+		return "", "", nil, false, fmt.Errorf("orchestrator: add rebase worktree for %q: %w", ref, err)
 	}
 	// Rebase onto main. Identity is forced because rebase re-commits. A failure is treated
-	// as a conflict: abort so the worktree carries no half-applied state, then signal.
+	// as a conflict: abort so the worktree carries no half-applied state, tear it down, then
+	// signal.
 	if _, rerr := m.run(ctx, wt,
 		"-c", "user.name="+provenanceCommitterName,
 		"-c", "user.email="+provenanceCommitterEmail,
 		"rebase", "refs/heads/main"); rerr != nil {
 		_, _ = m.run(ctx, wt, "rebase", "--abort")
-		return "", cleanup, true, nil //nolint:nilerr // a rebase failure is a conflict, signaled via conflict=true, not the error channel (which is reserved for infrastructure faults)
+		removeWorktree()
+		return "", "", nil, true, nil //nolint:nilerr // a rebase failure is a conflict, signaled via conflict=true, not the error channel (which is reserved for infrastructure faults)
 	}
 	landed, err = m.run(ctx, wt, "rev-parse", "--verify", "HEAD")
 	if err != nil {
-		return "", cleanup, false, fmt.Errorf("orchestrator: resolve rebased tip for %q: %w", ref, err)
+		removeWorktree()
+		return "", "", nil, false, fmt.Errorf("orchestrator: resolve rebased tip for %q: %w", ref, err)
 	}
-	return landed, cleanup, false, nil
+	// Anchor the rebased commits under a clonable ref, then drop the worktree.
+	tmpRef = integrationRef(issueID)
+	if _, err := m.run(ctx, repo, "update-ref", tmpRef, landed); err != nil {
+		removeWorktree()
+		return "", "", nil, false, fmt.Errorf("orchestrator: publish rebased result ref %q: %w", tmpRef, err)
+	}
+	removeWorktree()
+	cleanup = func() { _, _ = m.run(ctx, repo, "update-ref", "-d", tmpRef) }
+	return landed, tmpRef, cleanup, false, nil
+}
+
+// integrationRef is the temporary branch the rebased result is published under so the
+// re-gate's sandbox clone (which fetches refs/heads/*) can check it out; it is deleted once
+// main has advanced. Keyed by issue id: integration is serialized so at most one is in
+// flight, but per-issue naming keeps a ref leaked by a crash self-identifying and lets the
+// next attempt for that issue overwrite it cleanly.
+func integrationRef(issueID string) string {
+	if issueID == "" {
+		issueID = "pending"
+	}
+	return "refs/heads/integration/" + issueID
 }
 
 func (m *gitMerger) exec(ctx context.Context, dir string, args ...string) (string, error) {

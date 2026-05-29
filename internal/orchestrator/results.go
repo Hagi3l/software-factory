@@ -23,6 +23,13 @@ const statusInProgress = "in_progress"
 // now-blocked issue and the message is Acked (redelivery cannot resolve a conflict).
 var errMergeConflictHandled = errors.New("orchestrator: integrate conflict dead-lettered")
 
+// errMergeRegateRouted is an internal sentinel: advance returns it when the rebased result
+// failed the integrate re-gate and the issue has already been routed to a fix attempt (the
+// two-green-branches case). Like errMergeConflictHandled it tells accept to stop without
+// closing the issue again — route already closed it and spawned the fix — and the message
+// is Acked.
+var errMergeRegateRouted = errors.New("orchestrator: integrate re-gate failure routed")
+
 // consumeResults is the event-driven half of the loop: it pulls Result envelopes off
 // the orchestrator's durable consumer and processes each. Ack/Nak encode the outcome:
 //   - a fully-processed Result (accepted, routed, or dead-lettered) is Acked.
@@ -172,6 +179,17 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 // for implement the red half runs against the author-tests candidate, where the tests are
 // present but the implementation is absent (T2.3/T2.5, see specs/verification.md).
 func (o *Orchestrator) runGate(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result) (gate.Report, error) {
+	return o.gate.Run(ctx, o.gateCandidate(issue, stage, res.Branch.Ref))
+}
+
+// gateCandidate builds the gate's Candidate for grading ref under stage's postconditions in
+// the issue's verification profile. It is shared by the initial branch gate (runGate, ref =
+// the candidate branch) and the integrate re-gate (ref = the rebased result), so both grade
+// the same stage's full check suite in the same fresh, producer-distinct sandbox — only the
+// tree under test differs. BaseRef is the issue's threaded Base (where a red→green proof's
+// red half runs) when set, else the pipeline base; for a stage whose checks need no base
+// (the qa suite that gates integrate: tests-pass, scanners, mutation) it is simply unused.
+func (o *Orchestrator) gateCandidate(issue core.Issue, stage config.Stage, ref string) gate.Candidate {
 	profile := ""
 	if soul, ok := o.selectSoul(issue); ok {
 		profile = soul.Sandbox
@@ -180,14 +198,38 @@ func (o *Orchestrator) runGate(ctx context.Context, issue core.Issue, stage conf
 	if issue.Base != "" {
 		baseRef = issue.Base
 	}
-	return o.gate.Run(ctx, gate.Candidate{
+	return gate.Candidate{
 		Repo:           o.opts.Repo,
-		Ref:            res.Branch.Ref,
+		Ref:            ref,
 		BaseRef:        baseRef,
 		Postconditions: stage.Postcondition,
 		Profile:        profile,
 		Limits:         o.opts.Limits,
-	})
+	}
+}
+
+// reGate builds the ReGate the merger invokes after a clean rebase (specs/integration.md
+// step 3). It re-runs the producing stage's full check suite — the same checks, same fresh
+// producer-distinct sandbox as the branch gate — against the rebased result the merger
+// published, so the verdict is against what will actually land on main rather than the
+// branch as authored. This is what catches the two-green-branches case: a combination that
+// each branch's isolated gate never saw. On a pass it returns provenance citing the
+// re-gate's own checks (the combination's verification is the truth now); a clean failure
+// (accepted=false) tells the merger to abort the merge so advance can route a fix issue; a
+// gate that cannot reach a verdict surfaces as an error the merger propagates for retry.
+func (o *Orchestrator) reGate(issue core.Issue, srcStage config.Stage, res core.Result) ReGate {
+	return func(ctx context.Context, landedRef string) (Provenance, bool, error) {
+		report, err := o.gate.Run(ctx, o.gateCandidate(issue, srcStage, landedRef))
+		if err != nil {
+			return Provenance{}, false, err
+		}
+		if !report.Passed {
+			o.log.Info("orchestrator: re-gate rejected rebased result", "issue", issue.ID,
+				"ref", landedRef, "checks_run", len(report.Checks))
+			return Provenance{}, false, nil
+		}
+		return o.provenanceFor(issue, res, report), true, nil
+	}
 }
 
 // accept applies a verified Result: it writes any validated child-issue proposals
@@ -211,10 +253,11 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 			// validate guarantees produces targets exist; defense-in-depth.
 			return false, fmt.Errorf("issue %s produces undefined stage %q", issue.ID, target)
 		}
-		if transient, err := o.advance(ctx, issue, target, tstage, res, report); err != nil {
-			if errors.Is(err, errMergeConflictHandled) {
-				// advance already dead-lettered the issue (an integrate rebase conflict). Stop
-				// here without closing the now-blocked issue, and Ack: redelivery cannot help.
+		if transient, err := o.advance(ctx, issue, stage, target, tstage, res, report); err != nil {
+			if errors.Is(err, errMergeConflictHandled) || errors.Is(err, errMergeRegateRouted) {
+				// advance already terminated the issue: dead-lettered it (an integrate rebase
+				// conflict) or routed it to a fix attempt (a re-gate failure). Either way it is
+				// no longer this accept's to close — stop here and Ack.
 				return false, nil
 			}
 			return transient, err
@@ -274,10 +317,10 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage c
 // failing tests into the implementor's worktree. The candidate branch persists in the
 // repo after gating (it is never deleted; see specs/integration.md), so basing the new
 // issue on it is sound.
-func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, target string, tstage config.Stage, res core.Result, report gate.Report) (bool, error) {
+func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage config.Stage, target string, tstage config.Stage, res core.Result, report gate.Report) (bool, error) {
 	if tstage.Kind == config.StageKindTrustedMerge {
 		prov := o.provenanceFor(issue, res, report)
-		commit, err := o.merger.Merge(ctx, o.opts.Repo, res.Branch.Ref, prov)
+		commit, err := o.merger.Merge(ctx, o.opts.Repo, res.Branch.Ref, prov, o.reGate(issue, srcStage, res))
 		if err != nil {
 			if errors.Is(err, errRebaseConflict) {
 				// The verified candidate cannot be cleanly rebased onto the current main tip:
@@ -290,6 +333,18 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, target str
 					return true, derr
 				}
 				return false, errMergeConflictHandled
+			}
+			if errors.Is(err, errReGateFailed) {
+				// The candidate rebased cleanly but the re-gate found the combined tree broken:
+				// two branches each green in isolation, broken together (specs/integration.md).
+				// Unlike a conflict this may pass against a different main, so route a fix issue
+				// through the normal retry/budget machinery rather than dead-lettering. route
+				// closes this issue and spawns the fix, so signal accept to stop without closing
+				// it again.
+				if transient, rerr := o.route(ctx, issue, srcStage, res, "integrate: re-gate of rebased result failed"); rerr != nil {
+					return transient, rerr
+				}
+				return false, errMergeRegateRouted
 			}
 			return true, fmt.Errorf("merge candidate %s for issue %s: %w", res.Branch.Ref, issue.ID, err)
 		}

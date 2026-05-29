@@ -60,11 +60,20 @@ that needs an LLM runs **sandboxed** and produces a *proposed* rebase; the trust
 layer does the final `git` write. Untrusted environments never hold the keys to
 `main`.
 
-The queue is built up incrementally: the serialized rebase-onto-current-main (step
-2, with a conflict escalating to the dead-letter queue) lands first; re-gating the
-rebased result (step 3) and sandboxed conflict resolution (the step-2 conflict
-branch) follow. Until step 3 exists, the rebased result is merged on the trust of
-the original gate plus the determinism of a clean rebase.
+The queue was built up incrementally: the serialized rebase-onto-current-main (step
+2, with a conflict escalating to the dead-letter queue) landed first; re-gating the
+rebased result (step 3) now follows; sandboxed conflict resolution (the step-2
+conflict branch) is the remaining piece. **Step 3 is realized:** when a candidate is
+rebased, the trusted layer publishes the rebased result under a temporary
+`refs/heads/integration/<issue-id>` branch (clonable, so a verification sandbox can
+fetch it), re-runs the producing stage's full check suite against *that* tree in a
+fresh producer-distinct sandbox, and advances `main` only on a pass — recording the
+re-gate's own checks in the provenance trailer, since the combination is what landed.
+A re-gate failure does **not** dead-letter (unlike a conflict, which is
+deterministic): the combination may pass against a different `main`, so the
+orchestrator routes a fix issue through the normal retry/budget machinery. A
+fast-forward skips step 3 — it lands the exact tree the branch gate already graded,
+so there is nothing new to verify.
 
 ---
 
