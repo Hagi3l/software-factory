@@ -28,6 +28,14 @@ const MetadataKeyLease = "lease_until"
 // specs/workflow.md).
 const MetadataKeyRetries = "retries"
 
+// MetadataKeyBase holds the git ref a produced issue's candidate must branch from
+// (core.Issue.Base). A freshly seeded issue has none (the orchestrator seeds from the
+// pipeline base, main); a produced issue carries its predecessor's verified candidate
+// branch so the next stage builds on it — e.g. implement branches from the
+// author-tests candidate that holds the failing acceptance tests (see
+// specs/workflow.md, specs/verification.md).
+const MetadataKeyBase = "base"
+
 // The transitions below are the orchestrator's single-writer interface to beads:
 // only the orchestrator mutates the work graph, so funneling every status change
 // and proposal application through these methods is what enforces the single-writer
@@ -181,7 +189,7 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 	if issue.Body != "" {
 		args = append(args, "--description", issue.Body)
 	}
-	if issue.Role != "" || issue.Attempt > 0 {
+	if issue.Role != "" || issue.Attempt > 0 || issue.Base != "" {
 		meta := map[string]any{}
 		if issue.Role != "" {
 			meta[MetadataKeyRole] = issue.Role
@@ -190,6 +198,11 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 		// (a 0 generation is the absence of the key, decoded back as 0 by metaInt).
 		if issue.Attempt > 0 {
 			meta[MetadataKeyRetries] = issue.Attempt
+		}
+		// Only stamp the base when set; a seeded issue carries none and the orchestrator
+		// falls back to the pipeline base (main) when building the Brief.
+		if issue.Base != "" {
+			meta[MetadataKeyBase] = issue.Base
 		}
 		b, err := json.Marshal(meta)
 		if err != nil {

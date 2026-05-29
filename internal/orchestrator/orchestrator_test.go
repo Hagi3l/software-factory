@@ -399,8 +399,43 @@ func TestHandleResultAcceptProducesAgentStage(t *testing.T) {
 	if len(applied) != 1 || applied[0].Issue.Role != "qa" {
 		t.Errorf("applied = %+v, want one qa proposal", applied)
 	}
+	// The produced issue branches from the predecessor's verified candidate, so the
+	// downstream stage builds on the work already done rather than from main (this is
+	// what carries an author-tests candidate's failing tests into the implementor's
+	// worktree; see specs/workflow.md).
+	if applied[0].Issue.Base != "candidate/iss-1" {
+		t.Errorf("produced issue Base = %q, want candidate/iss-1 (the predecessor's candidate)", applied[0].Issue.Base)
+	}
 	if len(closed) != 1 || closed[0] != "iss-1" {
 		t.Errorf("closed = %v", closed)
+	}
+}
+
+// TestScheduleReadyThreadsProducedBase proves a produced issue's Base flows into the
+// Brief: an issue carrying a predecessor's candidate branch is dispatched with that ref
+// as the worktree base, not the pipeline default (main). This is the seam that lets
+// implement branch from the author-tests candidate.
+func TestScheduleReadyThreadsProducedBase(t *testing.T) {
+	bd := newFakeBeads()
+	bd.ready = []core.Issue{{ID: "iss-2", Role: "implement", Base: "candidate/iss-1"}}
+	o, nc := newOrch(t, kernelConfig(2), bd, &fakeGate{}, &fakeMerger{})
+
+	sub, err := nc.SubscribeSync(messaging.WorkSubject("implement"))
+	if err != nil {
+		t.Fatalf("subscribe work: %v", err)
+	}
+	o.scheduleReady(context.Background())
+
+	msg, err := sub.NextMsg(2 * time.Second)
+	if err != nil {
+		t.Fatalf("no work published: %v", err)
+	}
+	var brief core.Brief
+	if err := json.Unmarshal(msg.Data, &brief); err != nil {
+		t.Fatalf("decode brief: %v", err)
+	}
+	if brief.Base != "candidate/iss-1" {
+		t.Errorf("brief Base = %q, want candidate/iss-1 (threaded from the issue)", brief.Base)
 	}
 }
 
@@ -408,7 +443,9 @@ func TestHandleResultAcceptProducesAgentStage(t *testing.T) {
 
 func TestHandleResultGateFailRetries(t *testing.T) {
 	bd := newFakeBeads()
-	bd.put(inProgress("iss-1", "implement", 0))
+	iss := inProgress("iss-1", "implement", 0)
+	iss.Base = "candidate/iss-0" // produced from a predecessor; the fix must build on the same base
+	bd.put(iss)
 	o, _ := newOrch(t, kernelConfig(2), bd, &fakeGate{report: gate.Report{Passed: false}}, &fakeMerger{})
 
 	_, err := o.handleResult(context.Background(), core.Result{IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: "candidate/iss-1"}})
@@ -418,6 +455,11 @@ func TestHandleResultGateFailRetries(t *testing.T) {
 	_, _, closed, blocked, applied := bd.snap()
 	if len(applied) != 1 || applied[0].Issue.Role != "implement" || applied[0].Issue.Attempt != 1 {
 		t.Errorf("applied = %+v, want one implement fix issue at attempt 1", applied)
+	}
+	// The retry inherits the failed issue's base, so a fix attempt builds on the same
+	// branch its predecessor did rather than reverting to main.
+	if applied[0].Issue.Base != "candidate/iss-0" {
+		t.Errorf("fix issue Base = %q, want candidate/iss-0 (preserved across the retry)", applied[0].Issue.Base)
 	}
 	if len(closed) != 1 || closed[0] != "iss-1" {
 		t.Errorf("closed = %v, want original closed", closed)

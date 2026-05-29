@@ -112,6 +112,7 @@ func (r issueJSON) toCore() core.Issue {
 		Role:    metaString(r.Metadata, MetadataKeyRole),
 		Status:  r.Status,
 		Attempt: metaInt(r.Metadata, MetadataKeyRetries),
+		Base:    metaString(r.Metadata, MetadataKeyBase),
 	}
 }
 

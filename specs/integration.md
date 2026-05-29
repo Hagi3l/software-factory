@@ -101,4 +101,7 @@ the batch, bisect on failure — as large CI merge queues do) can be added later
 - Whether `integrate` is its own [Role](glossary.md#role) with a dedicated
   integrator soul, or a built-in orchestrator function with sandboxed help only for
   conflict resolution. Leaning: orchestrator-owned, sandboxed help on demand.
-- Branch retention / cleanup policy after merge — TBD.
+- Branch retention / cleanup policy after merge — TBD. Note that downstream agent
+  stages now rely on the predecessor candidate branch persisting (it is the base a
+  produced issue branches from — see base threading in [workflow.md](workflow.md)), so
+  any future cleanup policy must not remove a candidate still referenced as a base.

@@ -14,6 +14,18 @@ type Issue struct {
 	Body  string
 	Role  string // the role/stage this issue is dispatched to
 
+	// Base is the git ref a produced issue's candidate must branch from. It is empty for
+	// a freshly seeded issue — the orchestrator then seeds the worktree from the pipeline
+	// base (main) — and set when one agent stage produces the next: the produced issue
+	// inherits the predecessor's verified candidate branch so the downstream stage builds
+	// on the work already done. This is what carries the failing acceptance tests from
+	// the author-tests candidate into the implementor's worktree, rather than branching
+	// implement from a main that has neither tests nor implementation (see
+	// specs/workflow.md, specs/verification.md). Like Attempt and Role it rides in beads
+	// metadata, and is preserved across on_failure retries so a fix attempt builds on the
+	// same base its predecessor did.
+	Base string
+
 	// Status is the beads lifecycle status (open/in_progress/blocked/closed),
 	// populated when an issue is read back. It is read-only to everything but the
 	// orchestrator's single-writer transitions. The orchestrator reads it to stay

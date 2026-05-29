@@ -80,8 +80,8 @@ func TestSeedIntegration(t *testing.T) {
 	if len(ready) != 1 {
 		t.Fatalf("expected 1 ready issue, got %d", len(ready))
 	}
-	if ready[0].Role != "implementor" {
-		t.Fatalf("seed issue role = %q, want implementor", ready[0].Role)
+	if ready[0].Role != "test-author" {
+		t.Fatalf("seed issue role = %q, want test-author (the DAG entry stage)", ready[0].Role)
 	}
 	if ready[0].Title != "Implement the thing" {
 		t.Fatalf("seed issue title = %q", ready[0].Title)

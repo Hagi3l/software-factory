@@ -20,7 +20,7 @@ func validConfig() *Config {
 			DAG: map[string]Stage{
 				"requirements": {Kind: "human"},
 				"plan":         {Role: "planner", Produces: []string{"author-tests"}},
-				"author-tests": {Role: "test-author", Produces: []string{"implement"}},
+				"author-tests": {Role: "test-author", Postcondition: []string{"tests-red"}, Produces: []string{"implement"}},
 				"implement": {
 					Role:          "implementor",
 					Precondition:  "blockers-closed",
@@ -183,6 +183,16 @@ func TestValidateRedGreenWithoutAcceptanceCommand(t *testing.T) {
 	c.Souls = fullSouls(t)
 	delete(c.Harness.Checks, "tests-pass") // implement still declares tests-red-then-green
 	mustContain(t, problems(t, c), `stage "implement" declares the "tests-red-then-green" proof but no "tests-pass" command`)
+}
+
+// The tests-red proof (author-tests) likewise reuses the acceptance-test command; a
+// stage that declares it without that command registered is unresolvable at the gate,
+// so validation must reject it at startup (T2.4).
+func TestValidateTestsRedWithoutAcceptanceCommand(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	delete(c.Harness.Checks, "tests-pass") // author-tests still declares tests-red
+	mustContain(t, problems(t, c), `stage "author-tests" declares the "tests-red" proof but no "tests-pass" command`)
 }
 
 // A registered check with an empty command would silently fail every candidate, so an

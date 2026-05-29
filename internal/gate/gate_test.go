@@ -524,3 +524,87 @@ func TestRunRedGreenWithCommandCheck(t *testing.T) {
 		t.Errorf("base ran %v, want only [make test-unit]", base.execed)
 	}
 }
+
+// testsRedCandidate is a candidate whose only postcondition is the tests-red proof —
+// the author-tests stage's gate. Unlike red→green it needs no base ref: the acceptance
+// tests run once, against the candidate, and must fail.
+func testsRedCandidate() Candidate {
+	c := testCandidate()
+	c.Postconditions = []string{core.PostconditionTestsRed}
+	c.BaseRef = ""
+	return c
+}
+
+// Resolve binds the reserved tests-red proof to the acceptance-test command (it has no
+// entry of its own) and marks it the redProof kind, so Run grades it on a nonzero exit.
+func TestResolveTestsRedProof(t *testing.T) {
+	checks, err := redGreenRegistry().Resolve([]string{core.PostconditionTestsRed})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(checks) != 1 || checks[0].Name != core.PostconditionTestsRed || checks[0].Cmd != "make test-unit" {
+		t.Fatalf("Resolve = %+v, want the proof bound to the tests-pass command", checks)
+	}
+	if checks[0].kind != redProof {
+		t.Errorf("kind = %d, want redProof", checks[0].kind)
+	}
+}
+
+// The tests-red proof passes when the acceptance tests FAIL on the candidate: the test
+// author wrote real, executing tests that fail because no implementation exists yet. It
+// spends exactly one sandbox (no base ref), and the evidence labels the nonzero exit as
+// the expected outcome so it does not read as a contradiction.
+func TestRunTestsRedProofPassesWhenCandidateFails(t *testing.T) {
+	cand := &scriptedSandbox{id: "cand-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit": {ExitCode: 1, Stdout: []byte("FAIL: behavior not implemented")},
+	}}
+	be := &fakeBackend{sb: cand}
+	store := testStore(t)
+	g := New(be, redGreenRegistry(), store, t.TempDir(), nil)
+
+	report, err := g.Run(context.Background(), testsRedCandidate())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !report.Passed || len(report.Checks) != 1 {
+		t.Fatalf("report = %+v, want a single passing proof", report)
+	}
+	cr := report.Checks[0]
+	if cr.Base != nil || cr.ExitCode != 1 || !cr.Passed {
+		t.Fatalf("proof result = %+v, want no base, candidate exit 1, passed", cr)
+	}
+	// One sandbox only — the proof has no base ref.
+	if be.provisioned != 1 {
+		t.Fatalf("provisioned %d sandboxes, want 1 (candidate only)", be.provisioned)
+	}
+	ev := readArtifact(t, store, cr.Evidence.Hash)
+	for _, want := range []string{"kind: tests-red", "status: pass", "must be nonzero", "FAIL: behavior not implemented"} {
+		if !bytes.Contains(ev, []byte(want)) {
+			t.Errorf("evidence = %q, want it to contain %q", ev, want)
+		}
+	}
+}
+
+// The tests-red proof FAILS when the acceptance tests PASS on the candidate: a suite
+// that is green with no implementation is vacuous (or tests nothing), exactly what this
+// proof exists to catch before an implement attempt is spent on it.
+func TestRunTestsRedProofFailsWhenCandidatePasses(t *testing.T) {
+	cand := &scriptedSandbox{id: "cand-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit": {ExitCode: 0, Stdout: []byte("ok with no implementation — vacuous")},
+	}}
+	be := &fakeBackend{sb: cand}
+	store := testStore(t)
+	g := New(be, redGreenRegistry(), store, t.TempDir(), nil)
+
+	report, err := g.Run(context.Background(), testsRedCandidate())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Passed {
+		t.Fatal("report.Passed = true, want false (tests are green with no implementation, so vacuous)")
+	}
+	ev := readArtifact(t, store, report.Checks[0].Evidence.Hash)
+	if !bytes.Contains(ev, []byte("status: fail")) {
+		t.Errorf("evidence = %q, want status: fail", ev)
+	}
+}

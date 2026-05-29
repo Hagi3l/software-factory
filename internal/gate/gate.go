@@ -33,12 +33,15 @@ const teardownTimeout = 30 * time.Second
 // checkKind distinguishes how the gate runs a check. The zero value is a command
 // check (run once against the candidate; exit 0 = pass), so any Check built without
 // naming a kind keeps that meaning. A redGreenProof runs the acceptance tests against
-// two refs — the base (must fail) and the candidate (must pass) — see Run.
+// two refs — the base (must fail) and the candidate (must pass) — see Run. A redProof
+// runs the acceptance tests once against the candidate, which must FAIL (the
+// author-tests stage's tests are red before any implementation exists).
 type checkKind int
 
 const (
 	cmdCheck checkKind = iota
 	redGreenProof
+	redProof
 )
 
 // Check is one verification the gate runs in the clean sandbox. A command check passes
@@ -71,19 +74,25 @@ type Registry map[string]string
 // has no entry of its own and instead reuses the acceptance-test command registered
 // under core.CheckAcceptanceTests, run against two refs (see runRedGreen). Resolve binds
 // it to that command here so a stage that asks for the proof without a registered
-// acceptance-test command is a config fault caught before any sandbox is spent. Metric
-// comparisons ("mutation>=0.8") have no check kind yet (T2.7) and remain unresolved.
+// acceptance-test command is a config fault caught before any sandbox is spent. The
+// tests-red proof (core.PostconditionTestsRed) is the same shape run against one ref —
+// the candidate, which must fail — and binds to the same command. Metric comparisons
+// ("mutation>=0.8") have no check kind yet (T2.7) and remain unresolved.
 func (r Registry) Resolve(postconditions []string) ([]Check, error) {
 	checks := make([]Check, 0, len(postconditions))
 	var unresolved []string
 	for _, pc := range postconditions {
-		if pc == core.PostconditionRedGreen {
+		if pc == core.PostconditionRedGreen || pc == core.PostconditionTestsRed {
 			cmd, ok := r[core.CheckAcceptanceTests]
 			if !ok {
 				unresolved = append(unresolved, fmt.Sprintf("%s (no %q command registered)", pc, core.CheckAcceptanceTests))
 				continue
 			}
-			checks = append(checks, Check{Name: pc, Cmd: cmd, kind: redGreenProof})
+			kind := redGreenProof
+			if pc == core.PostconditionTestsRed {
+				kind = redProof
+			}
+			checks = append(checks, Check{Name: pc, Cmd: cmd, kind: kind})
 			continue
 		}
 		cmd, ok := r[pc]
@@ -138,6 +147,10 @@ type CheckResult struct {
 	Stdout   []byte
 	Stderr   []byte
 	Evidence core.ArtifactRef
+	// kind records how this check was graded, so the evidence record can label it (a
+	// red proof passes on a nonzero exit, which would otherwise read as a contradiction).
+	// It is unexported because only the gate writes evidence; callers read Passed.
+	kind checkKind
 	// Base, when non-nil, is the red half of a red→green proof: the acceptance tests
 	// run against the pre-implementation base, which must FAIL. The inline
 	// ExitCode/Stdout/Stderr above are then the green half — the same tests against the
@@ -291,13 +304,22 @@ func runCheck(ctx context.Context, check Check, base, cand sandbox.Sandbox) (Che
 	if err != nil {
 		return CheckResult{}, fmt.Errorf("gate: run check %q: %w", check.Name, err)
 	}
+	// A red proof inverts the command-check verdict: the acceptance tests must FAIL
+	// against the candidate (no implementation yet), so a nonzero exit is a pass and a
+	// zero exit — the suite passing with no implementation — means the tests are
+	// vacuous or do not exercise the change, which is the failure this proof catches.
+	passed := res.ExitCode == 0
+	if check.kind == redProof {
+		passed = res.ExitCode != 0
+	}
 	return CheckResult{
 		Name:     check.Name,
 		Cmd:      check.Cmd,
 		ExitCode: res.ExitCode,
-		Passed:   res.ExitCode == 0,
+		Passed:   passed,
 		Stdout:   res.Stdout,
 		Stderr:   res.Stderr,
+		kind:     check.kind,
 	}, nil
 }
 
@@ -323,6 +345,7 @@ func runRedGreen(ctx context.Context, check Check, base, cand sandbox.Sandbox) (
 		Stdout:   greenRes.Stdout,
 		Stderr:   greenRes.Stderr,
 		Base:     &RunResult{ExitCode: redRes.ExitCode, Stdout: redRes.Stdout, Stderr: redRes.Stderr},
+		kind:     redGreenProof,
 	}, nil
 }
 
@@ -438,6 +461,17 @@ func formatEvidence(cr CheckResult) []byte {
 		b.WriteString("--- candidate stdout ---\n")
 		writeStream(&b, cr.Stdout)
 		b.WriteString("--- candidate stderr ---\n")
+		writeStream(&b, cr.Stderr)
+		return b.Bytes()
+	}
+	if cr.kind == redProof {
+		// Red proof: the acceptance tests must FAIL here (no implementation yet), so a
+		// nonzero exit is a pass — spell that out so the record does not read as a
+		// contradiction when triaged.
+		fmt.Fprintf(&b, "check: %s\nkind: tests-red\ncommand: %s\nexit: %d (must be nonzero)\nstatus: %s\n", cr.Name, cr.Cmd, cr.ExitCode, status)
+		b.WriteString("--- stdout ---\n")
+		writeStream(&b, cr.Stdout)
+		b.WriteString("--- stderr ---\n")
 		writeStream(&b, cr.Stderr)
 		return b.Bytes()
 	}

@@ -1,0 +1,18 @@
+# The Go test author: the soul that fulfills the `author-tests` DAG role. It writes the
+# FAILING acceptance tests from the spec and is deliberately a *different* soul than the
+# implementor — producer != verifier, the defence against correlated errors where one
+# misreading produces both a wrong implementation and a test that agrees with it (see
+# specs/verification.md). One soul per role in the kernel; selector-based choice among
+# several souls for a role is Phase 3.
+#
+# It runs in the same `go-toolchain` sandbox as the implementor (it must compile and run
+# the tests it writes to confirm they are red), but its persona forbids it from writing
+# any implementation. The model resolves through infra.<env>.yaml's `models` registry;
+# the API key is supplied from the environment by the runner, never from this file.
+name:    test-author-go
+role:    test-author
+model:   claude-opus-4-8
+persona: souls/prompts/test-author.md
+tools:   [fs, shell, git]
+sandbox: go-toolchain
+selector: { lang: go }

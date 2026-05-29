@@ -60,14 +60,21 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 // buildBrief assembles the task envelope handed into the sandbox. In the bootstrap the
 // spec slice is empty: the seeded worktree contains the whole specs/ tree, so the agent
 // reads the spec it needs through its workspace tools; bounded spec-slice resolution is
-// Phase 3 (see specs/specs-process.md). Base is the ref the candidate branches from,
-// and Criteria carries the stage's postconditions so the agent knows what it must
-// satisfy (the orchestrator independently re-checks them at the gate).
+// Phase 3 (see specs/specs-process.md). Base is the ref the candidate branches from: an
+// issue produced by a preceding agent stage carries its predecessor's verified candidate
+// (issue.Base), so e.g. implement branches from the author-tests candidate that holds
+// the failing tests; a freshly seeded issue carries none and falls back to the pipeline
+// base (o.base, main). Criteria carries the stage's postconditions so the agent knows
+// what it must satisfy (the orchestrator independently re-checks them at the gate).
 func (o *Orchestrator) buildBrief(issue core.Issue, stage config.Stage, soul core.Soul) core.Brief {
+	base := o.base
+	if issue.Base != "" {
+		base = issue.Base
+	}
 	return core.Brief{
 		Issue:    issue,
 		Spec:     "",
-		Base:     o.base,
+		Base:     base,
 		Criteria: stage.Postcondition,
 		Soul:     soul,
 	}

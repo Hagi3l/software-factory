@@ -72,9 +72,24 @@ the project's acceptance-test command (the `tests-pass` command from the
 passes means the tests don't exercise the change and the candidate is rejected even
 though its own tests are green. The reserved proof has no command of its own — it
 reuses `tests-pass`, so the acceptance tests stay a single source of truth — and the
-evidence record captures both runs for audit. The base ref is meaningful only once
-[`author-tests`](workflow.md) lands: the implementor's base then holds the failing
-tests but not the implementation, so red→green is the natural gate on `implement`.
+evidence record captures both runs for audit. The base ref the candidate branched from
+holds the failing tests but not the implementation: the orchestrator threads the
+verified [`author-tests`](workflow.md) candidate as the `implement` issue's base (see
+base threading in [workflow.md](workflow.md)), so red→green is the natural gate on
+`implement`.
+
+### Tests-red proof
+The complement to red→green, gating [`author-tests`](workflow.md). It requires the
+acceptance tests to **fail against the author-tests candidate** — the branch holding
+the freshly written tests but no implementation. This proves the test author produced
+real, executing, non-vacuous tests that genuinely fail before an `implement` attempt is
+spent making them pass, rather than an always-green suite that asserts nothing. Like
+red→green it has no command of its own: it reuses the `tests-pass` command, run **once**
+against the candidate, and passes iff that command **fails** (nonzero exit). It is the
+[producer ≠ verifier](#producer--verifier) principle applied to the author-tests stage,
+and the natural complement to the implementor's red→green proof, which later re-confirms
+that same candidate is red as `implement`'s base before requiring the implementation to
+turn it green.
 
 ### Mutation testing
 Mutate the implementation and require the tests to **catch** the mutation; gate on

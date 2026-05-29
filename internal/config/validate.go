@@ -46,6 +46,16 @@ var knownPreconditions = map[string]bool{
 // each one runs (see specs/configuration.md).
 var reservedPostconditions = map[string]bool{
 	core.PostconditionRedGreen: true,
+	core.PostconditionTestsRed: true,
+}
+
+// reusesAcceptanceTests are the reserved proofs that have no command of their own and
+// instead run the acceptance-test command (core.CheckAcceptanceTests) against one or
+// more refs. A stage that declares one must register that command, or the gate cannot
+// resolve it at run time — caught here at startup rather than mid-run.
+var reusesAcceptanceTests = map[string]bool{
+	core.PostconditionRedGreen: true,
+	core.PostconditionTestsRed: true,
 }
 
 // knownMetrics are the metrics that may appear on the left of a comparison
@@ -131,12 +141,13 @@ func (c *Config) validateDAG(add func(string, ...any)) {
 				add("stage %q postcondition %q is not a known condition (no command in checks:, not a known metric or reserved proof)", name, pc)
 				continue
 			}
-			// The red→green proof has no command of its own; it runs the acceptance-test
-			// command against the base and the candidate. If a stage declares it, that
-			// command must be registered, or the gate cannot resolve it at run time —
-			// catch the gap here at startup rather than mid-run (see specs/verification.md).
-			if pc == core.PostconditionRedGreen && strings.TrimSpace(c.Harness.Checks[core.CheckAcceptanceTests]) == "" {
-				add("stage %q declares the %q proof but no %q command is registered in checks:", name, core.PostconditionRedGreen, core.CheckAcceptanceTests)
+			// The red→green and tests-red proofs have no command of their own; they run
+			// the acceptance-test command against the base and/or the candidate. If a stage
+			// declares one, that command must be registered, or the gate cannot resolve it
+			// at run time — catch the gap here at startup rather than mid-run (see
+			// specs/verification.md).
+			if reusesAcceptanceTests[pc] && strings.TrimSpace(c.Harness.Checks[core.CheckAcceptanceTests]) == "" {
+				add("stage %q declares the %q proof but no %q command is registered in checks:", name, pc, core.CheckAcceptanceTests)
 			}
 		}
 	}

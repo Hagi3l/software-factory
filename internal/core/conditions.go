@@ -14,11 +14,24 @@ const (
 	// reuses the CheckAcceptanceTests command, run against both refs.
 	PostconditionRedGreen = "tests-red-then-green"
 
+	// PostconditionTestsRed is the reserved "tests must be red" proof for the
+	// author-tests stage: the gate runs the acceptance tests against the stage's own
+	// candidate, which must FAIL because no implementation exists yet. It proves the
+	// test author produced real, executing acceptance tests that genuinely fail — not a
+	// vacuous, always-green, or non-compiling suite — so a wasted implement attempt is
+	// never spent on a bad test candidate (producer ≠ verifier applied to the author
+	// stage; see specs/verification.md, specs/workflow.md). Like the red→green proof it
+	// has no `checks` entry of its own — it reuses the CheckAcceptanceTests command, run
+	// once against the candidate — and is the natural complement to the implementor's
+	// red→green proof, which later re-confirms the same candidate is red as its base.
+	PostconditionTestsRed = "tests-red"
+
 	// CheckAcceptanceTests is the registry key for the project's acceptance-test
 	// command (e.g. `go test ./...`). It is the command a command-check stage runs to
-	// grade a candidate green, and the same command the red→green proof runs against
-	// both refs. Keeping the acceptance tests under one key makes that command a single
-	// source of truth shared by the `qa` stage's `tests-pass` check and the `implement`
-	// stage's red→green proof (see specs/configuration.md).
+	// grade a candidate green, and the same command the red→green and tests-red proofs
+	// run. Keeping the acceptance tests under one key makes that command a single source
+	// of truth shared by the `qa` stage's `tests-pass` check, the `implement` stage's
+	// red→green proof, and the `author-tests` stage's tests-red proof (see
+	// specs/configuration.md).
 	CheckAcceptanceTests = "tests-pass"
 )

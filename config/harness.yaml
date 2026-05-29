@@ -1,18 +1,36 @@
 # Bootstrap workflow (the kernel DAG).
 #
 # Why this shape: bootstrap.md collapses the full requirements -> plan ->
-# author-tests -> implement -> qa -> integrate pipeline down to
-# implement -> integrate for the self-host point. The human performs `plan` by
-# authoring specs and seeding one issue at the `implement` stage; the implementor
-# writes its own tests until the independent `author-tests` stage lands (Phase 2).
-# `integrate` is a trusted-merge executed inline by the orchestrator (never
-# dispatched to a runner), which is the terminal merge-to-main state.
+# author-tests -> implement -> qa -> integrate pipeline. The human still performs
+# `requirements`/`plan` by authoring specs and seeding one issue; that seed now enters
+# at `author-tests`, the first autonomous stage. `qa` (mutation + scanners) is still
+# folded into the gate and lands as its own stage in Phase 2 (T2.9).
 #
-# `on_failure: implement` routes a rejected candidate back through a fresh implement
-# attempt (a new issue, keeping the issue graph acyclic); `max_retries` bounds how
-# many such cycles run before the work dead-letters for human triage — the primary
-# termination guarantee.
+# `author-tests` writes the FAILING acceptance tests from the spec (producer != verifier:
+# a different soul than the implementor). Its `tests-red` postcondition proves the tests
+# genuinely fail with no implementation present — a vacuous or non-compiling suite is
+# rejected before an implement attempt is ever spent on it. On success it `produces` an
+# `implement` issue whose candidate branches from the author-tests candidate (the
+# orchestrator threads the verified branch as the new issue's base), so the implementor
+# inherits the failing tests and only has to make them pass.
+#
+# `implement` makes those tests pass; its `tests-pass` postcondition grades the candidate
+# green in the clean verification sandbox. (Flipping it to `tests-red-then-green` — proving
+# the same tests were red on the author-tests base — is T2.5, now unblocked by the base
+# threading.) `integrate` is a trusted-merge executed inline by the orchestrator (never
+# dispatched to a runner), the terminal merge-to-main state.
+#
+# `on_failure` routes a rejected candidate back through a fresh attempt of the same stage
+# (a new issue, keeping the issue graph acyclic); `max_retries` bounds how many such
+# cycles run before the work dead-letters for human triage — the primary termination
+# guarantee.
 dag:
+  author-tests:
+    role: test-author
+    precondition: blockers-closed
+    postcondition: [tests-red]
+    on_failure: author-tests
+    produces: [implement]
   implement:
     role: implementor
     precondition: blockers-closed
@@ -22,12 +40,14 @@ dag:
   integrate:
     kind: trusted-merge
 
-# The check registry: each command-check postcondition declared above resolves to the
-# shell command the gate runs in the clean verification sandbox (exit 0 = pass). These
-# are the harness's own make targets — `make test-unit` compiles every package (so a
-# build break also fails the gate) and runs the unit suite. Keeping the commands here
-# (not as flags or code) makes config the single source of truth the gate resolves
-# against; see specs/configuration.md.
+# The check registry: each command-check postcondition resolves to the shell command the
+# gate runs in the clean verification sandbox (exit 0 = pass). These are the harness's own
+# make targets — `make test-unit` compiles every package (so a build break also fails the
+# gate) and runs the unit suite. The reserved proofs `tests-red` (author-tests) and
+# `tests-red-then-green` (implement, when enabled) have no command of their own: they
+# reuse `tests-pass`, run against the candidate and/or its base, so the acceptance tests
+# stay a single source of truth. Keeping the commands here (not as flags or code) makes
+# config the single source of truth the gate resolves against; see specs/configuration.md.
 checks:
   tests-pass: make test-unit
 

@@ -207,9 +207,12 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 // advance applies one produces edge. A trusted-merge stage (integrate) is executed by
 // the orchestrator inline — it fast-forwards the just-verified candidate onto main,
 // which is the terminal state of the bootstrap pipeline. An agent stage is realized as
-// a new ready issue carrying the produced role, dispatched on a later tick. (Handing a
-// produced agent stage the predecessor's candidate to build on is Phase 3; the kernel
-// DAG goes implement -> integrate directly.)
+// a new ready issue carrying the produced role and the predecessor's just-verified
+// candidate branch as its Base, so the downstream stage builds on the work already done
+// rather than branching from main: this is what carries the author-tests candidate's
+// failing tests into the implementor's worktree. The candidate branch persists in the
+// repo after gating (it is never deleted; see specs/integration.md), so basing the new
+// issue on it is sound.
 func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, target string, tstage config.Stage, res core.Result, report gate.Report) (bool, error) {
 	if tstage.Kind == config.StageKindTrustedMerge {
 		prov := o.provenanceFor(issue, res, report)
@@ -223,13 +226,13 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, target str
 	}
 
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: tstage.Role},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: tstage.Role, Base: res.Branch.Ref},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create produced %q issue from %s: %w", target, issue.ID, err)
 	}
 	for _, c := range created {
-		o.log.Info("orchestrator: produced next-stage issue", "from", issue.ID, "stage", target, "new", c.ID)
+		o.log.Info("orchestrator: produced next-stage issue", "from", issue.ID, "stage", target, "new", c.ID, "base", res.Branch.Ref)
 	}
 	return false, nil
 }
@@ -255,7 +258,7 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	}
 
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create on_failure fix issue from %s: %w", issue.ID, err)

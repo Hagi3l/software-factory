@@ -72,7 +72,12 @@ different axes:
   might emit three `implement` issues or thirty.
 - **Depth is declarative.** Stage→stage transitions are config (`produces:`),
   applied by the **orchestrator**, never by the agent. When `implement` passes its
-  gate, the *orchestrator* creates the `qa` issue.
+  gate, the *orchestrator* creates the `qa` issue. When it creates the next-stage
+  issue it also seeds it with the predecessor's just-verified candidate branch as its
+  base, so the downstream stage builds on the work already done — e.g. an `implement`
+  issue branches from the `author-tests` candidate that holds the failing acceptance
+  tests, not from `main`. (The base rides in beads metadata and is preserved across
+  `on_failure` retries.)
 
 Therefore **agents never know what stage comes next.** They do their node and emit
 a Result. This keeps souls fully decoupled from the workflow shape: planners

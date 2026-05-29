@@ -18,17 +18,17 @@ func loadTestConfig(t *testing.T) *config.Config {
 	return cfg
 }
 
-// TestEntryRole proves seed infers the kernel's single entry stage (implement ->
-// implementor) so an operator need not name it, and that it refuses to guess when
-// the DAG is ambiguous or rootless.
+// TestEntryRole proves seed infers the kernel's single entry stage (author-tests ->
+// test-author, the agent stage no other stage produces) so an operator need not name
+// it, and that it refuses to guess when the DAG is ambiguous or rootless.
 func TestEntryRole(t *testing.T) {
 	cfg := loadTestConfig(t)
 	role, err := entryRole(cfg)
 	if err != nil {
 		t.Fatalf("entryRole: %v", err)
 	}
-	if role != "implementor" {
-		t.Fatalf("entryRole = %q, want %q", role, "implementor")
+	if role != "test-author" {
+		t.Fatalf("entryRole = %q, want %q", role, "test-author")
 	}
 
 	// Two unproduced agent stages -> ambiguous, must error.
@@ -54,11 +54,14 @@ func TestAgentRolesAndRoleIsAgentStage(t *testing.T) {
 	cfg := loadTestConfig(t)
 
 	roles := agentRoles(cfg)
-	if len(roles) != 1 || roles[0] != "implementor" {
-		t.Fatalf("agentRoles = %v, want [implementor]", roles)
+	if len(roles) != 2 || roles[0] != "implementor" || roles[1] != "test-author" {
+		t.Fatalf("agentRoles = %v, want [implementor test-author]", roles)
 	}
 	if !roleIsAgentStage(cfg, "implementor") {
 		t.Fatal("implementor should be an agent stage")
+	}
+	if !roleIsAgentStage(cfg, "test-author") {
+		t.Fatal("test-author should be an agent stage")
 	}
 	if roleIsAgentStage(cfg, "integrate") {
 		t.Fatal("integrate is a trusted-merge stage (no role), not an agent stage")

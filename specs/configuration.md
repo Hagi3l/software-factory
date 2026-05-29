@@ -29,7 +29,7 @@ infra.<env>.yaml      # sandbox/NATS/broker — differs per environment
 dag:
   requirements: { kind: human }
   plan:         { role: planner,      produces: [author-tests] }
-  author-tests: { role: test-author,  produces: [implement] }
+  author-tests: { role: test-author,  postcondition: [tests-red], produces: [implement] }
   implement:    { role: implementor,
                   precondition:  blockers-closed,
                   postcondition: [tests-red-then-green],
@@ -67,9 +67,15 @@ policy:
   specially. The `tests-red-then-green` proof reuses the **`tests-pass`** acceptance-test
   command, running it against two refs (fail on the base, pass on the candidate — see
   [verification.md](verification.md)); a stage that declares the proof must therefore
-  register a `tests-pass` command, which validation enforces. Keeping the acceptance
+  register a `tests-pass` command, which validation enforces. The **`tests-red`** proof
+  has the same shape: it too carries no `checks` entry and reuses `tests-pass`, but runs
+  it **once** against the candidate and passes iff that command **fails** — proving the
+  test author produced real, executing acceptance tests that genuinely fail before any
+  implementation exists. A stage declaring `tests-red` must likewise register a
+  `tests-pass` command, which validation enforces. Keeping the acceptance
   tests under one `tests-pass` key makes that command a single source of truth shared by
-  the `qa` stage's `tests-pass` check and the `implement` stage's red→green proof.
+  the `qa` stage's `tests-pass` check, the `author-tests` stage's `tests-red` proof, and
+  the `implement` stage's red→green proof.
 - `policy` is the **termination guarantee** — see budgets in
   [workflow.md](workflow.md).
 

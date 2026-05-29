@@ -379,6 +379,33 @@ func TestRetriesRoundTripIntegration(t *testing.T) {
 	}
 }
 
+// TestBaseRoundTripIntegration proves an issue's Base — the git ref a produced issue's
+// candidate branches from — survives the write to beads metadata and decodes back on
+// Get. This is what carries the author-tests candidate (holding the failing tests) into
+// the implementor's worktree; it must round-trip alongside Role and Attempt.
+func TestBaseRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+
+	created, err := c.Apply(context.Background(), []core.Proposal{
+		{Issue: core.Issue{Title: "build on the candidate", Role: "implement", Attempt: 2, Base: "candidate/harness-1"}},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got, err := c.Get(context.Background(), created[0].ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Base != "candidate/harness-1" {
+		t.Errorf("Base = %q, want candidate/harness-1 (round-tripped via metadata)", got.Base)
+	}
+	if got.Role != "implement" || got.Attempt != 2 {
+		t.Errorf("Role/Attempt = %q/%d, want implement/2 (must survive alongside base)", got.Role, got.Attempt)
+	}
+}
+
 // allIssues returns every issue id in the db (including closed) for count assertions.
 func allIssues(t *testing.T, dir string) []string {
 	t.Helper()
