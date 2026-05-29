@@ -92,6 +92,22 @@ func (c *Client) Get(ctx context.Context, id string) (core.Issue, error) {
 	return issues[0], nil
 }
 
+// InProgress returns every issue currently in_progress, fully decoded. It is the input to
+// the orchestrator's spec-drift sweep (recompileSpecDelta): an in-flight issue carries the
+// content hash of the spec slice it was briefed against (SpecHash), which the sweep
+// re-resolves and compares to detect work made stale by a spec edit (see
+// specs/specs-process.md). ListStranded reads the same in_progress set but for lease expiry
+// and needs only IDs plus the lease metadata; this returns whole core.Issue values because
+// the drift comparison needs Spec, SpecHash, and Role. The default limit is dropped so the
+// whole in-flight set is seen, not just the first page.
+func (c *Client) InProgress(ctx context.Context) ([]core.Issue, error) {
+	out, err := c.run(ctx, []string{"list", "--status", "in_progress", "--json", "--limit", "0"})
+	if err != nil {
+		return nil, fmt.Errorf("beads: list in_progress: %w", err)
+	}
+	return decodeIssues(out)
+}
+
 // issueJSON is the subset of bd's --json issue object the harness consumes. bd
 // emits many more fields (priority, owner, timestamps, counts); only the facets an
 // agent is handed are decoded. Metadata is decoded as raw values so a non-string

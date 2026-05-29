@@ -113,6 +113,21 @@ slice, re-hash, and compare to the pinned hash; a mismatch means stale in-flight
 to reissue, and already-merged work may spawn new issues for the diff. Mental
 model: **the factory recompiles the delta** when the spec changes.
 
+This is realized as a **continuous reconcile sweep**, not an explicit edit-event hook:
+on each tick the orchestrator re-resolves every in-flight (in_progress) issue's slice
+and re-hashes it, so re-resolving *subsumes* "diff which issues referenced the edited
+file" — an issue whose slice does not include the edit re-hashes unchanged and is left
+alone. An issue whose hash no longer matches its pin is **reissued**: returned to the
+ready pool (lease cleared so it re-dispatches afresh, and the stale pin cleared so the
+next dispatch re-pins the edited slice), and its in-flight attempt's eventual result is
+ignored because the issue is no longer in_progress. The sweep is best-effort and
+deliberately conservative: an issue with no spec or no pin, or whose slice fails to
+resolve (the file is mid-edit or was deleted — an ambiguous signal), is left untouched
+rather than disrupting live work. Re-deriving **already-merged** work for a spec diff
+(spawning fresh issues for the delta) is a distinct, less-settled concern — it must
+dedupe across an epic's many issues that share one spec path and decide which stage to
+re-enter — and is handled separately from the in-flight reissue path.
+
 ---
 
 ## What goes in the soul prompt (re: specs)

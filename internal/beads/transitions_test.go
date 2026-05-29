@@ -541,6 +541,68 @@ func TestListStrandedIntegration(t *testing.T) {
 	}
 }
 
+// Reissue returns a spec-drifted in_progress issue to the ready pool and clears BOTH its
+// lease and its pinned spec hash, against the real bd metadata round-trip. This is the
+// re-derive half of "recompile the delta": the spec version changed, so unlike Release
+// (dead-runner recovery, which keeps the pin) the pin must be dropped so the next dispatch
+// re-resolves the edited slice and re-pins it (see specs/specs-process.md).
+func TestReissueIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+
+	id := quickCreate(t, dir, "drifted work")
+	if _, err := c.Claim(context.Background(), id, time.Hour); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if err := c.PinSpecHash(context.Background(), id, "sha256:abc123"); err != nil {
+		t.Fatalf("PinSpecHash: %v", err)
+	}
+
+	if err := c.Reissue(context.Background(), id); err != nil {
+		t.Fatalf("Reissue: %v", err)
+	}
+
+	got, err := c.Get(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Status != "open" {
+		t.Errorf("Status = %q, want open (reissued back to ready)", got.Status)
+	}
+	if got.SpecHash != "" {
+		t.Errorf("SpecHash = %q, want empty (the pin must be cleared so dispatch re-pins the edited slice)", got.SpecHash)
+	}
+}
+
+// InProgress returns every in_progress issue fully decoded — including the pinned spec hash
+// the drift sweep compares against — and excludes issues in any other status.
+func TestInProgressIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+
+	working := quickCreate(t, dir, "working")
+	if _, err := c.Claim(context.Background(), working, time.Hour); err != nil {
+		t.Fatalf("Claim: %v", err)
+	}
+	if err := c.PinSpecHash(context.Background(), working, "sha256:pinned"); err != nil {
+		t.Fatalf("PinSpecHash: %v", err)
+	}
+	_ = quickCreate(t, dir, "still open") // stays open; must not appear in the in_progress set
+
+	got, err := c.InProgress(context.Background())
+	if err != nil {
+		t.Fatalf("InProgress: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != working {
+		t.Fatalf("InProgress = %+v, want only the claimed issue %s", got, working)
+	}
+	if got[0].SpecHash != "sha256:pinned" {
+		t.Errorf("SpecHash = %q, want sha256:pinned (the version the drift sweep reads)", got[0].SpecHash)
+	}
+}
+
 // The retry generation written via Apply (Issue.Attempt) must round-trip through bd
 // metadata and decode back on Get — this counter is what the retry cap is enforced
 // against.

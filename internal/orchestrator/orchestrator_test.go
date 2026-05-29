@@ -29,9 +29,11 @@ type fakeBeads struct {
 	ready    []core.Issue
 	issues   map[string]core.Issue
 	stranded []string
+	inflight []core.Issue
 
 	claimed  []string
 	released []string
+	reissued []string
 	closed   []string
 	blocked  []string
 	applied  []core.Proposal
@@ -123,6 +125,25 @@ func (f *fakeBeads) ListStranded(context.Context, time.Time) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.stranded...), nil
+}
+
+func (f *fakeBeads) InProgress(context.Context) ([]core.Issue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]core.Issue(nil), f.inflight...), nil
+}
+
+func (f *fakeBeads) Reissue(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.reissued = append(f.reissued, id)
+	// Mirror the real client: status -> open and the pin is cleared, so a later Get sees it.
+	if is, ok := f.issues[id]; ok {
+		is.Status = "open"
+		is.SpecHash = ""
+		f.issues[id] = is
+	}
+	return nil
 }
 
 func (f *fakeBeads) PinSpecHash(_ context.Context, id, hash string) error {

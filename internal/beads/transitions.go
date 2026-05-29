@@ -113,6 +113,20 @@ func (c *Client) Release(ctx context.Context, id string) error {
 	return c.setStatus(ctx, id, "open", "--unset-metadata", MetadataKeyLease)
 }
 
+// Reissue invalidates an in-flight issue made stale by a spec edit and returns it to the
+// ready pool. It is the re-derive half of "recompile the delta" (see specs/specs-process.md):
+// when a human refines a spec while work is underway, the agent cannot see the change (its
+// slice was materialized once, at dispatch), so realignment must be structural — the
+// orchestrator reissues the work so it is re-dispatched against the now-current slice. Like
+// Release, the stale in-flight attempt's eventual Result is ignored because the issue is no
+// longer in_progress. Unlike Release (dead-runner recovery, which keeps the pin so the
+// SAME spec version is re-dispatched), Reissue clears the pinned spec hash too: the spec
+// version itself changed, so the issue must carry no stale pin until the next dispatch
+// re-resolves the edited slice and re-pins it.
+func (c *Client) Reissue(ctx context.Context, id string) error {
+	return c.setStatus(ctx, id, "open", "--unset-metadata", MetadataKeyLease, "--unset-metadata", MetadataKeySpecHash)
+}
+
 // Close marks an issue accepted. Acceptance is the orchestrator's decision after a
 // passing gate, never an agent's self-report (producer != verifier — see
 // specs/verification.md).

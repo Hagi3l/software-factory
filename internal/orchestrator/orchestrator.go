@@ -41,7 +41,9 @@ type Beads interface {
 	Block(ctx context.Context, id string) error
 	Apply(ctx context.Context, proposals []core.Proposal) ([]core.Issue, error)
 	ListStranded(ctx context.Context, now time.Time) ([]string, error)
+	InProgress(ctx context.Context) ([]core.Issue, error)
 	PinSpecHash(ctx context.Context, id, hash string) error
+	Reissue(ctx context.Context, id string) error
 }
 
 // Gate verifies a candidate in a fresh, orchestrator-controlled sandbox and returns a
@@ -204,15 +206,19 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	return nil
 }
 
-// tickLoop schedules ready work and sweeps stranded leases on each tick, plus an
-// immediate pass at startup so dispatch is not delayed by one interval. Every pass is
-// idempotent: "already dispatched" is derived from beads state (an in_progress issue
-// is not in the ready set), never from orchestrator memory.
+// tickLoop schedules ready work, recompiles the spec delta, and sweeps stranded leases on
+// each tick, plus an immediate pass at startup so dispatch is not delayed by one interval.
+// Every pass is idempotent and reads its state from beads, never from orchestrator memory:
+// "already dispatched" is "not in the ready set"; "stale in-flight" is "pinned spec hash no
+// longer matches the re-resolved slice"; "stranded" is "lease expired". The two reconcilers
+// (recompileSpecDelta, sweepLeases) return affected in_progress issues to the ready pool;
+// the next scheduleReady redispatches them.
 func (o *Orchestrator) tickLoop(ctx context.Context) error {
 	t := time.NewTicker(o.tick)
 	defer t.Stop()
 	for {
 		o.scheduleReady(ctx)
+		o.recompileSpecDelta(ctx)
 		o.sweepLeases(ctx)
 		select {
 		case <-ctx.Done():

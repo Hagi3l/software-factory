@@ -631,7 +631,46 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
     or match `Issue.Spec` + transitive links), re-hashes, and invalidates/re-derives those whose pinned
     hash no longer matches. Specs updated: `specs-process.md` (Spec-version pinning — realized pin at
     dispatch), `components/agent.md` (Brief pins the slice hash).
-- [ ] **T3.7 Recompile-the-delta** — on a spec-file edit, the orchestrator diffs which issues referenced it and invalidates / re-derives the affected in-flight issues; already-merged work may spawn new issues for the diff. (needs T3.6) ([specs-process.md](specs/specs-process.md))
+- [x] **T3.7 Recompile-the-delta** — *done.* The orchestrator now recompiles the spec delta: a
+  continuous reconcile sweep returns spec-drifted in-flight work to the ready pool so it re-dispatches
+  against the edited spec. Verified with `make check` green (380 pass, 2 skip). Learnings for downstream
+  tasks:
+  - **Realized as a tick-loop sweep (`recompileSpecDelta` in `internal/orchestrator/recompile.go`), not
+    an edit-event hook.** Each tick it lists `in_progress` issues, re-resolves each one's slice from the
+    integration repo via `spec.Resolve(o.opts.Repo, issue.Spec, SpecDepth)`, re-hashes via `spec.Hash`,
+    and compares to the pinned `issue.SpecHash` (stamped at dispatch by T3.6). Re-resolving every
+    in-flight issue **subsumes** "diff which issues referenced the edited file": an issue whose slice
+    excludes the edit re-hashes unchanged and is skipped — no membership test or edit channel needed.
+    Runs in `tickLoop` after `scheduleReady`, alongside `sweepLeases` (both reconcile `in_progress`
+    issues back to ready; the next `scheduleReady` redispatches).
+  - **Invalidation = a new beads transition `Reissue(ctx, id)`** (`internal/beads/transitions.go`):
+    `bd update <id> --status open --unset-metadata lease_until --unset-metadata spec_hash`. Distinct
+    from `Release` (dead-runner recovery): Release keeps the pin so the *same* spec version redispatches;
+    Reissue clears it because the spec version itself changed, so the next dispatch re-resolves the
+    edited slice and re-pins. The stale in-flight attempt's eventual Result is ignored (the issue is no
+    longer `in_progress`), exactly like a released stranded lease. `--unset-metadata` is repeatable in bd
+    (stringArray), so both keys clear in one call.
+  - **New beads read `InProgress(ctx) ([]core.Issue, error)`** (`internal/beads/client.go`):
+    `bd list --status in_progress --json --limit 0` decoded to full `core.Issue` values (the drift
+    comparison needs Spec/SpecHash/Role). Distinct from `ListStranded`, which lists the same set but
+    returns only IDs + reads lease metadata for expiry. Both added to the orchestrator `Beads` interface
+    (and the test fake).
+  - **Best-effort / conservative**, mirroring `buildBrief`'s discipline: an issue with no spec or no pin
+    is skipped; a slice that fails to resolve (file mid-edit or deleted — ambiguous) is logged and left
+    untouched rather than disrupting live work; only a clean hash mismatch reissues.
+  - **Scope boundary:** only `in_progress` issues are swept — a not-yet-dispatched issue carries no pin
+    and resolves the current slice on dispatch; terminal issues are past redispatch. Re-deriving
+    already-merged work is deferred to T3.7b.
+  - Tests: `TestRecompileSpecDeltaReissuesDriftedWork` + `TestRecompileSpecDeltaSkipsWithoutDriftSignal`
+    (orchestrator, real spec resolver against an on-disk fixture); `TestReissueIntegration` +
+    `TestInProgressIntegration` (beads, real bd round-trip). Spec updated: `specs-process.md`
+    (Spec-version pinning — realized continuous-sweep mechanism + the in-flight/merged-work boundary).
+- [ ] **T3.7b Re-derive already-merged work on a spec edit** — when a spec edit drifts the pinned hash of
+  a *closed/merged* issue, spawn new issue(s) for the delta. Deferred from T3.7 (underspecified) because
+  it must: (a) dedupe across an epic's many closed issues that share one spec path (else one edit spawns
+  N duplicate epics); (b) decide which stage to re-enter (pipeline entry / planner vs. author-tests);
+  (c) stay idempotent (re-pin or mark the closed issues so they don't respawn every tick). Likely needs a
+  beads query for closed issues by spec path. (needs T3.7) ([specs-process.md](specs/specs-process.md))
 - [ ] **T3.8 Cumulative per-issue / epic budget** *(carried from Phase 1)* — surface `Usage` on the Result envelope (the runner already tallies it); the orchestrator accumulates spend across the `on_failure` loop per issue/epic and dead-letters on breach; a per-model cost table converts tokens → USD. ([workflow.md](specs/workflow.md))
 - [ ] **T3.9 Merge queue: serialized rebase onto `main`** — pop `integrate` issues in issue-graph topological order and rebase each candidate onto the *current* `main` tip in a sandbox (replaces the kernel's bare provenance-commit advance). ([integration.md](specs/integration.md))
 - [ ] **T3.10 Re-gate the merged result** — after rebase, re-run the full gate suite in a clean verification sandbox against the *rebased* result before advancing `main` (catches two-green-branches breakage). (needs T3.9) ([integration.md](specs/integration.md))
