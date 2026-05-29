@@ -1,6 +1,7 @@
 package gate
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -10,11 +11,19 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/Loxstomper/harness/internal/artifact"
 	"github.com/Loxstomper/harness/internal/broker"
 	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/sandbox"
 )
+
+// artifactKindEvidence is the artifact kind stamped on a persisted gate check
+// record. It mirrors the runner's prompt/transcript kinds (see
+// specs/components/artifact-store.md): kind is descriptive metadata on the ref, not
+// part of the content address.
+const artifactKindEvidence = "gate-evidence"
 
 // teardownTimeout bounds the reap of the verification sandbox. Teardown runs on a
 // context detached from the caller's so a canceled or timed-out gate still releases
@@ -84,9 +93,14 @@ type Candidate struct {
 	Limits         config.SandboxLimits // resource ceiling (wall-clock bounds the gate's runtime)
 }
 
-// CheckResult records one check's outcome and its captured output. The output is the
-// gate evidence the orchestrator attaches to the provenance trail (large items go to
-// the artifact store by hash — plan T1.18).
+// CheckResult records one check's outcome and its captured output. Stdout/Stderr are
+// the raw bytes the check produced; Evidence is a content-addressed reference to the
+// persisted evidence record (the same bytes plus a small header), written to the
+// artifact store before the verdict is returned so it survives the verification
+// sandbox's teardown. The orchestrator cites Evidence.Hash in the provenance trailer,
+// making each verified check auditable by hash (see specs/components/artifact-store.md,
+// specs/verification.md). Evidence is the zero value when no store is configured or a
+// store write failed — a degraded record, never a dropped verdict.
 type CheckResult struct {
 	Name     string
 	Cmd      string
@@ -94,6 +108,7 @@ type CheckResult struct {
 	Passed   bool
 	Stdout   []byte
 	Stderr   []byte
+	Evidence core.ArtifactRef
 }
 
 // Report is the gate's verdict. Passed is true iff every check passed. The gate stops
@@ -112,20 +127,23 @@ type Report struct {
 type Runner struct {
 	backend   sandbox.Backend
 	registry  Registry
+	store     artifact.Store
 	socketDir string
 	log       *slog.Logger
 }
 
 // New builds a gate Runner over a sandbox backend and the check registry that resolves
-// each candidate's declared postconditions into the commands to run. socketDir is
-// where the per-gate broker socket is minted (the verification sandbox still needs a
-// broker endpoint to provision, but it is a deny-all one — see Run). A nil logger
-// discards.
-func New(backend sandbox.Backend, registry Registry, socketDir string, log *slog.Logger) *Runner {
+// each candidate's declared postconditions into the commands to run. store is the
+// content-addressed home for each check's persisted evidence; like the runner's
+// harvest it is best-effort (a nil store, or a write that fails, degrades provenance
+// but never the verdict). socketDir is where the per-gate broker socket is minted (the
+// verification sandbox still needs a broker endpoint to provision, but it is a deny-all
+// one — see Run). A nil logger discards.
+func New(backend sandbox.Backend, registry Registry, store artifact.Store, socketDir string, log *slog.Logger) *Runner {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return &Runner{backend: backend, registry: registry, socketDir: socketDir, log: log}
+	return &Runner{backend: backend, registry: registry, store: store, socketDir: socketDir, log: log}
 }
 
 // Run provisions a fresh verification sandbox seeded with the candidate branch, runs
@@ -220,8 +238,65 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 		r.log.Debug("gate: check passed", "ref", c.Ref, "check", check.Name)
 	}
 
+	// Persist each check's evidence to the artifact store and stamp the ref onto the
+	// result. The captured bytes are already in memory (Exec copied them out of the
+	// sandbox), so this survives the deferred teardown regardless of ordering. Both
+	// passing and failing checks are persisted — a rejected gate's output is precisely
+	// what a human triages from the dead-letter queue.
+	r.persistEvidence(ctx, c.Ref, &report)
+
 	r.log.Info("gate: verdict", "ref", c.Ref, "passed", report.Passed, "checks_run", len(report.Checks))
 	return report, nil
+}
+
+// persistEvidence writes each check's evidence record to the artifact store and stamps
+// the returned ref onto the CheckResult. It is best-effort, mirroring the runner's
+// harvest (see specs/components/artifact-store.md): a missing store or a failed write
+// is logged loudly and leaves the ref empty (a degraded provenance record), but never
+// changes the verdict — a good candidate must not be rejected because a store write
+// hiccuped, and a bad one must not be accepted because its evidence failed to save.
+func (r *Runner) persistEvidence(ctx context.Context, ref string, report *Report) {
+	if r.store == nil {
+		return
+	}
+	for i := range report.Checks {
+		cr := &report.Checks[i]
+		a, err := r.store.Put(ctx, artifactKindEvidence, bytes.NewReader(formatEvidence(*cr)))
+		if err != nil {
+			r.log.Error("gate: persist check evidence", "ref", ref, "check", cr.Name, "err", err)
+			continue
+		}
+		cr.Evidence = a
+	}
+}
+
+// formatEvidence renders a check's result as a stable, human-readable evidence record:
+// a header (the check name, the exact command, exit code, verdict) followed by the
+// captured stdout and stderr. The format is deterministic so identical output
+// content-addresses to the same hash, and it is what the control room renders for a
+// gate run (see specs/control-room.md).
+func formatEvidence(cr CheckResult) []byte {
+	status := "pass"
+	if !cr.Passed {
+		status = "fail"
+	}
+	var b bytes.Buffer
+	fmt.Fprintf(&b, "check: %s\ncommand: %s\nexit: %d\nstatus: %s\n", cr.Name, cr.Cmd, cr.ExitCode, status)
+	b.WriteString("--- stdout ---\n")
+	writeStream(&b, cr.Stdout)
+	b.WriteString("--- stderr ---\n")
+	writeStream(&b, cr.Stderr)
+	return b.Bytes()
+}
+
+// writeStream appends a captured stream to b, ensuring it ends with a newline so the
+// next section header starts on its own line even when a check's output did not end
+// with one.
+func writeStream(b *bytes.Buffer, s []byte) {
+	b.Write(s)
+	if len(s) > 0 && s[len(s)-1] != '\n' {
+		b.WriteByte('\n')
+	}
 }
 
 // tailString returns the last max bytes of b as a string, prefixed with an elision

@@ -36,10 +36,11 @@ func TestGateIntegration(t *testing.T) {
 	// marker.txt exists only on the candidate branch, so grep succeeding proves the
 	// verification sandbox checked out the candidate, not main. A green build+test → pass.
 	t.Run("passing candidate", func(t *testing.T) {
+		store := testStore(t)
 		g := New(be, Registry{
 			"build": "grep -q candidate marker.txt",
 			"test":  "true",
-		}, t.TempDir(), nil)
+		}, store, t.TempDir(), nil)
 		report, err := g.Run(ctx, cand("build", "test"))
 		if err != nil {
 			t.Fatalf("Run: %v", err)
@@ -50,6 +51,17 @@ func TestGateIntegration(t *testing.T) {
 		if len(report.Checks) != 2 {
 			t.Errorf("ran %d checks, want 2", len(report.Checks))
 		}
+		// Through the real sandbox, each check's evidence is harvested to the store and
+		// retrievable by hash — the end-to-end persistence path the trailer cites.
+		for _, cr := range report.Checks {
+			if cr.Evidence.Hash == "" {
+				t.Errorf("%s check has no persisted evidence ref", cr.Name)
+				continue
+			}
+			if has, _ := store.Has(ctx, cr.Evidence.Hash); !has {
+				t.Errorf("%s evidence %q not present in store", cr.Name, cr.Evidence.Hash)
+			}
+		}
 	})
 
 	// A non-zero check exit fails the gate and stops the run.
@@ -57,7 +69,7 @@ func TestGateIntegration(t *testing.T) {
 		g := New(be, Registry{
 			"build": "true",
 			"test":  "exit 7",
-		}, t.TempDir(), nil)
+		}, testStore(t), t.TempDir(), nil)
 		report, err := g.Run(ctx, cand("build", "test"))
 		if err != nil {
 			t.Fatalf("Run: %v", err)

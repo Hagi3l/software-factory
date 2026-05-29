@@ -61,8 +61,12 @@ chain (see [security.md](security.md)):
 
 ```
 Soul: implementor-go | Model: claude-opus-4-7
-Issue: bd-1234 | Prompt-SHA: 9af… | Verified: build,test,gosec,mutation
+Issue: bd-1234 | Prompt-SHA: 9af… | Verified: build@sha256:1c2…,test@sha256:8be…,gosec@sha256:0a4…
 ```
+
+Each `Verified` entry cites a passed check as `<name>@<evidence-hash>`, the hash
+pointing into the [artifact store](components/artifact-store.md) at that check's
+captured output (see [security.md](security.md)).
 
 beads issue → commit → signed evidence is a SLSA-style chain that makes every
 autonomous change traceable, which matters precisely because no human reviewed it.

@@ -1,15 +1,56 @@
 package gate
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"io"
 	"testing"
 	"time"
 
+	"github.com/Loxstomper/harness/internal/artifact"
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/sandbox"
 )
+
+// testStore is a real content-addressed files store rooted in a temp dir, so the gate
+// tests exercise the actual persistence path rather than a fake.
+func testStore(t *testing.T) artifact.Store {
+	t.Helper()
+	s, err := artifact.NewFilesStore(t.TempDir())
+	if err != nil {
+		t.Fatalf("NewFilesStore: %v", err)
+	}
+	return s
+}
+
+// readArtifact returns the bytes stored under hash, failing the test if absent.
+func readArtifact(t *testing.T, s artifact.Store, hash string) []byte {
+	t.Helper()
+	rc, err := s.Get(context.Background(), hash)
+	if err != nil {
+		t.Fatalf("Get %s: %v", hash, err)
+	}
+	defer func() { _ = rc.Close() }()
+	b, err := io.ReadAll(rc)
+	if err != nil {
+		t.Fatalf("read artifact: %v", err)
+	}
+	return b
+}
+
+// erroringStore fails every Put, modeling a store outage so a test can prove evidence
+// persistence is best-effort: the verdict stands and the ref degrades to empty.
+type erroringStore struct{}
+
+func (erroringStore) Put(context.Context, string, io.Reader) (core.ArtifactRef, error) {
+	return core.ArtifactRef{}, errors.New("artifact store is down")
+}
+func (erroringStore) Get(context.Context, string) (io.ReadCloser, error) {
+	return nil, errors.New("artifact store is down")
+}
+func (erroringStore) Has(context.Context, string) (bool, error) { return false, nil }
 
 // --- fakes -------------------------------------------------------------------
 
@@ -104,7 +145,8 @@ func TestRunAllChecksPass(t *testing.T) {
 		"make test-unit": {ExitCode: 0, Stdout: []byte("ok")},
 	}}
 	be := &fakeBackend{sb: sb}
-	g := New(be, testRegistry(), t.TempDir(), nil)
+	store := testStore(t)
+	g := New(be, testRegistry(), store, t.TempDir(), nil)
 
 	report, err := g.Run(context.Background(), testCandidate())
 	if err != nil {
@@ -118,6 +160,27 @@ func TestRunAllChecksPass(t *testing.T) {
 	}
 	if !report.Checks[0].Passed || string(report.Checks[0].Stdout) != "built" {
 		t.Errorf("build check = %+v, want passed with captured stdout", report.Checks[0])
+	}
+	// Every check's evidence is persisted to the artifact store and its ref stamped onto
+	// the result, so the orchestrator can cite each verified check by hash. The persisted
+	// record is content-addressed and carries the check's name, command, and captured
+	// output.
+	for _, want := range []struct {
+		idx    int
+		name   string
+		stdout string
+	}{{0, "build", "built"}, {1, "test", "ok"}} {
+		cr := report.Checks[want.idx]
+		if cr.Evidence.Hash == "" {
+			t.Fatalf("%s check has no persisted evidence ref", want.name)
+		}
+		if cr.Evidence.Kind != artifactKindEvidence {
+			t.Errorf("%s evidence kind = %q, want %q", want.name, cr.Evidence.Kind, artifactKindEvidence)
+		}
+		ev := readArtifact(t, store, cr.Evidence.Hash)
+		if !bytes.Contains(ev, []byte("check: "+want.name)) || !bytes.Contains(ev, []byte(want.stdout)) {
+			t.Errorf("%s evidence = %q, want it to record the check name and captured stdout", want.name, ev)
+		}
 	}
 	// The verification sandbox must be seeded from the candidate branch, not the base.
 	if be.gotSpec.Workspace.BaseRef != core.CandidateBranch("issue-1") {
@@ -142,7 +205,8 @@ func TestRunStopsAtFirstFailure(t *testing.T) {
 		"make test-unit": {ExitCode: 0},
 	}}
 	be := &fakeBackend{sb: sb}
-	g := New(be, testRegistry(), t.TempDir(), nil)
+	store := testStore(t)
+	g := New(be, testRegistry(), store, t.TempDir(), nil)
 
 	report, err := g.Run(context.Background(), testCandidate())
 	if err != nil {
@@ -157,6 +221,15 @@ func TestRunStopsAtFirstFailure(t *testing.T) {
 	if report.Checks[0].ExitCode != 2 || string(report.Checks[0].Stderr) != "compile error" {
 		t.Errorf("build result = %+v, want exit 2 with captured stderr", report.Checks[0])
 	}
+	// A rejected gate's output is exactly what a human triages, so the failing check's
+	// evidence must be persisted too — recording the fail verdict and captured stderr.
+	if report.Checks[0].Evidence.Hash == "" {
+		t.Fatal("failing check has no persisted evidence ref")
+	}
+	ev := readArtifact(t, store, report.Checks[0].Evidence.Hash)
+	if !bytes.Contains(ev, []byte("status: fail")) || !bytes.Contains(ev, []byte("compile error")) {
+		t.Errorf("failing-check evidence = %q, want it to record the fail status and stderr", ev)
+	}
 	if len(sb.execed) != 1 || sb.execed[0] != "make build" {
 		t.Errorf("commands run = %v, want only [make build]", sb.execed)
 	}
@@ -170,7 +243,7 @@ func TestRunStopsAtFirstFailure(t *testing.T) {
 func TestRunExecErrorIsInfraFailure(t *testing.T) {
 	sb := &scriptedSandbox{id: "gate-sb", execErr: errors.New("sandbox is gone")}
 	be := &fakeBackend{sb: sb}
-	g := New(be, testRegistry(), t.TempDir(), nil)
+	g := New(be, testRegistry(), nil, t.TempDir(), nil)
 
 	if _, err := g.Run(context.Background(), testCandidate()); err == nil {
 		t.Fatal("Run returned nil error for a dead sandbox, want an error")
@@ -184,7 +257,7 @@ func TestRunExecErrorIsInfraFailure(t *testing.T) {
 // every candidate — a configuration error, caught before any sandbox is provisioned.
 func TestRunNoChecksErrors(t *testing.T) {
 	be := &fakeBackend{sb: &scriptedSandbox{id: "gate-sb"}}
-	g := New(be, testRegistry(), t.TempDir(), nil)
+	g := New(be, testRegistry(), nil, t.TempDir(), nil)
 	c := testCandidate()
 	c.Postconditions = nil
 	if _, err := g.Run(context.Background(), c); err == nil {
@@ -199,7 +272,7 @@ func TestRunNoChecksErrors(t *testing.T) {
 // fails the gate before a sandbox is spent, not after.
 func TestRunUnresolvablePostconditionErrors(t *testing.T) {
 	be := &fakeBackend{sb: &scriptedSandbox{id: "gate-sb"}}
-	g := New(be, testRegistry(), t.TempDir(), nil)
+	g := New(be, testRegistry(), nil, t.TempDir(), nil)
 	c := testCandidate()
 	c.Postconditions = []string{"build", "no-such-check"}
 	if _, err := g.Run(context.Background(), c); err == nil {
@@ -213,8 +286,33 @@ func TestRunUnresolvablePostconditionErrors(t *testing.T) {
 // A provisioning failure surfaces as an error (the gate could not produce a verdict).
 func TestRunProvisionFailure(t *testing.T) {
 	be := &fakeBackend{provErr: errors.New("no host capacity")}
-	g := New(be, testRegistry(), t.TempDir(), nil)
+	g := New(be, testRegistry(), nil, t.TempDir(), nil)
 	if _, err := g.Run(context.Background(), testCandidate()); err == nil {
 		t.Fatal("Run returned nil error when provisioning failed, want an error")
+	}
+}
+
+// A store that fails every write must not change the verdict: evidence persistence is
+// best-effort (it degrades provenance, never correctness). The gate still passes the
+// candidate; the evidence refs are simply empty.
+func TestRunEvidencePersistenceIsBestEffort(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"make build":     {ExitCode: 0, Stdout: []byte("built")},
+		"make test-unit": {ExitCode: 0, Stdout: []byte("ok")},
+	}}
+	be := &fakeBackend{sb: sb}
+	g := New(be, testRegistry(), erroringStore{}, t.TempDir(), nil)
+
+	report, err := g.Run(context.Background(), testCandidate())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !report.Passed || len(report.Checks) != 2 {
+		t.Fatalf("report = %+v, want a green verdict over 2 checks despite the store outage", report)
+	}
+	for _, cr := range report.Checks {
+		if cr.Evidence.Hash != "" {
+			t.Errorf("%s check has evidence ref %q, want empty (store write failed)", cr.Name, cr.Evidence.Hash)
+		}
 	}
 }

@@ -28,7 +28,7 @@ type Provenance struct {
 	Model     string   // the model that drove it
 	Issue     string   // the beads issue this change answers
 	PromptSHA string   // artifact-store hash of the exact prompt the invocation ran with
-	Verified  []string // names of the gate checks that passed
+	Verified  []string // gate checks that passed, each cited as name@<evidence-hash> when persisted
 }
 
 // Trailer renders the provenance block exactly as specs/security.md and
@@ -69,13 +69,23 @@ func (o *Orchestrator) provenanceFor(issue core.Issue, res core.Result, report g
 	return prov
 }
 
-// verifiedChecks returns the names of the checks that passed in the gate report. The
-// report's Passed is already true at this point (the candidate was accepted), so every
-// recorded check passed; listing them is what the trailer's "Verified:" field carries.
+// verifiedChecks renders the checks that passed in the gate report for the trailer's
+// "Verified:" field. The report's Passed is already true at this point (the candidate
+// was accepted), so every recorded check passed. Each is cited as name@<evidence-hash>
+// — the hash pointing into the artifact store at the persisted stdout/stderr — so a
+// merged commit's verification is auditable down to the exact captured output, not just
+// a list of names. When the gate could not persist a check's evidence (no store, or a
+// failed write) the hash is empty and the check degrades to a bare name, mirroring how
+// the trailer renders a missing Prompt-SHA: self-describing rather than silently wrong.
 func verifiedChecks(report gate.Report) []string {
 	names := make([]string, 0, len(report.Checks))
 	for _, c := range report.Checks {
-		if c.Passed {
+		if !c.Passed {
+			continue
+		}
+		if c.Evidence.Hash != "" {
+			names = append(names, c.Name+"@"+c.Evidence.Hash)
+		} else {
 			names = append(names, c.Name)
 		}
 	}

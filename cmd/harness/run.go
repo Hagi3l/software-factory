@@ -213,8 +213,10 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// The gate verifies in a fresh sandbox (producer != verifier): a clean checkout of
 	// the candidate branch graded against the producing stage's declared postconditions.
 	// The registry (config's `checks` map) is how those postconditions resolve to the
-	// commands run — the checks are data, not code.
-	gateRunner := gate.New(backend, gate.Registry(cfg.Harness.Checks), sockDir, log)
+	// commands run — the checks are data, not code. It shares the same artifact store as
+	// the runner: each check's stdout/stderr is harvested there before teardown so the
+	// provenance trailer can cite the evidence by hash.
+	gateRunner := gate.New(backend, gate.Registry(cfg.Harness.Checks), store, sockDir, log)
 
 	orch, err := orchestrator.New(orchestrator.Options{
 		Config: cfg,

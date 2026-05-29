@@ -123,7 +123,34 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
   - `internal/config/validate.go`: `reservedPostconditions` replaced the old
     `knownPostconditions`; `knownPostcondition` consults `Checks`; `isMetricComparison`
     is now reusable. Empty check commands are a validation error.
-- [ ] **T2.2 Gate evidence persistence** *(carried from Phase 1)* — `gate.Runner` writes each check's captured stdout/stderr to the artifact store (the orchestrator gains an `artifact.Store`); `gate.Report` returns `ArtifactRef`s; the orchestrator cites the hashes in the `Verified:` provenance trailer. (needs T2.1) ([components/artifact-store.md](specs/components/artifact-store.md), [verification.md](specs/verification.md))
+- [x] **T2.2 Gate evidence persistence** — *done.* The gate now harvests each check's
+  evidence to the artifact store before returning a verdict, and the orchestrator cites
+  it by hash in the `Verified:` trailer. Learnings for downstream tasks:
+  - **The gate (not the orchestrator proper) gained the `artifact.Store`** — it owns the
+    verification sandbox, so it harvests evidence the same way `runner.harvest` harvests
+    prompt/transcript. `gate.New(backend, registry, store, socketDir, log)`;
+    `buildRunComponents` passes the **same store the runner uses**. The captured bytes are
+    already in memory (Exec copied them out), so persistence survives the deferred
+    teardown regardless of ordering.
+  - **One combined `gate-evidence` artifact per check** (`formatEvidence`: a header —
+    name/command/exit/status — then `--- stdout ---`/`--- stderr ---` sections), so each
+    check maps to exactly one hash on `CheckResult.Evidence`; `gate.Report` carries the
+    refs. Deterministic format → content-addresses stably. This doc is the artifact the
+    control-room gate-evidence view (T4.7) will render.
+  - **Best-effort, mirrors harvest:** a nil store or a failed `Put` logs loudly and leaves
+    the ref empty (degraded provenance) but never changes the verdict. **Both passing and
+    failing checks persist** — a rejected gate's output is exactly what a human triages
+    (feeds the T4.8 DLQ view).
+  - **Trailer citation:** `verifiedChecks` renders each passed check as
+    `name@<evidence-hash>`, degrading to bare `name` when no hash. This is a *superstring*
+    of the old bare-name list, so `strings.Contains(msg, "Verified: tests-pass")`-style
+    assertions (spine e2e) stayed green, and merge/orchestrator tests that build
+    `Provenance` by hand or use a fake gate with no evidence refs were unaffected. Specs
+    updated: `security.md`/`integration.md` trailer examples now show the `name@<hash>` form.
+  - **For T2.3/T2.6/T2.7:** the persistence + citation path is now generic over checks —
+    a new check kind only needs to populate `CheckResult` (and may write richer structured
+    evidence, e.g. a mutation report, through the same `store.Put`); it is cited and
+    auditable for free.
 - [ ] **T2.3 Red→green proof postcondition** — the gate checks out the base ref as well as the candidate and requires the acceptance tests to **fail on base** and **pass on candidate** (proves the tests aren't vacuously green). New check type that runs against two refs. (needs T2.1) ([verification.md](specs/verification.md))
 - [ ] **T2.4 `author-tests` soul + persona** — a `test-author` role/soul (config + markdown persona) that writes *failing* acceptance tests from the spec and never reads the implementation. ([configuration.md](specs/configuration.md), [verification.md](specs/verification.md))
 - [ ] **T2.5 Wire `author-tests` into the DAG** — `author-tests` produces `implement`; the seed issue enters at `author-tests`; `implement`'s postcondition becomes `tests-red-then-green`; the implementor persona is updated to "make the existing tests pass, don't author them." (needs T2.3, T2.4) ([workflow.md](specs/workflow.md), [verification.md](specs/verification.md))
