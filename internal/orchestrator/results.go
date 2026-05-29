@@ -122,8 +122,8 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 
 	case core.StatusFailed:
 		// The agent could not produce a usable candidate. Route via on_failure or, if the
-		// retry cap is spent, dead-letter.
-		return o.route(ctx, issue, stage, "agent reported failure")
+		// retry cap or budget is spent, dead-letter.
+		return o.route(ctx, issue, stage, res, "agent reported failure")
 
 	case core.StatusDone:
 		if stage.Kind == config.StageKindPlan {
@@ -135,7 +135,7 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 		if res.Branch.Ref == "" {
 			// "done" with no candidate branch is not gradable; treat it as a failure to
 			// produce a candidate and route it.
-			return o.route(ctx, issue, stage, "done result carried no candidate branch")
+			return o.route(ctx, issue, stage, res, "done result carried no candidate branch")
 		}
 		report, gerr := o.runGate(ctx, issue, stage, res)
 		if gerr != nil {
@@ -146,7 +146,7 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 			return o.accept(ctx, issue, stage, res, report)
 		}
 		o.log.Info("orchestrator: gate rejected candidate", "issue", issue.ID, "checks_run", len(report.Checks))
-		return o.route(ctx, issue, stage, "gate rejected candidate")
+		return o.route(ctx, issue, stage, res, "gate rejected candidate")
 
 	default:
 		return o.deadLetter(ctx, issue, fmt.Sprintf("unknown result status %q", res.Status))
@@ -231,7 +231,7 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage c
 	if len(res.Proposes) == 0 {
 		// A planner that proposed nothing did not decompose the work; route it as a failure
 		// so the retry cap eventually dead-letters rather than silently stalling the pipeline.
-		return o.route(ctx, issue, stage, "planner produced no child issues")
+		return o.route(ctx, issue, stage, res, "planner produced no child issues")
 	}
 	allowed := map[string]bool{}
 	for _, target := range stage.Produces {
@@ -303,15 +303,36 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, target str
 	return false, nil
 }
 
-// route handles a rejected or failed issue. If the retry cap is spent it dead-letters;
-// otherwise it creates a new fix issue at the stage's on_failure target carrying an
-// incremented retry generation, and closes the original (its attempt is spent; the
-// retry lives as a new issue, keeping the issue graph acyclic — see
-// specs/workflow.md). The retry cap, enforced against the persistent Attempt counter,
-// is the primary termination guarantee.
-func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config.Stage, reason string) (bool, error) {
+// route handles a rejected or failed issue. It accumulates the just-finished
+// invocation's spend onto the retry chain's running total, then dead-letters if either
+// termination guarantee is breached — the retry cap (number of attempts) or the
+// cumulative per-issue budget (tokens/dollars those attempts burned). Otherwise it
+// creates a new fix issue at the stage's on_failure target carrying an incremented retry
+// generation and the new cumulative spend, and closes the original (its attempt is spent;
+// the retry lives as a new issue, keeping the issue graph acyclic — see specs/workflow.md).
+//
+// The two guards are complementary: the retry cap alone bounds how many attempts run but
+// not how much each burns, so a spec the factory cannot satisfy could otherwise consume
+// unbounded tokens within the cap. The budget closes that gap (see specs/workflow.md's
+// termination section). Spend is threaded exactly like Attempt: each route adds this
+// attempt's spend (Result.Usage, priced through the selected soul's per-model cost table)
+// to the predecessor's running total and stamps the sum on the fix issue.
+func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result, reason string) (bool, error) {
+	spentTokens := issue.SpentTokens + res.Usage.TotalTokens()
+	spentUSD := issue.SpentUSD + o.priceUsage(issue, res.Usage)
+
 	if issue.Attempt >= o.opts.Config.Harness.Policy.MaxRetries {
 		return o.deadLetter(ctx, issue, fmt.Sprintf("%s; retry cap (%d) exhausted", reason, o.opts.Config.Harness.Policy.MaxRetries))
+	}
+	// A zero budget dimension is uncapped (see config.Budget); only a configured cap that
+	// the cumulative spend has reached dead-letters. Checked before routing so a breach
+	// terminates rather than spawning another attempt that would burn yet more.
+	b := o.opts.Config.Harness.Policy.Budget
+	if b.Tokens > 0 && spentTokens >= b.Tokens {
+		return o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue token budget exhausted (%d >= %d)", reason, spentTokens, b.Tokens))
+	}
+	if b.USD > 0 && spentUSD >= b.USD {
+		return o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue USD budget exhausted ($%.4f >= $%.2f)", reason, spentUSD, b.USD))
 	}
 	if stage.OnFailure == "" {
 		// Every gate that can fail must have a defined route, or there is nowhere to send
@@ -324,7 +345,7 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	}
 
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create on_failure fix issue from %s: %w", issue.ID, err)
@@ -334,9 +355,27 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	}
 	for _, c := range created {
 		o.log.Info("orchestrator: routed failure to fix issue", "from", issue.ID, "to_stage", stage.OnFailure,
-			"new", c.ID, "attempt", issue.Attempt+1, "reason", reason)
+			"new", c.ID, "attempt", issue.Attempt+1, "spent_tokens", spentTokens, "spent_usd", spentUSD, "reason", reason)
 	}
 	return false, nil
+}
+
+// priceUsage converts an invocation's token usage to dollars at the issue's selected
+// model's published rate (the per-model cost table in the infra model registry). It
+// returns 0 when the infra overlay is absent, the model is unknown, or the model declares
+// no cost block — USD accounting then contributes nothing and spend stays bounded by the
+// token and retry caps, which never depend on the table. Selection mirrors the producer's
+// (the same soul that ran the invocation), so the price is the model that actually billed.
+func (o *Orchestrator) priceUsage(issue core.Issue, u core.Usage) float64 {
+	soul, ok := o.selectSoul(issue)
+	if !ok || o.opts.Config.Infra == nil {
+		return 0
+	}
+	mp, ok := o.opts.Config.Infra.Models[soul.Model]
+	if !ok {
+		return 0
+	}
+	return mp.Cost.USD(u)
 }
 
 // deadLetter terminates an issue into the dead-letter queue for human triage: it

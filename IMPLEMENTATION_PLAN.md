@@ -671,7 +671,49 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
   N duplicate epics); (b) decide which stage to re-enter (pipeline entry / planner vs. author-tests);
   (c) stay idempotent (re-pin or mark the closed issues so they don't respawn every tick). Likely needs a
   beads query for closed issues by spec path. (needs T3.7) ([specs-process.md](specs/specs-process.md))
-- [ ] **T3.8 Cumulative per-issue / epic budget** *(carried from Phase 1)* — surface `Usage` on the Result envelope (the runner already tallies it); the orchestrator accumulates spend across the `on_failure` loop per issue/epic and dead-letters on breach; a per-model cost table converts tokens → USD. ([workflow.md](specs/workflow.md))
+- [x] **T3.8 Cumulative per-issue budget** *(carried from Phase 1)* — *done.* The orchestrator now
+  enforces the **budget half of the termination guarantee**: it accumulates each invocation's spend
+  across the `on_failure` chain (per issue) and dead-letters when the running token or USD total
+  reaches `policy.budget`. Verified with `make check` green (387 pass, 2 skip) incl. new
+  orchestrator/beads/config tests. Learnings for downstream tasks:
+  - **Most of the scaffolding pre-existed (uncommitted) — T3.8 was the end-to-end wiring + cost
+    policy + tests.** The types were already laid down: `core.Result.Usage` (+`core.Usage`/`TotalTokens`),
+    `core.Issue.SpentTokens`/`SpentUSD`, `config.ModelProvider.Cost`/`ModelCost.USD`, beads
+    `MetadataKeySpentTokens`/`SpentUSD` (written in `create()`). Four gaps closed the loop: (1) the
+    **runner never stamped `res.Usage`** — `rel.Usage()` was logged then dropped; now converted
+    (model.Usage→core.Usage) onto the envelope inside the clean-invocation block (`runner.go`).
+    (2) **beads `toCore()` never read the spend back** — added `metaFloat` (SpentUSD is fractional)
+    and decode both keys. (3) **`route` ignored budgets** — it now accumulates `issue.Spent* +
+    this attempt`, dead-letters on a `budget.tokens`/`budget.usd` breach (after the retry-cap check,
+    a zero dimension = uncapped), and **threads the new cumulative spend onto the fix issue** (like
+    Attempt/Base). `route`'s signature gained `res core.Result` (all 4 call sites already had it).
+    (4) shipped `infra.dev.yaml` got real per-MTok `cost` blocks for the two tier models.
+  - **Pricing is per-issue via the selected soul's model.** New `priceUsage(issue, usage)`:
+    `selectSoul → soul.Model → Infra.Models[model].Cost.USD(usage)`, returning **0** when infra is
+    absent (tests), the model is unknown, or it has no cost block — so token+retry caps still bound
+    a deployment that prices nothing. USD is enforced *only* when both a cost table and `budget.usd`
+    are set; token budget needs neither.
+  - **Per-issue, not per-stage or per-epic — by design.** Each stage's produced issue starts with
+    fresh spend (`advance` does NOT copy Spent*; only `route` threads it), because the budget bounds
+    one logical work item's retry loop. `core.Issue` carries only `SpentTokens`/`SpentUSD` (no wall
+    field) — the deliberate scope. The within-invocation token/turn budget is a separate, already-live
+    mechanism (`agent.BudgetFromPolicy` enforced in the agent loop); T3.8 is the *across-loop* half.
+  - **The merge provenance trailer was deliberately left untouched** (cf. T3.6) — citing spend in the
+    trailer is a clean optional follow-up; the issue carries it and the DLQ alert reason quotes the
+    breached figure for triage.
+  - Specs updated: `workflow.md` (termination — realized per-issue cumulative mechanism + the epic/wall
+    boundary), `configuration.md` (model registry `cost` block contract). Tests: orchestrator
+    `budget_test.go` (thread+price / token-breach / USD-breach / unpriced-model); beads
+    `TestSpentRoundTripIntegration`; config `cost_test.go` (the four-dimension USD math).
+- [ ] **T3.8b Cumulative epic budget + cross-loop wall-clock** *(carried from T3.8)* — enforce the
+  cross-issue `epic_budget` (sum spend over all issues of one epic) and a cumulative wall-clock cap.
+  Both need design first: (a) **epic identity** — there is no epic id on issues today (an epic is
+  implicit: a seed + all its `advance`/planner descendants), so this needs an `epic_id` metadata key
+  threaded forward (like Base) or a beads ancestry query, then an aggregate-spend read. (b) **wall** —
+  `core.Issue` has no `SpentWall` field and `core.Result` carries no invocation duration; the runner
+  must stamp elapsed time and the orchestrator thread/accumulate it like Spent*. The per-invocation
+  wall ceiling (sandbox limit) already exists; this is the cumulative cross-loop cap. (needs T3.8)
+  ([workflow.md](specs/workflow.md))
 - [ ] **T3.9 Merge queue: serialized rebase onto `main`** — pop `integrate` issues in issue-graph topological order and rebase each candidate onto the *current* `main` tip in a sandbox (replaces the kernel's bare provenance-commit advance). ([integration.md](specs/integration.md))
 - [ ] **T3.10 Re-gate the merged result** — after rebase, re-run the full gate suite in a clean verification sandbox against the *rebased* result before advancing `main` (catches two-green-branches breakage). (needs T3.9) ([integration.md](specs/integration.md))
 - [ ] **T3.11 Conflict-resolution issue** — on a rebase conflict, spawn a sandboxed resolution issue (proposes a rebase), block, loop. *(OPEN: `integrate` as its own role vs. orchestrator function.)* (needs T3.9) ([integration.md](specs/integration.md))

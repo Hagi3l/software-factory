@@ -149,6 +149,20 @@ would loop forever. Termination is guaranteed only by:
   issue/epic).
 - **Retry caps** — a maximum number of `on_failure` cycles.
 
+The two are complementary: the retry cap bounds *how many* attempts run, the budget bounds
+*how much* those attempts may burn. A retry cap alone leaves a gap — a spec the factory
+cannot satisfy could consume unbounded tokens within the cap — which the budget closes.
+The cumulative *per-issue* token and dollar budget is realized: the runner stamps each
+invocation's `Usage` onto its Result from the broker relay (the trusted egress chokepoint,
+not the agent's self-report), and the orchestrator accumulates that spend across the
+`on_failure` chain (threaded forward on each routed fix issue like the retry counter),
+pricing it to USD through the model registry's per-model `cost` table
+([configuration.md](configuration.md)). When the running per-issue total reaches a
+configured `budget.tokens` or `budget.usd`, the issue dead-letters instead of spawning
+another attempt. (The cumulative `epic_budget` and a cumulative wall-clock cap are not yet
+enforced — a per-invocation wall ceiling is enforced by the sandbox; cross-loop wall and
+the cross-issue epic total remain ahead.)
+
 When either is breached, the work is **dead-lettered**: marked blocked, an alert
 event emitted, and left for a human to triage by refining the spec (see the human
 re-entry invariant in [specs-process.md](specs-process.md)). Triage happens through

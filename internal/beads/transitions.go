@@ -59,6 +59,19 @@ const MetadataKeySpecHash = "spec_hash"
 // (see specs/verification.md, specs/security.md).
 const MetadataKeyTraceMap = "trace_map"
 
+// MetadataKeySpentTokens and MetadataKeySpentUSD hold the cumulative spend of an issue's
+// on_failure retry chain so far (core.Issue.SpentTokens / SpentUSD): the total tokens and
+// dollars burned by earlier attempts at the same logical work item. A freshly seeded or
+// next-stage issue carries neither (treated as 0); each on_failure route stamps the
+// predecessor's running total plus the just-finished invocation's spend, so the
+// orchestrator can enforce the cumulative per-issue budget — the budget half of the
+// termination guarantee — against the sum rather than any single attempt. Like
+// MetadataKeyRetries they are threaded forward across the loop (see specs/workflow.md).
+const (
+	MetadataKeySpentTokens = "spent_tokens"
+	MetadataKeySpentUSD    = "spent_usd"
+)
+
 // The transitions below are the orchestrator's single-writer interface to beads:
 // only the orchestrator mutates the work graph, so funneling every status change
 // and proposal application through these methods is what enforces the single-writer
@@ -308,7 +321,8 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 	if issue.Body != "" {
 		args = append(args, "--description", issue.Body)
 	}
-	if issue.Role != "" || issue.Attempt > 0 || issue.Base != "" || issue.TraceMap != "" || issue.Spec != "" {
+	if issue.Role != "" || issue.Attempt > 0 || issue.Base != "" || issue.TraceMap != "" || issue.Spec != "" ||
+		issue.SpentTokens > 0 || issue.SpentUSD > 0 {
 		meta := map[string]any{}
 		if issue.Role != "" {
 			meta[MetadataKeyRole] = issue.Role
@@ -332,6 +346,15 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 		// stage produces an issue and is threaded forward from there.
 		if issue.TraceMap != "" {
 			meta[MetadataKeyTraceMap] = issue.TraceMap
+		}
+		// Only stamp cumulative spend when nonzero so a fresh/next-stage issue's metadata
+		// stays minimal (absence decodes back as 0). These are threaded forward by the
+		// orchestrator's on_failure route, accumulating across the retry chain.
+		if issue.SpentTokens > 0 {
+			meta[MetadataKeySpentTokens] = issue.SpentTokens
+		}
+		if issue.SpentUSD > 0 {
+			meta[MetadataKeySpentUSD] = issue.SpentUSD
 		}
 		b, err := json.Marshal(meta)
 		if err != nil {

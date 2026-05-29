@@ -133,7 +133,12 @@ func (r issueJSON) toCore() core.Issue {
 		Spec:     metaString(r.Metadata, MetadataKeySpec),
 		SpecHash: metaString(r.Metadata, MetadataKeySpecHash),
 		TraceMap: metaString(r.Metadata, MetadataKeyTraceMap),
-		Tags:     parseLabels(r.Labels),
+		// Cumulative spend of the on_failure retry chain so far, threaded forward by the
+		// orchestrator (the create() write path stamps them when nonzero). Absent metadata
+		// decodes back to 0 — a fresh or next-stage issue carries no spend.
+		SpentTokens: metaInt(r.Metadata, MetadataKeySpentTokens),
+		SpentUSD:    metaFloat(r.Metadata, MetadataKeySpentUSD),
+		Tags:        parseLabels(r.Labels),
 	}
 }
 
@@ -191,6 +196,21 @@ func metaInt(m map[string]json.RawMessage, key string) int {
 		return 0
 	}
 	return n
+}
+
+// metaFloat returns the float value of a metadata key, or 0 if absent or not a
+// number. It backs the cumulative USD spend (spent_usd), which is fractional; lenient
+// for the same reason as metaString/metaInt — foreign metadata must never fail a read.
+func metaFloat(m map[string]json.RawMessage, key string) float64 {
+	raw, ok := m[key]
+	if !ok {
+		return 0
+	}
+	var f float64
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return 0
+	}
+	return f
 }
 
 // decodeIssues parses bd's JSON array of issues. bd emits a JSON array for ready,

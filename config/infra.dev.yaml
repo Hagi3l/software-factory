@@ -23,5 +23,17 @@ otel:
 models:
   # Per-role model tiers (T3.4): a soul names its model here; the runner resolves it per
   # invocation, so cheaper models can serve roles whose output is independently re-gated.
-  claude-opus-4-8:   { provider: anthropic }   # frontier — planner, test-author, implementor
-  claude-sonnet-4-6: { provider: anthropic }   # mid tier — security/qa (candidate re-gated)
+  #
+  # `cost` is the per-million-token price (T3.8): the table the orchestrator uses to convert
+  # an invocation's recorded token usage into USD so it can enforce the cumulative per-issue
+  # dollar budget (policy.budget.usd) that bounds the on_failure loop — the budget half of the
+  # termination guarantee. Prices are not secrets (unlike API keys, which never live in
+  # config), so they sit here in the model registry; they track the published vendor sheet and
+  # are tuned per deployment. A model with no `cost` block contributes $0 (its spend is still
+  # bounded by the token and retry caps). See specs/workflow.md, specs/models.md.
+  claude-opus-4-8:   # frontier — planner, test-author, implementor
+    provider: anthropic
+    cost: { input_per_mtok: 15, output_per_mtok: 75, cache_write_per_mtok: 18.75, cache_read_per_mtok: 1.5 }
+  claude-sonnet-4-6: # mid tier — security/qa (candidate re-gated)
+    provider: anthropic
+    cost: { input_per_mtok: 3, output_per_mtok: 15, cache_write_per_mtok: 3.75, cache_read_per_mtok: 0.3 }

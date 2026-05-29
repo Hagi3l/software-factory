@@ -331,6 +331,17 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	// holds it. Only on a clean invocation: a failed/redelivered one (invErr != nil) has
 	// its Result discarded and is retried, so there is no envelope to attach evidence to.
 	if invErr == nil {
+		// Stamp the relay's token tally onto the envelope so the orchestrator can price it
+		// (per-model cost table) and enforce the cumulative per-issue budget across the
+		// on_failure loop — the budget half of the termination guarantee (see
+		// specs/workflow.md). Taken from the relay, the trusted egress chokepoint, so it
+		// reflects the calls actually relayed, never the untrusted agent's self-report.
+		res.Usage = core.Usage{
+			InputTokens:         u.InputTokens,
+			OutputTokens:        u.OutputTokens,
+			CacheCreationTokens: u.CacheCreationTokens,
+			CacheReadTokens:     u.CacheReadTokens,
+		}
 		r.harvest(ctx, brief.Issue.ID, rel, &res)
 	}
 	return res, invErr

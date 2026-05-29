@@ -73,6 +73,22 @@ type Issue struct {
 	// ("recompile the delta"). Empty until first dispatched, or when the issue names no spec.
 	SpecHash string
 
+	// SpentTokens and SpentUSD are the spend already consumed by EARLIER attempts in this
+	// issue's on_failure retry chain — the cumulative tokens and dollars burned across the
+	// feedback loop so far, not counting the just-finished invocation. They are 0 for a
+	// freshly seeded issue and for one produced by advancing to the NEXT stage (each stage
+	// begins with a fresh per-issue budget; the cross-stage total is the epic budget, a
+	// separate cap — see the plan's T3.8b). When the orchestrator routes a failure it adds
+	// the finished invocation's spend (from Result.Usage, priced by the per-model cost
+	// table) to these and threads the new total onto the fix issue, exactly as Attempt is
+	// threaded; it enforces config Policy.Budget against the running sum and dead-letters on
+	// a breach. This is the cumulative half of the termination guarantee that the retry cap
+	// alone does not cover — a spec the factory cannot satisfy could otherwise burn unbounded
+	// tokens within the retry cap. Like Base/Attempt they ride in beads metadata and are
+	// preserved across on_failure retries (see specs/workflow.md).
+	SpentTokens int
+	SpentUSD    float64
+
 	// Tags are the issue's selector input: the orchestrator picks which soul fulfills the
 	// issue's Role by matching these against each candidate soul's Selector (a role may map
 	// to a set of souls — see core.Soul.Matches, specs/configuration.md). They are a

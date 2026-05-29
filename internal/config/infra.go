@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+
+	"github.com/Loxstomper/harness/internal/core"
 )
 
 // Infra is infra.<env>.yaml: the environment-specific overlay — sandbox backend,
@@ -75,8 +77,36 @@ type OTelConfig struct {
 // adapter and, for OpenAI-compatible backends, an endpoint. API keys are NEVER in
 // config — the runner injects them from the environment (see specs/models.md).
 type ModelProvider struct {
-	Provider string `yaml:"provider"`           // one of the Provider* constants
-	Endpoint string `yaml:"endpoint,omitempty"` // base URL for openai-compat backends (Ollama/vLLM)
+	Provider string    `yaml:"provider"`           // one of the Provider* constants
+	Endpoint string    `yaml:"endpoint,omitempty"` // base URL for openai-compat backends (Ollama/vLLM)
+	Cost     ModelCost `yaml:"cost,omitempty"`     // per-million-token price, the tokens→USD table
+}
+
+// ModelCost is a model's per-million-token price: the table that converts a recorded
+// token Usage into USD so the orchestrator can enforce the dollar budget that bounds the
+// on_failure loop (see specs/workflow.md, specs/models.md). Per-million-token is the unit
+// model vendors publish, so the numbers map directly to a price sheet. Every field is
+// optional and a zero rate prices that dimension at $0, so a model with no cost block
+// contributes nothing to USD accounting — its spend is still bounded by the token and
+// retry caps, which never depend on the cost table. Prices are not secrets (unlike API
+// keys, which are never in config), so they live here in the model registry.
+type ModelCost struct {
+	InputPerMTok      float64 `yaml:"input_per_mtok,omitempty"`       // full-rate prompt tokens
+	OutputPerMTok     float64 `yaml:"output_per_mtok,omitempty"`      // generated tokens
+	CacheWritePerMTok float64 `yaml:"cache_write_per_mtok,omitempty"` // input tokens written to the prompt cache
+	CacheReadPerMTok  float64 `yaml:"cache_read_per_mtok,omitempty"`  // input tokens served from the cache
+}
+
+// USD converts a recorded token usage to dollars at this model's rates. Each dimension
+// is priced independently — full-rate input, output, cache write, and cache read all bill
+// differently — and summed; per-million pricing means each term is count*rate/1e6. An
+// unpriced dimension (zero rate) adds nothing, so an empty ModelCost yields $0.
+func (c ModelCost) USD(u core.Usage) float64 {
+	const perMillion = 1_000_000.0
+	return float64(u.InputTokens)*c.InputPerMTok/perMillion +
+		float64(u.OutputTokens)*c.OutputPerMTok/perMillion +
+		float64(u.CacheCreationTokens)*c.CacheWritePerMTok/perMillion +
+		float64(u.CacheReadTokens)*c.CacheReadPerMTok/perMillion
 }
 
 // Provider identifiers for ModelProvider.Provider. These are the single source of

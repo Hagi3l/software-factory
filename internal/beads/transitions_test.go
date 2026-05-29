@@ -686,6 +686,39 @@ func TestTraceMapRoundTripIntegration(t *testing.T) {
 	}
 }
 
+// TestSpentRoundTripIntegration proves an issue's cumulative spend — SpentTokens and
+// SpentUSD, the tokens and dollars burned by earlier attempts in its on_failure retry
+// chain — survives the write to beads metadata and decodes back on Get. The orchestrator
+// threads these forward like Base/Attempt and enforces the per-issue budget against the
+// running sum (T3.8), so they must round-trip; SpentUSD is fractional, exercising the
+// metaFloat decode path (see specs/workflow.md).
+func TestSpentRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+
+	created, err := c.Apply(context.Background(), []core.Proposal{
+		{Issue: core.Issue{Title: "expensive fix", Role: "implement", Attempt: 2,
+			SpentTokens: 1_350_000, SpentUSD: 12.5}},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got, err := c.Get(context.Background(), created[0].ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.SpentTokens != 1_350_000 {
+		t.Errorf("SpentTokens = %d, want 1350000 (round-tripped via metadata)", got.SpentTokens)
+	}
+	if got.SpentUSD != 12.5 {
+		t.Errorf("SpentUSD = %v, want 12.5 (round-tripped via metadata, fractional)", got.SpentUSD)
+	}
+	if got.Role != "implement" || got.Attempt != 2 {
+		t.Errorf("Role/Attempt = %q/%d, want implement/2 (must survive alongside spend)", got.Role, got.Attempt)
+	}
+}
+
 // TestSpecRoundTripIntegration proves an issue's Spec — the repo-relative path of the spec
 // file governing it — survives the write to beads metadata and decodes back on Get. It is
 // the reference the orchestrator resolves the bounded spec slice from, threaded forward

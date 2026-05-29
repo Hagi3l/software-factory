@@ -187,7 +187,9 @@ artifacts:
 otel:
   endpoint: ...            # trace/metric export; see observability.md
 models:                    # registry: model name (used by soul.model) → provider adapter
-  claude-opus-4-7: { provider: anthropic }
+  claude-opus-4-7:
+    provider: anthropic
+    cost: { input_per_mtok: 15, output_per_mtok: 75, cache_write_per_mtok: 18.75, cache_read_per_mtok: 1.5 }
   gpt-4o:          { provider: openai }
   llama-3.3-70b:   { provider: openai-compat, endpoint: http://ollama:11434/v1 }
   # API keys come from env / the secret store, NEVER from config
@@ -197,6 +199,14 @@ The `models` registry maps the `model` name a soul declares to a provider adapte
 (and endpoint for OpenAI-compatible backends). The runner resolves it at call time;
 see [models.md](models.md). Keys are injected from the environment, never written
 into config files.
+
+The optional `cost` block is the **per-million-token price** — the table that converts a
+recorded token `Usage` into USD so the orchestrator can enforce the dollar half of the
+[budget](workflow.md) that bounds the `on_failure` loop. Each dimension (full-rate input,
+output, cache write, cache read) bills independently; an absent block (or a zero rate)
+prices that dimension at $0, so a model with no `cost` contributes nothing to USD
+accounting — its spend is still bounded by the token and retry caps, which never depend on
+the table. Prices are not secrets, so unlike API keys they live in config.
 
 **Per-role model tiers** are expressed here, not by any separate construct: a soul
 names its `model`, so assigning a cheaper model to one role's soul and a frontier model

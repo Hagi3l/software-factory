@@ -44,6 +44,36 @@ type Result struct {
 	// the artifact store and the structured form is cleared, leaving only the ArtifactRef
 	// on Evidence; the provenance trailer cites it by hash. Empty for non-author roles.
 	Trace []TraceEntry
+
+	// Usage is the token accounting for this invocation, summed across every model
+	// completion the runner's broker relay tallied (the relay is the trusted egress
+	// chokepoint, so this reflects the calls actually relayed, never the agent's
+	// self-report). The runner stamps it onto the envelope so the orchestrator can
+	// convert it to spend (via the per-model cost table) and enforce the cumulative
+	// per-issue budget across the on_failure loop — the budget half of the termination
+	// guarantee, since the retry cap alone bounds the number of attempts but not the
+	// tokens/dollars they burn (see specs/workflow.md, specs/models.md).
+	Usage Usage
+}
+
+// Usage is normalized token accounting for one invocation. It mirrors model.Usage but
+// lives in core so the Result envelope (and the orchestrator that enforces budgets
+// against it) carries no dependency on the model layer — the same leaf discipline the
+// other canonical envelope types follow. The runner converts the model-layer tally to
+// this at harvest time.
+type Usage struct {
+	InputTokens         int // prompt tokens billed at full rate
+	OutputTokens        int // tokens generated
+	CacheCreationTokens int // input tokens written to the prompt cache
+	CacheReadTokens     int // input tokens served from the prompt cache
+}
+
+// TotalTokens is the sum of every token dimension — the figure the per-issue token
+// budget is enforced against. Cache reads and writes count: they are real billed tokens
+// (at reduced rates), and the budget is a termination guard on total model work, not a
+// full-rate-only meter.
+func (u Usage) TotalTokens() int {
+	return u.InputTokens + u.OutputTokens + u.CacheCreationTokens + u.CacheReadTokens
 }
 
 // TraceEntry is one row of the test↔spec traceability map: the acceptance test, and the
