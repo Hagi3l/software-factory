@@ -81,7 +81,7 @@ type Stage struct {
 type Policy struct {
 	MaxRetries int    `yaml:"max_retries"` // max on_failure cycles before dead-lettering
 	Budget     Budget `yaml:"budget"`      // per-issue cap
-	EpicBudget Budget `yaml:"epic_budget"` // cumulative cap across an epic
+	EpicBudget Budget `yaml:"epic_budget"` // cumulative cap across an epic — declared/validated but NOT yet enforced (no epic_id on issues yet); T3.8b wires enforcement
 	DeadLetter string `yaml:"dead_letter"` // subject breached work is dead-lettered to, e.g. "harness.dlq"
 }
 

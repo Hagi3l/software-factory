@@ -821,10 +821,40 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
     it; the published-ref + cleanup discipline here is reusable for handing a conflicted state to an
     agent. Specs updated: `integration.md` (step 3 realized: published temp ref, re-gate-then-advance,
     route-not-dead-letter on failure, FF skips it).
-- [ ] **T3.11 Conflict-resolution issue** — on a rebase conflict, spawn a sandboxed resolution
-  issue (proposes a rebase), block, loop — replacing T3.9's dead-letter at `advance`'s
-  `errRebaseConflict` branch. *(OPEN: `integrate` as its own role vs. orchestrator function —
-  T3.9 kept it orchestrator-owned.)* (needs T3.9) ([integration.md](specs/integration.md))
+- [x] **T3.11 Conflict-resolution issue** — *done.* On a rebase conflict the orchestrator no
+  longer dead-letters: it spawns a sandboxed **resolution issue** for a new `resolve` DAG stage
+  (`kind: resolve`, a `merge-resolver` soul) seeded at the *conflicting candidate*; the agent
+  rebases it onto `main`, resolves the conflicts, and submits a new candidate that is re-gated
+  (producer ≠ verifier) and `produces: [integrate]`, re-entering the merge queue. Verified with
+  `make check` green (396 pass, 2 skip). Learnings for downstream tasks:
+  - **`resolve` is a second gated agent-stage kind — `kind: resolve`** (`config.StageKindResolve`),
+    the mirror of T3.1's `plan`: like `plan` it names a role *and* coexists with a kind, but UNLIKE
+    `plan` it IS sandbox-gated (it must declare a postcondition — the suite re-verifying the resolved
+    tree). `validateDAG` gained a `resolve` case requiring both role and postcondition. It is reached
+    only on a conflict, never through a `produces` edge, so it has produces-indegree 0 like `plan`;
+    `entryRole` (cmd/harness) **excludes `kind: resolve`** so the pipeline-entry computation doesn't
+    see two unproduced agent stages and report ambiguity.
+  - **The conflict seam is exactly T3.9's `errRebaseConflict` branch in `advance`** — the dead-letter
+    there is replaced by `resolveConflict`, which creates the resolution issue seeded at the
+    conflicting candidate (`Base = res.Branch.Ref`, NOT `issue.Base`), threading Attempt/spend/Spec/
+    Tags/TraceMap forward, then closes the conflicted issue and returns the existing
+    `errMergeConflictHandled` sentinel so `accept` stops without re-closing. **With no `resolve` stage
+    configured (the kernel / spine-e2e fixture) it falls back to dead-lettering**, preserving pre-T3.11
+    behavior.
+  - **The conflict loop is bounded by the SAME termination guarantees as a fix loop.** The retry-cap +
+    cumulative-budget check (T3.8) was extracted from `route` into a shared `chargeAndAuthorize`
+    primitive that both `route` and `resolveConflict` call, so a pathological conflict no rebase
+    resolves eventually dead-letters rather than looping forever — the budget half of termination holds
+    identically wherever the orchestrator spawns a follow-up.
+  - **The OPEN is resolved: `integrate` stays orchestrator-owned.** The trusted layer performs the
+    rebase + final `git` write; the *only* part handed to a role is conflict resolution, via the
+    sandboxed `resolve` stage / `merge-resolver` soul, which merely *proposes* a rebased candidate the
+    orchestrator re-gates and merges. The merge-resolver runs the **frontier** model (hard semantic
+    merge reasoning; the re-gate is the safety net, not a licence to under-power it).
+  - Specs updated: `integration.md` (conflict resolution realized; the integrate-as-its-own-role OPEN
+    struck as Decided), `configuration.md` (`resolve` stage kind + the persona-path resolution rule).
+    Tests: `TestShippedResolveStageWired`, `TestHandleResultIntegrateConflictSpawnsResolution`,
+    `TestHandleResultIntegrateConflictResolveCapExhausted`. (needs T3.9) ([integration.md](specs/integration.md))
 
 ## Phase 4 — Control room
 
@@ -843,9 +873,9 @@ The human's read-only window + the wizard (their only action surface). Stack: te
 - [ ] **T4.9 OTel spans + export** — emit spans at the broker, orchestrator, and runner (boot, llm-turn, tool-call, gate-run) and metrics (latency, throughput, cost); export to a trace backend (Tempo/Jaeger). ([observability.md](specs/observability.md))
 - [ ] **T4.10 Budgets + Provenance views** — budgets (token/$/wall burn vs. caps) from OTel metrics; provenance (trace a merged commit → issue → soul → model → prompt → evidence). (needs T4.2, T4.9) ([control-room.md](specs/control-room.md))
 - [ ] **T4.11 Replay** — reconstruct an invocation's full decision trail from the broker-captured transcript + the artifact store, live or after the fact. (needs T4.7) ([observability.md](specs/observability.md))
-- [ ] **T4.12 Requirements-planner conversation loop** — the trusted, **non-sandboxed** LLM that drives toward aligned, testable intent, streaming over SSE; reuses the canonical model layer. *(Needs a capable model at runtime.)* ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
+- [ ] **T4.12 Requirements-planner conversation loop** — the trusted, **non-sandboxed** LLM that drives toward aligned, testable intent, streaming over SSE; reuses the canonical model layer. *(Needs a capable model at runtime.)* Scope note: control-room.md gives this planner three jobs — elicit testable intent (this task), author/maintain `specs/` markdown, and gate on human approval. The conversation loop is T4.12; the **spec-authoring persona and its link-integrity ownership** (specs-process.md: "every link resolves; every spec maps to ≥1 issue") land in **T4.14** — keep that validation a first-class postcondition on the planner's output there, not an afterthought. ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
 - [ ] **T4.13 Alignment ledger** — forks rendered as selectable chips (with tradeoffs); each item agreed/open with a one-line rationale; freeform typing always available. (needs T4.12) ([control-room.md](specs/control-room.md))
-- [ ] **T4.14 Spec authoring + consent gate** — the planner drafts spec markdown + seed issues (keeping link integrity + the README index); on explicit human **APPROVE**, the spec is committed to git, the decisions sidecar written, the conversation transcript stored, and the seed issues created through the single-writer path. (needs T4.12) ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md))
+- [ ] **T4.14 Spec authoring + consent gate** — the planner drafts spec markdown + seed issues (keeping link integrity + the README index); on explicit human **APPROVE**, the spec is committed to git, the decisions sidecar written, the conversation transcript stored, and the seed issues created through the single-writer path. The single-writer seam already exists — `beads.Apply` (the validated, referential-integrity-checked write `cmd/harness/seed.go` already uses, "written exactly as the orchestrator would write"); the wizard reuses it, plus a `produces`-legality check on the batch mirroring `acceptPlan`'s validation of planner output. So no separate orchestrator-integration task is needed. (needs T4.12) ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md))
 - [ ] **T4.15 Resolve mode** — Create and Resolve are one component; Resolve pre-loads the escalation + spec slice + the agent transcript that raised it and shows the spec diff + blast radius before commit. (needs T4.14) ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
 
 ## Phase 5 — Production isolation & distribution
@@ -856,7 +886,7 @@ store) with the production stack.
 - [ ] **T5.1 vsock broker transport** — `broker.Listen`/`Serve` over vsock and a `sandbox.Endpoint` of `vsock`+`cid:port` (currently unix-only); the transport Firecracker needs. ([messaging.md](specs/messaging.md), [components/runner.md](specs/components/runner.md))
 - [ ] **T5.2 Firecracker sandbox backend** — a KVM-microVM backend implementing the `Backend`/`Sandbox` interface: rootfs seeding, vsock I/O (T5.1), resource limits incl. disk, deterministic teardown. The production isolation target. (needs T5.1) ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.3 Rootfs / base-image composition** — per-role toolchain images with the module/package cache baked in for offline (zero-network) builds. *(OPEN in sandbox.md.)* ([components/sandbox.md](specs/components/sandbox.md))
-- [ ] **T5.4 Sandbox seeded-worktree ownership** *(carried from Phase 1)* — the Docker backend `chown`s the seeded worktree to the container user (and the Firecracker backend seeds correct ownership), dropping the `safe.directory` / VCS-stamping workaround the bootstrap profile image relies on. ([components/sandbox.md](specs/components/sandbox.md))
+- [ ] **T5.4 Sandbox seeded-worktree ownership** *(carried from Phase 1)* — **drop the current workaround:** the bootstrap `go-toolchain` image relies on `git config --global --add safe.directory '*'` to tolerate the seeded worktree being owned by the host uid (the Docker backend seeds via `docker cp host/. container:workdir`, preserving host ownership; no `chown` today). Replace it by having the Docker backend `chown` the seeded worktree to the container user (and the Firecracker backend seed correct ownership), so the `safe.directory` / VCS-stamping crutch can be removed. ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.5** *(optional)* gVisor backend (medium-trust). ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.6 Vetted package mirror/proxy** — route package fetches through a pinning/scanning/logging proxy on the broker allowlist; a read-through cache amortizes downloads without weakening egress control. ([security.md](specs/security.md), [components/runner.md](specs/components/runner.md))
 - [ ] **T5.7 Scoped short-lived secret minting** — the runner mints a per-task git token scoped to push *only* the task branch, injected for the invocation lifetime and dying with the sandbox (replaces the bootstrap local-repo push). ([components/runner.md](specs/components/runner.md), [security.md](specs/security.md))
@@ -877,7 +907,10 @@ These are `OPEN:` in the specs and may reshape tasks above:
   fail-fast.** Deliberate for proof/measurement checks (a mutation score is meaningless on
   red tests). Aggregating all independent-scanner findings in one pass (better DLQ triage)
   needs a per-check "independent" config signal and is filed as **T2.12** (optional).
-- `integrate` as its own role/soul vs. orchestrator-owned with sandboxed conflict help (T3.11).
+- ~~`integrate` as its own role/soul vs. orchestrator-owned with sandboxed conflict help~~ —
+  **decided (T3.11): orchestrator-owned.** The trusted layer does the rebase + final `git` write;
+  only conflict resolution is handed to a role (the sandboxed `resolve` stage / `merge-resolver`
+  soul), which proposes a rebased candidate the orchestrator re-gates and merges.
 - HA orchestrator: single instance (fine for v1) vs. leader election (T5.11).
 - Condition-expression language for pre/postconditions (shell exit-code vs. CEL) — affects
   config validation + the gate runner. T2.1 landed the shell-exit-code form: command-check
