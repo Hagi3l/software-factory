@@ -58,7 +58,10 @@ Brief:
 
 The **spec slice** is bounded: the referenced spec file plus its linked neighbours
 to a configured depth — *not* the whole `specs/` tree, which would blow context
-and dilute focus. See [../specs-process.md](../specs-process.md).
+and dilute focus. The orchestrator resolves it from the issue's structured spec
+reference (a repo-relative path threaded forward across the epic) and embeds it here,
+so the agent receives the contract in-context rather than reading the tree. See
+[../specs-process.md](../specs-process.md).
 
 ---
 

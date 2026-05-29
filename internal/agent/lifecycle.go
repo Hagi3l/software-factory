@@ -216,8 +216,9 @@ func (lc *lifecycle) requestSubtaskTool() Tool {
 				"type": "object",
 				"properties": {
 					"title": {"type": "string", "description": "Short imperative title of the child work item."},
-					"body": {"type": "string", "description": "What the child work item must accomplish, and which spec/section governs it."},
+					"body": {"type": "string", "description": "What the child work item must accomplish."},
 					"role": {"type": "string", "description": "The role that should handle it, e.g. \"test-author\"."},
+					"spec": {"type": "string", "description": "Repository-relative path of the spec file that governs this child (e.g. \"specs/orders.md\"), so its bounded spec slice is resolved for it. Use the file paths named in your spec slice."},
 					"key": {"type": "string", "description": "Optional local label for this child so a later child can name it in depends_on (siblings have no id yet)."},
 					"tags": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Optional selector tags (e.g. {\"lang\": \"go\"}) that pick which soul fulfills the child's role when several do. Threaded forward across the child's stages."},
 					"depends_on": {"type": "array", "items": {"type": "string"}, "description": "Blocked-by edges: existing issue ids, or the key of a sibling proposed in this same task."}
@@ -230,6 +231,7 @@ func (lc *lifecycle) requestSubtaskTool() Tool {
 				Title     string            `json:"title"`
 				Body      string            `json:"body"`
 				Role      string            `json:"role"`
+				Spec      string            `json:"spec"`
 				Key       string            `json:"key"`
 				Tags      map[string]string `json:"tags"`
 				DependsOn []string          `json:"depends_on"`
@@ -244,7 +246,7 @@ func (lc *lifecycle) requestSubtaskTool() Tool {
 				return invalid("role is required"), nil
 			}
 			lc.addProposal(core.Proposal{
-				Issue:     core.Issue{Title: a.Title, Body: a.Body, Role: a.Role, Tags: a.Tags},
+				Issue:     core.Issue{Title: a.Title, Body: a.Body, Role: a.Role, Spec: a.Spec, Tags: a.Tags},
 				Key:       a.Key,
 				DependsOn: a.DependsOn,
 			})

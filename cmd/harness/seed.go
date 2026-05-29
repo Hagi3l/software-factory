@@ -32,9 +32,9 @@ func (e *ambiguousEntryError) Error() string {
 // (1) ensure a spec markdown exists (writing a starter from --title/--description if
 // the file is absent), and (2) create a beads issue at the entry role, going through
 // beads.Apply so the issue is written exactly as the orchestrator would write a
-// child (single-writer invariant; the orchestrator is the only other writer). The
-// agent reads the spec from its seeded worktree, so the issue body records where the
-// spec lives.
+// child (single-writer invariant; the orchestrator is the only other writer). The spec
+// location is recorded as the issue's structured spec reference (core.Issue.Spec), from
+// which the orchestrator resolves the bounded spec slice for the Brief.
 func cmdSeed(args []string) error {
 	fs := flag.NewFlagSet("seed", flag.ContinueOnError)
 	dir := fs.String("config", "config", "config directory (used to resolve the entry role)")
@@ -75,6 +75,7 @@ func cmdSeed(args []string) error {
 	}
 
 	body := strings.TrimSpace(*desc)
+	specRef := ""
 	if *specPath != "" {
 		full := *specPath
 		if !filepath.IsAbs(full) {
@@ -83,21 +84,20 @@ func cmdSeed(args []string) error {
 		if err := ensureSpec(full, *title, *desc); err != nil {
 			return err
 		}
-		// Record the spec location relative to the repo root so the agent (which sees
-		// the worktree, not host absolute paths) can find it.
+		// Record the spec location relative to the repo root as the issue's structured spec
+		// reference (core.Issue.Spec), not prose in the body: the orchestrator resolves the
+		// bounded spec slice from it, and it threads forward across the epic's stages. The
+		// path is repo-relative because the agent sees the worktree, not host absolute paths.
 		rel, rerr := filepath.Rel(absRepo, full)
 		if rerr != nil {
 			rel = *specPath
 		}
-		if body != "" {
-			body += "\n\n"
-		}
-		body += "Spec: " + filepath.ToSlash(rel)
+		specRef = filepath.ToSlash(rel)
 	}
 
 	bd := beads.New(beads.WithBinary(*bdBin), beads.WithDir(absRepo))
 	created, err := bd.Apply(context.Background(), []core.Proposal{{
-		Issue: core.Issue{Title: *title, Body: body, Role: r},
+		Issue: core.Issue{Title: *title, Body: body, Role: r, Spec: specRef},
 	}})
 	if err != nil {
 		return err

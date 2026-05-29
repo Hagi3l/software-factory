@@ -37,6 +37,14 @@ const MetadataKeyRetries = "retries"
 // specs/workflow.md, specs/verification.md).
 const MetadataKeyBase = "base"
 
+// MetadataKeySpec holds the repository-relative path of the spec file an issue is
+// governed by (core.Issue.Spec). A seeded issue carries the spec the operator pointed at;
+// the planner stamps each child's governing spec; thereafter it is threaded forward like
+// MetadataKeyBase so every stage of an epic resolves the same bounded spec slice for its
+// Brief (see internal/spec, specs/specs-process.md). It is a path, not content — the slice
+// is resolved on demand from it; T3.6 adds a separate key for the slice's content hash.
+const MetadataKeySpec = "spec"
+
 // MetadataKeyTraceMap holds the artifact-store hash of the test↔spec traceability map
 // (core.Issue.TraceMap). A freshly seeded issue has none; the author-tests stage's map is
 // threaded forward onto the issues it produces, like MetadataKeyBase, so it survives to
@@ -259,10 +267,15 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 	if issue.Body != "" {
 		args = append(args, "--description", issue.Body)
 	}
-	if issue.Role != "" || issue.Attempt > 0 || issue.Base != "" || issue.TraceMap != "" {
+	if issue.Role != "" || issue.Attempt > 0 || issue.Base != "" || issue.TraceMap != "" || issue.Spec != "" {
 		meta := map[string]any{}
 		if issue.Role != "" {
 			meta[MetadataKeyRole] = issue.Role
+		}
+		// Only stamp the spec path when set; a seed without --spec carries none and the
+		// orchestrator dispatches with an empty slice (the worktree tree is the fallback).
+		if issue.Spec != "" {
+			meta[MetadataKeySpec] = issue.Spec
 		}
 		// Only stamp retries when nonzero so a fresh issue's metadata stays {"role":...}
 		// (a 0 generation is the absence of the key, decoded back as 0 by metaInt).

@@ -20,6 +20,14 @@ type Harness struct {
 	// like "tests-red-then-green") are not command checks and need no entry here.
 	Checks map[string]string `yaml:"checks,omitempty"`
 	Policy Policy            `yaml:"policy"`
+
+	// SpecDepth bounds the spec slice handed to an agent: the issue's referenced spec file
+	// plus its cross-linked neighbors reachable within this many link hops (0 = just the
+	// referenced file; 1 = it plus its direct neighbors). It is the configured depth of
+	// the spec context horizon — large enough to carry the contract and the terms it leans
+	// on, small enough not to slurp the whole tree (see internal/spec, specs/specs-process.md).
+	// Unset (0) is a safe minimal slice; the bootstrap sets 1.
+	SpecDepth int `yaml:"spec_depth,omitempty"`
 }
 
 // Stage kinds for non-agent stages. An agent stage names a Role instead; a stage is

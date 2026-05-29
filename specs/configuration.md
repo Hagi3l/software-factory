@@ -47,6 +47,8 @@ checks:                          # command-check postcondition -> shell command
   govulncheck:  govulncheck ./...                        # vulnerabilities verification
   license-scan: go-licenses check ./...                  # deps/licenses   sandbox
 
+spec_depth: 1                    # spec-slice link-hop horizon (see below)
+
 policy:
   max_retries: 3
   budget:      { tokens: 2_000_000, usd: 20, wall: 2h }   # per issue
@@ -54,6 +56,11 @@ policy:
   dead_letter: harness.dlq
 ```
 
+- `spec_depth` bounds the **spec context horizon**: the orchestrator hands each agent
+  the bounded spec slice — the issue's referenced spec file plus its cross-linked
+  neighbours within this many link hops — rather than the whole `specs/` tree (0 = just
+  the referenced file; 1 = it plus its direct neighbours). See
+  [specs-process.md](specs-process.md).
 - `produces:` are the **declarative depth** transitions the orchestrator applies.
 - `precondition` / `postcondition` / `on_failure` are the stage guards (see
   [workflow.md](workflow.md)). Postconditions evaluate in a clean

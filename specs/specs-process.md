@@ -71,6 +71,16 @@ Slurping the entire `specs/` tree would blow context and dilute focus. The
 requirements planner owns link integrity (a natural postcondition on the
 `requirements` stage: every link resolves; every spec maps to ≥1 issue).
 
+The slice is built by the trusted orchestrator, not the agent. Each issue carries a
+**structured spec reference** (the repo-relative path of its governing file), set at
+seed time and by the planner per child, and threaded forward across an epic's stages
+like the candidate base. From it the orchestrator resolves the slice — breadth-first
+over markdown cross-links to `spec_depth` hops (see [configuration.md](configuration.md)),
+confined to the repository, external/anchor/non-markdown links skipped — and embeds it
+in the [Brief](components/agent.md#the-brief). The slice is assembled deterministically
+so it can be content-hashed for version pinning (below). An issue naming no spec gets no
+slice and the agent falls back to the tree in its worktree.
+
 ---
 
 ## Spec drift

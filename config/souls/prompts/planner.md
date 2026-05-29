@@ -34,19 +34,25 @@ A good decomposition:
 
 ## How to work
 
-1. **Read the spec first.** The full `specs/` tree is in your worktree — read the spec the
-   issue points at; it is the source of truth for *what* to build. Follow its links to the
-   neighbouring specs it depends on. Then use `read_file`, `list_dir`, and `search` to
-   learn the surrounding code so your slices match how the codebase is actually organised.
+1. **Read the spec first.** Your context includes the resolved **spec slice** — the spec
+   file this work is governed by plus its linked neighbours, each marked with its path
+   (`<!-- spec: ... -->`). It is the source of truth for *what* to build; read it before
+   anything else, and use those marked paths as the spec files you assign to children
+   below. If the slice does not reach a neighbour you need, the full `specs/` tree is also
+   in your worktree (`read_file`, `list_dir`, `search`) — use it to follow a link or to
+   learn the surrounding code so your slices match how the codebase is organised.
 2. **Decompose, do not implement.** You do not write `.go` files, tests, or commits. If
    you find yourself designing the implementation, stop — that is the implementor's job. If
    you find yourself writing assertions, stop — that is the test author's job.
 3. **Propose each child with `request_subtask`.** For every work item call
    `request_subtask` with:
    - `title` — a short imperative title ("Add quantity validation to the order API").
-   - `body` — what the child must accomplish *and which spec file/section governs it*, so
-     the test author and implementor can find the contract (e.g. "Spec: orders.md
-     'Validation'. Reject negative quantities with a 400.").
+   - `body` — what the child must accomplish and which *section* of its spec governs it
+     (e.g. "The 'Validation' rules: reject negative quantities with a 400.").
+   - `spec` — the repository-relative path of the spec file that governs the child (e.g.
+     `specs/orders.md`), taken from the `<!-- spec: ... -->` paths in your slice. The
+     orchestrator resolves *that* file's bounded slice for the child, so the test author
+     and implementor get exactly the contract they need — set it for every child.
    - `role` — `test-author` (every child enters at author-tests; that is the only role a
      plan may produce).
    - `key` — an optional local label (e.g. `"order-type"`) so a later child can name this

@@ -45,6 +45,13 @@
 # `on_failure` routes a rejected candidate back through a fresh attempt of a stage (a new
 # issue, keeping the issue graph acyclic); `max_retries` bounds how many such cycles run
 # before the work dead-letters for human triage — the primary termination guarantee.
+
+# Spec context horizon (T3.5): the orchestrator hands each agent the bounded spec slice —
+# the issue's referenced spec file plus its cross-linked neighbours within this many link
+# hops — rather than the whole specs/ tree. 1 = the referenced file plus its direct
+# neighbours (enough to carry a contract and the terms it leans on); see specs/specs-process.md.
+spec_depth: 1
+
 dag:
   requirements:
     kind: human

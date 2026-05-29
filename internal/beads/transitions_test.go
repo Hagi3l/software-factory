@@ -624,6 +624,34 @@ func TestTraceMapRoundTripIntegration(t *testing.T) {
 	}
 }
 
+// TestSpecRoundTripIntegration proves an issue's Spec — the repo-relative path of the spec
+// file governing it — survives the write to beads metadata and decodes back on Get. It is
+// the reference the orchestrator resolves the bounded spec slice from, threaded forward
+// like Base, so it must round-trip alongside Role and Base (see internal/spec, T3.5).
+func TestSpecRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+
+	created, err := c.Apply(context.Background(), []core.Proposal{
+		{Issue: core.Issue{Title: "implement orders", Role: "implement",
+			Base: "candidate/harness-1", Spec: "specs/orders.md"}},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got, err := c.Get(context.Background(), created[0].ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Spec != "specs/orders.md" {
+		t.Errorf("Spec = %q, want specs/orders.md (round-tripped via metadata)", got.Spec)
+	}
+	if got.Base != "candidate/harness-1" || got.Role != "implement" {
+		t.Errorf("Base/Role = %q/%q, want candidate/harness-1/implement (must survive alongside spec)", got.Base, got.Role)
+	}
+}
+
 // allIssues returns every issue id in the db (including closed) for count assertions.
 func allIssues(t *testing.T, dir string) []string {
 	t.Helper()

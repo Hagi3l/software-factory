@@ -51,6 +51,19 @@ type Issue struct {
 	// specs/verification.md, specs/security.md).
 	TraceMap string
 
+	// Spec is the repository-relative path of the spec file this issue is governed by
+	// (e.g. "specs/orders.md"). It is the issue's structured reference into the spec graph
+	// — a first-class field, not prose buried in Body — so the orchestrator can resolve the
+	// bounded spec slice for the Brief (the referenced file + its linked neighbors to a
+	// configured depth; see internal/spec, specs/specs-process.md) without parsing untrusted
+	// agent-authored text. It is set at seed time and by the decomposition planner per child
+	// (request_subtask's `spec`), rides in beads metadata like Base/TraceMap, and is threaded
+	// forward across an epic's stages so author-tests, implement, and qa all resolve the same
+	// contract. Empty when the issue names no spec (the slice is then omitted and the agent
+	// falls back to the specs/ tree in its worktree). T3.6 will additionally pin the slice's
+	// content hash on the issue for spec-version drift detection.
+	Spec string
+
 	// Tags are the issue's selector input: the orchestrator picks which soul fulfills the
 	// issue's Role by matching these against each candidate soul's Selector (a role may map
 	// to a set of souls — see core.Soul.Matches, specs/configuration.md). They are a

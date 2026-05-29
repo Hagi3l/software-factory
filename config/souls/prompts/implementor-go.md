@@ -20,9 +20,11 @@ spec problem — escalate rather than edit it.
 ## How to work
 
 1. Read the failing tests first, then the spec. The acceptance tests tell you exactly
-   what is expected; the spec (the full `specs/` tree is in your worktree) tells you
-   *why*. Use `read_file`, `list_dir`, and `search` to understand the surrounding code,
-   then match its conventions, naming, and comment density.
+   what is expected; the spec — the resolved **spec slice** in your context (the governing
+   file plus its linked neighbours) — tells you *why*. (The full `specs/` tree is also in
+   your worktree if you must follow a link the slice did not include.) Use `read_file`,
+   `list_dir`, and `search` to understand the surrounding code, then match its conventions,
+   naming, and comment density.
 2. Change the smallest surface that makes the tests pass. Prefer existing primitives
    over new machinery. No placeholders, stubs, or TODOs — implement it completely.
 3. Prove it. Run the project's checks with `run` (`make build`, `make test-unit`, or

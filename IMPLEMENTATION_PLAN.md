@@ -557,7 +557,47 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
     slice. The Brief plumbing T3.4 leaned on (soul embedded whole) is unaffected.
   - Specs updated: `models.md` (new *Per-role model tiers* section; OPEN questions resolved),
     `configuration.md` (tier note under the `models` registry).
-- [ ] **T3.5 Spec-slice resolution** — a new `internal/spec` package that builds the bounded slice (referenced file + linked neighbours to a configured depth) and populates `Brief.Spec`, so the agent no longer reads the whole `specs/` tree from the worktree. ([specs-process.md](specs/specs-process.md), [components/agent.md](specs/components/agent.md))
+- [x] **T3.5 Spec-slice resolution** — *done.* New `internal/spec` package builds the bounded
+  slice (referenced spec file + cross-linked markdown neighbours to a configured depth) and
+  `buildBrief` populates `Brief.Spec` from the issue's structured spec reference, so the agent
+  gets the contract in-context instead of slurping the whole `specs/` tree. Verified with `make
+  check` green (373 pass, 2 skip). Learnings for downstream tasks:
+  - **`Brief.Spec` was already wired into the agent prompt (`loop.go` buildContext renders a
+    "# Specification (resolved slice)" section) but `buildBrief` hardcoded `Spec: ""` — a dead
+    path.** T3.5 filled it; no prompt-rendering change needed. The spec *reference* previously
+    lived only as prose (`Spec: <path>` in `Issue.Body`, written by seed, propagated by the
+    planner persona). T3.5 promoted it to a **structured `core.Issue.Spec`** field (repo-relative
+    path), because the trusted orchestrator must not parse untrusted agent prose to decide what
+    enters agent context, and **T3.6/T3.7 need the reference structurally** (pin the slice hash;
+    diff issues by spec ref). The body `Spec:` line is gone — single source of truth.
+  - **`spec.Resolve(root, ref, depth)`** is a host-side, filesystem resolver: BFS from the
+    referenced file over inline markdown links (`[t](path.md)`) to `depth` hops, each file emitted
+    once with an `<!-- spec: <path> -->` marker, **deterministic** (BFS + source-order links) so it
+    content-addresses stably for T3.6. It **confines to `root`** (a `../` escape is dropped — a
+    hostile spec link can't pull host files), and skips external URLs, pure `#anchors`, and non-`.md`
+    targets. Only the *referenced* file failing to read is an error; a broken/forward neighbour link
+    is skipped (a spec may link ahead). Limitation: reference-style links (`[t][ref]`) aren't followed
+    (specs use inline links by convention) — documented, not silent.
+  - **`Issue.Spec` threads forward exactly like Base/TraceMap/Tags:** rides in beads metadata
+    (`MetadataKeySpec = "spec"`, stamped in `create`, read in `toCore`); `advance` and `route` copy
+    it; set by `seed` (`Issue.Spec` from `--spec`) and by the planner per child (`request_subtask`
+    gained a `spec` param → `Proposal.Issue.Spec`). So author-tests → implement → qa of one epic all
+    resolve the same contract. **The planner reads the `<!-- spec: ... -->` paths in its own slice
+    and assigns them to children** (persona updated).
+  - **Depth is config: `Harness.SpecDepth` (`spec_depth` in harness.yaml), shipped = 1** (referenced
+    file + direct neighbours). Unset (0) is a safe minimal one-file slice, not an error; validate
+    rejects only a negative depth. `buildBrief` resolution is **best-effort**: an unresolvable spec
+    logs loudly and dispatches with an empty slice (the worktree tree is the fallback) rather than
+    wedging the issue — the same degradation discipline harvest uses.
+  - **Personas updated** (planner/test-author/implementor): the spec slice in context is now the
+    primary source; the full `specs/` tree in the worktree remains a fallback for following a link the
+    slice didn't reach. The `security` soul is spec-independent (defence-in-depth) — left unchanged.
+  - **For T3.6:** hash `Brief.Spec` (the deterministic slice bytes) and store it on the issue (a new
+    `spec_hash` metadata key, alongside `spec`); `Resolve`'s stable output is what makes the hash
+    meaningful. **For T3.7:** the structured `Issue.Spec` reference is the index to diff issues against
+    an edited spec file. Specs updated: `specs-process.md` (Spec context horizon — realized mechanism),
+    `components/agent.md` (Brief slice is orchestrator-resolved from the issue's reference),
+    `configuration.md` (`spec_depth`).
 - [ ] **T3.6 Spec-version pinning** — the Brief pins the content hash of its spec slice; the hash is stored on the issue. (needs T3.5) ([specs-process.md](specs/specs-process.md))
 - [ ] **T3.7 Recompile-the-delta** — on a spec-file edit, the orchestrator diffs which issues referenced it and invalidates / re-derives the affected in-flight issues; already-merged work may spawn new issues for the diff. (needs T3.6) ([specs-process.md](specs/specs-process.md))
 - [ ] **T3.8 Cumulative per-issue / epic budget** *(carried from Phase 1)* — surface `Usage` on the Result envelope (the runner already tallies it); the orchestrator accumulates spend across the `on_failure` loop per issue/epic and dead-letters on breach; a per-model cost table converts tokens → USD. ([workflow.md](specs/workflow.md))

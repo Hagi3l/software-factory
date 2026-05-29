@@ -155,6 +155,24 @@ func TestRequestSubtaskThreadsTags(t *testing.T) {
 	}
 }
 
+// request_subtask threads the governing spec path onto the proposed child, so the planner
+// assigns each child the spec file the orchestrator resolves its bounded slice from (T3.5,
+// see internal/spec, core.Issue.Spec).
+func TestRequestSubtaskThreadsSpec(t *testing.T) {
+	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{})
+	if out := invoke(t, lcToolByName(t, tools, "request_subtask"),
+		`{"title":"validate quantity","role":"test-author","spec":"specs/orders.md"}`); out.IsError {
+		t.Fatalf("request_subtask = %+v", out)
+	}
+	out := invoke(t, lcToolByName(t, tools, "submit_plan"), `{"summary":"one slice"}`)
+	if out.Result == nil || len(out.Result.Proposes) != 1 {
+		t.Fatalf("submit_plan = %+v, want one proposal", out.Result)
+	}
+	if spec := out.Result.Proposes[0].Issue.Spec; spec != "specs/orders.md" {
+		t.Errorf("proposal spec = %q, want specs/orders.md", spec)
+	}
+}
+
 // submit_plan with no proposals is a non-terminal error: a planner that decomposed
 // nothing would end the pipeline with no work, so it is told to propose first.
 func TestSubmitPlanRequiresProposals(t *testing.T) {

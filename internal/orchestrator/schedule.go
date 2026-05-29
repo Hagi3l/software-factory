@@ -7,6 +7,7 @@ import (
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/messaging"
+	"github.com/Loxstomper/harness/internal/spec"
 )
 
 // scheduleReady dispatches every ready issue whose role is an agent stage: it claims
@@ -60,23 +61,38 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 	}
 }
 
-// buildBrief assembles the task envelope handed into the sandbox. In the bootstrap the
-// spec slice is empty: the seeded worktree contains the whole specs/ tree, so the agent
-// reads the spec it needs through its workspace tools; bounded spec-slice resolution is
-// Phase 3 (see specs/specs-process.md). Base is the ref the candidate branches from: an
-// issue produced by a preceding agent stage carries its predecessor's verified candidate
-// (issue.Base), so e.g. implement branches from the author-tests candidate that holds
-// the failing tests; a freshly seeded issue carries none and falls back to the pipeline
-// base (o.base, main). Criteria carries the stage's postconditions so the agent knows
-// what it must satisfy (the orchestrator independently re-checks them at the gate).
+// buildBrief assembles the task envelope handed into the sandbox. The spec slice is the
+// bounded context horizon (see specs/specs-process.md): the orchestrator resolves the
+// issue's referenced spec file plus its linked neighbors to the configured depth from
+// the integration repo and embeds it, so the agent gets exactly the contract it needs in
+// context rather than slurping the whole specs/ tree. An issue with no spec reference (a
+// seed without --spec) gets an empty slice and falls back to the tree in its worktree.
+// Resolution is best-effort: a missing/unreadable spec is logged loudly and the brief
+// dispatches with an empty slice rather than wedging the issue — degraded context, not a
+// dead pipeline (the same discipline harvest uses). Base is the ref the candidate branches
+// from: an issue produced by a preceding agent stage carries its predecessor's verified
+// candidate (issue.Base), so e.g. implement branches from the author-tests candidate that
+// holds the failing tests; a freshly seeded issue carries none and falls back to the
+// pipeline base (o.base, main). Criteria carries the stage's postconditions so the agent
+// knows what it must satisfy (the orchestrator independently re-checks them at the gate).
 func (o *Orchestrator) buildBrief(issue core.Issue, stage config.Stage, soul core.Soul) core.Brief {
 	base := o.base
 	if issue.Base != "" {
 		base = issue.Base
 	}
+	specSlice := ""
+	if issue.Spec != "" {
+		s, err := spec.Resolve(o.opts.Repo, issue.Spec, o.opts.Config.Harness.SpecDepth)
+		if err != nil {
+			o.log.Error("orchestrator: resolve spec slice; dispatching with empty slice",
+				"issue", issue.ID, "spec", issue.Spec, "err", err)
+		} else {
+			specSlice = s
+		}
+	}
 	return core.Brief{
 		Issue:    issue,
-		Spec:     "",
+		Spec:     specSlice,
 		Base:     base,
 		Criteria: stage.Postcondition,
 		Soul:     soul,

@@ -34,10 +34,12 @@ trusts in place of a human reviewer. They must:
 
 ## How to work
 
-1. Read the spec first. The full `specs/` tree is in your worktree — read the spec the
-   issue points at; it is the source of truth for *what* to test. Then use `read_file`,
-   `list_dir`, and `search` to learn the surrounding code's conventions, test layout,
-   and naming, so your tests match them.
+1. Read the spec first. Your context includes the resolved **spec slice** — the spec file
+   this work is governed by plus its linked neighbours — which is the source of truth for
+   *what* to test; read it before anything else. (The full `specs/` tree is also in your
+   worktree if you must follow a link the slice did not include.) Then use `read_file`,
+   `list_dir`, and `search` to learn the surrounding code's conventions, test layout, and
+   naming, so your tests match them.
 2. **Do not write the implementation.** You write `_test.go` files (and only the minimal
    non-test scaffolding a test cannot compile without — and prefer to avoid even that).
    Making the tests pass is the implementor's job, performed by a different soul in a

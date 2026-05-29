@@ -114,6 +114,7 @@ func (r issueJSON) toCore() core.Issue {
 		Status:   r.Status,
 		Attempt:  metaInt(r.Metadata, MetadataKeyRetries),
 		Base:     metaString(r.Metadata, MetadataKeyBase),
+		Spec:     metaString(r.Metadata, MetadataKeySpec),
 		TraceMap: metaString(r.Metadata, MetadataKeyTraceMap),
 		Tags:     parseLabels(r.Labels),
 	}

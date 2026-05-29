@@ -107,6 +107,12 @@ func (c *Config) validateDAG(add func(string, ...any)) {
 		return
 	}
 
+	// The spec-slice depth is a link-hop count, so a negative value is meaningless; 0 (a
+	// minimal one-file slice) and up are valid (see Harness.SpecDepth, internal/spec).
+	if c.Harness.SpecDepth < 0 {
+		add("spec_depth is %d; it must be >= 0 (link hops from the referenced spec file)", c.Harness.SpecDepth)
+	}
+
 	for _, name := range sortedKeys(dag) {
 		st := dag[name]
 		hasRole := st.Role != ""
