@@ -11,8 +11,9 @@ See also: [workflow.md](workflow.md), [verification.md](verification.md),
 
 ## The trap: two green branches can break `main`
 
-Each `implement` issue produces its own branch off `main` (`bd/<id>`). Many run in
-parallel. The decomposition planner serializes *known* conflicts with `blocked-by`
+Each `implement` issue produces its own candidate branch off `main`
+(`candidate/<issue-id>` — the canonical name the agent's `submit` commits onto and
+the [broker](components/runner.md) refuses to deviate from). Many run in parallel. The decomposition planner serializes *known* conflicts with `blocked-by`
 edges — but it cannot predict every collision.
 
 Two branches that each pass their gate **independently** can still combine into a
@@ -38,7 +39,7 @@ one at a time:
 3. re-run the FULL gate suite in a clean verification sandbox
    against the REBASED result — i.e. against what will actually land
        └─ fail? the combination broke something → spawn a fix issue, loop
-4. fast-forward merge to main + write the provenance trailer
+4. advance main to the verified candidate + write the provenance trailer
 5. next in queue
 ```
 
@@ -65,6 +66,18 @@ Issue: bd-1234 | Prompt-SHA: 9af… | Verified: build,test,gosec,mutation
 
 beads issue → commit → signed evidence is a SLSA-style chain that makes every
 autonomous change traceable, which matters precisely because no human reviewed it.
+
+**The trailer requires a trusted commit, so the final step is *not* a literal
+fast-forward.** A bare fast-forward would move `main` onto the agent's own commit,
+leaving nowhere to attach a trailer the trusted layer vouches for. Instead the
+orchestrator creates a **provenance commit on top of the verified candidate** —
+same tree (no file changes), parent = candidate tip, authored by the harness
+identity, message = the trailer — then advances `main` to it. So `main`'s tip is
+always a trusted, attributable commit and the candidate history stays intact below.
+This stays within fast-forward semantics (`main` must be an ancestor of the
+candidate; a non-fast-forward is still refused — that is what the rebase in step 2
+is for), and it is idempotent: a redelivered accept re-detects the candidate as an
+ancestor and writes nothing.
 
 ---
 

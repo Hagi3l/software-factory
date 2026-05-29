@@ -116,6 +116,11 @@ evidence hashes are pointers into the content-addressed
 [artifact store](components/artifact-store.md), so a record cannot be silently
 altered. Commits/artifacts should be signed with the harness's identity.
 
+So the trailer can be vouched for by the trusted layer, the tip of `main` is always
+a **harness-authored provenance commit** sitting on top of the verified candidate,
+never the agent's own commit fast-forwarded into place. See
+[integration.md](integration.md).
+
 ---
 
 ## OPEN questions

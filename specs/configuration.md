@@ -76,6 +76,12 @@ trivially 1:1 and needs no extra ceremony; adding a specialized soul later needs
 no DAG change. The issue's tags are set by the decomposition planner at
 issue-creation.
 
+These are **two distinct bindings on an issue, stored separately.** The
+*stage/role* an issue belongs to (what routes it to `work.<role>`) is recorded in
+the issue's metadata, set when the orchestrator creates it. The issue's *tags* are
+the selector input above. Keeping them apart means a soul `selector` (e.g.
+`lang: go`) never collides with the role binding that drives dispatch.
+
 **Concurrency is not a soul concern.** Many invocations of the same soul run in
 parallel across runners; you scale throughput by adding runners, not by defining
 more souls.

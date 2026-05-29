@@ -80,6 +80,13 @@ Result:
 step gated independently. `needs-spec-clarification` routes to the human re-entry
 loop — the agent has detected ambiguity and is **escalating, not guessing**.
 
+**Correlation is stamped by the trusted layer, not self-reported.** A `failed` or
+escalated Result carries no candidate branch, so the only reliable link back to the
+work item is the issue id — and trusting a sandboxed agent to address its own work
+would be a trust-boundary hole. The [runner](runner.md) stamps the issue id onto
+the Result at harvest, from the trusted dispatch; the orchestrator correlates on
+that, and a Result it cannot correlate is treated as poison and dropped.
+
 ---
 
 ## The inner loop
