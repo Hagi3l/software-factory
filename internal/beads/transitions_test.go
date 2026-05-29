@@ -652,6 +652,46 @@ func TestSpecRoundTripIntegration(t *testing.T) {
 	}
 }
 
+// TestPinSpecHashRoundTripIntegration proves PinSpecHash merges the spec-version hash into
+// an issue's metadata without disturbing the role/spec/base written at creation, and that it
+// decodes back on Get — the durable anchor T3.7 diffs against (T3.6, see internal/spec).
+func TestPinSpecHashRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+	ctx := context.Background()
+
+	created, err := c.Apply(ctx, []core.Proposal{
+		{Issue: core.Issue{Title: "implement orders", Role: "implement", Spec: "specs/orders.md"}},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	id := created[0].ID
+
+	// An empty hash is a no-op (an issue naming no spec has nothing to pin).
+	if err := c.PinSpecHash(ctx, id, ""); err != nil {
+		t.Fatalf("PinSpecHash(empty): %v", err)
+	}
+	if got, _ := c.Get(ctx, id); got.SpecHash != "" {
+		t.Errorf("empty hash must not pin, got SpecHash %q", got.SpecHash)
+	}
+
+	if err := c.PinSpecHash(ctx, id, "sha256:abc123"); err != nil {
+		t.Fatalf("PinSpecHash: %v", err)
+	}
+	got, err := c.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.SpecHash != "sha256:abc123" {
+		t.Errorf("SpecHash = %q, want sha256:abc123 (round-tripped via metadata)", got.SpecHash)
+	}
+	if got.Role != "implement" || got.Spec != "specs/orders.md" {
+		t.Errorf("Role/Spec = %q/%q, want implement/specs/orders.md (pin must not disturb them)", got.Role, got.Spec)
+	}
+}
+
 // allIssues returns every issue id in the db (including closed) for count assertions.
 func allIssues(t *testing.T, dir string) []string {
 	t.Helper()

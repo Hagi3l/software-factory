@@ -35,6 +35,7 @@ type fakeBeads struct {
 	closed   []string
 	blocked  []string
 	applied  []core.Proposal
+	pinned   map[string]string
 	seq      int
 
 	claimErr error
@@ -122,6 +123,21 @@ func (f *fakeBeads) ListStranded(context.Context, time.Time) ([]string, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return append([]string(nil), f.stranded...), nil
+}
+
+func (f *fakeBeads) PinSpecHash(_ context.Context, id, hash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.pinned == nil {
+		f.pinned = map[string]string{}
+	}
+	f.pinned[id] = hash
+	// Mirror the real client: the pin is durable on the issue, so a later Get sees it.
+	if is, ok := f.issues[id]; ok {
+		is.SpecHash = hash
+		f.issues[id] = is
+	}
+	return nil
 }
 
 // snapshot accessors (copy under lock).

@@ -161,3 +161,21 @@ func TestResolveEmptyRefErrors(t *testing.T) {
 		t.Error("empty ref must error")
 	}
 }
+
+// Hash is the content address the Brief pins and the issue stores; it must be a stable,
+// prefixed digest of the slice, with the empty slice mapping to no pin (T3.6).
+func TestHash(t *testing.T) {
+	if got := Hash(""); got != "" {
+		t.Errorf("Hash(empty) = %q, want \"\" (nothing to pin)", got)
+	}
+	a := Hash("# A\nbody\n")
+	if !strings.HasPrefix(a, HashPrefix) {
+		t.Errorf("Hash = %q, want a %q-prefixed digest", a, HashPrefix)
+	}
+	if a != Hash("# A\nbody\n") {
+		t.Error("Hash is not deterministic for identical content")
+	}
+	if a == Hash("# A\nbody changed\n") {
+		t.Error("Hash must differ when the slice content differs (drift detection depends on it)")
+	}
+}

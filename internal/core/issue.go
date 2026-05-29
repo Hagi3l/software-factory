@@ -64,6 +64,15 @@ type Issue struct {
 	// content hash on the issue for spec-version drift detection.
 	Spec string
 
+	// SpecHash is the content address of the spec slice this issue was last briefed against
+	// (see internal/spec.Hash). Unlike Spec (the path, set at creation and threaded forward),
+	// the orchestrator pins this at *dispatch* — when it materializes the slice for the Brief —
+	// because it records the spec *version* the agent actually worked against, not a property
+	// inherited from the parent. A later edit to the governing spec changes the re-resolved
+	// hash, which is how T3.7 detects which in-flight issues are stale and must be re-derived
+	// ("recompile the delta"). Empty until first dispatched, or when the issue names no spec.
+	SpecHash string
+
 	// Tags are the issue's selector input: the orchestrator picks which soul fulfills the
 	// issue's Role by matching these against each candidate soul's Selector (a role may map
 	// to a set of souls — see core.Soul.Matches, specs/configuration.md). They are a

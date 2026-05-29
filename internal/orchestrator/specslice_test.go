@@ -2,16 +2,20 @@ package orchestrator
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/gate"
+	"github.com/Loxstomper/harness/internal/messaging"
+	"github.com/Loxstomper/harness/internal/spec"
 )
 
 // orchWithRepo builds a bare Orchestrator carrying just the integration repo path, a
@@ -54,6 +58,10 @@ func TestBuildBriefResolvesSpecSlice(t *testing.T) {
 	if !strings.Contains(brief.Spec, "<!-- spec: specs/orders.md -->") {
 		t.Errorf("slice missing the file marker:\n%s", brief.Spec)
 	}
+	// The Brief pins the slice's content address (T3.6).
+	if brief.SpecHash == "" || brief.SpecHash != spec.Hash(brief.Spec) {
+		t.Errorf("brief.SpecHash = %q, want the non-empty hash of the slice (%q)", brief.SpecHash, spec.Hash(brief.Spec))
+	}
 }
 
 // An issue that names no spec gets an empty slice (and the agent falls back to the specs/
@@ -63,6 +71,49 @@ func TestBuildBriefNoSpecYieldsEmptySlice(t *testing.T) {
 	brief := o.buildBrief(core.Issue{ID: "iss-1", Role: "implement"}, config.Stage{}, core.Soul{})
 	if brief.Spec != "" {
 		t.Errorf("issue with no spec must get an empty slice, got %q", brief.Spec)
+	}
+	if brief.SpecHash != "" {
+		t.Errorf("no slice means no pin, got SpecHash %q", brief.SpecHash)
+	}
+}
+
+// TestScheduleReadyPinsSpecHashToIssue proves T3.6 end-to-end on dispatch: a ready issue
+// with a spec reference is dispatched with a Brief that pins the slice hash, and the same
+// hash is stored on the issue (the durable anchor T3.7 diffs against). The two must agree —
+// the issue records exactly what the agent was briefed against.
+func TestScheduleReadyPinsSpecHashToIssue(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteSpec(t, filepath.Join(repo, "specs", "orders.md"), "# Orders\nreject negatives\n")
+
+	cfg := kernelConfig(2)
+	cfg.Harness.SpecDepth = 1
+	bd := newFakeBeads()
+	bd.ready = []core.Issue{{ID: "iss-1", Title: "do it", Role: "implement", Spec: "specs/orders.md"}}
+	o, nc := newOrch(t, cfg, bd, &fakeGate{}, &fakeMerger{})
+	o.opts.Repo = repo // point the orchestrator at the fixture repo holding the spec
+
+	sub, err := nc.SubscribeSync(messaging.WorkSubject("implement"))
+	if err != nil {
+		t.Fatalf("subscribe work: %v", err)
+	}
+	o.scheduleReady(context.Background())
+
+	msg, err := sub.NextMsg(2 * time.Second)
+	if err != nil {
+		t.Fatalf("no work published: %v", err)
+	}
+	var brief core.Brief
+	if err := json.Unmarshal(msg.Data, &brief); err != nil {
+		t.Fatalf("decode brief: %v", err)
+	}
+	if brief.SpecHash == "" || brief.SpecHash != spec.Hash(brief.Spec) {
+		t.Fatalf("brief.SpecHash = %q, want the hash of the briefed slice", brief.SpecHash)
+	}
+	bd.mu.Lock()
+	pinned := bd.pinned["iss-1"]
+	bd.mu.Unlock()
+	if pinned != brief.SpecHash {
+		t.Errorf("issue pinned hash = %q, want %q (the issue must record what was briefed)", pinned, brief.SpecHash)
 	}
 }
 

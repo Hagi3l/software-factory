@@ -45,6 +45,13 @@ const MetadataKeyBase = "base"
 // is resolved on demand from it; T3.6 adds a separate key for the slice's content hash.
 const MetadataKeySpec = "spec"
 
+// MetadataKeySpecHash holds the content address of the spec slice an issue was last
+// briefed against (core.Issue.SpecHash). Unlike MetadataKeySpec (the path, written at
+// creation), the orchestrator pins this at dispatch via PinSpecHash, because it records the
+// spec *version* the agent worked against; a later spec edit changes the re-resolved hash,
+// which is how T3.7 detects stale in-flight work (see internal/spec, specs/specs-process.md).
+const MetadataKeySpecHash = "spec_hash"
+
 // MetadataKeyTraceMap holds the artifact-store hash of the test↔spec traceability map
 // (core.Issue.TraceMap). A freshly seeded issue has none; the author-tests stage's map is
 // threaded forward onto the issues it produces, like MetadataKeyBase, so it survives to
@@ -77,6 +84,26 @@ func (c *Client) Claim(ctx context.Context, id string, ttl time.Duration) (time.
 		return time.Time{}, fmt.Errorf("beads: claim issue %s: %w", id, err)
 	}
 	return until, nil
+}
+
+// PinSpecHash records the content address of the spec slice an issue was briefed against,
+// merged into its metadata without touching status or other keys. The orchestrator calls it
+// at dispatch, once the slice is materialized, so the issue durably carries the spec version
+// its work was derived from — the pin T3.7 diffs against to find work made stale by a spec
+// edit (see core.Issue.SpecHash, internal/spec, specs/specs-process.md). An empty hash is a
+// no-op: an issue naming no spec has nothing to pin.
+func (c *Client) PinSpecHash(ctx context.Context, id, hash string) error {
+	if id == "" {
+		return fmt.Errorf("beads: empty issue id")
+	}
+	if hash == "" {
+		return nil
+	}
+	args := []string{"update", id, "--set-metadata", MetadataKeySpecHash + "=" + hash}
+	if _, err := c.run(ctx, args); err != nil {
+		return fmt.Errorf("beads: pin spec hash on %s: %w", id, err)
+	}
+	return nil
 }
 
 // Release returns an issue to the ready pool and clears its lease — used by the

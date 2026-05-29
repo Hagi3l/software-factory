@@ -598,7 +598,39 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
     an edited spec file. Specs updated: `specs-process.md` (Spec context horizon — realized mechanism),
     `components/agent.md` (Brief slice is orchestrator-resolved from the issue's reference),
     `configuration.md` (`spec_depth`).
-- [ ] **T3.6 Spec-version pinning** — the Brief pins the content hash of its spec slice; the hash is stored on the issue. (needs T3.5) ([specs-process.md](specs/specs-process.md))
+- [x] **T3.6 Spec-version pinning** — *done.* The Brief now pins the content hash of its spec
+  slice and the orchestrator stores that hash on the issue at dispatch, so each issue durably
+  records the spec *version* its work was derived from — the anchor T3.7 diffs against. Verified
+  with `make check` green (376 pass, 2 skip). Learnings for downstream tasks:
+  - **`spec.Hash(slice)`** (co-located with `Resolve`, since T3.7 needs both together) returns
+    `sha256:<hex>` over the slice bytes — the same content-address scheme as the artifact store
+    (`spec.HashPrefix` mirrors `artifact.HashPrefix`; kept local, not imported, so `spec` stays a
+    leaf). The empty slice (no spec ref) hashes to `""` (nothing to pin). Determinism is load-bearing:
+    `Resolve`'s stable byte output is what makes the hash a meaningful version anchor.
+  - **Pinned at *dispatch*, not creation — the one threaded field that is NOT threaded.** Spec (the
+    *path*) is set at creation and threaded forward like Base/TraceMap (T3.5); the *hash* is computed
+    fresh in `buildBrief` and written per dispatch, because it records what the agent actually worked
+    against, and re-pinning each dispatch is what lets T3.7 see drift between a stage's dispatch and a
+    later spec edit. So `advance`/`route` deliberately do **not** copy SpecHash; `create()` never
+    stamps it; only `PinSpecHash` writes it.
+  - **`Beads.PinSpecHash(ctx, id, hash)`** is a new single-writer transition (`bd update
+    --set-metadata spec_hash=<hash>`, merge-only — leaves status/role/spec untouched), added to the
+    orchestrator `Beads` interface (and the fake). `MetadataKeySpecHash = "spec_hash"`; `toCore` reads
+    it into the new `core.Issue.SpecHash`. An empty hash is a no-op. `core.Brief.SpecHash` carries the
+    pin on the wire.
+  - **`scheduleReady` pins best-effort:** after `buildBrief`, if `brief.SpecHash != ""` it calls
+    `PinSpecHash`; a failure logs and dispatch continues (the Brief still carries the hash — degraded
+    drift tracking, not a stalled issue, the same discipline buildBrief uses for an unresolvable slice).
+  - **Deliberately NOT surfaced in the provenance trailer yet.** The merge trailer (Soul/Model/Issue/
+    Prompt-SHA/Verified/Traceability) was left untouched to avoid trailer back-compat churn (cf. T2.8);
+    the issue now carries `SpecHash`, so citing it in provenance (trace a merged commit → spec version)
+    is a clean, optional follow-up — `provenanceFor` already reads the issue.
+  - **For T3.7 (recompile-the-delta):** the pieces are now in place — `Issue.Spec` (which file, T3.5),
+    `Issue.SpecHash` (what version, T3.6), and `spec.Resolve`+`spec.Hash` to recompute. T3.7 watches for
+    spec-file edits, finds issues whose slice includes the edited file (re-resolve and check membership,
+    or match `Issue.Spec` + transitive links), re-hashes, and invalidates/re-derives those whose pinned
+    hash no longer matches. Specs updated: `specs-process.md` (Spec-version pinning — realized pin at
+    dispatch), `components/agent.md` (Brief pins the slice hash).
 - [ ] **T3.7 Recompile-the-delta** — on a spec-file edit, the orchestrator diffs which issues referenced it and invalidates / re-derives the affected in-flight issues; already-merged work may spawn new issues for the diff. (needs T3.6) ([specs-process.md](specs/specs-process.md))
 - [ ] **T3.8 Cumulative per-issue / epic budget** *(carried from Phase 1)* — surface `Usage` on the Result envelope (the runner already tallies it); the orchestrator accumulates spend across the `on_failure` loop per issue/epic and dead-letters on breach; a per-model cost table converts tokens → USD. ([workflow.md](specs/workflow.md))
 - [ ] **T3.9 Merge queue: serialized rebase onto `main`** — pop `integrate` issues in issue-graph topological order and rebase each candidate onto the *current* `main` tip in a sandbox (replaces the kernel's bare provenance-commit advance). ([integration.md](specs/integration.md))

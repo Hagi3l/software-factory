@@ -48,6 +48,15 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 			continue
 		}
 		brief := o.buildBrief(issue, stage, soul)
+		// Pin the spec version on the issue so it durably records what its work was derived
+		// from (T3.7's drift anchor). Best-effort: a pin failure logs and dispatch continues —
+		// the Brief still carries the hash, so this degrades to weaker drift tracking, not a
+		// stalled issue (the same discipline buildBrief uses for an unresolvable slice).
+		if brief.SpecHash != "" {
+			if err := o.bd.PinSpecHash(ctx, issue.ID, brief.SpecHash); err != nil {
+				o.log.Error("orchestrator: pin spec hash; dispatching anyway", "issue", issue.ID, "err", err)
+			}
+		}
 		if err := o.publishWork(ctx, issue.Role, brief); err != nil {
 			o.log.Error("orchestrator: publish work, releasing claim", "issue", issue.ID, "err", err)
 			// Undo the claim so the issue returns to ready and is redispatched promptly
@@ -90,9 +99,14 @@ func (o *Orchestrator) buildBrief(issue core.Issue, stage config.Stage, soul cor
 			specSlice = s
 		}
 	}
+	// Pin the slice's content address so the exact spec version this invocation works
+	// against is recorded in the Brief and (by scheduleReady) on the issue — the anchor
+	// T3.7 diffs against to detect spec drift (see internal/spec.Hash, specs/specs-process.md).
+	// An empty slice hashes to "" (nothing to pin).
 	return core.Brief{
 		Issue:    issue,
 		Spec:     specSlice,
+		SpecHash: spec.Hash(specSlice),
 		Base:     base,
 		Criteria: stage.Postcondition,
 		Soul:     soul,

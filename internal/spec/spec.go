@@ -12,12 +12,35 @@
 package spec
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"strings"
 )
+
+// HashPrefix is the content-address scheme for a spec-slice hash. It mirrors the artifact
+// store's addressing (see internal/artifact) deliberately — same SHA-256 scheme — so the
+// hash is self-describing and migration-safe, though a spec slice is hashed for version
+// pinning rather than stored. Kept here, not imported, so this package stays a leaf.
+const HashPrefix = "sha256:"
+
+// Hash returns the content address of a resolved spec slice: the SHA-256 of its bytes,
+// prefixed with the algorithm. It is what the Brief pins and the orchestrator stores on the
+// issue, so the exact spec version an agent worked against is recorded and a later edit to
+// the governing spec is detectable as drift — re-resolve, re-hash, compare (T3.6/T3.7, see
+// specs/specs-process.md). Resolve is deterministic, so the same slice always hashes
+// identically. The empty slice (an issue naming no spec) hashes to "" — there is nothing to
+// pin.
+func Hash(slice string) string {
+	if slice == "" {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(slice))
+	return HashPrefix + hex.EncodeToString(sum[:])
+}
 
 // linkRe matches an inline markdown link's target: the `path` in `[text](path)`. Specs
 // use inline links by convention (see specs/specs-process.md "Format"); reference-style

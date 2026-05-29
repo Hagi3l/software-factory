@@ -100,9 +100,17 @@ kinds of drift, handled in three places:
 ### Spec-version pinning
 
 Each issue's [Brief](components/agent.md#the-brief) pins the **content hash** of
-its spec slice. When a human edits a spec file, the orchestrator diffs which issues
-referenced it and **invalidates / re-derives** the affected ones — stale in-flight
-work is reissued; already-merged work may spawn new issues for the diff. Mental
+its spec slice. The orchestrator computes it at dispatch — when it materializes the
+slice — over the slice's deterministic bytes, embeds it in the Brief, and **stores it
+on the issue** (beads metadata), so the issue durably records the spec *version* its
+work was derived from. (Unlike the spec *path*, which is set at creation and threaded
+forward, the *hash* is pinned per dispatch, because it captures what the agent actually
+worked against.)
+
+When a human edits a spec file, the orchestrator diffs which issues
+referenced it and **invalidates / re-derives** the affected ones — re-resolve each
+slice, re-hash, and compare to the pinned hash; a mismatch means stale in-flight work
+to reissue, and already-merged work may spawn new issues for the diff. Mental
 model: **the factory recompiles the delta** when the spec changes.
 
 ---

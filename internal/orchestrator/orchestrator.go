@@ -41,6 +41,7 @@ type Beads interface {
 	Block(ctx context.Context, id string) error
 	Apply(ctx context.Context, proposals []core.Proposal) ([]core.Issue, error)
 	ListStranded(ctx context.Context, now time.Time) ([]string, error)
+	PinSpecHash(ctx context.Context, id, hash string) error
 }
 
 // Gate verifies a candidate in a fresh, orchestrator-controlled sandbox and returns a
