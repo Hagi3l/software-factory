@@ -52,6 +52,26 @@ sandbox:
 
 ---
 
+## A non-isolating local backend (testing only)
+
+Exercising the full `spec → implement → gate → merge` spine in a test needs *faithful
+execution*, not real isolation. A **local host-exec backend** satisfies the
+`Backend`/`Sandbox` interface by running each command in an ephemeral host tempdir — a
+real git worktree, a real shell, the candidate branch extracted as a git bundle over
+the same `Exec` channel the container backends use — instead of inside a container.
+This makes orchestration testable without a container runtime, giving a fast, hermetic
+end-to-end test of the control flow.
+
+It is deliberately **not an isolation backend**: it shares the host kernel *and
+network* and enforces no resource limits, so it **must never run untrusted agents**.
+It is therefore **not config-selectable** — `sandbox.backend` accepts only the
+isolation backends in the table above; the local backend is injected by tests alone
+and can never appear in a real deployment. The isolation properties it gives up
+(zero-network, limits, deterministic teardown) are covered instead by a separate
+Docker-backed end-to-end test.
+
+---
+
 ## Local transport to the runner
 
 Because there is no network, the agent reaches the runner over a local channel:

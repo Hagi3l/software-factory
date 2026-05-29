@@ -67,6 +67,24 @@ more souls, the DLQ, the control room, provenance — each as its own beads issu
 
 ---
 
+## Testing the spine without a capable model
+
+The kernel's machinery can be verified end-to-end *before* — and independently of —
+any capable model, by driving it with a **deterministic fake model** (see
+[models.md](models.md)) over a non-isolating
+[local backend](components/sandbox.md): a scripted agent run carries a seed issue
+through implement → gate → merge on a fixture repo, with no Docker and no network. It
+pins the control-flow and tool contracts as a fast regression guard; a second,
+Docker-backed run covers the isolation properties the local backend gives up.
+
+This is orthogonal to the two thresholds above. It proves the *plumbing* is correct —
+not whether the harness produces *correct* software autonomously, which is threshold
+(b) and needs model judgement a fake cannot supply. Verifying the spine cheaply this
+way is exactly what keeps the hand-built (a) phase honest while (b) is still out of
+reach.
+
+---
+
 ## The trust-bootstrap caveat
 
 The components that *enforce* the guarantees — orchestrator, runner/broker, sandbox

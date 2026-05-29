@@ -67,6 +67,22 @@ definitions, tool calls/results, usage, and streaming.
 
 ---
 
+## Deterministically fakeable by construction
+
+Because the agent is provider-unaware and the runner selects the adapter from config,
+the model layer is **faked without touching production code**: point an
+`openai-compat` model entry at a local fake endpoint that returns scripted completions
+and the runner cannot tell it from Ollama or a hosted API. This is what lets the whole
+`spec → implement → gate → merge` spine be driven **deterministically** in tests — no
+hosted key, no nondeterminism — over the non-isolating [local backend](components/sandbox.md).
+
+A deterministic fake validates the *machinery* — routing, the tool contract, gating,
+merge, provenance — and nothing more. It cannot validate model *judgement*, which is
+why autonomous self-hosting still awaits a capable runtime model (see
+[bootstrap.md](bootstrap.md)).
+
+---
+
 ## Constraints and the hard parts
 
 - **Require tool-calling-capable models.** Models with weak/no function-calling

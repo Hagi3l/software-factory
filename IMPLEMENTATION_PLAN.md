@@ -56,6 +56,43 @@ matters the moment a capable model is wired and autonomy is switched on.
 
 ---
 
+## Testing infrastructure (cross-cutting)
+
+Verifies the kernel's *machinery* — routing, the tool contract, gating, merge,
+provenance — deterministically and fast, independently of a capable runtime model.
+Specs: [models.md](specs/models.md) (deterministically-fakeable), [components/sandbox.md](specs/components/sandbox.md)
+(non-isolating local backend), [bootstrap.md](specs/bootstrap.md) (testing the spine).
+
+- [ ] **TE.1 Deterministic end-to-end spine test (fast, no Docker) + Docker variant** —
+  drive `spec → implement → gate → merge` in one process against a fixture repo, with
+  no agent turn exercised end-to-end today (the only orchestrator+runner test,
+  `cmd/harness/run_test.go`, dispatches no work). Agreed design:
+  - **Fake model:** a reusable `internal/model/modeltest` package — an `httptest`
+    server speaking `POST /v1/chat/completions`, returning a *scripted* sequence keyed
+    on turn count. The canned `tool_calls` must match the real tool schema
+    (`WorkspaceTools` + `submit`/`escalate`/`request_subtask`); authoring that script
+    is the bulk of the work and is what pins the tool contract. Wired via an
+    `openai-compat` model entry pointed at the server — **no production code change**
+    to the model layer.
+  - **Local backend:** a non-isolating host-exec `sandbox.Backend` (real git worktree
+    in a tempdir, `sh -c` via `os/exec`, candidate branch via git bundle over `Exec`).
+    **Injected, never config-selectable** — add an optional `backend sandbox.Backend`
+    to `buildRunComponents`/`runOptions` (nil → `NewDockerBackend()`, unchanged prod
+    behaviour); `"local"` stays an invalid `sandbox.backend` config value so it can
+    never reach a real deployment.
+  - **Fixture:** a tiny seeded git repo + minimal `harness.yaml` (`implement →
+    integrate`, one soul on `model: fake`, `checks: { tests-pass: "true" }`).
+  - **Targets:** the fast e2e is a plain `go test` package folded into `make check`
+    (always-on); the Docker variant is behind a `//go:build docker_e2e` tag (so the
+    fast suite never compiles it) run via a new `make test-e2e-docker`. The Docker
+    variant additionally covers what the local backend gives up: zero-network, limits,
+    teardown.
+  - Note: `buildRunComponents` currently *ignores* `cfg.Infra.Sandbox.Backend`
+    (hardcodes Docker) — honouring it for real backends is a separate latent gap that
+    only matters once Firecracker lands (T5.2); leave it.
+
+---
+
 ## Phase 2 — Independent verification
 
 Turns the kernel's "implementor writes + grades its own tests" into a genuinely
