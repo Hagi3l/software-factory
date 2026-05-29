@@ -32,10 +32,13 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 				"issue", issue.ID, "role", issue.Role)
 			continue
 		}
-		soul, ok := o.soulForRole(issue.Role)
+		soul, ok := o.selectSoul(issue)
 		if !ok {
-			// validate guarantees every agent role resolves to a soul; defense-in-depth.
-			o.log.Error("orchestrator: no soul fulfills role; cannot dispatch", "issue", issue.ID, "role", issue.Role)
+			// validate guarantees every agent role resolves to >=1 soul; reaching here means
+			// either that (defense-in-depth) or a role with several souls none of whose
+			// selector the issue's tags satisfy. Skip and log; the issue stays ready and is
+			// retried — a persistently unmatched issue is a planner/config fault for a human.
+			o.log.Error("orchestrator: no soul matches issue; cannot dispatch", "issue", issue.ID, "role", issue.Role, "tags", issue.Tags)
 			continue
 		}
 
@@ -110,16 +113,49 @@ func (o *Orchestrator) stageForRole(role string) (config.Stage, bool) {
 	return config.Stage{}, false
 }
 
-// soulForRole returns the first soul that fulfills the role. Selector-based choice
-// among several souls for a role is Phase 3 (see specs/configuration.md); the kernel
-// has one soul per role.
-func (o *Orchestrator) soulForRole(role string) (core.Soul, bool) {
+// selectSoul picks the soul that fulfills an issue's role. A role may map to a *set* of
+// souls (stage != soul); the choice among them is by matching the issue's tags against
+// each candidate's Selector (see core.Soul.Matches, specs/configuration.md):
+//
+//   - no soul fulfills the role -> (zero, false): not dispatchable.
+//   - exactly one soul -> use it unconditionally. The trivial 1:1 case needs no tags or
+//     selector ceremony, so the kernel (one soul per role, issues untagged) keeps working
+//     even though the shipped souls declare a selector.
+//   - several souls -> keep those whose Selector the issue's tags satisfy and pick the
+//     most specific (largest Selector); an empty selector is a catch-all default, so a
+//     specialized soul beats it. If none match -> (zero, false).
+//
+// Selection is deterministic: Config.Souls is loaded sorted by Name, so iterating it and
+// taking strictly-larger selectors breaks specificity ties by lowest Name. Validation
+// rejects two souls fulfilling one role with identical selectors, so no real ambiguity
+// reaches here. runGate re-selects by the same issue and gets the same soul, so the
+// verification sandbox profile matches the producer's (producer != verifier still holds —
+// a fresh sandbox, same toolchain).
+func (o *Orchestrator) selectSoul(issue core.Issue) (core.Soul, bool) {
+	var candidates []core.Soul
 	for _, s := range o.opts.Config.Souls {
-		if s.Role == role {
-			return s, true
+		if s.Role == issue.Role {
+			candidates = append(candidates, s)
 		}
 	}
-	return core.Soul{}, false
+	switch len(candidates) {
+	case 0:
+		return core.Soul{}, false
+	case 1:
+		return candidates[0], true
+	}
+	best := -1
+	var chosen core.Soul
+	for _, s := range candidates {
+		if s.Matches(issue.Tags) && len(s.Selector) > best {
+			best = len(s.Selector)
+			chosen = s
+		}
+	}
+	if best < 0 {
+		return core.Soul{}, false
+	}
+	return chosen, true
 }
 
 // roleIsAgentStage reports whether a role corresponds to a dispatchable agent stage —

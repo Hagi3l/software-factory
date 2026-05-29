@@ -91,6 +91,44 @@ func TestStatusRejectsEmptyID(t *testing.T) {
 	}
 }
 
+// TestApplyCreatesIssueWithLabels pins the write side of the tag<->label encoding: an
+// issue's selector Tags are emitted as bd's comma-separated key=value --labels, sorted by
+// key for a deterministic encoding (parseLabels is the inverse on the read path).
+func TestApplyCreatesIssueWithLabels(t *testing.T) {
+	c, calls := recordingClient(func(args []string) ([]byte, error) {
+		if args[0] == "create" {
+			return []byte(`{"id":"new-1"}`), nil
+		}
+		return nil, nil
+	})
+	proposals := []core.Proposal{
+		{Issue: core.Issue{Title: "do it", Role: "implement", Tags: map[string]string{"tier": "high", "lang": "go"}}},
+	}
+	if _, err := c.Apply(context.Background(), proposals); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	create := strings.Join((*calls)[0], " ")
+	if !strings.Contains(create, "--labels lang=go,tier=high") {
+		t.Errorf("create args = %q, want sorted --labels lang=go,tier=high", create)
+	}
+}
+
+// An issue with no tags emits no --labels flag, so an untagged issue's create stays clean.
+func TestApplyCreatesIssueWithoutLabelsWhenUntagged(t *testing.T) {
+	c, calls := recordingClient(func(args []string) ([]byte, error) {
+		if args[0] == "create" {
+			return []byte(`{"id":"new-1"}`), nil
+		}
+		return nil, nil
+	})
+	if _, err := c.Apply(context.Background(), []core.Proposal{{Issue: core.Issue{Title: "do it", Role: "implement"}}}); err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if create := strings.Join((*calls)[0], " "); strings.Contains(create, "--labels") {
+		t.Errorf("create args = %q, want no --labels for an untagged issue", create)
+	}
+}
+
 func TestApplyCreatesIssuesAndEdges(t *testing.T) {
 	// create returns a distinct id per call; the existence probe (show) finds the
 	// external dependency; dep add succeeds.

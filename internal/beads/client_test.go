@@ -33,7 +33,7 @@ const readyJSON = `[
     "description": "make the tests pass",
     "status": "open",
     "priority": 2,
-    "labels": ["lang-go"],
+    "labels": ["lang=go", "tier=high"],
     "metadata": {"role": "implement"}
   },
   {
@@ -63,9 +63,49 @@ func TestReadyMapsFields(t *testing.T) {
 	if got.Role != "implement" {
 		t.Errorf("issue[0] role = %q, want implement (from metadata)", got.Role)
 	}
+	// Labels decode into selector Tags (one key=value label each); the role lives in
+	// metadata, the tags in labels, kept apart so they never collide.
+	if got.Tags["lang"] != "go" || got.Tags["tier"] != "high" || len(got.Tags) != 2 {
+		t.Errorf("issue[0] tags = %v, want {lang:go, tier:high}", got.Tags)
+	}
 	// An issue with no metadata.role maps to an empty Role, not an error.
 	if issues[1].Role != "" {
 		t.Errorf("issue[1] role = %q, want empty", issues[1].Role)
+	}
+	// An issue with no labels carries a nil tag map (the trivial 1:1 case).
+	if issues[1].Tags != nil {
+		t.Errorf("issue[1] tags = %v, want nil", issues[1].Tags)
+	}
+}
+
+// TestParseLabels pins the label<->tag encoding: key=value splits on the first '=', a
+// label with no '=' is a valueless tag, an empty key is dropped, and no labels yields nil.
+func TestParseLabels(t *testing.T) {
+	cases := []struct {
+		name string
+		in   []string
+		want map[string]string
+	}{
+		{"nil", nil, nil},
+		{"empty", []string{}, nil},
+		{"single", []string{"lang=go"}, map[string]string{"lang": "go"}},
+		{"multi", []string{"lang=go", "tier=high"}, map[string]string{"lang": "go", "tier": "high"}},
+		{"value with equals", []string{"expr=a=b"}, map[string]string{"expr": "a=b"}},
+		{"bare label is valueless", []string{"urgent"}, map[string]string{"urgent": ""}},
+		{"empty key dropped", []string{"=v"}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseLabels(tc.in)
+			if len(got) != len(tc.want) {
+				t.Fatalf("parseLabels(%v) = %v, want %v", tc.in, got, tc.want)
+			}
+			for k, v := range tc.want {
+				if got[k] != v {
+					t.Errorf("parseLabels(%v)[%q] = %q, want %q", tc.in, k, got[k], v)
+				}
+			}
+		})
 	}
 }
 

@@ -101,6 +101,7 @@ type issueJSON struct {
 	Title       string                     `json:"title"`
 	Description string                     `json:"description"`
 	Status      string                     `json:"status"`
+	Labels      []string                   `json:"labels"`
 	Metadata    map[string]json.RawMessage `json:"metadata"`
 }
 
@@ -114,7 +115,34 @@ func (r issueJSON) toCore() core.Issue {
 		Attempt:  metaInt(r.Metadata, MetadataKeyRetries),
 		Base:     metaString(r.Metadata, MetadataKeyBase),
 		TraceMap: metaString(r.Metadata, MetadataKeyTraceMap),
+		Tags:     parseLabels(r.Labels),
 	}
+}
+
+// parseLabels decodes beads labels into the issue's selector tags. A tag is encoded as
+// one `key=value` label (the unambiguous, conventional form; bd round-trips it verbatim),
+// split on the first `=`. This is the bridge from bd's flat label list to the
+// map[string]string a soul's selector matches against (see core.Issue.Tags,
+// core.Soul.Matches). A label with no `=` is kept as a valueless tag (key with empty
+// value): it cannot satisfy a {k: v} selector but is preserved rather than dropped, and
+// being lenient keeps the read path robust to labels the harness did not write. Returns
+// nil for no labels so an untagged issue carries a nil map (the trivial 1:1 case).
+func parseLabels(labels []string) map[string]string {
+	if len(labels) == 0 {
+		return nil
+	}
+	tags := make(map[string]string, len(labels))
+	for _, l := range labels {
+		k, v, _ := strings.Cut(l, "=")
+		if k == "" {
+			continue
+		}
+		tags[k] = v
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+	return tags
 }
 
 // metaString returns the string value of a metadata key, or "" if absent or not a

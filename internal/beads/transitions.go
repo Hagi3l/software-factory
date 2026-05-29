@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -284,6 +285,14 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 		}
 		args = append(args, "--metadata", string(b))
 	}
+	// Selector tags ride in beads labels (one `key=value` label each), distinct from the
+	// role/base/etc. that ride in metadata above, so a soul selector never collides with
+	// the role binding (see core.Issue.Tags, MetadataKeyRole). bd's --labels is
+	// comma-separated; keys are sorted so the label list is deterministic (stable provenance
+	// and stable test assertions). parseLabels is the inverse on the read path.
+	if len(issue.Tags) > 0 {
+		args = append(args, "--labels", formatLabels(issue.Tags))
+	}
 	out, err := c.run(ctx, args)
 	if err != nil {
 		return "", err
@@ -298,4 +307,19 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 		return "", fmt.Errorf("beads: created issue has no id")
 	}
 	return created.ID, nil
+}
+
+// formatLabels encodes selector tags as bd's comma-separated `key=value` label list,
+// sorted by key for a deterministic, stable encoding (see create, parseLabels).
+func formatLabels(tags map[string]string) string {
+	keys := make([]string, 0, len(tags))
+	for k := range tags {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = k + "=" + tags[k]
+	}
+	return strings.Join(parts, ",")
 }

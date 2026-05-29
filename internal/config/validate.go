@@ -253,6 +253,11 @@ func (c *Config) validateSouls(add func(string, ...any)) {
 
 	soulsByRole := map[string]int{}
 	seenName := map[string]bool{}
+	// selectorOwner maps role -> canonical selector -> the first soul that declared it, so
+	// two souls fulfilling one role with identical selectors are rejected: selection would
+	// pick the same one every time (Name tie-break) and the other could never be reached,
+	// which is a config fault, not a valid specialization (see orchestrator.selectSoul).
+	selectorOwner := map[string]map[string]string{}
 	for _, s := range c.Souls {
 		switch {
 		case s.Name == "":
@@ -269,6 +274,15 @@ func (c *Config) validateSouls(add func(string, ...any)) {
 			soulsByRole[s.Role]++
 			if _, used := rolesUsed[s.Role]; !used && c.Harness != nil {
 				add("soul %q declares role %q which no dag stage uses", s.Name, s.Role)
+			}
+			sel := canonicalSelector(s.Selector)
+			if selectorOwner[s.Role] == nil {
+				selectorOwner[s.Role] = map[string]string{}
+			}
+			if other, dup := selectorOwner[s.Role][sel]; dup {
+				add("souls %q and %q both fulfill role %q with the same selector — one can never be selected", other, s.Name, s.Role)
+			} else {
+				selectorOwner[s.Role][sel] = s.Name
 			}
 		}
 
@@ -288,6 +302,26 @@ func (c *Config) validateSouls(add func(string, ...any)) {
 			add("dag role %q (stage(s) %s) resolves to no soul", role, strings.Join(rolesUsed[role], ", "))
 		}
 	}
+}
+
+// canonicalSelector renders a soul selector as a stable string (sorted `k=v` pairs) so
+// two selectors can be compared for equality regardless of map iteration order. The empty
+// selector canonicalizes to "" — the catch-all default; two default souls for one role
+// therefore collide, which is the intended rejection.
+func canonicalSelector(sel map[string]string) string {
+	if len(sel) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(sel))
+	for k := range sel {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	parts := make([]string, len(keys))
+	for i, k := range keys {
+		parts[i] = k + "=" + sel[k]
+	}
+	return strings.Join(parts, ",")
 }
 
 // validatePersona checks the soul's persona markdown exists on disk, resolving a

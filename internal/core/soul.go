@@ -17,3 +17,18 @@ type Soul struct {
 	Sandbox  string            `yaml:"sandbox"`  // sandbox profile name
 	Selector map[string]string `yaml:"selector"` // tag match that picks this soul for an issue, e.g. {lang: go}
 }
+
+// Matches reports whether this soul's Selector is satisfied by an issue's tags: every
+// selector key must be present in tags with the same value (a subset test). An empty
+// selector matches any issue, so a soul with no selector is a catch-all default for its
+// role. This is the predicate the orchestrator uses to pick which soul fulfills a role
+// when several do; the most-specific (largest) matching selector wins, so a specialized
+// soul is preferred over a default (see specs/configuration.md, orchestrator.selectSoul).
+func (s Soul) Matches(tags map[string]string) bool {
+	for k, v := range s.Selector {
+		if tags[k] != v {
+			return false
+		}
+	}
+	return true
+}

@@ -51,6 +51,9 @@ A good decomposition:
      plan may produce).
    - `key` — an optional local label (e.g. `"order-type"`) so a later child can name this
      one in its `depends_on` before any issue id exists.
+   - `tags` — optional selector tags (e.g. `{"lang": "go"}`) that pick which soul fulfills
+     the child's role when a role has several specialized souls. Omit them when one soul
+     per role suffices (the default); they thread forward through the child's later stages.
    - `depends_on` — the keys of the sibling children this one is blocked by (and/or ids of
      pre-existing issues). Omit it for independent work that can proceed in parallel.
 4. **Submit the plan.** When you have proposed every child, call `submit_plan` (with a

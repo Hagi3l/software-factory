@@ -333,6 +333,44 @@ func TestValidateDuplicateSoulName(t *testing.T) {
 	mustContain(t, problems(t, c), `defined more than once`)
 }
 
+// Two souls fulfilling one role must have distinguishing selectors. Identical selectors
+// make one unreachable (selectSoul would always pick the same one), which is a config
+// fault, not a valid specialization.
+func TestValidateDuplicateSelectorForRole(t *testing.T) {
+	c := validConfig()
+	souls := fullSouls(t)
+	a := soul(t, "impl-a", "implementor")
+	a.Selector = map[string]string{"lang": "go"}
+	b := soul(t, "impl-b", "implementor")
+	b.Selector = map[string]string{"lang": "go"} // same role + same selector as impl-a
+	souls = append(souls, a, b)
+	c.Souls = souls
+	mustContain(t, problems(t, c), "with the same selector")
+}
+
+// Two souls for one role with *different* selectors are a legitimate specialization and
+// must validate cleanly.
+func TestValidateDistinctSelectorsForRole(t *testing.T) {
+	c := validConfig()
+	souls := fullSouls(t)
+	a := soul(t, "impl-go", "implementor")
+	a.Selector = map[string]string{"lang": "go"}
+	b := soul(t, "impl-rust", "implementor")
+	b.Selector = map[string]string{"lang": "rust"}
+	// Replace the single implementor soul with the two specialized ones.
+	var kept []core.Soul
+	for _, s := range souls {
+		if s.Role != "implementor" {
+			kept = append(kept, s)
+		}
+	}
+	kept = append(kept, a, b)
+	c.Souls = kept
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate with distinct selectors: %v", err)
+	}
+}
+
 func TestValidateModelNotInRegistry(t *testing.T) {
 	c := validConfig()
 	souls := fullSouls(t)

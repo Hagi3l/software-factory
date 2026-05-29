@@ -50,4 +50,16 @@ type Issue struct {
 	// re-implemented candidate still traces back to the same author's interpretation (see
 	// specs/verification.md, specs/security.md).
 	TraceMap string
+
+	// Tags are the issue's selector input: the orchestrator picks which soul fulfills the
+	// issue's Role by matching these against each candidate soul's Selector (a role may map
+	// to a set of souls — see core.Soul.Matches, specs/configuration.md). They are a
+	// distinct binding from Role, stored separately: Role lives in beads metadata and
+	// drives dispatch to work.<role>; Tags ride in beads *labels* (one `key=value` label
+	// per entry) so a soul selector like {lang: go} never collides with the role binding.
+	// Set by the decomposition planner at issue-creation and threaded forward across the
+	// stages of an epic (like Base/TraceMap), so a `lang=go` epic routes every stage to
+	// the matching soul. Empty when no soul disambiguation is needed (the trivial 1:1
+	// single-soul-per-role case ignores them).
+	Tags map[string]string
 }

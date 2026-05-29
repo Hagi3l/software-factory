@@ -66,7 +66,7 @@ func (o *Orchestrator) provenanceFor(issue core.Issue, res core.Result, report g
 		Verified:     verifiedChecks(report),
 		Traceability: issue.TraceMap,
 	}
-	if soul, ok := o.soulForRole(issue.Role); ok {
+	if soul, ok := o.selectSoul(issue); ok {
 		prov.Soul = soul.Name
 		prov.Model = soul.Model
 	}

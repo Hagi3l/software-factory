@@ -478,7 +478,49 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
   - Specs updated: `workflow.md` (DAG-legal list gains "every dependency target exists" + the
     prefix-blind rationale), `security.md` (Control 5: "dangling edges" + harness-owned existence
     check), `components/orchestrator.md` (validate pseudocode comment).
-- [ ] **T3.3 Stage ≠ role + selector matching** — a role maps to a *set* of souls; the orchestrator picks one per issue by matching the issue's tags against each soul's `selector`. Generalize the kernel's `stage==role` assumption (`stageForRole`). ([configuration.md](specs/configuration.md))
+- [x] **T3.3 Stage ≠ role + selector matching** — *done.* A role may now map to a *set* of
+  souls; the orchestrator picks one per issue by matching the issue's **tags** against each
+  soul's `selector`. The kernel's one-soul-per-role assumption (`soulForRole` returned the
+  first match) is generalized into `selectSoul(issue)`. Verified with `make check` green.
+  Learnings for downstream tasks:
+  - **`selectSoul(issue core.Issue)` replaced `soulForRole(role)`** (`schedule.go`), and all
+    three call sites now pass it the issue: dispatch (`scheduleReady`), the gate's sandbox
+    profile (`runGate`), and the provenance soul/model (`provenanceFor`). Selection is
+    **deterministic and re-entrant** — re-selecting from the same issue yields the same soul,
+    so the verifier sandbox profile and the merge trailer's soul name always match the
+    producer's. Algorithm: 0 souls → not dispatchable; **exactly 1 soul → used
+    unconditionally** (the trivial 1:1 case, so an untagged issue still dispatches even though
+    the shipped souls all declare `selector: {lang: go}` — this is what keeps the kernel
+    green with no config/issue changes); ≥2 souls → keep those whose selector the issue's
+    tags satisfy (subset test, `core.Soul.Matches`) and pick the **most specific** (largest
+    matching selector). An **empty selector matches anything** → a soul with no selector is a
+    role's catch-all *default*; a specialized soul beats it. Specificity ties break by Name
+    (souls load Name-sorted).
+  - **Tags are a SECOND binding, stored apart from role.** `core.Issue.Tags map[string]string`
+    is the selector input; it rides in beads **labels** (one `key=value` label per tag, e.g.
+    selector `{lang: go}` ↔ label `lang=go`), whereas role rides in **metadata**. The two
+    stores never collide (the `client.go` comment predicted this design; T3.3 realized it).
+    `key=value` round-trips through bd verbatim (verified against bd 0.62.0); `parseLabels`
+    (read) splits on the first `=`, `formatLabels` (write) emits sorted `k=v` comma-joined to
+    bd's `--labels`. `issueJSON` gained `Labels`; `create` appends `--labels` only when tagged.
+  - **Tags thread forward across an epic, like Base/TraceMap.** `advance` (produced issue) and
+    `route` (on_failure fix) copy `issue.Tags`, so a `lang=go` epic routes every stage to the
+    matching soul. They are **set by the planner at issue-creation**: `request_subtask` gained
+    a `tags` object param (`lifecycle.go`) → `Proposal.Issue.Tags`; planner persona documents it.
+  - **New validation rule:** two souls fulfilling the **same role** must not share an identical
+    selector (one would be unreachable — selection always picks the same one). `validateSouls`
+    tracks role→canonical-selector→owner and rejects a collision (`canonicalSelector` = sorted
+    `k=v`). The empty selector canonicalizes to `""`, so two default souls for one role also
+    collide. Distinct selectors for one role validate cleanly.
+  - **`stageForRole` was left as-is** (it already resolves by `Stage.Role`, not stage name, so
+    stage name and role can already differ). The "stage ≠ role" generalization that mattered was
+    the *soul* side — a role → set of souls — which `selectSoul` delivers.
+  - **For T3.4 (per-role model tiers):** the per-issue model is now resolvable — `selectSoul`
+    returns the chosen soul, whose `Model` field is the model name; T3.4 threads that into the
+    Brief/runner instead of any global default. The selection seam T3.4 needs already exists.
+  - Specs updated: `configuration.md` (Roles-vs-souls: selection algorithm, label encoding,
+    tags thread forward; validation: distinct-selector rule), `components/agent.md`
+    (`request_subtask` gains `tags`).
 - [ ] **T3.4 Per-role model tiers** — resolve the model per issue from the selected soul, so cheap models serve easy roles and frontier models the hard ones. (builds on T3.3) ([models.md](specs/models.md), [configuration.md](specs/configuration.md))
 - [ ] **T3.5 Spec-slice resolution** — a new `internal/spec` package that builds the bounded slice (referenced file + linked neighbours to a configured depth) and populates `Brief.Spec`, so the agent no longer reads the whole `specs/` tree from the worktree. ([specs-process.md](specs/specs-process.md), [components/agent.md](specs/components/agent.md))
 - [ ] **T3.6 Spec-version pinning** — the Brief pins the content hash of its spec slice; the hash is stored on the issue. (needs T3.5) ([specs-process.md](specs/specs-process.md))

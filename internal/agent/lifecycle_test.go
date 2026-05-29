@@ -137,6 +137,24 @@ func TestSubmitPlanFoldsProposalsNoPush(t *testing.T) {
 	}
 }
 
+// request_subtask threads selector tags onto the proposed child issue, so the
+// decomposition planner sets at issue-creation which soul each child's role resolves to
+// (see specs/configuration.md, core.Issue.Tags).
+func TestRequestSubtaskThreadsTags(t *testing.T) {
+	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{})
+	if out := invoke(t, lcToolByName(t, tools, "request_subtask"),
+		`{"title":"add order type","role":"test-author","tags":{"lang":"go"}}`); out.IsError {
+		t.Fatalf("request_subtask = %+v", out)
+	}
+	out := invoke(t, lcToolByName(t, tools, "submit_plan"), `{"summary":"one slice"}`)
+	if out.Result == nil || len(out.Result.Proposes) != 1 {
+		t.Fatalf("submit_plan = %+v, want one proposal", out.Result)
+	}
+	if tags := out.Result.Proposes[0].Issue.Tags; tags["lang"] != "go" || len(tags) != 1 {
+		t.Errorf("proposal tags = %v, want {lang:go}", tags)
+	}
+}
+
 // submit_plan with no proposals is a non-terminal error: a planner that decomposed
 // nothing would end the pipeline with no work, so it is told to propose first.
 func TestSubmitPlanRequiresProposals(t *testing.T) {

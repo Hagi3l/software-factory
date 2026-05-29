@@ -168,7 +168,7 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 // present but the implementation is absent (T2.3/T2.5, see specs/verification.md).
 func (o *Orchestrator) runGate(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result) (gate.Report, error) {
 	profile := ""
-	if soul, ok := o.soulForRole(issue.Role); ok {
+	if soul, ok := o.selectSoul(issue); ok {
 		profile = soul.Sandbox
 	}
 	baseRef := o.base
@@ -276,6 +276,10 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, target str
 		return false, nil
 	}
 
+	// Tags thread forward unchanged (issue.Tags below): they are the soul-selector input set
+	// by the planner at issue-creation, so every stage of an epic routes to the matching soul
+	// (a `lang=go` epic stays on go souls end-to-end). Like Base/TraceMap they ride along.
+	//
 	// Thread the test↔spec traceability map forward, like Base. The author-tests result
 	// carries the freshly harvested map; later agent stages (e.g. implement) carry none of
 	// their own, so they propagate the map already threaded onto this issue. Either way the
@@ -287,7 +291,7 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, target str
 	}
 
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: tstage.Role, Base: res.Branch.Ref, TraceMap: traceMap},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: tstage.Role, Base: res.Branch.Ref, TraceMap: traceMap, Tags: issue.Tags},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create produced %q issue from %s: %w", target, issue.ID, err)
@@ -319,7 +323,7 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	}
 
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, TraceMap: issue.TraceMap},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, TraceMap: issue.TraceMap, Tags: issue.Tags},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create on_failure fix issue from %s: %w", issue.ID, err)

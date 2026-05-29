@@ -219,6 +219,7 @@ func (lc *lifecycle) requestSubtaskTool() Tool {
 					"body": {"type": "string", "description": "What the child work item must accomplish, and which spec/section governs it."},
 					"role": {"type": "string", "description": "The role that should handle it, e.g. \"test-author\"."},
 					"key": {"type": "string", "description": "Optional local label for this child so a later child can name it in depends_on (siblings have no id yet)."},
+					"tags": {"type": "object", "additionalProperties": {"type": "string"}, "description": "Optional selector tags (e.g. {\"lang\": \"go\"}) that pick which soul fulfills the child's role when several do. Threaded forward across the child's stages."},
 					"depends_on": {"type": "array", "items": {"type": "string"}, "description": "Blocked-by edges: existing issue ids, or the key of a sibling proposed in this same task."}
 				},
 				"required": ["title", "role"]
@@ -226,11 +227,12 @@ func (lc *lifecycle) requestSubtaskTool() Tool {
 		},
 		fn: func(_ context.Context, args json.RawMessage) (Outcome, error) {
 			var a struct {
-				Title     string   `json:"title"`
-				Body      string   `json:"body"`
-				Role      string   `json:"role"`
-				Key       string   `json:"key"`
-				DependsOn []string `json:"depends_on"`
+				Title     string            `json:"title"`
+				Body      string            `json:"body"`
+				Role      string            `json:"role"`
+				Key       string            `json:"key"`
+				Tags      map[string]string `json:"tags"`
+				DependsOn []string          `json:"depends_on"`
 			}
 			if bad := decodeArgs(args, &a); bad != nil {
 				return *bad, nil
@@ -242,7 +244,7 @@ func (lc *lifecycle) requestSubtaskTool() Tool {
 				return invalid("role is required"), nil
 			}
 			lc.addProposal(core.Proposal{
-				Issue:     core.Issue{Title: a.Title, Body: a.Body, Role: a.Role},
+				Issue:     core.Issue{Title: a.Title, Body: a.Body, Role: a.Role, Tags: a.Tags},
 				Key:       a.Key,
 				DependsOn: a.DependsOn,
 			})

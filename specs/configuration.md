@@ -127,13 +127,31 @@ map to a **set** of souls; the orchestrator picks one per issue by matching the
 issue's tags against each soul's `selector`. With a single soul per role this is
 trivially 1:1 and needs no extra ceremony; adding a specialized soul later needs
 no DAG change. The issue's tags are set by the decomposition planner at
-issue-creation.
+issue-creation and **threaded forward across the stages of an epic** (like the
+candidate base), so a `lang=go` epic routes every stage — author-tests, implement,
+qa — to the matching soul.
+
+**Selection algorithm.** Given an issue's role:
+
+- if **one** soul fulfills the role, it is used unconditionally — the trivial 1:1
+  case, so an untagged issue still dispatches even when that soul declares a
+  selector (the kernel relies on this);
+- if **several** souls fulfill it, the orchestrator keeps those whose `selector`
+  the issue's tags **satisfy** (every selector key present in the tags with the
+  same value) and picks the **most specific** — the one with the largest matching
+  selector. An **empty selector matches anything**, so a soul with no selector is a
+  catch-all *default* for its role that a specialized soul beats. If no soul matches
+  the issue is not dispatched (a planner/config fault for a human);
+- ties at equal specificity break **deterministically** by soul name (souls load
+  name-sorted), so selection is reproducible.
 
 These are **two distinct bindings on an issue, stored separately.** The
 *stage/role* an issue belongs to (what routes it to `work.<role>`) is recorded in
-the issue's metadata, set when the orchestrator creates it. The issue's *tags* are
-the selector input above. Keeping them apart means a soul `selector` (e.g.
-`lang: go`) never collides with the role binding that drives dispatch.
+the issue's **metadata**, set when the orchestrator creates it. The issue's *tags*
+are the selector input above and ride in the issue's **labels** — one `key=value`
+label per tag (e.g. selector `{lang: go}` ↔ label `lang=go`). Keeping them in
+separate stores means a soul `selector` never collides with the role binding that
+drives dispatch.
 
 **Concurrency is not a soul concern.** Many invocations of the same soul run in
 parallel across runners; you scale throughput by adding runners, not by defining
@@ -187,7 +205,9 @@ validate` step must run before anything executes and check:
 - every `produces:` / `on_failure:` target is a defined stage;
 - every `precondition`/`postcondition` reference is known — a command-check
   postcondition must have a `checks:` entry; a metric/reserved one must be recognized;
-- soul `selector`s are well-formed; persona files exist;
+- soul `selector`s are well-formed (no empty keys/values); two souls fulfilling the
+  **same role** must not share an identical selector — that would make one
+  unreachable (selection always picks the same one); persona files exist;
 - the DAG `produces:` transitions don't create an unreachable or trivially-looping
   definition.
 

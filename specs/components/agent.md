@@ -125,7 +125,9 @@ format. They split along the trust boundary:
   proposed children and **no** candidate branch), `escalate` (raise
   `needs-spec-clarification`), `request_subtask` (propose a child issue — emergent
   breadth; a child may name a sibling proposed in the same task via a local `key` to
-  express an ordering edge). The tools are universal; a soul's persona decides which it
+  express an ordering edge, and may carry selector `tags` that pick which soul fulfills
+  the child's role — see [configuration.md](../configuration.md)). The tools are
+  universal; a soul's persona decides which it
   uses (only the planner calls `submit_plan`, only the test author calls `trace_test`).
 - **Brokered I/O** is mostly implicit: package fetch is `run` reaching the vetted
   mirror through the broker's proxy; git push is performed by the runner on
