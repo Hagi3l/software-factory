@@ -83,6 +83,13 @@ func cmdRun(args []string) error {
 // here — config is their single source of truth (see specs/configuration.md).
 type runOptions struct {
 	bdBin string
+	// backend lets a test inject a non-production sandbox backend (the non-isolating
+	// host-exec local backend) so the spine can be driven end-to-end without Docker
+	// (see TE.1 in IMPLEMENTATION_PLAN.md, specs/bootstrap.md). It is INJECTION-ONLY and
+	// deliberately not config-selectable: `sandbox.backend` config still maps only to
+	// real isolating backends, so a non-isolating backend can never reach a deployment.
+	// nil — the production path — uses the Docker backend, unchanged.
+	backend sandbox.Backend
 }
 
 // runComponents holds the assembled, ready-to-run kernel and a cleanup that releases
@@ -167,7 +174,13 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		return nil, err
 	}
 
-	backend := sandbox.NewDockerBackend()
+	// Production uses the Docker backend; a test may inject the local host-exec backend
+	// (never config-selectable — see runOptions.backend). The same backend serves both
+	// the runner (building candidates) and the gate (verifying them).
+	backend := opts.backend
+	if backend == nil {
+		backend = sandbox.NewDockerBackend()
+	}
 
 	sockDir, err := os.MkdirTemp("", "harness-broker-")
 	if err != nil {

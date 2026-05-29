@@ -63,33 +63,37 @@ provenance — deterministically and fast, independently of a capable runtime mo
 Specs: [models.md](specs/models.md) (deterministically-fakeable), [components/sandbox.md](specs/components/sandbox.md)
 (non-isolating local backend), [bootstrap.md](specs/bootstrap.md) (testing the spine).
 
-- [ ] **TE.1 Deterministic end-to-end spine test (fast, no Docker) + Docker variant** —
-  drive `spec → implement → gate → merge` in one process against a fixture repo, with
-  no agent turn exercised end-to-end today (the only orchestrator+runner test,
-  `cmd/harness/run_test.go`, dispatches no work). Agreed design:
-  - **Fake model:** a reusable `internal/model/modeltest` package — an `httptest`
-    server speaking `POST /v1/chat/completions`, returning a *scripted* sequence keyed
-    on turn count. The canned `tool_calls` must match the real tool schema
-    (`WorkspaceTools` + `submit`/`escalate`/`request_subtask`); authoring that script
-    is the bulk of the work and is what pins the tool contract. Wired via an
-    `openai-compat` model entry pointed at the server — **no production code change**
-    to the model layer.
-  - **Local backend:** a non-isolating host-exec `sandbox.Backend` (real git worktree
-    in a tempdir, `sh -c` via `os/exec`, candidate branch via git bundle over `Exec`).
-    **Injected, never config-selectable** — add an optional `backend sandbox.Backend`
-    to `buildRunComponents`/`runOptions` (nil → `NewDockerBackend()`, unchanged prod
-    behaviour); `"local"` stays an invalid `sandbox.backend` config value so it can
-    never reach a real deployment.
-  - **Fixture:** a tiny seeded git repo + minimal `harness.yaml` (`implement →
-    integrate`, one soul on `model: fake`, `checks: { tests-pass: "true" }`).
-  - **Targets:** the fast e2e is a plain `go test` package folded into `make check`
-    (always-on); the Docker variant is behind a `//go:build docker_e2e` tag (so the
-    fast suite never compiles it) run via a new `make test-e2e-docker`. The Docker
-    variant additionally covers what the local backend gives up: zero-network, limits,
-    teardown.
-  - Note: `buildRunComponents` currently *ignores* `cfg.Infra.Sandbox.Backend`
-    (hardcodes Docker) — honouring it for real backends is a separate latent gap that
-    only matters once Firecracker lands (T5.2); leave it.
+- [x] **TE.1 Deterministic end-to-end spine test (fast, no Docker) + Docker variant** —
+  *done.* `spec → implement → gate → merge` now runs end-to-end in one process against a
+  fixture repo, the first test to exercise a full agent turn (run_test.go still only
+  proves wiring). Both variants verified against real infra (local: ~2.7s in `make
+  check`; Docker: against a built `go-toolchain` image). Learnings for downstream tasks:
+  - **Fake model** lives in `internal/model/modeltest` (`NewServer(t, []Turn)`): an
+    `httptest` SSE server speaking the OpenAI streaming wire format, scripted by request
+    count. It drives the **real** `openai` adapter (resolved through the real registry) —
+    `TestServerDrivesRealAdapter` pins that wire contract in isolation. **No production
+    model-layer change**; the server is selected purely by an `openai-compat` model
+    entry whose endpoint is patched to `srv.URL()` at runtime. Reusable by any future
+    test needing a deterministic model (e.g. T2.4 author-tests, T3.1 planner).
+  - **Local backend** is defined in `cmd/harness/spine_e2e_test.go` as **test-only**
+    (compiled only under test, so the non-isolating host-exec backend can never ship). It
+    is wired through the new `runOptions.backend` seam in `buildRunComponents` (nil →
+    `NewDockerBackend()`, unchanged prod). The **same injected backend serves both the
+    runner and the gate**, so the local path verifies candidates too.
+  - **Fixture** is generated in a tempdir at runtime: a real non-bare git repo (`main` +
+    initial commit), a `bd init --prefix harness` store seeded via `beads.Apply` (role
+    `implementor`), and a config tree with `checks: { tests-pass: "true" }`. The scripted
+    turns are `run` (commit the candidate branch) then `submit` — that two-turn script is
+    what pins the run/submit tool contract. Gotcha: a soul's `persona` path resolves
+    against the **config root**, so it needs the `souls/` prefix.
+  - **Targets:** the fast e2e (`TestSpineE2ELocal`) is plain `go test`, in `make check`.
+    The Docker variant (`TestSpineE2EDocker`) is behind `//go:build docker_e2e`, run via
+    `make test-e2e-docker`; it skips cleanly unless Docker + the `go-toolchain` image are
+    present (image is an operator prerequisite, overridable via `HARNESS_E2E_IMAGE`).
+  - Confirmed still-latent: `buildRunComponents` ignores `cfg.Infra.Sandbox.Backend`
+    (hardcodes Docker on the prod path). The injection seam is the *only* non-Docker
+    route, so `"local"` is never config-reachable. Honoring the config value for real
+    backends stays deferred to T5.2.
 
 ---
 

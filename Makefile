@@ -13,7 +13,7 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 RESULTS := test/results
 
-.PHONY: all build vet lint fmt tidy test test-unit check clean
+.PHONY: all build vet lint fmt tidy test test-unit test-e2e-docker check clean
 
 all: build
 
@@ -48,6 +48,16 @@ test-unit:
 	@mkdir -p $(RESULTS)
 	$(GO) test -json $(PKG) >$(RESULTS)/test-unit.json 2>$(RESULTS)/test-unit.stderr \
 		|| (cat $(RESULTS)/test-unit.stderr; exit 1)
+
+## test-e2e-docker: run the Docker-backed spine e2e (build tag docker_e2e). Needs a
+## running Docker daemon and the `go-toolchain` image (build it from
+## deploy/go-toolchain.Dockerfile, or set HARNESS_E2E_IMAGE); the test skips if absent.
+## Excluded from `check` because it is slow and infrastructure-dependent.
+test-e2e-docker:
+	@mkdir -p $(RESULTS)
+	$(GO) test -json -tags docker_e2e -run TestSpineE2EDocker ./cmd/harness/ \
+		>$(RESULTS)/test-e2e-docker.json 2>$(RESULTS)/test-e2e-docker.stderr \
+		|| (cat $(RESULTS)/test-e2e-docker.stderr; exit 1)
 
 ## clean: remove build and test output.
 clean:
