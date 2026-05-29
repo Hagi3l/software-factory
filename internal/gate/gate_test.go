@@ -82,17 +82,27 @@ func (s *scriptedSandbox) Exec(_ context.Context, cmd sandbox.Command) (sandbox.
 func (s *scriptedSandbox) Teardown(context.Context) error { s.teardowns++; return nil }
 
 type fakeBackend struct {
-	sb          *scriptedSandbox
+	sb          *scriptedSandbox            // returned when byRef has no entry for the seeded ref
+	byRef       map[string]*scriptedSandbox // seeded ref -> sandbox, for the two-sandbox red→green path
 	provErr     error
-	gotSpec     sandbox.Spec
+	gotSpec     sandbox.Spec   // the last spec provisioned (single-sandbox assertions)
+	specs       []sandbox.Spec // every spec provisioned, in order
 	provisioned int
 }
 
 func (b *fakeBackend) Provision(_ context.Context, spec sandbox.Spec) (sandbox.Sandbox, error) {
 	b.provisioned++
 	b.gotSpec = spec
+	b.specs = append(b.specs, spec)
 	if b.provErr != nil {
 		return nil, b.provErr
+	}
+	// A red→green gate provisions one sandbox per ref (base + candidate); byRef lets a
+	// test script each ref independently. Command-check tests set only sb.
+	if b.byRef != nil {
+		if sb, ok := b.byRef[spec.Workspace.BaseRef]; ok {
+			return sb, nil
+		}
 	}
 	return b.sb, nil
 }
@@ -314,5 +324,203 @@ func TestRunEvidencePersistenceIsBestEffort(t *testing.T) {
 		if cr.Evidence.Hash != "" {
 			t.Errorf("%s check has evidence ref %q, want empty (store write failed)", cr.Name, cr.Evidence.Hash)
 		}
+	}
+}
+
+// --- red→green proof (T2.3) --------------------------------------------------
+
+// redGreenRegistry maps the acceptance-test check the red→green proof reuses. The proof
+// has no entry of its own; it resolves to the tests-pass command, run against two refs.
+func redGreenRegistry() Registry {
+	return Registry{core.CheckAcceptanceTests: "make test-unit"}
+}
+
+// redGreenCandidate is a candidate whose only postcondition is the red→green proof, with
+// the base ref the orchestrator threads (the ref the candidate branched from).
+func redGreenCandidate() Candidate {
+	c := testCandidate()
+	c.Postconditions = []string{core.PostconditionRedGreen}
+	c.BaseRef = "main"
+	return c
+}
+
+// Resolve binds the reserved red→green proof to the acceptance-test command (it has no
+// entry of its own), and marks it as the proof kind so Run executes it against two refs.
+func TestResolveRedGreenProof(t *testing.T) {
+	checks, err := redGreenRegistry().Resolve([]string{core.PostconditionRedGreen})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(checks) != 1 || checks[0].Name != core.PostconditionRedGreen || checks[0].Cmd != "make test-unit" {
+		t.Fatalf("Resolve = %+v, want the proof bound to the tests-pass command", checks)
+	}
+	if checks[0].kind != redGreenProof {
+		t.Errorf("kind = %d, want redGreenProof", checks[0].kind)
+	}
+}
+
+// Declaring the proof with no acceptance-test command registered is a config fault — the
+// gate cannot resolve a command to run, so it errors before any sandbox is spent.
+func TestResolveRedGreenWithoutAcceptanceCommandErrors(t *testing.T) {
+	if _, err := (Registry{"gosec": "gosec ./..."}).Resolve([]string{core.PostconditionRedGreen}); err == nil {
+		t.Fatal("Resolve accepted the red→green proof with no acceptance-test command, want an error")
+	}
+}
+
+// The proof passes when the acceptance tests FAIL on the base (red) and PASS on the
+// candidate (green). The gate provisions two sandboxes — one per ref — and the evidence
+// record captures both runs so the proof is auditable.
+func TestRunRedGreenProofPasses(t *testing.T) {
+	base := &scriptedSandbox{id: "base-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit": {ExitCode: 1, Stdout: []byte("FAIL: feature absent")},
+	}}
+	cand := &scriptedSandbox{id: "cand-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit": {ExitCode: 0, Stdout: []byte("ok: feature present")},
+	}}
+	be := &fakeBackend{byRef: map[string]*scriptedSandbox{
+		"main":                          base,
+		core.CandidateBranch("issue-1"): cand,
+	}}
+	store := testStore(t)
+	g := New(be, redGreenRegistry(), store, t.TempDir(), nil)
+
+	report, err := g.Run(context.Background(), redGreenCandidate())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !report.Passed || len(report.Checks) != 1 {
+		t.Fatalf("report = %+v, want a single passing proof", report)
+	}
+	cr := report.Checks[0]
+	if cr.Base == nil || cr.Base.ExitCode != 1 || cr.ExitCode != 0 {
+		t.Fatalf("proof result = %+v, want base exit 1 (red) and candidate exit 0 (green)", cr)
+	}
+	// Two sandboxes were provisioned, one seeded at the base and one at the candidate.
+	if be.provisioned != 2 {
+		t.Fatalf("provisioned %d sandboxes, want 2 (base + candidate)", be.provisioned)
+	}
+	seeded := map[string]bool{}
+	for _, s := range be.specs {
+		seeded[s.Workspace.BaseRef] = true
+	}
+	if !seeded["main"] || !seeded[core.CandidateBranch("issue-1")] {
+		t.Errorf("seeded refs = %v, want both the base (main) and the candidate", seeded)
+	}
+	if base.teardowns != 1 || cand.teardowns != 1 {
+		t.Errorf("teardowns base=%d cand=%d, want 1 each", base.teardowns, cand.teardowns)
+	}
+	// The evidence record cites both halves: the failing base run and the passing
+	// candidate run, so a human can audit that the tests actually exercise the change.
+	if cr.Evidence.Hash == "" {
+		t.Fatal("proof has no persisted evidence ref")
+	}
+	ev := readArtifact(t, store, cr.Evidence.Hash)
+	for _, want := range []string{"kind: red-green", "status: pass", "FAIL: feature absent", "ok: feature present"} {
+		if !bytes.Contains(ev, []byte(want)) {
+			t.Errorf("evidence = %q, want it to contain %q", ev, want)
+		}
+	}
+}
+
+// The proof FAILS when the tests pass on the base too: that means they don't exercise
+// the new behavior (vacuously green) — exactly what red→green exists to catch. The
+// gate must not accept such a candidate even though its own tests are green.
+func TestRunRedGreenFailsWhenBaseIsNotRed(t *testing.T) {
+	base := &scriptedSandbox{id: "base-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit": {ExitCode: 0, Stdout: []byte("ok even without the change")},
+	}}
+	cand := &scriptedSandbox{id: "cand-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit": {ExitCode: 0, Stdout: []byte("ok")},
+	}}
+	be := &fakeBackend{byRef: map[string]*scriptedSandbox{
+		"main":                          base,
+		core.CandidateBranch("issue-1"): cand,
+	}}
+	store := testStore(t)
+	g := New(be, redGreenRegistry(), store, t.TempDir(), nil)
+
+	report, err := g.Run(context.Background(), redGreenCandidate())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Passed {
+		t.Fatal("report.Passed = true, want false (tests are green on the base, so vacuous)")
+	}
+	ev := readArtifact(t, store, report.Checks[0].Evidence.Hash)
+	if !bytes.Contains(ev, []byte("status: fail")) {
+		t.Errorf("evidence = %q, want status: fail", ev)
+	}
+}
+
+// The proof FAILS when the tests do not pass on the candidate: the change does not make
+// the acceptance tests green. (Here the base is red, as required, but the candidate
+// stays red too.)
+func TestRunRedGreenFailsWhenCandidateIsNotGreen(t *testing.T) {
+	base := &scriptedSandbox{id: "base-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit": {ExitCode: 1},
+	}}
+	cand := &scriptedSandbox{id: "cand-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit": {ExitCode: 1, Stderr: []byte("still failing")},
+	}}
+	be := &fakeBackend{byRef: map[string]*scriptedSandbox{
+		"main":                          base,
+		core.CandidateBranch("issue-1"): cand,
+	}}
+	g := New(be, redGreenRegistry(), testStore(t), t.TempDir(), nil)
+
+	report, err := g.Run(context.Background(), redGreenCandidate())
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Passed {
+		t.Fatal("report.Passed = true, want false (candidate tests are not green)")
+	}
+}
+
+// A red→green proof with no base ref threaded is a wiring fault: it fails before any
+// sandbox is provisioned, the way other resolution faults do.
+func TestRunRedGreenMissingBaseRefErrors(t *testing.T) {
+	be := &fakeBackend{sb: &scriptedSandbox{id: "gate-sb"}}
+	g := New(be, redGreenRegistry(), nil, t.TempDir(), nil)
+	c := redGreenCandidate()
+	c.BaseRef = ""
+	if _, err := g.Run(context.Background(), c); err == nil {
+		t.Fatal("Run accepted a red→green proof with no base ref, want an error")
+	}
+	if be.provisioned != 0 {
+		t.Errorf("provisioned %d sandboxes for a base-less proof, want 0", be.provisioned)
+	}
+}
+
+// A command check mixed with a red→green proof runs both, each against the right ref(s):
+// the command check only on the candidate, the proof on base + candidate.
+func TestRunRedGreenWithCommandCheck(t *testing.T) {
+	base := &scriptedSandbox{id: "base-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit": {ExitCode: 1},
+	}}
+	cand := &scriptedSandbox{id: "cand-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit": {ExitCode: 0},
+		"gosec ./...":    {ExitCode: 0},
+	}}
+	be := &fakeBackend{byRef: map[string]*scriptedSandbox{
+		"main":                          base,
+		core.CandidateBranch("issue-1"): cand,
+	}}
+	reg := Registry{core.CheckAcceptanceTests: "make test-unit", "gosec": "gosec ./..."}
+	g := New(be, reg, testStore(t), t.TempDir(), nil)
+	c := redGreenCandidate()
+	c.Postconditions = []string{core.PostconditionRedGreen, "gosec"}
+
+	report, err := g.Run(context.Background(), c)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !report.Passed || len(report.Checks) != 2 {
+		t.Fatalf("report = %+v, want both checks passing", report)
+	}
+	// The command check ran only against the candidate; the base sandbox ran the tests
+	// once (the red half).
+	if len(base.execed) != 1 || base.execed[0] != "make test-unit" {
+		t.Errorf("base ran %v, want only [make test-unit]", base.execed)
 	}
 }

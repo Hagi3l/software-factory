@@ -63,7 +63,13 @@ policy:
   command each check runs is config — not code — and is the single source of truth
   the gate resolves against. Postconditions backed by a built-in check *kind* rather
   than a command — metric comparisons (`mutation>=0.8`) and reserved proofs
-  (`tests-red-then-green`) — need no `checks` entry; the gate runs them specially.
+  (`tests-red-then-green`) — need no `checks` entry of their own; the gate runs them
+  specially. The `tests-red-then-green` proof reuses the **`tests-pass`** acceptance-test
+  command, running it against two refs (fail on the base, pass on the candidate — see
+  [verification.md](verification.md)); a stage that declares the proof must therefore
+  register a `tests-pass` command, which validation enforces. Keeping the acceptance
+  tests under one `tests-pass` key makes that command a single source of truth shared by
+  the `qa` stage's `tests-pass` check and the `implement` stage's red→green proof.
 - `policy` is the **termination guarantee** — see budgets in
   [workflow.md](workflow.md).
 

@@ -175,6 +175,16 @@ func TestValidateCommandCheckWithoutRegistryEntry(t *testing.T) {
 	mustContain(t, problems(t, c), `postcondition "lint-pass"`)
 }
 
+// The red→green proof has no command of its own; it reuses the acceptance-test command
+// (tests-pass). A stage that declares the proof without that command registered would be
+// unresolvable at the gate, so validation must reject it at startup (T2.3).
+func TestValidateRedGreenWithoutAcceptanceCommand(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	delete(c.Harness.Checks, "tests-pass") // implement still declares tests-red-then-green
+	mustContain(t, problems(t, c), `stage "implement" declares the "tests-red-then-green" proof but no "tests-pass" command`)
+}
+
 // A registered check with an empty command would silently fail every candidate, so an
 // empty command is a validation error.
 func TestValidateEmptyCheckCommand(t *testing.T) {

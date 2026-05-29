@@ -151,7 +151,39 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
     a new check kind only needs to populate `CheckResult` (and may write richer structured
     evidence, e.g. a mutation report, through the same `store.Put`); it is cited and
     auditable for free.
-- [ ] **T2.3 Red→green proof postcondition** — the gate checks out the base ref as well as the candidate and requires the acceptance tests to **fail on base** and **pass on candidate** (proves the tests aren't vacuously green). New check type that runs against two refs. (needs T2.1) ([verification.md](specs/verification.md))
+- [x] **T2.3 Red→green proof postcondition** — *done.* The gate now realizes the reserved
+  `tests-red-then-green` proof: the acceptance tests must **fail on the base** (red) and
+  **pass on the candidate** (green), proving the tests aren't vacuously green. Verified
+  with unit fakes (pass / base-not-red / candidate-not-green / mixed-with-command-check /
+  missing-base-ref) and a real docker+git integration subtest. Learnings for downstream:
+  - **Two verification sandboxes.** `gate.Runner.Run` provisions the candidate verifier
+    always (command checks + the green half) and a **second** verifier seeded at the base
+    ref *lazily* — only when a `redGreenProof` check is present (`requiresBase`). Both are
+    deny-all and torn down; provisioning was extracted into `provisionVerifier(ctx, c,
+    ref) (sb, cleanup, err)`. A gate with no proof still spends exactly one sandbox.
+  - **The proof reuses `tests-pass`.** A reserved proof has no `checks` entry of its own;
+    `Registry.Resolve` binds `tests-red-then-green` to the **`tests-pass`** acceptance-test
+    command (run against both refs). The two shared identifiers live in
+    `core/conditions.go` (`core.PostconditionRedGreen`, `core.CheckAcceptanceTests`) so
+    config-validation and the gate agree on the spelling (no cycle: `core` is a leaf).
+    `internal/config/validate.go` now cross-checks that a stage declaring the proof
+    registers a `tests-pass` command (caught at startup, not mid-run). Specs updated:
+    `configuration.md` + `verification.md` document the two-ref / reuse-`tests-pass` shape.
+  - **Base ref threading.** `gate.Candidate` gained `BaseRef`; the orchestrator's `runGate`
+    passes `o.base` (the ref the candidate branched from, the same value `buildBrief`
+    seeds the producer's worktree at). A proof with an empty `BaseRef` is a wiring fault
+    that fails before any sandbox is spent.
+  - **Evidence is generic (T2.2 path).** `CheckResult.Base *RunResult` carries the red
+    half; `formatEvidence` renders both runs (`kind: red-green`, base + candidate
+    sections) into one `gate-evidence` artifact, cited by hash like any check — no
+    provenance change needed.
+  - **⚠ Critical for T2.5:** the proof is mechanically correct but only *meaningful* once
+    `author-tests` lands. Today every issue branches from `o.base` (`main`), and `main`
+    holds neither the new tests nor the impl — so running the tests there is not reliably
+    "red." T2.5 must (a) flip `implement`'s postcondition to `tests-red-then-green` **and**
+    (b) make the `implement` issue's `brief.Base` the *author-tests candidate* (tests
+    present, impl absent), not `main` — otherwise the red half won't be red. The kernel
+    DAG still uses `tests-pass`, so nothing is broken in the meantime.
 - [ ] **T2.4 `author-tests` soul + persona** — a `test-author` role/soul (config + markdown persona) that writes *failing* acceptance tests from the spec and never reads the implementation. ([configuration.md](specs/configuration.md), [verification.md](specs/verification.md))
 - [ ] **T2.5 Wire `author-tests` into the DAG** — `author-tests` produces `implement`; the seed issue enters at `author-tests`; `implement`'s postcondition becomes `tests-red-then-green`; the implementor persona is updated to "make the existing tests pass, don't author them." (needs T2.3, T2.4) ([workflow.md](specs/workflow.md), [verification.md](specs/verification.md))
 - [ ] **T2.6 Independent scanners as checks** — `gosec` (SAST), `govulncheck` (vuln), dependency/license scan, each a gate check emitting evidence. (needs T2.1, T2.2) ([verification.md](specs/verification.md), [security.md](specs/security.md))
@@ -230,6 +262,7 @@ These are `OPEN:` in the specs and may reshape tasks above:
   postconditions resolve to commands via the `checks:` registry in `harness.yaml`; the gate
   runs them via `sh -c` (exit 0 = pass). `harness validate` still gates *bare* identifiers
   (reserved proofs, known metrics) against explicit registries that must be extended as new
-  built-in check kinds are added (e.g. T2.3 red→green, T2.7 mutation).
+  built-in check kinds are added. T2.3 added the red→green kind (reuses the `tests-pass`
+  command, run against two refs); T2.7 (mutation `>=` comparisons) still has no gate kind.
 - Rootfs / base-image composition per role (T5.3).
 - Exact module set drawn into the TCB boundary — must be pinned before autonomy is switched on for harness work.

@@ -64,6 +64,18 @@ normally leaves to a human's eye — proves a test is not vacuously green and
 actually exercises the behaviour. It is cheap and kills a class of fake-passing
 tests.
 
+Mechanically, the gate provisions **two fresh verification sandboxes** — one seeded
+at the candidate branch, one at the base ref the candidate branched from — and runs
+the project's acceptance-test command (the `tests-pass` command from the
+[check registry](configuration.md)) in each. The proof passes iff that command
+**fails on the base** (red) and **passes on the candidate** (green); a base that
+passes means the tests don't exercise the change and the candidate is rejected even
+though its own tests are green. The reserved proof has no command of its own — it
+reuses `tests-pass`, so the acceptance tests stay a single source of truth — and the
+evidence record captures both runs for audit. The base ref is meaningful only once
+[`author-tests`](workflow.md) lands: the implementor's base then holds the failing
+tests but not the implementation, so red→green is the natural gate on `implement`.
+
 ### Mutation testing
 Mutate the implementation and require the tests to **catch** the mutation; gate on
 a minimum mutation score. This mechanically attacks the "weak test" problem

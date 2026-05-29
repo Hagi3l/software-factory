@@ -152,7 +152,10 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 // brand-new sandbox — producer != verifier holds by construction (see
 // specs/verification.md). The candidate is graded against the *stage's* declared
 // postconditions, which the gate resolves to checks through its registry, so check
-// selection is per-stage and config-driven (T2.1) rather than one hardcoded set.
+// selection is per-stage and config-driven (T2.1) rather than one hardcoded set. BaseRef
+// is the ref the candidate branched from (o.base, the same value buildBrief seeds the
+// producer's worktree at), which a red→green proof checks out to confirm the acceptance
+// tests fail without the change (T2.3, see specs/verification.md).
 func (o *Orchestrator) runGate(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result) (gate.Report, error) {
 	profile := ""
 	if soul, ok := o.soulForRole(issue.Role); ok {
@@ -161,6 +164,7 @@ func (o *Orchestrator) runGate(ctx context.Context, issue core.Issue, stage conf
 	return o.gate.Run(ctx, gate.Candidate{
 		Repo:           o.opts.Repo,
 		Ref:            res.Branch.Ref,
+		BaseRef:        o.base,
 		Postconditions: stage.Postcondition,
 		Profile:        profile,
 		Limits:         o.opts.Limits,

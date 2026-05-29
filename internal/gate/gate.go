@@ -30,14 +30,27 @@ const artifactKindEvidence = "gate-evidence"
 // the host resources the backend holds.
 const teardownTimeout = 30 * time.Second
 
-// Check is one verification command the gate runs in the clean sandbox. A check
-// passes iff its command exits zero. The command is operator-configured (not agent
+// checkKind distinguishes how the gate runs a check. The zero value is a command
+// check (run once against the candidate; exit 0 = pass), so any Check built without
+// naming a kind keeps that meaning. A redGreenProof runs the acceptance tests against
+// two refs — the base (must fail) and the candidate (must pass) — see Run.
+type checkKind int
+
+const (
+	cmdCheck checkKind = iota
+	redGreenProof
+)
+
+// Check is one verification the gate runs in the clean sandbox. A command check passes
+// iff its command exits zero; the red→green proof passes iff the command fails on the
+// base and passes on the candidate. The command is operator-configured (not agent
 // input), so it is run through the sandbox shell verbatim. Checks are not constructed
 // directly at the gate; they are resolved from a stage's declared postconditions
 // through a Registry, so the set the gate runs is data (config), not code.
 type Check struct {
 	Name string // the postcondition identifier this check realizes, e.g. "tests-pass"
 	Cmd  string // shell command run via `sh -c` at the worktree root
+	kind checkKind
 }
 
 // Registry is the check registry: postcondition identifier -> shell command. It is
@@ -54,20 +67,31 @@ type Registry map[string]string
 // (a configuration fault — harness validate accepts a command-check postcondition only
 // when it has a `checks` entry, so a live gap means config and the gate disagree).
 //
-// Postconditions backed by a built-in check kind rather than a command — metric
-// comparisons ("mutation>=0.8") and reserved proofs ("tests-red-then-green") — are not
-// command checks; the gate does not yet run them, so they are reported as unresolved
-// here until their check kind lands (red→green is T2.3, mutation is T2.7).
+// The reserved red→green proof (core.PostconditionRedGreen) is not a command check: it
+// has no entry of its own and instead reuses the acceptance-test command registered
+// under core.CheckAcceptanceTests, run against two refs (see runRedGreen). Resolve binds
+// it to that command here so a stage that asks for the proof without a registered
+// acceptance-test command is a config fault caught before any sandbox is spent. Metric
+// comparisons ("mutation>=0.8") have no check kind yet (T2.7) and remain unresolved.
 func (r Registry) Resolve(postconditions []string) ([]Check, error) {
 	checks := make([]Check, 0, len(postconditions))
 	var unresolved []string
 	for _, pc := range postconditions {
+		if pc == core.PostconditionRedGreen {
+			cmd, ok := r[core.CheckAcceptanceTests]
+			if !ok {
+				unresolved = append(unresolved, fmt.Sprintf("%s (no %q command registered)", pc, core.CheckAcceptanceTests))
+				continue
+			}
+			checks = append(checks, Check{Name: pc, Cmd: cmd, kind: redGreenProof})
+			continue
+		}
 		cmd, ok := r[pc]
 		if !ok {
 			unresolved = append(unresolved, pc)
 			continue
 		}
-		checks = append(checks, Check{Name: pc, Cmd: cmd})
+		checks = append(checks, Check{Name: pc, Cmd: cmd, kind: cmdCheck})
 	}
 	if len(unresolved) > 0 {
 		return nil, fmt.Errorf("gate: no check command registered for postcondition(s) %v", unresolved)
@@ -83,6 +107,11 @@ func (r Registry) Resolve(postconditions []string) ([]Check, error) {
 type Candidate struct {
 	Repo string // repo the candidate branch was pushed to
 	Ref  string // candidate branch ref, e.g. core.CandidateBranch(issueID)
+	// BaseRef is the pre-implementation base the candidate branched from. A red→green
+	// proof checks it out in a second verification sandbox to confirm the acceptance
+	// tests FAIL without the change (see specs/verification.md). Command checks never
+	// touch it; only a red→green postcondition requires it to be set.
+	BaseRef string
 	// Postconditions are the stage's declared postconditions; the gate resolves them
 	// to runnable checks through its Registry. This is what makes the gate run the
 	// *stage's* declared checks rather than a single hardcoded set (see
@@ -109,6 +138,21 @@ type CheckResult struct {
 	Stdout   []byte
 	Stderr   []byte
 	Evidence core.ArtifactRef
+	// Base, when non-nil, is the red half of a red→green proof: the acceptance tests
+	// run against the pre-implementation base, which must FAIL. The inline
+	// ExitCode/Stdout/Stderr above are then the green half — the same tests against the
+	// candidate, which must PASS — and Passed is true only when Base failed and the
+	// candidate passed. Base is nil for an ordinary command check.
+	Base *RunResult
+}
+
+// RunResult captures one execution of a check's command against a single git ref. It
+// holds the extra (base) run behind a red→green proof; the candidate run stays inline
+// on CheckResult so command checks are unchanged.
+type RunResult struct {
+	ExitCode int
+	Stdout   []byte
+	Stderr   []byte
 }
 
 // Report is the gate's verdict. Passed is true iff every check passed. The gate stops
@@ -147,11 +191,12 @@ func New(backend sandbox.Backend, registry Registry, store artifact.Store, socke
 }
 
 // Run provisions a fresh verification sandbox seeded with the candidate branch, runs
-// the checks in order, and reports pass/fail. A returned error means the gate could
-// not run to a verdict (provisioning failed, the sandbox died mid-check) — that is a
-// transient/infrastructure failure the orchestrator retries, distinct from a clean
-// Report whose Passed is false (a real gate failure routed via on_failure). The
-// sandbox is always torn down.
+// the checks in order, and reports pass/fail. A red→green proof additionally provisions
+// a second sandbox seeded at the base ref, so the acceptance tests can be shown to fail
+// without the change. A returned error means the gate could not run to a verdict
+// (provisioning failed, a sandbox died mid-check) — that is a transient/infrastructure
+// failure the orchestrator retries, distinct from a clean Report whose Passed is false
+// (a real gate failure routed via on_failure). Every sandbox is always torn down.
 func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 	// Resolve the stage's declared postconditions to runnable checks before spending
 	// a sandbox: an unresolvable postcondition is a config fault, and a stage that
@@ -164,76 +209,51 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 	if len(checks) == 0 {
 		return Report{}, fmt.Errorf("gate: no checks configured (stage declared no postconditions)")
 	}
+	// A red→green proof with no base ref is a wiring fault (the orchestrator failed to
+	// thread it); catch it before spending any sandbox, alongside the other config faults.
+	needBase := requiresBase(checks)
+	if needBase && c.BaseRef == "" {
+		return Report{}, fmt.Errorf("gate: a red→green proof requires a base ref, but the candidate carries none")
+	}
 
-	id, err := gateID()
+	// The candidate verifier is always needed: command checks and the green half of any
+	// red→green proof run against the candidate branch.
+	cand, candDone, err := r.provisionVerifier(ctx, c, c.Ref)
 	if err != nil {
 		return Report{}, err
 	}
-	sockPath := filepath.Join(r.socketDir, "gate-"+id+".sock")
-	ln, err := broker.Listen("unix", sockPath)
-	if err != nil {
-		return Report{}, fmt.Errorf("gate: listen broker socket: %w", err)
-	}
+	defer candDone()
+	r.log.Info("gate: provisioned verification sandbox", "id", cand.ID(), "ref", c.Ref, "profile", c.Profile, "checks", len(checks))
 
-	spec := sandbox.Spec{
-		Profile:   c.Profile,
-		Workspace: sandbox.Workspace{Repo: c.Repo, BaseRef: c.Ref},
-		Limits:    c.Limits,
-		Broker:    sandbox.Endpoint{Network: "unix", Address: sockPath},
-	}
-	sb, err := r.backend.Provision(ctx, spec)
-	if err != nil {
-		_ = ln.Close() // unlinks the socket we just bound
-		return Report{}, fmt.Errorf("gate: provision verification sandbox: %w", err)
-	}
-	defer func() {
-		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownTimeout)
-		defer cancel()
-		if err := sb.Teardown(tctx); err != nil {
-			r.log.Error("gate: teardown verification sandbox", "id", sb.ID(), "err", err)
+	// A red→green proof additionally needs a second verifier seeded at the
+	// pre-implementation base, to confirm the acceptance tests fail without the change.
+	// Provision it once, up front, only when a check requires it — so a base provisioning
+	// failure surfaces as an infra error before any check runs, and a gate with no
+	// red→green proof spends exactly one sandbox.
+	var base sandbox.Sandbox
+	if needBase {
+		b, baseDone, err := r.provisionVerifier(ctx, c, c.BaseRef)
+		if err != nil {
+			return Report{}, err
 		}
-	}()
-
-	// The verification sandbox gets a deny-all broker: it must reach nothing — no model
-	// calls, no git push, no events. It only runs build/test on a clean checkout and the
-	// orchestrator reads the verdict. The socket exists only because Provision requires a
-	// broker endpoint; serving deny-all is how "the verifier has zero I/O" is enforced by
-	// construction (NewServer with no allowlist denies every destination).
-	srv := broker.NewServer(denyHandler{}, broker.WithAllowlist(nil))
-	brokerCtx, stopBroker := context.WithCancel(ctx)
-	defer stopBroker()
-	go func() {
-		if err := srv.Serve(brokerCtx, ln); err != nil {
-			r.log.Error("gate: broker serve", "err", err)
-		}
-	}()
-
-	r.log.Info("gate: provisioned verification sandbox", "id", sb.ID(), "ref", c.Ref, "profile", c.Profile, "checks", len(checks))
+		defer baseDone()
+		base = b
+		r.log.Info("gate: provisioned base verification sandbox", "id", b.ID(), "ref", c.BaseRef)
+	}
 
 	report := Report{Passed: true}
 	for _, check := range checks {
-		res, err := sb.Exec(ctx, sandbox.Command{Path: "sh", Args: []string{"-c", check.Cmd}})
+		cr, err := runCheck(ctx, check, base, cand)
 		if err != nil {
 			// Could not run the check at all (sandbox gone) — not a gate failure, a gate
 			// infrastructure error the orchestrator retries.
-			return Report{}, fmt.Errorf("gate: run check %q: %w", check.Name, err)
-		}
-		cr := CheckResult{
-			Name:     check.Name,
-			Cmd:      check.Cmd,
-			ExitCode: res.ExitCode,
-			Passed:   res.ExitCode == 0,
-			Stdout:   res.Stdout,
-			Stderr:   res.Stderr,
+			return Report{}, err
 		}
 		report.Checks = append(report.Checks, cr)
 		if !cr.Passed {
 			report.Passed = false
-			// Surface the tail of the captured output so a failed gate is triageable from
-			// the log; full evidence persistence into the artifact store is Phase 2.
-			r.log.Info("gate: check failed", "ref", c.Ref, "check", check.Name, "exit_code", res.ExitCode,
-				"stdout_tail", tailString(res.Stdout, 2000), "stderr_tail", tailString(res.Stderr, 2000))
-			break // a failed build makes a later test run meaningless; stop at the first failure
+			r.logFailure(c.Ref, check, cr)
+			break // a failed check makes the remaining ones meaningless; stop at the first
 		}
 		r.log.Debug("gate: check passed", "ref", c.Ref, "check", check.Name)
 	}
@@ -247,6 +267,130 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 
 	r.log.Info("gate: verdict", "ref", c.Ref, "passed", report.Passed, "checks_run", len(report.Checks))
 	return report, nil
+}
+
+// requiresBase reports whether any check needs a base-ref verifier (a red→green proof).
+func requiresBase(checks []Check) bool {
+	for _, c := range checks {
+		if c.kind == redGreenProof {
+			return true
+		}
+	}
+	return false
+}
+
+// runCheck dispatches one check to its execution shape: a command check runs once
+// against the candidate; a red→green proof runs the acceptance tests against the base
+// and the candidate. A non-nil error means a sandbox could not run the command at all
+// (an infra failure), never a clean fail verdict.
+func runCheck(ctx context.Context, check Check, base, cand sandbox.Sandbox) (CheckResult, error) {
+	if check.kind == redGreenProof {
+		return runRedGreen(ctx, check, base, cand)
+	}
+	res, err := execCheck(ctx, cand, check.Cmd)
+	if err != nil {
+		return CheckResult{}, fmt.Errorf("gate: run check %q: %w", check.Name, err)
+	}
+	return CheckResult{
+		Name:     check.Name,
+		Cmd:      check.Cmd,
+		ExitCode: res.ExitCode,
+		Passed:   res.ExitCode == 0,
+		Stdout:   res.Stdout,
+		Stderr:   res.Stderr,
+	}, nil
+}
+
+// runRedGreen realizes the red→green proof: the acceptance tests must FAIL against the
+// pre-implementation base (red) and PASS against the candidate (green). A base that
+// passes means the tests don't exercise the new behavior (vacuously green) — the exact
+// failure mode this proof exists to catch. The candidate run is recorded inline; the
+// base run is kept on Base for the evidence record.
+func runRedGreen(ctx context.Context, check Check, base, cand sandbox.Sandbox) (CheckResult, error) {
+	redRes, err := execCheck(ctx, base, check.Cmd)
+	if err != nil {
+		return CheckResult{}, fmt.Errorf("gate: run red→green base check %q: %w", check.Name, err)
+	}
+	greenRes, err := execCheck(ctx, cand, check.Cmd)
+	if err != nil {
+		return CheckResult{}, fmt.Errorf("gate: run red→green candidate check %q: %w", check.Name, err)
+	}
+	return CheckResult{
+		Name:     check.Name,
+		Cmd:      check.Cmd,
+		ExitCode: greenRes.ExitCode,
+		Passed:   redRes.ExitCode != 0 && greenRes.ExitCode == 0,
+		Stdout:   greenRes.Stdout,
+		Stderr:   greenRes.Stderr,
+		Base:     &RunResult{ExitCode: redRes.ExitCode, Stdout: redRes.Stdout, Stderr: redRes.Stderr},
+	}, nil
+}
+
+// execCheck runs a check's command once in sb. A nil error means the command ran to an
+// exit code (the caller decides pass/fail); a non-nil error means the sandbox could not
+// run it at all (an infra failure).
+func execCheck(ctx context.Context, sb sandbox.Sandbox, cmd string) (sandbox.ExecResult, error) {
+	return sb.Exec(ctx, sandbox.Command{Path: "sh", Args: []string{"-c", cmd}})
+}
+
+// logFailure surfaces the tail of a failed check's output so a rejected gate is
+// triageable from the log (full evidence goes to the artifact store). A red→green proof
+// logs both halves, since which half failed is the first thing a human needs to know.
+func (r *Runner) logFailure(ref string, check Check, cr CheckResult) {
+	if cr.Base != nil {
+		r.log.Info("gate: red→green proof failed", "ref", ref, "check", check.Name,
+			"base_exit", cr.Base.ExitCode, "candidate_exit", cr.ExitCode,
+			"base_stdout_tail", tailString(cr.Base.Stdout, 1000),
+			"candidate_stdout_tail", tailString(cr.Stdout, 1000))
+		return
+	}
+	r.log.Info("gate: check failed", "ref", ref, "check", check.Name, "exit_code", cr.ExitCode,
+		"stdout_tail", tailString(cr.Stdout, 2000), "stderr_tail", tailString(cr.Stderr, 2000))
+}
+
+// provisionVerifier provisions one fresh verification sandbox seeded at ref, behind its
+// own deny-all broker (the verifier must reach nothing — no model calls, git push, or
+// events; the socket exists only because Provision requires a broker endpoint, and
+// serving deny-all is how "the verifier has zero I/O" is enforced by construction). It
+// returns the live sandbox and a cleanup that stops the broker and tears the sandbox
+// down; the caller MUST defer the cleanup, since the backend holds host resources.
+func (r *Runner) provisionVerifier(ctx context.Context, c Candidate, ref string) (sandbox.Sandbox, func(), error) {
+	id, err := gateID()
+	if err != nil {
+		return nil, nil, err
+	}
+	sockPath := filepath.Join(r.socketDir, "gate-"+id+".sock")
+	ln, err := broker.Listen("unix", sockPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("gate: listen broker socket: %w", err)
+	}
+	spec := sandbox.Spec{
+		Profile:   c.Profile,
+		Workspace: sandbox.Workspace{Repo: c.Repo, BaseRef: ref},
+		Limits:    c.Limits,
+		Broker:    sandbox.Endpoint{Network: "unix", Address: sockPath},
+	}
+	sb, err := r.backend.Provision(ctx, spec)
+	if err != nil {
+		_ = ln.Close() // unlinks the socket we just bound
+		return nil, nil, fmt.Errorf("gate: provision verification sandbox: %w", err)
+	}
+	srv := broker.NewServer(denyHandler{}, broker.WithAllowlist(nil))
+	brokerCtx, stopBroker := context.WithCancel(ctx)
+	go func() {
+		if err := srv.Serve(brokerCtx, ln); err != nil {
+			r.log.Error("gate: broker serve", "err", err)
+		}
+	}()
+	cleanup := func() {
+		stopBroker() // closes ln, unblocking Serve and unlinking the socket
+		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownTimeout)
+		defer cancel()
+		if err := sb.Teardown(tctx); err != nil {
+			r.log.Error("gate: teardown verification sandbox", "id", sb.ID(), "err", err)
+		}
+	}
+	return sb, cleanup, nil
 }
 
 // persistEvidence writes each check's evidence record to the artifact store and stamps
@@ -281,6 +425,22 @@ func formatEvidence(cr CheckResult) []byte {
 		status = "fail"
 	}
 	var b bytes.Buffer
+	if cr.Base != nil {
+		// Red→green proof: render both halves so the record shows the tests fail on the
+		// base and pass on the candidate (or which expectation was violated).
+		fmt.Fprintf(&b, "check: %s\nkind: red-green\ncommand: %s\nstatus: %s\n", cr.Name, cr.Cmd, status)
+		fmt.Fprintf(&b, "base (must fail): exit %d\n", cr.Base.ExitCode)
+		b.WriteString("--- base stdout ---\n")
+		writeStream(&b, cr.Base.Stdout)
+		b.WriteString("--- base stderr ---\n")
+		writeStream(&b, cr.Base.Stderr)
+		fmt.Fprintf(&b, "candidate (must pass): exit %d\n", cr.ExitCode)
+		b.WriteString("--- candidate stdout ---\n")
+		writeStream(&b, cr.Stdout)
+		b.WriteString("--- candidate stderr ---\n")
+		writeStream(&b, cr.Stderr)
+		return b.Bytes()
+	}
 	fmt.Fprintf(&b, "check: %s\ncommand: %s\nexit: %d\nstatus: %s\n", cr.Name, cr.Cmd, cr.ExitCode, status)
 	b.WriteString("--- stdout ---\n")
 	writeStream(&b, cr.Stdout)

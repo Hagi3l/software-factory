@@ -45,7 +45,7 @@ var knownPreconditions = map[string]bool{
 // and validated against it, so config is the single source of truth for what command
 // each one runs (see specs/configuration.md).
 var reservedPostconditions = map[string]bool{
-	"tests-red-then-green": true,
+	core.PostconditionRedGreen: true,
 }
 
 // knownMetrics are the metrics that may appear on the left of a comparison
@@ -129,6 +129,14 @@ func (c *Config) validateDAG(add func(string, ...any)) {
 		for _, pc := range st.Postcondition {
 			if !c.knownPostcondition(pc) {
 				add("stage %q postcondition %q is not a known condition (no command in checks:, not a known metric or reserved proof)", name, pc)
+				continue
+			}
+			// The red→green proof has no command of its own; it runs the acceptance-test
+			// command against the base and the candidate. If a stage declares it, that
+			// command must be registered, or the gate cannot resolve it at run time —
+			// catch the gap here at startup rather than mid-run (see specs/verification.md).
+			if pc == core.PostconditionRedGreen && strings.TrimSpace(c.Harness.Checks[core.CheckAcceptanceTests]) == "" {
+				add("stage %q declares the %q proof but no %q command is registered in checks:", name, core.PostconditionRedGreen, core.CheckAcceptanceTests)
 			}
 		}
 	}

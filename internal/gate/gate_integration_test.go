@@ -64,6 +64,31 @@ func TestGateIntegration(t *testing.T) {
 		}
 	})
 
+	// Red→green proof against real checkouts: marker.txt exists only on the candidate,
+	// so `grep candidate marker.txt` FAILS on the base (red) and PASSES on the candidate
+	// (green). This exercises the two-sandbox path — the gate seeds one verifier per ref
+	// — through real docker + git, the way the orchestrator threads o.base as BaseRef.
+	t.Run("red→green proof", func(t *testing.T) {
+		store := testStore(t)
+		g := New(be, Registry{core.CheckAcceptanceTests: "grep -q candidate marker.txt"}, store, t.TempDir(), nil)
+		c := cand(core.PostconditionRedGreen)
+		c.BaseRef = "main"
+		report, err := g.Run(ctx, c)
+		if err != nil {
+			t.Fatalf("Run: %v", err)
+		}
+		if !report.Passed || len(report.Checks) != 1 {
+			t.Fatalf("report = %+v, want a single passing red→green proof", report)
+		}
+		cr := report.Checks[0]
+		if cr.Base == nil || cr.Base.ExitCode == 0 || cr.ExitCode != 0 {
+			t.Errorf("proof = %+v, want base non-zero (red) and candidate zero (green)", cr)
+		}
+		if cr.Evidence.Hash == "" {
+			t.Fatal("red→green proof has no persisted evidence ref")
+		}
+	})
+
 	// A non-zero check exit fails the gate and stops the run.
 	t.Run("failing candidate", func(t *testing.T) {
 		g := New(be, Registry{
