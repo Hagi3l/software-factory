@@ -126,6 +126,12 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 		return o.route(ctx, issue, stage, "agent reported failure")
 
 	case core.StatusDone:
+		if stage.Kind == config.StageKindPlan {
+			// A plan stage is an agent stage but is not sandbox-gated: the planner writes no
+			// candidate, only proposes the children that make up the decomposition. Accept it
+			// structurally (no branch, no gate) — see acceptPlan and specs/workflow.md.
+			return o.acceptPlan(ctx, issue, stage, res)
+		}
 		if res.Branch.Ref == "" {
 			// "done" with no candidate branch is not gradable; treat it as a failure to
 			// produce a candidate and route it.
@@ -209,6 +215,43 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 		return true, fmt.Errorf("close accepted issue %s: %w", issue.ID, err)
 	}
 	o.log.Info("orchestrator: accepted", "issue", issue.ID, "produces", stage.Produces)
+	return false, nil
+}
+
+// acceptPlan accepts a decomposition planner's result. A plan stage is an agent stage
+// but is never verified in a sandbox: the planner produces no candidate branch, only the
+// child issues it proposes (emergent breadth). Acceptance is therefore structural — the
+// proposals were already checked for legal roles in handleResult; here we additionally
+// require the planner produced at least one child and that each targets a role this stage
+// declares it produces, then apply them and close the plan issue. There is no gate and no
+// depth-advance: the proposals ARE the production (see specs/workflow.md "emergent
+// breadth"). Restricting targets to the declared produces stops an untrusted planner from
+// injecting work that skips stages (e.g. an implement issue with no author-tests).
+func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result) (bool, error) {
+	if len(res.Proposes) == 0 {
+		// A planner that proposed nothing did not decompose the work; route it as a failure
+		// so the retry cap eventually dead-letters rather than silently stalling the pipeline.
+		return o.route(ctx, issue, stage, "planner produced no child issues")
+	}
+	allowed := map[string]bool{}
+	for _, target := range stage.Produces {
+		if ts, ok := o.opts.Config.Harness.DAG[target]; ok && ts.Role != "" {
+			allowed[ts.Role] = true
+		}
+	}
+	for _, p := range res.Proposes {
+		if !allowed[p.Issue.Role] {
+			return o.deadLetter(ctx, issue,
+				fmt.Sprintf("illegal proposal: role %q is not a role stage %q produces", p.Issue.Role, issue.Role))
+		}
+	}
+	if _, err := o.bd.Apply(ctx, res.Proposes); err != nil {
+		return true, fmt.Errorf("apply planner proposals for issue %s: %w", issue.ID, err)
+	}
+	if err := o.bd.Close(ctx, issue.ID); err != nil {
+		return true, fmt.Errorf("close plan issue %s: %w", issue.ID, err)
+	}
+	o.log.Info("orchestrator: accepted decomposition", "issue", issue.ID, "children", len(res.Proposes))
 	return false, nil
 }
 

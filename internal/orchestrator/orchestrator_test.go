@@ -208,6 +208,33 @@ func kernelConfig(maxRetries int) *config.Config {
 	}
 }
 
+// planConfig returns a DAG whose entry is a plan stage (kind plan, role planner) that
+// produces author-tests, plus downstream agent stages so a planner's proposals resolve to
+// real agent roles. It is the fixture for the ungated decomposition path.
+func planConfig(maxRetries int) *config.Config {
+	return &config.Config{
+		Harness: &config.Harness{
+			DAG: map[string]config.Stage{
+				"plan": {
+					Kind:      config.StageKindPlan,
+					Role:      "planner",
+					OnFailure: "plan",
+					Produces:  []string{"author-tests"},
+				},
+				"author-tests": {Role: "test-author", Postcondition: []string{"tests-red"}, OnFailure: "author-tests", Produces: []string{"implement"}},
+				"implement":    {Role: "implementor", Postcondition: []string{"tests-pass"}, OnFailure: "implement", Produces: []string{"integrate"}},
+				"integrate":    {Kind: config.StageKindTrustedMerge},
+			},
+			Policy: config.Policy{MaxRetries: maxRetries},
+		},
+		Souls: []core.Soul{
+			{Name: "planner-go", Role: "planner", Sandbox: "go-toolchain"},
+			{Name: "test-author-go", Role: "test-author", Sandbox: "go-toolchain"},
+			{Name: "implementor-go", Role: "implementor", Sandbox: "go-toolchain"},
+		},
+	}
+}
+
 func newOrch(t *testing.T, cfg *config.Config, bd Beads, g Gate, m Merger) (*Orchestrator, *nats.Conn) {
 	t.Helper()
 	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{StoreDir: t.TempDir()})
@@ -409,6 +436,100 @@ func TestHandleResultAcceptProducesAgentStage(t *testing.T) {
 	}
 	if len(closed) != 1 || closed[0] != "iss-1" {
 		t.Errorf("closed = %v", closed)
+	}
+}
+
+// --- plan stage (ungated decomposition) --------------------------------------
+
+// A plan stage is an agent stage but is not sandbox-gated: a planner's "done" result
+// carries no candidate branch, only proposed children. The orchestrator accepts it
+// structurally — it writes the proposals (emergent breadth) and closes the plan issue,
+// running NO gate and merging nothing.
+func TestHandleResultPlanAppliesProposalsNoGate(t *testing.T) {
+	bd := newFakeBeads()
+	bd.put(inProgress("plan-1", "planner", 0))
+	g := &fakeGate{report: gate.Report{Passed: true}}
+	m := &fakeMerger{}
+	o, _ := newOrch(t, planConfig(2), bd, g, m)
+
+	res := core.Result{
+		IssueID: "plan-1", Status: core.StatusDone, // a planner pushes no branch
+		Proposes: []core.Proposal{
+			{Issue: core.Issue{Title: "slice A", Role: "test-author"}, Key: "a"},
+			{Issue: core.Issue{Title: "slice B", Role: "test-author"}, DependsOn: []string{"a"}},
+		},
+	}
+	transient, err := o.handleResult(context.Background(), res)
+	if err != nil || transient {
+		t.Fatalf("handleResult = (%v,%v), want (false,nil)", transient, err)
+	}
+	if len(g.called()) != 0 {
+		t.Error("the gate ran for an ungated plan stage")
+	}
+	if len(m.merged()) != 0 {
+		t.Error("a plan stage merged something")
+	}
+	_, _, closed, blocked, applied := bd.snap()
+	if len(applied) != 2 || applied[0].Issue.Role != "test-author" || applied[1].Issue.Role != "test-author" {
+		t.Errorf("applied = %+v, want two author-tests children", applied)
+	}
+	if len(closed) != 1 || closed[0] != "plan-1" {
+		t.Errorf("closed = %v, want [plan-1]", closed)
+	}
+	if len(blocked) != 0 {
+		t.Errorf("blocked = %v, want none", blocked)
+	}
+}
+
+// A planner that proposes nothing did not decompose the work; it routes via on_failure
+// (a fresh plan attempt) rather than stalling the pipeline with no work to do.
+func TestHandleResultPlanNoProposalsRoutes(t *testing.T) {
+	bd := newFakeBeads()
+	bd.put(inProgress("plan-1", "planner", 0))
+	o, _ := newOrch(t, planConfig(2), bd, &fakeGate{}, &fakeMerger{})
+
+	res := core.Result{IssueID: "plan-1", Status: core.StatusDone} // no proposals
+	if _, err := o.handleResult(context.Background(), res); err != nil {
+		t.Fatalf("handleResult: %v", err)
+	}
+	_, _, closed, blocked, applied := bd.snap()
+	if len(applied) != 1 || applied[0].Issue.Role != "planner" || applied[0].Issue.Attempt != 1 {
+		t.Errorf("applied = %+v, want one planner retry at attempt 1", applied)
+	}
+	if len(closed) != 1 || closed[0] != "plan-1" {
+		t.Errorf("closed = %v, want the original plan issue closed", closed)
+	}
+	if len(blocked) != 0 {
+		t.Errorf("blocked = %v, want none (still retryable)", blocked)
+	}
+}
+
+// A planner may only produce work targeting a role its stage declares it produces
+// (author-tests). A proposal that names a valid agent role outside that set — here
+// implementor, which would skip author-tests — is an illegal proposal and dead-letters,
+// so an untrusted planner cannot inject stage-skipping work.
+func TestHandleResultPlanIllegalTargetDeadLetters(t *testing.T) {
+	bd := newFakeBeads()
+	bd.put(inProgress("plan-1", "planner", 0))
+	o, nc := newOrch(t, planConfig(2), bd, &fakeGate{}, &fakeMerger{})
+	sub, _ := nc.SubscribeSync(messaging.SubjectDLQ)
+
+	res := core.Result{
+		IssueID: "plan-1", Status: core.StatusDone,
+		Proposes: []core.Proposal{{Issue: core.Issue{Title: "skip ahead", Role: "implementor"}}},
+	}
+	if _, err := o.handleResult(context.Background(), res); err != nil {
+		t.Fatalf("handleResult: %v", err)
+	}
+	_, _, _, blocked, applied := bd.snap()
+	if len(blocked) != 1 || blocked[0] != "plan-1" {
+		t.Errorf("blocked = %v, want the plan issue dead-lettered", blocked)
+	}
+	if len(applied) != 0 {
+		t.Errorf("applied = %+v, want no children written for an illegal decomposition", applied)
+	}
+	if _, err := sub.NextMsg(2 * time.Second); err != nil {
+		t.Errorf("no dlq alert for the illegal proposal: %v", err)
 	}
 }
 

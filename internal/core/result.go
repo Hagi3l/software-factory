@@ -100,6 +100,18 @@ const ArtifactKindTraceabilityMap = "traceability-map"
 // within budget — before writing it; an illegal proposal is simply rejected (see
 // specs/workflow.md).
 type Proposal struct {
-	Issue     Issue    // the proposed child issue; ID is assigned by the orchestrator on write
-	DependsOn []string // blocked-by edges: IDs of issues this child depends on
+	Issue Issue // the proposed child issue; ID is assigned by the orchestrator on write
+
+	// Key is an optional batch-local label so a sibling proposed in the SAME Apply
+	// batch can be named in another proposal's DependsOn before any real ID exists. A
+	// decomposition planner emits an ordered set of children at once (the seed has no
+	// pre-existing siblings to depend on), so inter-sibling edges can only be expressed
+	// symbolically; Apply resolves a DependsOn entry that matches a sibling's Key to that
+	// sibling's assigned ID (see Apply). Empty for a child with no siblings to reference.
+	Key string
+
+	// DependsOn are blocked-by edges. Each entry is either an existing issue ID or the
+	// Key of a sibling proposed in the same batch (resolved by Apply). bd rejects any
+	// edge that would close a cycle, the acyclicity guarantee for the issue DAG.
+	DependsOn []string
 }

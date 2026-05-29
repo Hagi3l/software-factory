@@ -384,8 +384,60 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
 
 Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
 
-- [ ] **T3.1 Decomposition planner soul + `plan` stage** — a `planner` soul/persona that reads a seed issue + its spec slice and proposes child issues (with dependency edges) via `request_subtask`; `plan` produces `author-tests`; the seed enters at `plan`. ([workflow.md](specs/workflow.md))
-- [ ] **T3.2 `beads.Apply` self-validates `DependsOn` existence** *(carried from Phase 1)* — a prefix-independent referential-integrity check on each proposed dep target, closing the bd-1.0.4 foreign-prefix gap (a hostile proposal naming a foreign-prefix dep is currently accepted silently). TCB beads code. ([architecture.md](specs/architecture.md), [workflow.md](specs/workflow.md))
+- [x] **T3.1 Decomposition planner soul + `plan` stage** — *done.* The pipeline now has a
+  live, ungated `plan` stage: a `planner` soul reads the seed + its spec and proposes the
+  child `author-tests` work items (with dependency edges) via `request_subtask`, ending with
+  a new `submit_plan` terminal tool; the seed enters at `plan` (the new entry role). Verified
+  with `make check` green (320 pass) incl. new orchestrator/lifecycle/beads/config unit tests.
+  Learnings for downstream tasks:
+  - **`plan` is realized as an explicit `kind: plan` stage — an agent stage that coexists with
+    a `role`** (the one kind that does; `config.StageKindPlan`). *Why explicit, not "agent stage
+    with empty postcondition":* several existing orchestrator tests build agent stages with no
+    postcondition but still expect the gated/depth-advance path, so empty-postcondition is an
+    ambiguous signal. `validateDAG` was restructured to a kind-switch: `plan` requires a role and
+    **forbids a postcondition** (a planner writes no candidate to grade); `human`/`trusted-merge`
+    still forbid a role. The role-XOR-kind invariant became "role-XOR-(human|trusted-merge), and
+    plan needs both."
+  - **The planner produces no candidate and runs no gate; acceptance is structural.** New
+    `orchestrator.acceptPlan` (dispatched from `handleResult`'s `StatusDone` when
+    `stage.Kind==plan`, *before* the branch-required/gate path): it requires ≥1 proposal (a
+    decomposition of nothing routes `on_failure` for a fresh attempt, bounded by the retry cap)
+    and that **each proposal's role is a role the stage `produces`** (so an untrusted planner
+    can't inject stage-skipping work, e.g. an `implement` issue with no `author-tests` — this is
+    *stronger* than the global `roleIsAgentStage` check that runs for all results), then applies
+    the proposals and closes the plan issue. No depth-advance: the proposals **are** the
+    production (emergent breadth), unlike a gated stage whose `produces` triggers one
+    base-threaded next-stage issue.
+  - **New universal lifecycle tool `submit_plan`** (`internal/agent/lifecycle.go`): folds the
+    accumulated proposals into a terminal `done` Result with **no branch** and **no broker push**.
+    *Why a new tool, not overloading `submit`:* `submit` pushes the candidate branch and a planner
+    has none; an "empty Criteria ⇒ don't push" heuristic on `submit` would have broken its existing
+    tests (`lifecycleBrief` carries no Criteria yet expects a push). Like `trace_test`, the tool is
+    added for every soul but only the planner persona uses it; an implementor that misused it would
+    return done-with-no-branch and route as a failure (loud, harmless).
+  - **Inter-sibling dependency edges via local keys (`core.Proposal.Key`).** A decomposition emits
+    an ordered set of children *at once*, so a child can't reference a sibling by id (none assigned
+    yet). `request_subtask` gained a `key` (local label) and `depends_on` may now name a sibling's
+    key; **`beads.Apply` is now two-phase — create ALL children first (recording key→assigned-id),
+    then add ALL edges resolving sibling keys** — which also makes forward references resolve. This
+    changed Apply's shell-call ordering (all `create`s precede the `dep add`s); `TestApplyCreatesIssuesAndEdges`
+    updated, and duplicate-key/forward-ref tests added. **For T3.2:** Apply now resolves sibling
+    keys to real ids *before* `dep add`; the referential-integrity check T3.2 adds should validate
+    the **resolved, non-sibling** targets exist (a sibling key is satisfied-by-construction) — the
+    two compose cleanly.
+  - **Entry role is now `planner`** (the single produces-indegree-0 agent stage); `entryRole`
+    computes it dynamically (no code change), but `TestEntryRole`/`TestAgentRolesAndRoleIsAgentStage`/
+    `TestSeedIntegration` assertions and the shipped `config/harness.yaml` (added `requirements:
+    {kind: human}` + the `plan` stage) were updated. New soul `config/souls/planner.yaml` +
+    persona `souls/prompts/planner.md`. The spine e2e is unaffected (it seeds at `implementor` in
+    its own `implement→integrate` fixture).
+  - **Known scope boundaries (feed later tasks):** the planner still reads the **whole** `specs/`
+    tree from its worktree (bounded spec-slice is T3.5); proposals are validated for legal roles +
+    acyclicity but **not** against a per-epic budget (T3.8); one soul per role still (selector
+    matching is T3.3). Specs updated: `workflow.md` (plan realized as ungated `kind: plan`,
+    `submit_plan`, structural acceptance), `configuration.md` (the `plan` kind + example),
+    `components/agent.md` (`submit_plan` + sibling-key `request_subtask`).
+- [ ] **T3.2 `beads.Apply` self-validates `DependsOn` existence** *(carried from Phase 1)* — a prefix-independent referential-integrity check on each proposed dep target, closing the bd-1.0.4 foreign-prefix gap (a hostile proposal naming a foreign-prefix dep is currently accepted silently). TCB beads code. *(T3.1 made `Apply` two-phase and sibling-key-resolving; the check applies to the **resolved, non-sibling** targets — a same-batch sibling key is satisfied by construction.)* ([architecture.md](specs/architecture.md), [workflow.md](specs/workflow.md))
 - [ ] **T3.3 Stage ≠ role + selector matching** — a role maps to a *set* of souls; the orchestrator picks one per issue by matching the issue's tags against each soul's `selector`. Generalize the kernel's `stage==role` assumption (`stageForRole`). ([configuration.md](specs/configuration.md))
 - [ ] **T3.4 Per-role model tiers** — resolve the model per issue from the selected soul, so cheap models serve easy roles and frontier models the hard ones. (builds on T3.3) ([models.md](specs/models.md), [configuration.md](specs/configuration.md))
 - [ ] **T3.5 Spec-slice resolution** — a new `internal/spec` package that builds the bounded slice (referenced file + linked neighbours to a configured depth) and populates `Brief.Spec`, so the agent no longer reads the whole `specs/` tree from the worktree. ([specs-process.md](specs/specs-process.md), [components/agent.md](specs/components/agent.md))

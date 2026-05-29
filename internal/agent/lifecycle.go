@@ -12,13 +12,18 @@ import (
 )
 
 // LifecycleTools are the tools that control the invocation and produce its Result (see
-// specs/components/agent.md): submit (candidate ready → done), escalate (spec ambiguity
-// → needs-spec-clarification), request_subtask (propose a child issue — emergent
-// breadth), and trace_test (record a test↔spec traceability entry). submit and escalate
-// are terminal: they return the Result that ends the loop. request_subtask and trace_test
-// are not terminal — they accumulate (a Proposal, a TraceEntry) and let the agent keep
-// working; the accumulated proposals and trace entries are folded into the terminal
-// Result that follows.
+// specs/components/agent.md): submit (candidate ready → done), submit_plan (a
+// decomposition is ready → done, with no candidate), escalate (spec ambiguity →
+// needs-spec-clarification), request_subtask (propose a child issue — emergent breadth),
+// and trace_test (record a test↔spec traceability entry). submit, submit_plan, and
+// escalate are terminal: they return the Result that ends the loop. request_subtask and
+// trace_test are not terminal — they accumulate (a Proposal, a TraceEntry) and let the
+// agent keep working; the accumulated proposals and trace entries are folded into the
+// terminal Result that follows.
+//
+// The tools are universal — every soul gets all of them — but a soul's persona decides
+// which it uses: only the planner calls submit_plan and only the test author calls
+// trace_test, the same way only the implementor produces a real candidate via submit.
 //
 // They share one lifecycle value so the terminal tools can attach what was gathered
 // across the run. They are bound per invocation to the broker (submit pushes the
@@ -26,7 +31,7 @@ import (
 // default dependency for proposed children).
 func LifecycleTools(brief core.Brief, brk BrokerClient) []Tool {
 	lc := &lifecycle{brief: brief, brk: brk}
-	return []Tool{lc.submitTool(), lc.escalateTool(), lc.requestSubtaskTool(), lc.traceTestTool()}
+	return []Tool{lc.submitTool(), lc.submitPlanTool(), lc.escalateTool(), lc.requestSubtaskTool(), lc.traceTestTool()}
 }
 
 type lifecycle struct {
@@ -115,6 +120,49 @@ func (lc *lifecycle) submitTool() Tool {
 	}
 }
 
+// submitPlanTool ends a decomposition planner's invocation. Unlike submit it pushes no
+// candidate branch: a planner writes no code — its entire contribution is the child
+// issues it proposed with request_subtask (emergent breadth), which the orchestrator
+// validates and writes. It folds the accumulated proposals into a terminal `done` Result
+// with no branch; the orchestrator's plan stage accepts it structurally (no sandbox gate,
+// since there is nothing to verify). Requiring at least one proposal here catches a
+// planner that would otherwise end the pipeline with nothing to do (see
+// specs/workflow.md "emergent breadth", specs/components/agent.md).
+func (lc *lifecycle) submitPlanTool() Tool {
+	return funcTool{
+		def: model.ToolDef{
+			Name: "submit_plan",
+			Description: "Submit your decomposition: the child work items you proposed with request_subtask " +
+				"become the next stage's issues. Use this to finish a planning task. Produces no candidate " +
+				"branch (a planner writes no code) and ends the task.",
+			Params: json.RawMessage(`{
+				"type": "object",
+				"properties": {
+					"summary": {"type": "string", "description": "Short summary of how you decomposed the work."}
+				}
+			}`),
+		},
+		fn: func(_ context.Context, args json.RawMessage) (Outcome, error) {
+			var a struct {
+				Summary string `json:"summary"`
+			}
+			if bad := decodeArgs(args, &a); bad != nil {
+				return *bad, nil
+			}
+			proposals := lc.takeProposals()
+			if len(proposals) == 0 {
+				return invalid("propose at least one child work item with request_subtask before submitting the plan"), nil
+			}
+			result := core.Result{
+				Status:   core.StatusDone,
+				Proposes: proposals,
+				Trace:    lc.takeTrace(),
+			}
+			return Outcome{Content: fmt.Sprintf("plan submitted: %d child issue(s)", len(proposals)), Result: &result}, nil
+		},
+	}
+}
+
 // escalateTool ends the invocation with needs-spec-clarification, routing to the human
 // re-entry loop. The agent must escalate, never invent intent, on spec ambiguity or
 // contradiction (see specs/specs-process.md). The required reason is recorded in the
@@ -168,9 +216,10 @@ func (lc *lifecycle) requestSubtaskTool() Tool {
 				"type": "object",
 				"properties": {
 					"title": {"type": "string", "description": "Short imperative title of the child work item."},
-					"body": {"type": "string", "description": "What the child work item must accomplish."},
-					"role": {"type": "string", "description": "DAG role/stage that should handle it, e.g. \"implement\"."},
-					"depends_on": {"type": "array", "items": {"type": "string"}, "description": "IDs of existing issues this child is blocked by."}
+					"body": {"type": "string", "description": "What the child work item must accomplish, and which spec/section governs it."},
+					"role": {"type": "string", "description": "The role that should handle it, e.g. \"test-author\"."},
+					"key": {"type": "string", "description": "Optional local label for this child so a later child can name it in depends_on (siblings have no id yet)."},
+					"depends_on": {"type": "array", "items": {"type": "string"}, "description": "Blocked-by edges: existing issue ids, or the key of a sibling proposed in this same task."}
 				},
 				"required": ["title", "role"]
 			}`),
@@ -180,6 +229,7 @@ func (lc *lifecycle) requestSubtaskTool() Tool {
 				Title     string   `json:"title"`
 				Body      string   `json:"body"`
 				Role      string   `json:"role"`
+				Key       string   `json:"key"`
 				DependsOn []string `json:"depends_on"`
 			}
 			if bad := decodeArgs(args, &a); bad != nil {
@@ -193,6 +243,7 @@ func (lc *lifecycle) requestSubtaskTool() Tool {
 			}
 			lc.addProposal(core.Proposal{
 				Issue:     core.Issue{Title: a.Title, Body: a.Body, Role: a.Role},
+				Key:       a.Key,
 				DependsOn: a.DependsOn,
 			})
 			return Outcome{Content: fmt.Sprintf("subtask proposed: %q (role %s)", a.Title, a.Role)}, nil

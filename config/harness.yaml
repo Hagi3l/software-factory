@@ -1,10 +1,20 @@
 # Bootstrap workflow (the kernel DAG).
 #
-# Why this shape: bootstrap.md collapses the full requirements -> plan ->
-# author-tests -> implement -> qa -> integrate pipeline. The human still performs
-# `requirements`/`plan` by authoring specs and seeding one issue; that seed enters
-# at `author-tests`, the first autonomous stage. As of T2.9 `qa` is its own live stage
+# Why this shape: the full requirements -> plan -> author-tests -> implement -> qa ->
+# integrate pipeline. `requirements` stays human (a person authors specs and seeds one
+# `plan` issue, the first autonomous stage). As of T3.1 `plan` is its own live stage:
+# the seed enters there, not at `author-tests`. As of T2.9 `qa` is its own live stage
 # between `implement` and `integrate` (it was previously folded into the implement gate).
+#
+# `plan` is the decomposition stage (kind: plan), run by the `planner` soul. It reads the
+# seed issue + its spec and breaks the work into concrete child work items, proposing each
+# (with dependency edges) via request_subtask. It is an agent stage but is NOT
+# sandbox-gated: the planner writes no candidate, so it declares no postcondition; its
+# output is the proposals, which the orchestrator validates (legal roles within the
+# declared `produces`, acyclic edges) and writes. Breadth is emergent (the planner decides
+# how many children); depth is declarative (`produces: [author-tests]` fixes that each
+# child enters at author-tests). A plan that proposes nothing routes `on_failure` for a
+# fresh attempt. See specs/workflow.md, specs/configuration.md.
 #
 # `author-tests` writes the FAILING acceptance tests from the spec (producer != verifier:
 # a different soul than the implementor). Its `tests-red` postcondition proves the tests
@@ -36,6 +46,14 @@
 # issue, keeping the issue graph acyclic); `max_retries` bounds how many such cycles run
 # before the work dead-letters for human triage — the primary termination guarantee.
 dag:
+  requirements:
+    kind: human
+  plan:
+    role: planner
+    kind: plan
+    precondition: blockers-closed
+    on_failure: plan
+    produces: [author-tests]
   author-tests:
     role: test-author
     precondition: blockers-closed

@@ -31,15 +31,24 @@ const (
 	// StageKindTrustedMerge is the integrate stage: the orchestrator itself merges a
 	// verified candidate to main (the trusted merge queue), never an agent.
 	StageKindTrustedMerge = "trusted-merge"
+	// StageKindPlan is the decomposition stage: an agent stage (it dispatches to a
+	// planner soul and so also names a Role) that is NOT sandbox-gated. The planner
+	// writes no candidate; its output is the child issues it proposes (emergent
+	// breadth), which the orchestrator validates structurally and writes. A plan stage
+	// therefore declares a role but no postcondition (see specs/workflow.md). It is the
+	// one kind that coexists with a role.
+	StageKindPlan = "plan"
 )
 
 // Stage is one node in the workflow DAG, keyed by stage name in the DAG map. A
 // stage is either an agent stage — it names a Role that souls fulfill and may carry
 // guards — or a non-agent stage with Kind set ("human" for requirements,
-// "trusted-merge" for integrate). Depth between stages is declarative via Produces;
-// breadth within a stage is emergent (see specs/workflow.md).
+// "trusted-merge" for integrate). The one hybrid is "plan": an agent stage (it names a
+// Role) that is not sandbox-gated, so it carries Kind="plan" alongside its Role and no
+// postcondition. Depth between stages is declarative via Produces; breadth within a
+// stage is emergent (see specs/workflow.md).
 type Stage struct {
-	Kind          string   `yaml:"kind,omitempty"`          // non-agent stage: "human" | "trusted-merge"
+	Kind          string   `yaml:"kind,omitempty"`          // non-agent stage: "human" | "trusted-merge"; or "plan" (agent, ungated)
 	Role          string   `yaml:"role,omitempty"`          // role souls fulfill for an agent stage
 	Precondition  string   `yaml:"precondition,omitempty"`  // guard that must hold before entry, e.g. "blockers-closed"
 	Postcondition []string `yaml:"postcondition,omitempty"` // guards evaluated in a clean verification sandbox before acceptance

@@ -115,13 +115,75 @@ func TestApplyCreatesIssuesAndEdges(t *testing.T) {
 	if created[0].Role != "implement" {
 		t.Errorf("created[0].Role = %q", created[0].Role)
 	}
-	// First create carries description + role metadata; the dep edge is added after.
+	// First create carries description + role metadata. Apply is two-phase: it creates
+	// every child first (so a sibling reference can resolve to an assigned id), then adds
+	// the edges — so both creates precede the dep add.
 	c0 := strings.Join((*calls)[0], " ")
 	if !strings.Contains(c0, "create fix it --json") || !strings.Contains(c0, "--description details") || !strings.Contains(c0, `--metadata {"role":"implement"}`) {
 		t.Errorf("create args = %q", c0)
 	}
-	if got := strings.Join((*calls)[1], " "); got != "dep add new-1 existing-1" {
-		t.Errorf("dep args = %q, want dep add new-1 existing-1", got)
+	if got := (*calls)[1]; got[0] != "create" {
+		t.Errorf("second call = %q, want the second create (two-phase: all creates before edges)", got)
+	}
+	if got := strings.Join((*calls)[2], " "); got != "dep add new-1 existing-1" {
+		t.Errorf("dep args = %q, want dep add new-1 existing-1 (added after all creates)", got)
+	}
+}
+
+// A child may depend on a sibling proposed in the same batch by naming the sibling's
+// local Key in DependsOn; Apply resolves it to the sibling's freshly assigned id (the
+// edge a decomposition planner emits, since siblings have no id when proposed). Forward
+// references resolve too, because every child is created before any edge is added.
+func TestApplyResolvesSiblingKey(t *testing.T) {
+	n := 0
+	c, calls := recordingClient(func(args []string) ([]byte, error) {
+		if args[0] == "create" {
+			n++
+			return []byte(`{"id":"new-` + string(rune('0'+n)) + `"}`), nil
+		}
+		return nil, nil
+	})
+	// Second child depends on the first via its key; first child also forward-references
+	// nothing. Order the dependent first to exercise forward resolution.
+	proposals := []core.Proposal{
+		{Issue: core.Issue{Title: "validate", Role: "implement"}, DependsOn: []string{"order-type"}},
+		{Issue: core.Issue{Title: "order type", Role: "implement"}, Key: "order-type"},
+	}
+	created, err := c.Apply(context.Background(), proposals)
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	if len(created) != 2 || created[0].ID != "new-1" || created[1].ID != "new-2" {
+		t.Fatalf("created = %+v", created)
+	}
+	// new-1 ("validate") must be blocked by new-2 ("order type"), the resolved sibling key.
+	var sawEdge bool
+	for _, call := range *calls {
+		if strings.Join(call, " ") == "dep add new-1 new-2" {
+			sawEdge = true
+		}
+		if call[0] == "dep" && call[len(call)-1] == "order-type" {
+			t.Errorf("dep edge used the unresolved key: %v", call)
+		}
+	}
+	if !sawEdge {
+		t.Errorf("did not add the resolved sibling edge dep add new-1 new-2; calls = %v", *calls)
+	}
+}
+
+// A reused local key in one batch is ambiguous (which sibling does a reference mean?), so
+// Apply rejects it before shelling out.
+func TestApplyDuplicateKeyRejected(t *testing.T) {
+	c, calls := recordingClient(func([]string) ([]byte, error) { return nil, nil })
+	_, err := c.Apply(context.Background(), []core.Proposal{
+		{Issue: core.Issue{Title: "a", Role: "implement"}, Key: "dup"},
+		{Issue: core.Issue{Title: "b", Role: "implement"}, Key: "dup"},
+	})
+	if err == nil {
+		t.Fatal("Apply accepted a duplicate local key")
+	}
+	if len(*calls) != 0 {
+		t.Errorf("Apply shelled out despite a duplicate key: %v", *calls)
 	}
 }
 

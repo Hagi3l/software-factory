@@ -139,15 +139,23 @@ func (c *Client) setStatus(ctx context.Context, id, status string, extra ...stri
 }
 
 // Apply writes a batch of validated child-issue proposals: it creates each child
-// (carrying its role in metadata, per MetadataKeyRole) and adds its blocked-by
-// edges. bd rejects any edge that would close a cycle, which is the acyclicity
-// guarantee for the issue DAG (see specs/architecture.md) — note the current
-// Proposal shape (a brand-new child depending only on existing issues) cannot itself
-// form a cycle, so this is defense-in-depth that also covers any future shape that
-// adds edges among existing issues. Apply is all-or-nothing: if any create or edge
-// fails, every issue created in this call is deleted, so the orchestrator can safely
-// retry. It returns the created issues with their assigned IDs, in proposal order.
+// (carrying its role in metadata, per MetadataKeyRole) and adds its blocked-by edges.
+// bd rejects any edge that would close a cycle, which is the acyclicity guarantee for
+// the issue DAG (see specs/architecture.md).
+//
+// It runs in two phases — create ALL the children first, then add ALL the edges —
+// because a proposal may depend on a sibling proposed in the same batch (a
+// decomposition planner emits an ordered set of children at once, before any has an
+// ID). Each DependsOn entry is resolved against the batch's Key→ID map: an entry that
+// matches a sibling's Proposal.Key becomes that sibling's freshly assigned ID;
+// anything else is treated as an existing issue ID. Creating every child before any
+// edge means forward references (A depends on a sibling created later) resolve too.
+//
+// Apply is all-or-nothing: if any create or edge fails, every issue created in this
+// call is deleted, so the orchestrator can safely retry. It returns the created issues
+// with their assigned IDs, in proposal order.
 func (c *Client) Apply(ctx context.Context, proposals []core.Proposal) ([]core.Issue, error) {
+	keyToIndex := map[string]int{}
 	for i, p := range proposals {
 		if strings.TrimSpace(p.Issue.Title) == "" {
 			return nil, fmt.Errorf("beads: proposal %d has an empty title", i)
@@ -160,6 +168,12 @@ func (c *Client) Apply(ctx context.Context, proposals []core.Proposal) ([]core.I
 				return nil, fmt.Errorf("beads: proposal %d (%q) has an empty dependency id", i, p.Issue.Title)
 			}
 		}
+		if p.Key != "" {
+			if _, dup := keyToIndex[p.Key]; dup {
+				return nil, fmt.Errorf("beads: proposal %d (%q) reuses local key %q", i, p.Issue.Title, p.Key)
+			}
+			keyToIndex[p.Key] = i
+		}
 	}
 
 	created := make([]core.Issue, 0, len(proposals))
@@ -169,6 +183,9 @@ func (c *Client) Apply(ctx context.Context, proposals []core.Proposal) ([]core.I
 		}
 	}
 
+	// Phase 1: create every child, recording each declared Key's assigned ID so a
+	// later edge can resolve a sibling reference (including a forward one).
+	keyToID := map[string]string{}
 	for i, p := range proposals {
 		id, err := c.create(ctx, p.Issue)
 		if err != nil {
@@ -178,11 +195,21 @@ func (c *Client) Apply(ctx context.Context, proposals []core.Proposal) ([]core.I
 		issue := p.Issue
 		issue.ID = id
 		created = append(created, issue)
+		if p.Key != "" {
+			keyToID[p.Key] = id
+		}
+	}
 
+	// Phase 2: add the blocked-by edges, resolving sibling Keys to assigned IDs.
+	for i, p := range proposals {
 		for _, dep := range p.DependsOn {
-			if _, err := c.run(ctx, []string{"dep", "add", id, dep}); err != nil {
+			target := dep
+			if id, ok := keyToID[dep]; ok {
+				target = id
+			}
+			if _, err := c.run(ctx, []string{"dep", "add", created[i].ID, target}); err != nil {
 				rollback()
-				return nil, fmt.Errorf("beads: add dependency %s depends-on %s: %w", id, dep, err)
+				return nil, fmt.Errorf("beads: add dependency %s depends-on %s: %w", created[i].ID, target, err)
 			}
 		}
 	}

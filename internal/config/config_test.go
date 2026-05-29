@@ -16,7 +16,7 @@ import (
 const harnessYAML = `
 dag:
   requirements: { kind: human }
-  plan:         { role: planner,      produces: [author-tests] }
+  plan:         { role: planner, kind: plan, on_failure: plan, produces: [author-tests] }
   author-tests: { role: test-author,  produces: [implement] }
   implement:    { role: implementor,
                   precondition:  blockers-closed,
@@ -105,6 +105,14 @@ func TestLoadHarness(t *testing.T) {
 	}
 	if got := h.DAG["integrate"]; got.Kind != "trusted-merge" {
 		t.Errorf("integrate kind = %q, want trusted-merge", got.Kind)
+	}
+
+	// The plan stage is the hybrid: an agent stage (it names a role) that is ungated
+	// (kind=plan, no postcondition), producing author-tests issues from the planner's
+	// proposals.
+	if got := h.DAG["plan"]; got.Kind != "plan" || got.Role != "planner" || len(got.Postcondition) != 0 ||
+		!reflect.DeepEqual(got.Produces, []string{"author-tests"}) {
+		t.Errorf("plan = %+v, want kind=plan role=planner no-postcondition produces=[author-tests]", got)
 	}
 
 	// Agent stage with the full guard set: precondition, postcondition list,

@@ -51,7 +51,7 @@ func TestLifecycleToolSet(t *testing.T) {
 			t.Errorf("tool %s has invalid JSON schema params", tl.Def().Name)
 		}
 	}
-	for _, want := range []string{"submit", "escalate", "request_subtask"} {
+	for _, want := range []string{"submit", "submit_plan", "escalate", "request_subtask"} {
 		if !got[want] {
 			t.Errorf("missing lifecycle tool %q", want)
 		}
@@ -92,6 +92,61 @@ func TestSubmitPushFailureIsRecoverable(t *testing.T) {
 	}
 	if !out.IsError || !strings.Contains(out.Content, "git push") {
 		t.Errorf("submit push failure = %+v, want IsError mentioning git push", out)
+	}
+}
+
+// submit_plan folds the accumulated proposals into a terminal done Result with NO
+// candidate branch (a planner writes no code), and pushes nothing through the broker.
+func TestSubmitPlanFoldsProposalsNoPush(t *testing.T) {
+	brk := &recordingBroker{pushCommit: "should-not-be-used"}
+	tools := LifecycleTools(lifecycleBrief(), brk)
+
+	for _, args := range []string{
+		`{"title":"add order type","role":"test-author","key":"order-type"}`,
+		`{"title":"validate quantity","role":"test-author","depends_on":["order-type"]}`,
+	} {
+		if out := invoke(t, lcToolByName(t, tools, "request_subtask"), args); out.IsError {
+			t.Fatalf("request_subtask %s = %+v", args, out)
+		}
+	}
+
+	out := invoke(t, lcToolByName(t, tools, "submit_plan"), `{"summary":"split into two slices"}`)
+	if out.Result == nil {
+		t.Fatal("submit_plan must return a terminal Result")
+	}
+	if brk.pushedBranch != "" {
+		t.Errorf("submit_plan pushed %q, want no push (a planner has no candidate)", brk.pushedBranch)
+	}
+	r := out.Result
+	if r.Status != core.StatusDone {
+		t.Errorf("status = %q, want done", r.Status)
+	}
+	if r.Branch.Ref != "" {
+		t.Errorf("branch = %+v, want empty (no candidate)", r.Branch)
+	}
+	if len(r.Proposes) != 2 {
+		t.Fatalf("Proposes = %+v, want 2 children", r.Proposes)
+	}
+	// The local key and the sibling reference ride through to the proposal so beads.Apply
+	// can resolve the inter-sibling edge at write time.
+	if r.Proposes[0].Key != "order-type" {
+		t.Errorf("proposal[0].Key = %q, want order-type", r.Proposes[0].Key)
+	}
+	if len(r.Proposes[1].DependsOn) != 1 || r.Proposes[1].DependsOn[0] != "order-type" {
+		t.Errorf("proposal[1].DependsOn = %v, want [order-type]", r.Proposes[1].DependsOn)
+	}
+}
+
+// submit_plan with no proposals is a non-terminal error: a planner that decomposed
+// nothing would end the pipeline with no work, so it is told to propose first.
+func TestSubmitPlanRequiresProposals(t *testing.T) {
+	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{})
+	out := invoke(t, lcToolByName(t, tools, "submit_plan"), `{}`)
+	if out.Result != nil {
+		t.Errorf("submit_plan with no proposals must not terminate, got %+v", out.Result)
+	}
+	if !out.IsError || !strings.Contains(out.Content, "request_subtask") {
+		t.Errorf("submit_plan no-proposals = %+v, want IsError guiding to request_subtask", out)
 	}
 }
 

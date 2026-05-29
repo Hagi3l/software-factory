@@ -109,15 +109,29 @@ func (c *Config) validateDAG(add func(string, ...any)) {
 
 	for _, name := range sortedKeys(dag) {
 		st := dag[name]
-		agent := st.Role != ""
-		nonAgent := st.Kind != ""
-		switch {
-		case agent && nonAgent:
-			add("stage %q sets both role %q and kind %q; a stage is one or the other", name, st.Role, st.Kind)
-		case !agent && !nonAgent:
-			add("stage %q sets neither role nor kind; it is neither an agent nor a non-agent stage", name)
-		case nonAgent && st.Kind != StageKindHuman && st.Kind != StageKindTrustedMerge:
-			add("stage %q has unknown kind %q (want %q or %q)", name, st.Kind, StageKindHuman, StageKindTrustedMerge)
+		hasRole := st.Role != ""
+		switch st.Kind {
+		case "":
+			if !hasRole {
+				add("stage %q sets neither role nor kind; it is neither an agent nor a non-agent stage", name)
+			}
+		case StageKindPlan:
+			// A plan stage is an agent stage (it dispatches to a planner soul, so it must
+			// name a role) but is NOT sandbox-gated: its output is the child issues it
+			// proposes, validated structurally by the orchestrator, so it must declare no
+			// postcondition (see specs/workflow.md). It is the one kind that coexists with a role.
+			if !hasRole {
+				add("stage %q has kind %q but no role; a plan stage dispatches to a planner soul", name, st.Kind)
+			}
+			if len(st.Postcondition) > 0 {
+				add("stage %q has kind %q and a postcondition; a plan stage is not sandbox-gated and must declare none", name, st.Kind)
+			}
+		case StageKindHuman, StageKindTrustedMerge:
+			if hasRole {
+				add("stage %q sets both role %q and kind %q; a stage is one or the other", name, st.Role, st.Kind)
+			}
+		default:
+			add("stage %q has unknown kind %q (want %q, %q or %q)", name, st.Kind, StageKindHuman, StageKindTrustedMerge, StageKindPlan)
 		}
 
 		for _, target := range st.Produces {

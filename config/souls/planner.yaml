@@ -1,0 +1,21 @@
+# The Go decomposition planner: the soul that fulfills the `plan` DAG role. It is the
+# first autonomous stage — the human seeds one `plan` issue pointing at a spec, and this
+# soul breaks that work into concrete child work items, proposing each (with dependency
+# edges) via request_subtask, then calls submit_plan. It writes NO code and NO tests; the
+# children it proposes flow on through author-tests -> implement -> qa -> integrate, each a
+# different soul (producer != verifier holds downstream).
+#
+# `plan` is not sandbox-gated: there is no candidate to grade, so the orchestrator accepts
+# the decomposition structurally (legal child roles within the declared `produces`, acyclic
+# edges). The planner is still untrusted — it runs in the same zero-network `go-toolchain`
+# sandbox as the other souls so it can read the spec and the surrounding code, and its
+# proposals are validated, not trusted. The model resolves through infra.<env>.yaml's
+# `models` registry; the API key is supplied from the environment by the runner, never
+# from this file.
+name:    planner-go
+role:    planner
+model:   claude-opus-4-8
+persona: souls/prompts/planner.md
+tools:   [fs, shell, git]
+sandbox: go-toolchain
+selector: { lang: go }

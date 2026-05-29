@@ -19,7 +19,7 @@ func validConfig() *Config {
 		Harness: &Harness{
 			DAG: map[string]Stage{
 				"requirements": {Kind: "human"},
-				"plan":         {Role: "planner", Produces: []string{"author-tests"}},
+				"plan":         {Role: "planner", Kind: StageKindPlan, Produces: []string{"author-tests"}},
 				"author-tests": {Role: "test-author", Postcondition: []string{"tests-red"}, Produces: []string{"implement"}},
 				"implement": {
 					Role:          "implementor",
@@ -268,6 +268,36 @@ func TestValidateStageBothRoleAndKind(t *testing.T) {
 	c.Souls = fullSouls(t)
 	c.Harness.DAG["weird"] = Stage{Role: "planner", Kind: "human"}
 	mustContain(t, problems(t, c), `sets both role`)
+}
+
+// A plan stage is the one kind that coexists with a role — it dispatches to a planner
+// soul — so a kind:plan stage with no role is a config fault (nothing to dispatch).
+func TestValidatePlanStageWithoutRole(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	st := c.Harness.DAG["plan"]
+	st.Role = ""
+	c.Harness.DAG["plan"] = st
+	mustContain(t, problems(t, c), `stage "plan" has kind "plan" but no role`)
+}
+
+// A plan stage is not sandbox-gated (the planner writes no candidate to grade), so
+// declaring a postcondition on it is a config fault.
+func TestValidatePlanStageWithPostcondition(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	st := c.Harness.DAG["plan"]
+	st.Postcondition = []string{"tests-pass"}
+	c.Harness.DAG["plan"] = st
+	mustContain(t, problems(t, c), `stage "plan" has kind "plan" and a postcondition`)
+}
+
+// An unrecognized kind is a typo that would otherwise be dispatched (or not) by accident.
+func TestValidateUnknownStageKind(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Harness.DAG["odd"] = Stage{Kind: "teleport"}
+	mustContain(t, problems(t, c), `stage "odd" has unknown kind "teleport"`)
 }
 
 func TestValidateMissingPersona(t *testing.T) {

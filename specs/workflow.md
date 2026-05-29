@@ -56,7 +56,11 @@ roles (see [configuration.md](configuration.md)). The stages:
   the one place a human is in the loop, realised as the **Create-Task wizard** in
   the [control room](control-room.md). See [specs-process.md](specs-process.md).
 - The **decomposition planner** is autonomous and sandboxed. It reads a seed issue
-  plus its spec and breaks it into concrete work items with dependency edges.
+  plus its spec and breaks it into concrete work items with dependency edges. It is the
+  pipeline's autonomous entry: the human seeds one `plan` issue and the planner produces
+  the `author-tests` issues. Realised as an **ungated `kind: plan` stage** (an agent stage
+  that is not sandbox-gated — see below); the planner proposes each child with
+  `request_subtask` and ends with `submit_plan`, producing no candidate branch.
 
 Humans set *what/why*; the autonomous planner sets *how/decomposition*.
 
@@ -86,6 +90,16 @@ create breadth, the orchestrator creates depth.
 Emergent breadth is still **validated, not trusted**: a planner *proposes* child
 issues in its Result; the orchestrator checks they are DAG-legal (valid roles,
 edges keep the graph acyclic, within budget) before writing them.
+
+The `plan` stage has **no postcondition** and runs **no gate**: a planner produces no
+candidate to verify in a sandbox, so its *acceptance is exactly this structural
+validation*. The orchestrator additionally requires the planner produced at least one
+child (a decomposition of nothing routes `on_failure` for a fresh attempt) and that each
+child targets a role the stage declares it `produces` — so an untrusted planner cannot
+inject work that skips a stage (e.g. an `implement` issue with no `author-tests`). The
+children branch from `main` (fresh work, no predecessor candidate to thread); inter-child
+ordering is expressed by naming a sibling's local key in `depends_on`, which the
+single-writer beads layer resolves to the assigned id at write time.
 
 ---
 

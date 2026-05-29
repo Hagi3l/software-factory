@@ -121,8 +121,12 @@ format. They split along the trust boundary:
 - **Workspace** (run *in* the sandbox, on the worktree): `read_file`, `write_file`,
   `edit_file`, `list_dir`, `search`, `run` (build/test/lint).
 - **Lifecycle** (control the invocation, produce the Result): `submit` (candidate
-  ready), `escalate` (raise `needs-spec-clarification`), `request_subtask` (propose
-  a child issue — emergent breadth).
+  ready), `submit_plan` (a decomposition is ready — ends a planning task with the
+  proposed children and **no** candidate branch), `escalate` (raise
+  `needs-spec-clarification`), `request_subtask` (propose a child issue — emergent
+  breadth; a child may name a sibling proposed in the same task via a local `key` to
+  express an ordering edge). The tools are universal; a soul's persona decides which it
+  uses (only the planner calls `submit_plan`, only the test author calls `trace_test`).
 - **Brokered I/O** is mostly implicit: package fetch is `run` reaching the vetted
   mirror through the broker's proxy; git push is performed by the runner on
   `submit`, not an agent tool. The explicit network-tool surface stays near-zero —
