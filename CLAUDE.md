@@ -32,10 +32,11 @@ is Phases 2–5, filed as beads issues. See `IMPLEMENTATION_PLAN.md`.
   install on macOS with `brew install beads` (currently v1.0.4, Dolt backend; a
   major bump from 0.62.0 — `bd dep add` treats a foreign-prefix dep id as an
   unvalidated external ref, so tests pin the db prefix via `bd init --prefix harness`).
-  Note: **the Linux dev sandbox here runs bd v0.62.0**, where `dep add` already rejects
-  nonexistent foreign-prefix targets (the v1.0.4 silent-accept gap is absent) — so
-  `beads.Apply`'s own existence check is what holds against v1.0.4; don't rely on local
-  `dep add` strictness reproducing the macOS behavior.
+  The Linux dev sandbox here also runs **v1.0.4** (matching brew), so its `dep add`
+  silently accepts a nonexistent foreign-prefix target as an external ref — `beads.Apply`'s
+  own existence check (T3.2) is what holds against this, not `dep add` strictness. (Earlier
+  it ran v0.62.0, which still rejected such targets; install Linux builds from the
+  `steveyegge/beads` GitHub releases — `beads_<ver>_linux_amd64.tar.gz`.)
 - Model layer: canonical types + thin per-provider adapters over official Go SDKs.
   No agent framework.
 - Control room (later): htmx + Alpine + templ + Tailwind standalone CLI + embed.FS.
