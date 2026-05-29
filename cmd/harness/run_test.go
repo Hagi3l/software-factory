@@ -31,8 +31,6 @@ func TestBuildRunComponents(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	comp, err := buildRunComponents(cfg, repo, runOptions{
-		gateBuild: "true",
-		gateTest:  "true",
 		// A bd binary that does not exist: the orchestrator's Ready query will error
 		// and be logged, but the loop must not crash — proving the wiring is robust to
 		// a missing collaborator at the edges.
@@ -72,7 +70,7 @@ func TestBuildRunComponentsCleanupReleases(t *testing.T) {
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 
 	for i := 0; i < 2; i++ {
-		comp, err := buildRunComponents(cfg, repo, runOptions{gateBuild: "true", gateTest: "true", bdBin: "bd"}, log)
+		comp, err := buildRunComponents(cfg, repo, runOptions{bdBin: "bd"}, log)
 		if err != nil {
 			t.Fatalf("assembly %d: %v", i, err)
 		}

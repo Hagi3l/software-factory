@@ -131,7 +131,7 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 			// produce a candidate and route it.
 			return o.route(ctx, issue, stage, "done result carried no candidate branch")
 		}
-		report, gerr := o.runGate(ctx, issue, res)
+		report, gerr := o.runGate(ctx, issue, stage, res)
 		if gerr != nil {
 			// The gate could not reach a verdict (infrastructure) — transient, retry.
 			return true, fmt.Errorf("gate issue %s: %w", issue.ID, gerr)
@@ -150,18 +150,20 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 // runGate verifies the candidate in a fresh sandbox distinct from the producer's. The
 // verification profile is the producing role's sandbox profile (same toolchain), but a
 // brand-new sandbox — producer != verifier holds by construction (see
-// specs/verification.md). Per-stage check selection (mutation/scanners for qa) is
-// Phase 2; the kernel gate is a single injected build+test runner.
-func (o *Orchestrator) runGate(ctx context.Context, issue core.Issue, res core.Result) (gate.Report, error) {
+// specs/verification.md). The candidate is graded against the *stage's* declared
+// postconditions, which the gate resolves to checks through its registry, so check
+// selection is per-stage and config-driven (T2.1) rather than one hardcoded set.
+func (o *Orchestrator) runGate(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result) (gate.Report, error) {
 	profile := ""
 	if soul, ok := o.soulForRole(issue.Role); ok {
 		profile = soul.Sandbox
 	}
 	return o.gate.Run(ctx, gate.Candidate{
-		Repo:    o.opts.Repo,
-		Ref:     res.Branch.Ref,
-		Profile: profile,
-		Limits:  o.opts.Limits,
+		Repo:           o.opts.Repo,
+		Ref:            res.Branch.Ref,
+		Postconditions: stage.Postcondition,
+		Profile:        profile,
+		Limits:         o.opts.Limits,
 	})
 }
 

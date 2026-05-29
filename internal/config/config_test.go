@@ -29,6 +29,11 @@ dag:
                   produces:      [integrate] }
   integrate:    { kind: trusted-merge }
 
+checks:
+  tests-pass: go test ./...
+  gosec:      gosec ./...
+  deps-scan:  govulncheck ./...
+
 policy:
   max_retries: 3
   budget:      { tokens: 2_000_000, usd: 20, wall: 2h }
@@ -120,6 +125,13 @@ func TestLoadHarness(t *testing.T) {
 	}
 	if want := []string{"tests-pass", "mutation>=0.8", "gosec", "deps-scan"}; !reflect.DeepEqual(h.DAG["qa"].Postcondition, want) {
 		t.Errorf("qa postcondition = %v, want %v", h.DAG["qa"].Postcondition, want)
+	}
+
+	// The check registry maps each command-check postcondition to its shell command,
+	// the bridge the gate resolves against (see specs/configuration.md).
+	wantChecks := map[string]string{"tests-pass": "go test ./...", "gosec": "gosec ./...", "deps-scan": "govulncheck ./..."}
+	if !reflect.DeepEqual(h.Checks, wantChecks) {
+		t.Errorf("checks = %v, want %v", h.Checks, wantChecks)
 	}
 
 	// Policy: the underscore-separated token literal and the "2h" duration are the

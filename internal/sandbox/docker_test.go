@@ -459,14 +459,21 @@ func TestDockerSandboxIntegration(t *testing.T) {
 	// The broker socket is the one wired channel.
 	mustExec(t, sb, "the broker socket is mounted", Command{Path: "sh", Args: []string{"-c", "test -S /run/harness/broker.sock && echo ok"}}, "ok")
 
-	// Zero direct network: --network none leaves only loopback.
-	res, err := sb.Exec(ctx, Command{Path: "sh", Args: []string{"-c", "ls /sys/class/net"}})
+	// Zero direct network: `--network none` attaches no usable interface. The invariant
+	// is "no non-loopback interface is UP", not "only lo exists": on some hosts the
+	// kernel auto-creates down, address-less tunnel pseudo-devices (gre0, sit0, tunl0,
+	// erspan0, …) in every netns, which carry no traffic. A real egress interface (a
+	// bridged eth0) would be UP, so operstate is the property that proves isolation.
+	res, err := sb.Exec(ctx, Command{Path: "sh", Args: []string{"-c",
+		`for i in /sys/class/net/*; do echo "$(basename "$i") $(cat "$i/operstate")"; done`}})
 	if err != nil {
-		t.Fatalf("Exec(ls /sys/class/net): %v", err)
+		t.Fatalf("Exec(enumerate interfaces): %v", err)
 	}
-	nets := strings.Fields(string(res.Stdout))
-	if len(nets) != 1 || nets[0] != "lo" {
-		t.Errorf("expected only loopback (zero-network), got interfaces %v", nets)
+	for _, line := range strings.Split(strings.TrimSpace(string(res.Stdout)), "\n") {
+		f := strings.Fields(line)
+		if len(f) == 2 && f[0] != "lo" && f[1] == "up" {
+			t.Errorf("non-loopback interface %q is up, want zero-network isolation; interfaces:\n%s", f[0], res.Stdout)
+		}
 	}
 
 	// A non-zero exit is a result, not an error.

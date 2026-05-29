@@ -21,11 +21,14 @@ func TestGateIntegration(t *testing.T) {
 	requireDockerAndGit(t)
 
 	repo := seedRepoWithCandidate(t)
-	cand := Candidate{
-		Repo:    repo,
-		Ref:     core.CandidateBranch("issue-1"),
-		Profile: "busybox:latest",
-		Limits:  config.SandboxLimits{CPU: 1, Mem: "64Mi", Wall: config.Duration(2 * time.Minute)},
+	cand := func(postconditions ...string) Candidate {
+		return Candidate{
+			Repo:           repo,
+			Ref:            core.CandidateBranch("issue-1"),
+			Postconditions: postconditions,
+			Profile:        "busybox:latest",
+			Limits:         config.SandboxLimits{CPU: 1, Mem: "64Mi", Wall: config.Duration(2 * time.Minute)},
+		}
 	}
 	be := sandbox.NewDockerBackend()
 	ctx := context.Background()
@@ -33,11 +36,11 @@ func TestGateIntegration(t *testing.T) {
 	// marker.txt exists only on the candidate branch, so grep succeeding proves the
 	// verification sandbox checked out the candidate, not main. A green build+test → pass.
 	t.Run("passing candidate", func(t *testing.T) {
-		g := New(be, []Check{
-			{Name: "build", Cmd: "grep -q candidate marker.txt"},
-			{Name: "test", Cmd: "true"},
+		g := New(be, Registry{
+			"build": "grep -q candidate marker.txt",
+			"test":  "true",
 		}, t.TempDir(), nil)
-		report, err := g.Run(ctx, cand)
+		report, err := g.Run(ctx, cand("build", "test"))
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}
@@ -51,11 +54,11 @@ func TestGateIntegration(t *testing.T) {
 
 	// A non-zero check exit fails the gate and stops the run.
 	t.Run("failing candidate", func(t *testing.T) {
-		g := New(be, []Check{
-			{Name: "build", Cmd: "true"},
-			{Name: "test", Cmd: "exit 7"},
+		g := New(be, Registry{
+			"build": "true",
+			"test":  "exit 7",
 		}, t.TempDir(), nil)
-		report, err := g.Run(ctx, cand)
+		report, err := g.Run(ctx, cand("build", "test"))
 		if err != nil {
 			t.Fatalf("Run: %v", err)
 		}

@@ -9,8 +9,17 @@ import (
 // rarely and is environment-independent — the per-environment knobs live in the
 // infra overlay (see Infra). See specs/configuration.md and specs/workflow.md.
 type Harness struct {
-	DAG    map[string]Stage `yaml:"dag"`
-	Policy Policy           `yaml:"policy"`
+	DAG map[string]Stage `yaml:"dag"`
+	// Checks is the check registry: it maps a command-check postcondition identifier
+	// (e.g. "tests-pass") to the shell command that realizes it in the clean
+	// verification sandbox (exit 0 = pass). It is the bridge from a declared
+	// postcondition name to a runnable gate check, so the command a check runs is
+	// config rather than code — the single source of truth the gate resolves against
+	// (see specs/configuration.md, specs/verification.md). Postconditions backed by a
+	// built-in check kind (metric comparisons like "mutation>=0.8", reserved proofs
+	// like "tests-red-then-green") are not command checks and need no entry here.
+	Checks map[string]string `yaml:"checks,omitempty"`
+	Policy Policy            `yaml:"policy"`
 }
 
 // Stage kinds for non-agent stages. An agent stage names a Role instead; a stage is

@@ -38,12 +38,14 @@ var knownPreconditions = map[string]bool{
 	"blockers-closed": true,
 }
 
-// knownPostconditions are the bare (non-comparison) postcondition identifiers.
-var knownPostconditions = map[string]bool{
+// reservedPostconditions are postcondition identifiers backed by a built-in gate
+// check kind rather than a configured command: the red→green proof (T2.3) and any
+// later special verifications. Command-check postconditions (tests-pass, gosec, …)
+// are deliberately NOT listed here — they are defined in harness.yaml's `checks` map
+// and validated against it, so config is the single source of truth for what command
+// each one runs (see specs/configuration.md).
+var reservedPostconditions = map[string]bool{
 	"tests-red-then-green": true,
-	"tests-pass":           true,
-	"gosec":                true,
-	"deps-scan":            true,
 }
 
 // knownMetrics are the metrics that may appear on the left of a comparison
@@ -125,9 +127,17 @@ func (c *Config) validateDAG(add func(string, ...any)) {
 			add("stage %q precondition %q is not a known condition", name, st.Precondition)
 		}
 		for _, pc := range st.Postcondition {
-			if !knownCondition(pc, knownPostconditions) {
-				add("stage %q postcondition %q is not a known condition", name, pc)
+			if !c.knownPostcondition(pc) {
+				add("stage %q postcondition %q is not a known condition (no command in checks:, not a known metric or reserved proof)", name, pc)
 			}
+		}
+	}
+
+	// Every registered check must carry a command; an empty one would exit non-zero
+	// (or, worse, vacuously pass) and silently fail every candidate at the gate.
+	for cname, cmd := range c.Harness.Checks {
+		if strings.TrimSpace(cmd) == "" {
+			add("check %q has an empty command", cname)
 		}
 	}
 
@@ -288,9 +298,29 @@ func (c *Config) validateModels(add func(string, ...any)) {
 // in the given set, or a comparison of a known metric against a numeric threshold
 // (e.g. "mutation>=0.8").
 func knownCondition(s string, bare map[string]bool) bool {
-	if bare[s] {
+	return bare[s] || isMetricComparison(s)
+}
+
+// knownPostcondition reports whether a postcondition reference resolves to something
+// the harness can evaluate: a reserved built-in proof, a command check defined in the
+// `checks` registry, or a comparison against a known metric. This is the
+// configuration-time half of bridging declared postconditions to gate checks; the
+// gate resolves the command checks against the same registry at run time.
+func (c *Config) knownPostcondition(pc string) bool {
+	if reservedPostconditions[pc] {
 		return true
 	}
+	if c.Harness != nil {
+		if _, ok := c.Harness.Checks[pc]; ok {
+			return true
+		}
+	}
+	return isMetricComparison(pc)
+}
+
+// isMetricComparison reports whether s is a comparison of a known metric against a
+// numeric threshold, e.g. "mutation>=0.8".
+func isMetricComparison(s string) bool {
 	for _, op := range comparisonOps {
 		if i := strings.Index(s, op); i > 0 {
 			metric := strings.TrimSpace(s[:i])

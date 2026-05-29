@@ -34,8 +34,6 @@ func cmdRun(args []string) error {
 	dir := fs.String("config", "config", "config directory (harness.yaml, souls/, infra.<env>.yaml)")
 	env := fs.String("env", "dev", "infra environment overlay to load")
 	repo := fs.String("repo", ".", "integration repository: candidates are pushed and merged here, and worktrees seeded from it")
-	gateBuild := fs.String("gate-build", "make build", "build check command run in the verification sandbox")
-	gateTest := fs.String("gate-test", "make test-unit", "test check command run in the verification sandbox")
 	bdBin := fs.String("bd", "bd", "path to the beads CLI")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -58,9 +56,7 @@ func cmdRun(args []string) error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	comp, err := buildRunComponents(cfg, absRepo, runOptions{
-		gateBuild: *gateBuild,
-		gateTest:  *gateTest,
-		bdBin:     *bdBin,
+		bdBin: *bdBin,
 	}, log)
 	if err != nil {
 		return err
@@ -81,13 +77,12 @@ func cmdRun(args []string) error {
 	return err
 }
 
-// runOptions carries the run-only knobs that are not in the config file (the gate
-// check commands and the beads binary), so buildRunComponents has a stable signature
-// the wiring test can call directly.
+// runOptions carries the run-only knobs that are not in the config file (the beads
+// binary path), so buildRunComponents has a stable signature the wiring test can call
+// directly. The gate check commands live in harness.yaml's `checks` registry, not
+// here — config is their single source of truth (see specs/configuration.md).
 type runOptions struct {
-	gateBuild string
-	gateTest  string
-	bdBin     string
+	bdBin string
 }
 
 // runComponents holds the assembled, ready-to-run kernel and a cleanup that releases
@@ -202,13 +197,11 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		return nil, err
 	}
 
-	// The gate verifies in a fresh sandbox (producer != verifier): clean checkout of
-	// the candidate branch, then build + test. The checks are data; the kernel runs
-	// the two bootstrap commands.
-	gateRunner := gate.New(backend, []gate.Check{
-		{Name: "build", Cmd: opts.gateBuild},
-		{Name: "test", Cmd: opts.gateTest},
-	}, sockDir, log)
+	// The gate verifies in a fresh sandbox (producer != verifier): a clean checkout of
+	// the candidate branch graded against the producing stage's declared postconditions.
+	// The registry (config's `checks` map) is how those postconditions resolve to the
+	// commands run — the checks are data, not code.
+	gateRunner := gate.New(backend, gate.Registry(cfg.Harness.Checks), sockDir, log)
 
 	orch, err := orchestrator.New(orchestrator.Options{
 		Config: cfg,

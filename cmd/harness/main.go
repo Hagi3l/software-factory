@@ -73,8 +73,7 @@ usage:
   harness validate [--config DIR] [--env ENV]
   harness seed     --title TITLE [--role ROLE] [--description TEXT] [--spec PATH]
                    [--config DIR] [--env ENV] [--repo DIR] [--bd PATH]
-  harness run      [--config DIR] [--env ENV] [--repo DIR]
-                   [--gate-build CMD] [--gate-test CMD] [--bd PATH]
+  harness run      [--config DIR] [--env ENV] [--repo DIR] [--bd PATH]
   harness version
 
 Run a subcommand with -h for its flags.

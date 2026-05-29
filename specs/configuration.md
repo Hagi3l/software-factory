@@ -41,6 +41,11 @@ dag:
                   produces:      [integrate] }
   integrate:    { kind: trusted-merge }
 
+checks:                          # command-check postcondition -> shell command
+  tests-pass: go test ./...      #   exit 0 = pass, run at the worktree root
+  gosec:      gosec ./...        #   in the clean verification sandbox
+  deps-scan:  govulncheck ./...
+
 policy:
   max_retries: 3
   budget:      { tokens: 2_000_000, usd: 20, wall: 2h }   # per issue
@@ -52,6 +57,13 @@ policy:
 - `precondition` / `postcondition` / `on_failure` are the stage guards (see
   [workflow.md](workflow.md)). Postconditions evaluate in a clean
   [verification sandbox](verification.md).
+- `checks:` is the **check registry**: it maps each *command-check* postcondition to
+  the shell command that realizes it in the verification sandbox (exit 0 = pass). It
+  is the bridge from a declared postcondition name to a runnable gate check, so the
+  command each check runs is config — not code — and is the single source of truth
+  the gate resolves against. Postconditions backed by a built-in check *kind* rather
+  than a command — metric comparisons (`mutation>=0.8`) and reserved proofs
+  (`tests-red-then-green`) — need no `checks` entry; the gate runs them specially.
 - `policy` is the **termination guarantee** — see budgets in
   [workflow.md](workflow.md).
 
@@ -132,7 +144,8 @@ validate` step must run before anything executes and check:
 
 - every DAG `role` resolves to ≥1 soul, and every soul's `role` exists;
 - every `produces:` / `on_failure:` target is a defined stage;
-- every `precondition`/`postcondition` reference is known;
+- every `precondition`/`postcondition` reference is known — a command-check
+  postcondition must have a `checks:` entry; a metric/reserved one must be recognized;
 - soul `selector`s are well-formed; persona files exist;
 - the DAG `produces:` transitions don't create an unreachable or trivially-looping
   definition.

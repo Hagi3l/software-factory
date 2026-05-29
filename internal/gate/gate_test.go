@@ -56,16 +56,44 @@ func (b *fakeBackend) Provision(_ context.Context, spec sandbox.Spec) (sandbox.S
 	return b.sb, nil
 }
 
+// testRegistry maps the two bootstrap-style command checks the gate tests script. A
+// stage's postconditions resolve to commands through it, the way config.Harness.Checks
+// does at run time.
+func testRegistry() Registry {
+	return Registry{"build": "make build", "test": "make test-unit"}
+}
+
 func testCandidate() Candidate {
 	return Candidate{
-		Repo:    "/repo",
-		Ref:     core.CandidateBranch("issue-1"),
-		Profile: "go-toolchain",
-		Limits:  config.SandboxLimits{CPU: 2, Mem: "2Gi", Wall: config.Duration(30 * time.Minute)},
+		Repo:           "/repo",
+		Ref:            core.CandidateBranch("issue-1"),
+		Postconditions: []string{"build", "test"},
+		Profile:        "go-toolchain",
+		Limits:         config.SandboxLimits{CPU: 2, Mem: "2Gi", Wall: config.Duration(30 * time.Minute)},
 	}
 }
 
 // --- tests -------------------------------------------------------------------
+
+// Resolve turns declared postconditions into ordered checks via the registry, and a
+// postcondition with no registered command is an error (a config/gate disagreement).
+func TestRegistryResolve(t *testing.T) {
+	checks, err := testRegistry().Resolve([]string{"test", "build"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	// Order follows the postcondition list, and each check's Name is the postcondition
+	// identifier it realizes (so the report and provenance cite the declared name).
+	if len(checks) != 2 || checks[0].Name != "test" || checks[0].Cmd != "make test-unit" || checks[1].Name != "build" {
+		t.Fatalf("Resolve = %+v, want [test->make test-unit, build->make build] in order", checks)
+	}
+}
+
+func TestRegistryResolveUnknownErrors(t *testing.T) {
+	if _, err := testRegistry().Resolve([]string{"build", "mutation>=0.8"}); err == nil {
+		t.Fatal("Resolve accepted a postcondition with no registered command, want an error")
+	}
+}
 
 // All checks pass: the report is green, the verification sandbox is seeded with the
 // candidate branch ref (a clean checkout distinct from the producer's), and it is
@@ -76,7 +104,7 @@ func TestRunAllChecksPass(t *testing.T) {
 		"make test-unit": {ExitCode: 0, Stdout: []byte("ok")},
 	}}
 	be := &fakeBackend{sb: sb}
-	g := New(be, []Check{{Name: "build", Cmd: "make build"}, {Name: "test", Cmd: "make test-unit"}}, t.TempDir(), nil)
+	g := New(be, testRegistry(), t.TempDir(), nil)
 
 	report, err := g.Run(context.Background(), testCandidate())
 	if err != nil {
@@ -114,7 +142,7 @@ func TestRunStopsAtFirstFailure(t *testing.T) {
 		"make test-unit": {ExitCode: 0},
 	}}
 	be := &fakeBackend{sb: sb}
-	g := New(be, []Check{{Name: "build", Cmd: "make build"}, {Name: "test", Cmd: "make test-unit"}}, t.TempDir(), nil)
+	g := New(be, testRegistry(), t.TempDir(), nil)
 
 	report, err := g.Run(context.Background(), testCandidate())
 	if err != nil {
@@ -142,7 +170,7 @@ func TestRunStopsAtFirstFailure(t *testing.T) {
 func TestRunExecErrorIsInfraFailure(t *testing.T) {
 	sb := &scriptedSandbox{id: "gate-sb", execErr: errors.New("sandbox is gone")}
 	be := &fakeBackend{sb: sb}
-	g := New(be, []Check{{Name: "build", Cmd: "make build"}}, t.TempDir(), nil)
+	g := New(be, testRegistry(), t.TempDir(), nil)
 
 	if _, err := g.Run(context.Background(), testCandidate()); err == nil {
 		t.Fatal("Run returned nil error for a dead sandbox, want an error")
@@ -152,11 +180,14 @@ func TestRunExecErrorIsInfraFailure(t *testing.T) {
 	}
 }
 
-// A gate with no checks would pass everything — that is a configuration error.
+// A stage that declared no postconditions resolves to no checks, which would pass
+// every candidate — a configuration error, caught before any sandbox is provisioned.
 func TestRunNoChecksErrors(t *testing.T) {
 	be := &fakeBackend{sb: &scriptedSandbox{id: "gate-sb"}}
-	g := New(be, nil, t.TempDir(), nil)
-	if _, err := g.Run(context.Background(), testCandidate()); err == nil {
+	g := New(be, testRegistry(), t.TempDir(), nil)
+	c := testCandidate()
+	c.Postconditions = nil
+	if _, err := g.Run(context.Background(), c); err == nil {
 		t.Fatal("Run accepted a gate with no checks, want an error")
 	}
 	if be.provisioned != 0 {
@@ -164,10 +195,25 @@ func TestRunNoChecksErrors(t *testing.T) {
 	}
 }
 
+// An unresolvable postcondition (no command in the registry) is a config fault and
+// fails the gate before a sandbox is spent, not after.
+func TestRunUnresolvablePostconditionErrors(t *testing.T) {
+	be := &fakeBackend{sb: &scriptedSandbox{id: "gate-sb"}}
+	g := New(be, testRegistry(), t.TempDir(), nil)
+	c := testCandidate()
+	c.Postconditions = []string{"build", "no-such-check"}
+	if _, err := g.Run(context.Background(), c); err == nil {
+		t.Fatal("Run accepted an unresolvable postcondition, want an error")
+	}
+	if be.provisioned != 0 {
+		t.Errorf("provisioned %d sandboxes for an unresolvable gate, want 0", be.provisioned)
+	}
+}
+
 // A provisioning failure surfaces as an error (the gate could not produce a verdict).
 func TestRunProvisionFailure(t *testing.T) {
 	be := &fakeBackend{provErr: errors.New("no host capacity")}
-	g := New(be, []Check{{Name: "build", Cmd: "make build"}}, t.TempDir(), nil)
+	g := New(be, testRegistry(), t.TempDir(), nil)
 	if _, err := g.Run(context.Background(), testCandidate()); err == nil {
 		t.Fatal("Run returned nil error when provisioning failed, want an error")
 	}

@@ -36,6 +36,11 @@ func validConfig() *Config {
 				},
 				"integrate": {Kind: "trusted-merge"},
 			},
+			Checks: map[string]string{
+				"tests-pass": "go test ./...",
+				"gosec":      "gosec ./...",
+				"deps-scan":  "govulncheck ./...",
+			},
 			Policy: Policy{MaxRetries: 3, DeadLetter: "harness.dlq"},
 		},
 		Infra: &Infra{
@@ -156,6 +161,27 @@ func TestValidateUnknownPostcondition(t *testing.T) {
 	st.Postcondition = []string{"tests-pass", "coverage>=0.9"} // coverage is not a known metric
 	c.Harness.DAG["qa"] = st
 	mustContain(t, problems(t, c), `postcondition "coverage>=0.9"`)
+}
+
+// A command-check postcondition with no entry in the `checks` registry is a typo
+// that would have nothing to run at the gate, so validation must reject it. This is
+// the configuration-time half of bridging postconditions to gate checks.
+func TestValidateCommandCheckWithoutRegistryEntry(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	st := c.Harness.DAG["qa"]
+	st.Postcondition = []string{"lint-pass"} // no checks: entry defines it
+	c.Harness.DAG["qa"] = st
+	mustContain(t, problems(t, c), `postcondition "lint-pass"`)
+}
+
+// A registered check with an empty command would silently fail every candidate, so an
+// empty command is a validation error.
+func TestValidateEmptyCheckCommand(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Harness.Checks["tests-pass"] = "   "
+	mustContain(t, problems(t, c), `check "tests-pass" has an empty command`)
 }
 
 // A comparison against a known metric with a numeric threshold is accepted; a

@@ -22,6 +22,15 @@ dag:
   integrate:
     kind: trusted-merge
 
+# The check registry: each command-check postcondition declared above resolves to the
+# shell command the gate runs in the clean verification sandbox (exit 0 = pass). These
+# are the harness's own make targets — `make test-unit` compiles every package (so a
+# build break also fails the gate) and runs the unit suite. Keeping the commands here
+# (not as flags or code) makes config the single source of truth the gate resolves
+# against; see specs/configuration.md.
+checks:
+  tests-pass: make test-unit
+
 policy:
   max_retries: 3
   budget: { tokens: 2_000_000, usd: 20, wall: 2h }   # per issue

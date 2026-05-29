@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"sync"
 	"testing"
 	"time"
@@ -324,7 +325,10 @@ func TestHandleResultAcceptMergesAndCloses(t *testing.T) {
 		t.Fatalf("handleResult = (%v,%v), want (false,nil)", transient, err)
 	}
 
-	if got := g.called(); len(got) != 1 || got[0].Ref != "candidate/iss-1" || got[0].Profile != "go-toolchain" {
+	// The gate grades the candidate against the producing stage's declared
+	// postconditions (T2.1), not a hardcoded set, so they must reach the Candidate.
+	if got := g.called(); len(got) != 1 || got[0].Ref != "candidate/iss-1" || got[0].Profile != "go-toolchain" ||
+		!reflect.DeepEqual(got[0].Postconditions, []string{"tests-pass"}) {
 		t.Errorf("gate candidate = %+v", got)
 	}
 	if got := m.merged(); len(got) != 1 || got[0] != "candidate/iss-1" {
