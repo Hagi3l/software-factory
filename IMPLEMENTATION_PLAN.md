@@ -217,7 +217,46 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
     covered by `internal/gate` unit + docker-integration tests (T2.3).
   - Specs were already aligned (`configuration.md`/`verification.md` document `implement`'s
     `tests-red-then-green` from T2.3); no spec change needed.
-- [ ] **T2.6 Independent scanners as checks** — `gosec` (SAST), `govulncheck` (vuln), dependency/license scan, each a gate check emitting evidence. (needs T2.1, T2.2) ([verification.md](specs/verification.md), [security.md](specs/security.md))
+- [x] **T2.6 Independent scanners as checks** — *done.* The `qa` gate's three
+  spec-independent scanners — `gosec` (SAST), `govulncheck` (known-vulnerability scan),
+  `license-scan` (`go-licenses`, dependency/licence policy) — are realized as **ordinary
+  command checks**, each emitting its captured report as gate evidence cited by name in the
+  provenance trailer (`gosec@<hash>`). Learnings for downstream tasks:
+  - **No new gate check kind was needed — scanners are command checks.** The T2.1 registry
+    + T2.2 evidence-persistence + provenance-citation path is already generic over command
+    checks: a scanner name in `checks:` resolves to `cmdCheck` (graded on exit code: 0 =
+    clean = pass; non-zero = findings *or* tool error = **fail-closed**), runs once in the
+    clean verification sandbox, and its report is persisted + cited for free. `gate.go`'s
+    own comment ("spec-independent scanners are command checks layered on in Phase 2") was
+    the design intent; `TestRunRedGreenWithCommandCheck` already drove `gosec ./...` as a
+    command check. So T2.6 is a *config + proof + docs* increment, not gate machinery —
+    the generality earned in T2.1/T2.2 absorbed it. (`internal/gate/gate.go` unchanged.)
+  - **"Independent" means spec-independent, not run-independent.** `verification.md`'s "many
+    independent checks, not one" is about *defence in depth* (diverse generic layers), which
+    a `qa` stage's postcondition list already provides; it does **not** mandate dropping
+    fail-fast. The gate still stops at the first failing check, so a `qa` run surfaces one
+    scanner finding at a time. Running every independent scanner to **aggregate all findings
+    in one pass** is a real refinement for the DLQ-triage human (T4.8) — deferred to **T2.9**,
+    where the concrete multi-scanner set lands and a config signal to mark a check
+    "independent" (vs. the build/proof checks fail-fast genuinely helps) can be decided.
+  - **Established three function-named scanners**, replacing the conflated `deps-scan:
+    govulncheck` placeholder the T2.7 `qa` fixture carried (govulncheck is a *vulnerability*
+    tool, not a dependency/licence one). The spec example (`configuration.md`) and the config
+    fixtures (`config_test.go`/`validate_test.go`) are kept in sync — the fixtures mirror the
+    documented YAML verbatim, so they double as a contract check.
+  - **Zero-network constraint is the real engineering finding (→ T5.3/T5.6).** The
+    verification sandbox has no egress, so a scanner needing reference data — the vuln DB for
+    `govulncheck`, licence metadata for `license-scan` — must read it from data **baked into
+    the role's sandbox image** (rootfs composition, T5.3) or a vetted mirror (T5.6), never the
+    network. `gosec` is purely static and needs none. Documented in `configuration.md` +
+    `verification.md`; the gate path itself is offline-clean (deny-all broker).
+  - **Capability-complete but dormant** (mirrors T2.7): the shipped `config/harness.yaml` has
+    no `qa` stage, so the scanners are exercised only in the config fixtures' `qa` stage and
+    in three gate tests (`TestResolveScannerChecks` pins `cmdCheck` resolution;
+    `TestRunScannerChecksEmitEvidence` pins the "each a gate check emitting evidence"
+    contract; `TestRunScannerFindingsFailClosed` pins fail-closed with findings persisted).
+    **T2.9's dependency on T2.6 is now met** (T2.7 already done): T2.9 wires the live `qa`
+    stage + `security` soul that runs the mutation metric + these three scanners.
 - [x] **T2.7 Mutation-testing postcondition** — *done.* A **metric-comparison** gate check:
   a `metric<op>threshold` postcondition (e.g. `mutation>=0.8`) resolves to the measurement
   command registered under its metric name, runs once against the candidate, and grades the
@@ -323,6 +362,10 @@ These are `OPEN:` in the specs and may reshape tasks above:
 - Mutation score threshold + operators — the metric-comparison *expression* and gate
   kind are decided and implemented (T2.7); only the concrete default score is picked when
   the `qa` stage lands (T2.9).
+- Gate fail-fast vs. run-all for independent scanners — the gate stops at the first failing
+  check, so a multi-scanner `qa` run surfaces one finding at a time. Aggregating all
+  independent-scanner findings in one pass (better for DLQ triage) needs a config signal to
+  mark a check "independent"; decided when `qa` lands (T2.9). See T2.6.
 - `integrate` as its own role/soul vs. orchestrator-owned with sandboxed conflict help (T3.11).
 - HA orchestrator: single instance (fine for v1) vs. leader election (T5.11).
 - Condition-expression language for pre/postconditions (shell exit-code vs. CEL) — affects

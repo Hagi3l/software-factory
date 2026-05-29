@@ -24,16 +24,17 @@ dag:
                   on_failure:    implement,
                   produces:      [qa] }
   qa:           { role: security,
-                  postcondition: [tests-pass, "mutation>=0.8", gosec, deps-scan],
+                  postcondition: [tests-pass, "mutation>=0.8", gosec, govulncheck, license-scan],
                   on_failure:    implement,
                   produces:      [integrate] }
   integrate:    { kind: trusted-merge }
 
 checks:
-  tests-pass: go test ./...
-  gosec:      gosec ./...
-  deps-scan:  govulncheck ./...
-  mutation:   gremlins unleash --output /tmp/m.json && jq -r .efficacy /tmp/m.json
+  tests-pass:   go test ./...
+  gosec:        gosec ./...
+  govulncheck:  govulncheck ./...
+  license-scan: go-licenses check ./...
+  mutation:     gremlins unleash --output /tmp/m.json && jq -r .efficacy /tmp/m.json
 
 policy:
   max_retries: 3
@@ -124,17 +125,20 @@ func TestLoadHarness(t *testing.T) {
 	if !reflect.DeepEqual(impl.Produces, []string{"qa"}) {
 		t.Errorf("implement produces = %v, want [qa]", impl.Produces)
 	}
-	if want := []string{"tests-pass", "mutation>=0.8", "gosec", "deps-scan"}; !reflect.DeepEqual(h.DAG["qa"].Postcondition, want) {
+	if want := []string{"tests-pass", "mutation>=0.8", "gosec", "govulncheck", "license-scan"}; !reflect.DeepEqual(h.DAG["qa"].Postcondition, want) {
 		t.Errorf("qa postcondition = %v, want %v", h.DAG["qa"].Postcondition, want)
 	}
 
 	// The check registry maps each command-check postcondition to its shell command,
-	// the bridge the gate resolves against (see specs/configuration.md).
+	// the bridge the gate resolves against (see specs/configuration.md). The qa stage's
+	// three independent scanners (SAST / vulnerability / dependency-license) are plain
+	// command checks alongside tests-pass and the mutation measurement command.
 	wantChecks := map[string]string{
-		"tests-pass": "go test ./...",
-		"gosec":      "gosec ./...",
-		"deps-scan":  "govulncheck ./...",
-		"mutation":   "gremlins unleash --output /tmp/m.json && jq -r .efficacy /tmp/m.json",
+		"tests-pass":   "go test ./...",
+		"gosec":        "gosec ./...",
+		"govulncheck":  "govulncheck ./...",
+		"license-scan": "go-licenses check ./...",
+		"mutation":     "gremlins unleash --output /tmp/m.json && jq -r .efficacy /tmp/m.json",
 	}
 	if !reflect.DeepEqual(h.Checks, wantChecks) {
 		t.Errorf("checks = %v, want %v", h.Checks, wantChecks)

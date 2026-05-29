@@ -36,15 +36,16 @@ dag:
                   on_failure:    implement,
                   produces:      [qa] }
   qa:           { role: security,
-                  postcondition: [tests-pass, "mutation>=0.8", gosec, deps-scan],
+                  postcondition: [tests-pass, "mutation>=0.8", gosec, govulncheck, license-scan],
                   on_failure:    implement,
                   produces:      [integrate] }
   integrate:    { kind: trusted-merge }
 
 checks:                          # command-check postcondition -> shell command
-  tests-pass: go test ./...      #   exit 0 = pass, run at the worktree root
-  gosec:      gosec ./...        #   in the clean verification sandbox
-  deps-scan:  govulncheck ./...
+  tests-pass:   go test ./...    #   exit 0 = pass, run at the worktree root
+  gosec:        gosec ./...                              # SAST            in the clean
+  govulncheck:  govulncheck ./...                        # vulnerabilities verification
+  license-scan: go-licenses check ./...                  # deps/licenses   sandbox
 
 policy:
   max_retries: 3
@@ -82,7 +83,18 @@ policy:
   `tests-pass` command, which validation enforces. Keeping the acceptance
   tests under one `tests-pass` key makes that command a single source of truth shared by
   the `qa` stage's `tests-pass` check, the `author-tests` stage's `tests-red` proof, and
-  the `implement` stage's red→green proof.
+  the `implement` stage's red→green proof. **Independent scanners** (`gosec`,
+  `govulncheck`, `license-scan` above) are *ordinary command checks* — they need no
+  built-in kind, since the gate already grades a command on its exit code (0 = clean =
+  pass; non-zero = findings or a tool error = fail, closed). They are spec-independent
+  (generic SAST / vulnerability / dependency-licence layers — see
+  [verification.md](verification.md)), so they are declared and resolved exactly like
+  `tests-pass`, and each emits its captured report as gate evidence cited by name in the
+  provenance trailer (`gosec@<hash>`). Because the verification sandbox is
+  **zero-network**, a scanner that needs reference data (the vulnerability database for
+  `govulncheck`, licence metadata for `license-scan`) reads it from data baked into the
+  role's sandbox image, never the network — the same offline guarantee the build relies
+  on (see [sandbox](components/sandbox.md), and rootfs composition in the build plan).
 - `policy` is the **termination guarantee** — see budgets in
   [workflow.md](workflow.md).
 

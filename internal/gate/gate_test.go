@@ -753,3 +753,114 @@ func TestRunMetricFailsOnUnparseableScore(t *testing.T) {
 		t.Errorf("evidence = %q, want it to record an unparseable score", ev)
 	}
 }
+
+// --- independent scanners (T2.6) ---------------------------------------------
+
+// scannerRegistry maps the three spec-independent scanners the qa gate runs as plain
+// command checks: SAST, vulnerability, and dependency/license. They need no built-in
+// check kind — the gate already grades a command on its exit code — so they resolve and
+// run exactly like tests-pass (see specs/verification.md, specs/configuration.md).
+func scannerRegistry() Registry {
+	return Registry{
+		"gosec":        "gosec ./...",
+		"govulncheck":  "govulncheck ./...",
+		"license-scan": "go-licenses check ./...",
+	}
+}
+
+// The three scanners resolve to ordinary command checks (cmdCheck) — defense in depth is
+// "many independent checks," and each is just a command graded on exit code, not a new
+// kind. This pins that the generality T2.1/T2.2 built already absorbs scanners.
+func TestResolveScannerChecks(t *testing.T) {
+	checks, err := scannerRegistry().Resolve([]string{"gosec", "govulncheck", "license-scan"})
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	if len(checks) != 3 {
+		t.Fatalf("resolved %d checks, want 3", len(checks))
+	}
+	for i, want := range []struct{ name, cmd string }{
+		{"gosec", "gosec ./..."},
+		{"govulncheck", "govulncheck ./..."},
+		{"license-scan", "go-licenses check ./..."},
+	} {
+		if checks[i].Name != want.name || checks[i].Cmd != want.cmd || checks[i].kind != cmdCheck {
+			t.Errorf("check[%d] = %+v, want %s -> %q as a command check", i, checks[i], want.name, want.cmd)
+		}
+	}
+}
+
+// All three scanners clean (exit 0): the gate passes, runs each once against the
+// candidate, and emits each scanner's captured report as evidence cited by its name — so
+// the provenance trailer can list gosec@<hash>, govulncheck@<hash>, license-scan@<hash>.
+// This is the "each a gate check emitting evidence" contract for T2.6.
+func TestRunScannerChecksEmitEvidence(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"gosec ./...":             {ExitCode: 0, Stdout: []byte("Issues: 0")},
+		"govulncheck ./...":       {ExitCode: 0, Stdout: []byte("No vulnerabilities found.")},
+		"go-licenses check ./...": {ExitCode: 0, Stdout: []byte("all licenses allowed")},
+	}}
+	be := &fakeBackend{sb: sb}
+	store := testStore(t)
+	g := New(be, scannerRegistry(), store, t.TempDir(), nil)
+
+	c := testCandidate()
+	c.Postconditions = []string{"gosec", "govulncheck", "license-scan"}
+
+	report, err := g.Run(context.Background(), c)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !report.Passed || len(report.Checks) != 3 {
+		t.Fatalf("report = %+v, want a green verdict over 3 scanner checks", report)
+	}
+	for _, want := range []struct{ name, report string }{
+		{"gosec", "Issues: 0"},
+		{"govulncheck", "No vulnerabilities found."},
+		{"license-scan", "all licenses allowed"},
+	} {
+		var cr *CheckResult
+		for i := range report.Checks {
+			if report.Checks[i].Name == want.name {
+				cr = &report.Checks[i]
+			}
+		}
+		if cr == nil {
+			t.Fatalf("no result for scanner %q", want.name)
+		}
+		if cr.Evidence.Hash == "" {
+			t.Fatalf("%s scanner has no persisted evidence ref to cite in provenance", want.name)
+		}
+		ev := readArtifact(t, store, cr.Evidence.Hash)
+		if !bytes.Contains(ev, []byte("check: "+want.name)) || !bytes.Contains(ev, []byte(want.report)) {
+			t.Errorf("%s evidence = %q, want it to record the scanner name and its captured report", want.name, ev)
+		}
+	}
+}
+
+// A scanner that reports findings (non-zero exit) fails the gate closed, and its report
+// is persisted as evidence — a rejected security gate is exactly what a human triages from
+// the dead-letter queue, so the findings must survive the sandbox teardown.
+func TestRunScannerFindingsFailClosed(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"govulncheck ./...": {ExitCode: 3, Stdout: []byte("Vulnerability #1: GO-2024-0001 in golang.org/x/net")},
+	}}
+	be := &fakeBackend{sb: sb}
+	store := testStore(t)
+	g := New(be, scannerRegistry(), store, t.TempDir(), nil)
+
+	c := testCandidate()
+	c.Postconditions = []string{"govulncheck"}
+
+	report, err := g.Run(context.Background(), c)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Passed {
+		t.Fatal("report.Passed = true, want false (the vulnerability scanner reported a finding)")
+	}
+	ev := readArtifact(t, store, report.Checks[0].Evidence.Hash)
+	if !bytes.Contains(ev, []byte("status: fail")) || !bytes.Contains(ev, []byte("GO-2024-0001")) {
+		t.Errorf("evidence = %q, want it to record the fail status and the vulnerability finding", ev)
+	}
+}

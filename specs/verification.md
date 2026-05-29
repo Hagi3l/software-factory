@@ -120,6 +120,26 @@ dependency/license/vulnerability scans, policy-as-code. Defence in depth — the
 gate carries 100% of the assurance a human reviewer would otherwise provide, so it
 should be many independent checks, not one.
 
+These need no built-in check kind: a scanner is an **ordinary command check** (see the
+[check registry](configuration.md)), graded on its exit code — `0` means the scanner ran
+and found nothing (pass); any non-zero exit means it reported findings *or* could not run,
+both of which **fail closed** (an unverifiable candidate is not a passing one). The kernel
+ships three: `gosec` (SAST), `govulncheck` (known-vulnerability scan), and `license-scan`
+(dependency/licence policy, e.g. `go-licenses check`). Each captures its report as gate
+evidence, cited by name in the provenance trailer (`gosec@<hash>`) like every other check,
+so a passed or failed scan is auditable down to the exact findings. Adding a fourth scanner
+is a config edit — a new `checks:` entry plus the stage postcondition — because the gate
+grades an exit code, not a particular tool's report.
+
+Because the verification sandbox is [zero-network](security.md), a scanner that needs
+reference data — the vulnerability database for `govulncheck`, licence metadata for
+`license-scan` — must read it from data baked into the role's sandbox image, the same
+offline guarantee the build relies on. A purely static analyser like `gosec` needs no such
+data. The gate runs its checks fail-fast (it stops at the first failure), so today a `qa`
+run that trips one scanner surfaces that finding and re-routes; running every independent
+scanner to aggregate *all* findings in one pass is a natural refinement to weigh when the
+`qa` stage that declares them lands.
+
 ### Traceability map
 The test author emits, per test, the **spec heading + sentence** it claims to
 encode. This does not prove faithfulness, but it makes interpretation *auditable*
