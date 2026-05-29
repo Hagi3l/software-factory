@@ -437,7 +437,47 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
     matching is T3.3). Specs updated: `workflow.md` (plan realized as ungated `kind: plan`,
     `submit_plan`, structural acceptance), `configuration.md` (the `plan` kind + example),
     `components/agent.md` (`submit_plan` + sibling-key `request_subtask`).
-- [ ] **T3.2 `beads.Apply` self-validates `DependsOn` existence** *(carried from Phase 1)* — a prefix-independent referential-integrity check on each proposed dep target, closing the bd-1.0.4 foreign-prefix gap (a hostile proposal naming a foreign-prefix dep is currently accepted silently). TCB beads code. *(T3.1 made `Apply` two-phase and sibling-key-resolving; the check applies to the **resolved, non-sibling** targets — a same-batch sibling key is satisfied by construction.)* ([architecture.md](specs/architecture.md), [workflow.md](specs/workflow.md))
+- [x] **T3.2 `beads.Apply` self-validates `DependsOn` existence** — *done.* `Apply` now runs a
+  prefix-independent referential-integrity pass *before* it creates anything: every dependency
+  target that is not a same-batch sibling key must resolve via the read path (`c.Get` →
+  `bd show`), else the whole batch is rejected. This closes the bd-1.0.4 foreign-prefix gap —
+  a hostile proposal naming a fabricated id can no longer plant a dangling edge. TCB beads code.
+  Verified: `make check` green (323 pass, 2 skip). Learnings for downstream tasks:
+  - **The check is the harness's own, deliberately not delegated to bd.** bd 1.0.4 validates a
+    same-prefix `dep add` target but treats a foreign-prefix id as an *unchecked external
+    (federation) reference* and silently accepts it. So `Apply` verifies existence itself, via
+    the read path (`Get`/`bd show`), which is prefix-blind: it resolves *any* id against the local
+    store and errors on a miss. **Correct regardless of bd version** — defense in depth, not a
+    reliance on `dep add`'s leniency.
+  - **Placed pre-create (fail-fast), as a third validation pass after the dup-key loop.** External
+    targets are pre-existing, so existence is knowable before Phase 1; rejecting up front means an
+    illegal proposal fails the batch with **nothing to roll back** (no create/delete churn). Order
+    is now: validate (title/role/empty-dep/dup-key) → existence check → Phase 1 create → Phase 2
+    edges. Sibling keys (in `keyToIndex`) are **skipped** — satisfied by construction, exactly as
+    Phase 2 resolves them from `keyToID`. Targets are deduped (`checked` set) so a fan-out to one
+    shared dep probes it once.
+  - **`Get` is a robust existence probe across bd output shapes.** A miss surfaces as either a
+    nonzero exit (→ `run` errors) *or* a non-array error-object body / empty array (→ `decodeIssues`
+    fails or `Get` returns "not found"). All three yield a non-nil error, so `Get` rejects a missing
+    id whether bd exits nonzero or returns `{"error":...}`. Unit tests pin both the nonzero-exit and
+    empty-array paths.
+  - **Signature unchanged → orchestrator untouched.** `Apply`'s params/returns are identical, so the
+    orchestrator's `Beads` interface and its faked-`Beads` tests are unaffected; this was a pure
+    `internal/beads` increment (production + tests).
+  - **Test reshuffle:** the old `TestApplyRollbackIntegration` (nonexistent dep) now exercises the
+    *pre-create existence check*, not rollback — renamed `TestApplyRejectsUnknownDependencyIntegration`.
+    Real-bd rollback coverage is preserved by a new `TestApplyRollbackOnCycleIntegration` (two siblings
+    A↔B that exist by construction, so they clear the existence check, but the second edge closes a
+    cycle bd rejects → rollback deletes both). Unit rollback stays covered by `TestApplyRollsBackOnDepFailure`
+    (now also stubs `show`). New unit tests: `TestApplyRejectsUnknownDependency` (fail-fast, no
+    create/delete) + `TestApplyRejectsUnknownDependencyEmptyResult` (empty-array miss).
+  - **Env note (not a blocker):** the Linux dev sandbox here ships **bd v0.62.0**, where `dep add`
+    *already* rejects both nonexistent same- and foreign-prefix targets (the v1.0.4 silent-accept gap
+    is absent). The new check is still correct and necessary — it makes `Apply` version-independent and
+    is the layer that holds when run against v1.0.4. (CLAUDE.md documents the macOS brew v1.0.4.)
+  - Specs updated: `workflow.md` (DAG-legal list gains "every dependency target exists" + the
+    prefix-blind rationale), `security.md` (Control 5: "dangling edges" + harness-owned existence
+    check), `components/orchestrator.md` (validate pseudocode comment).
 - [ ] **T3.3 Stage ≠ role + selector matching** — a role maps to a *set* of souls; the orchestrator picks one per issue by matching the issue's tags against each soul's `selector`. Generalize the kernel's `stage==role` assumption (`stageForRole`). ([configuration.md](specs/configuration.md))
 - [ ] **T3.4 Per-role model tiers** — resolve the model per issue from the selected soul, so cheap models serve easy roles and frontier models the hard ones. (builds on T3.3) ([models.md](specs/models.md), [configuration.md](specs/configuration.md))
 - [ ] **T3.5 Spec-slice resolution** — a new `internal/spec` package that builds the bounded slice (referenced file + linked neighbours to a configured depth) and populates `Brief.Spec`, so the agent no longer reads the whole `specs/` tree from the worktree. ([specs-process.md](specs/specs-process.md), [components/agent.md](specs/components/agent.md))

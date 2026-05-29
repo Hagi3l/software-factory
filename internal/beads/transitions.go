@@ -151,6 +151,11 @@ func (c *Client) setStatus(ctx context.Context, id, status string, extra ...stri
 // anything else is treated as an existing issue ID. Creating every child before any
 // edge means forward references (A depends on a sibling created later) resolve too.
 //
+// Before creating anything, Apply checks that every dependency target which is not a
+// same-batch sibling key already exists, so a hostile proposal cannot plant a dangling
+// edge to a fabricated id (closing the bd-1.0.4 foreign-prefix gap — see the check
+// below).
+//
 // Apply is all-or-nothing: if any create or edge fails, every issue created in this
 // call is deleted, so the orchestrator can safely retry. It returns the created issues
 // with their assigned IDs, in proposal order.
@@ -173,6 +178,36 @@ func (c *Client) Apply(ctx context.Context, proposals []core.Proposal) ([]core.I
 				return nil, fmt.Errorf("beads: proposal %d (%q) reuses local key %q", i, p.Issue.Title, p.Key)
 			}
 			keyToIndex[p.Key] = i
+		}
+	}
+
+	// Referential-integrity check: every dependency target that is not a same-batch
+	// sibling key must already exist in the store. The harness verifies this itself
+	// through the read path rather than trusting `bd dep add` to reject a dangling edge:
+	// bd 1.0.4 validates a same-prefix target but treats a foreign-prefix id as an
+	// unchecked external (federation) reference and silently accepts it, so an untrusted
+	// proposal could otherwise plant an edge to a fabricated id (e.g. "other-123") and
+	// corrupt the work graph — exactly the kind of mutation single-writer validation must
+	// reject (see specs/architecture.md, specs/security.md). The check is
+	// prefix-independent — Get resolves any id against the local store and errors on a
+	// miss regardless of prefix — and runs before any issue is created, so an illegal
+	// proposal fails the whole batch with nothing to roll back. A sibling key is satisfied
+	// by construction (its issue is created in Phase 1), so it is skipped here exactly as
+	// Phase 2 resolves it from the batch. Targets are deduplicated so a batch that fans out
+	// to one shared dependency probes it once.
+	checked := map[string]bool{}
+	for i, p := range proposals {
+		for _, dep := range p.DependsOn {
+			if _, sibling := keyToIndex[dep]; sibling {
+				continue
+			}
+			if checked[dep] {
+				continue
+			}
+			if _, err := c.Get(ctx, dep); err != nil {
+				return nil, fmt.Errorf("beads: proposal %d (%q) depends on unknown issue %q: %w", i, p.Issue.Title, dep, err)
+			}
+			checked[dep] = true
 		}
 	}
 

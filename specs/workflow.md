@@ -89,7 +89,12 @@ create breadth, the orchestrator creates depth.
 
 Emergent breadth is still **validated, not trusted**: a planner *proposes* child
 issues in its Result; the orchestrator checks they are DAG-legal (valid roles,
-edges keep the graph acyclic, within budget) before writing them.
+every dependency target exists, edges keep the graph acyclic, within budget) before
+writing them. The existence check is the harness's own, not delegated to the store:
+the work-item store may treat a dependency id whose prefix differs from its own as an
+unchecked external reference, so a hostile proposal naming a fabricated id would
+otherwise plant a dangling edge — the orchestrator resolves every non-sibling target
+against the store itself, prefix-blind, before applying the batch.
 
 The `plan` stage has **no postcondition** and runs **no gate**: a planner produces no
 candidate to verify in a sandbox, so its *acceptance is exactly this structural

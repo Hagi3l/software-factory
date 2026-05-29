@@ -47,7 +47,7 @@ loop:
       publish work.<role>  { brief(issue) }    # JetStream, at-least-once
 
   for result in completions:                   # agents' Result envelopes
-      validate(result.proposals)               # DAG-legal? acyclic? in budget?
+      validate(result.proposals)               # DAG-legal? deps exist? acyclic? in budget?
       if gates(result) == pass:
           apply(result.proposals); advance(issue)   # create produces[] issue
       else if retryable(issue):

@@ -85,8 +85,11 @@ output or merging their own code. See [verification.md](verification.md),
 ## Control 5 — Single-writer work graph
 
 Only the orchestrator writes beads. Agents *propose* mutations, which are validated
-for DAG-legality (valid roles, acyclic edges, in budget) before being applied. A
-confused or compromised agent cannot inject garbage or cycles into the work graph.
+for DAG-legality (valid roles, existing dependency targets, acyclic edges, in budget)
+before being applied. A confused or compromised agent cannot inject garbage, cycles,
+or dangling edges into the work graph. The orchestrator checks every proposed
+dependency target's existence itself — prefix-blind, never trusting the store to
+reject a foreign-prefix id it would treat as an unchecked external reference.
 See [components/orchestrator.md](components/orchestrator.md).
 
 ---

@@ -92,12 +92,16 @@ func TestStatusRejectsEmptyID(t *testing.T) {
 }
 
 func TestApplyCreatesIssuesAndEdges(t *testing.T) {
-	// create returns a distinct id per call; dep add succeeds.
+	// create returns a distinct id per call; the existence probe (show) finds the
+	// external dependency; dep add succeeds.
 	n := 0
 	c, calls := recordingClient(func(args []string) ([]byte, error) {
-		if args[0] == "create" {
+		switch args[0] {
+		case "create":
 			n++
 			return []byte(`{"id":"new-` + string(rune('0'+n)) + `"}`), nil
+		case "show":
+			return []byte(`[{"id":"existing-1","status":"open"}]`), nil
 		}
 		return nil, nil
 	})
@@ -115,17 +119,22 @@ func TestApplyCreatesIssuesAndEdges(t *testing.T) {
 	if created[0].Role != "implement" {
 		t.Errorf("created[0].Role = %q", created[0].Role)
 	}
+	// The external dependency's existence is checked first, before any create — so an
+	// illegal proposal fails fast with nothing to roll back.
+	if got := strings.Join((*calls)[0], " "); got != "show existing-1 --json" {
+		t.Errorf("first call = %q, want the existence probe show existing-1 --json", got)
+	}
 	// First create carries description + role metadata. Apply is two-phase: it creates
 	// every child first (so a sibling reference can resolve to an assigned id), then adds
 	// the edges — so both creates precede the dep add.
-	c0 := strings.Join((*calls)[0], " ")
-	if !strings.Contains(c0, "create fix it --json") || !strings.Contains(c0, "--description details") || !strings.Contains(c0, `--metadata {"role":"implement"}`) {
-		t.Errorf("create args = %q", c0)
+	c1 := strings.Join((*calls)[1], " ")
+	if !strings.Contains(c1, "create fix it --json") || !strings.Contains(c1, "--description details") || !strings.Contains(c1, `--metadata {"role":"implement"}`) {
+		t.Errorf("create args = %q", c1)
 	}
-	if got := (*calls)[1]; got[0] != "create" {
-		t.Errorf("second call = %q, want the second create (two-phase: all creates before edges)", got)
+	if got := (*calls)[2]; got[0] != "create" {
+		t.Errorf("third call = %q, want the second create (two-phase: all creates before edges)", got)
 	}
-	if got := strings.Join((*calls)[2], " "); got != "dep add new-1 existing-1" {
+	if got := strings.Join((*calls)[3], " "); got != "dep add new-1 existing-1" {
 		t.Errorf("dep args = %q, want dep add new-1 existing-1 (added after all creates)", got)
 	}
 }
@@ -164,6 +173,11 @@ func TestApplyResolvesSiblingKey(t *testing.T) {
 		}
 		if call[0] == "dep" && call[len(call)-1] == "order-type" {
 			t.Errorf("dep edge used the unresolved key: %v", call)
+		}
+		// A sibling key has no id when proposed, so it must NOT be existence-checked — it
+		// is satisfied by construction once Phase 1 creates it.
+		if call[0] == "show" {
+			t.Errorf("sibling-key dependency must not be existence-checked: %v", call)
 		}
 	}
 	if !sawEdge {
@@ -211,6 +225,8 @@ func TestApplyRollsBackOnDepFailure(t *testing.T) {
 		switch args[0] {
 		case "create":
 			return []byte(`{"id":"new-1"}`), nil
+		case "show": // the dependency exists, so the failure is the edge, not the check
+			return []byte(`[{"id":"existing-1","status":"open"}]`), nil
 		case "dep":
 			return nil, errors.New("adding dependency would create a cycle")
 		}
@@ -244,6 +260,54 @@ func TestApplyCreateNoID(t *testing.T) {
 		{Issue: core.Issue{Title: "t", Role: "implement"}},
 	}); err == nil {
 		t.Fatal("Apply accepted a create response with no id")
+	}
+}
+
+// A dependency on an issue that does not exist must fail the whole batch before any
+// child is created. This closes the bd-1.0.4 foreign-prefix gap: `dep add` validates a
+// same-prefix target but silently accepts a foreign-prefix id as an unchecked external
+// reference, so an untrusted proposal could otherwise plant a dangling edge to a
+// fabricated id. The harness verifies existence itself via the read path, prefix-blind
+// (see specs/architecture.md, T3.2).
+func TestApplyRejectsUnknownDependency(t *testing.T) {
+	c, calls := recordingClient(func(args []string) ([]byte, error) {
+		switch args[0] {
+		case "show": // bd reports a miss with a nonzero exit; model that as an error
+			return nil, errors.New(`no issue found matching "other-123"`)
+		case "create":
+			return []byte(`{"id":"new-1"}`), nil
+		}
+		return nil, nil
+	})
+	_, err := c.Apply(context.Background(), []core.Proposal{
+		{Issue: core.Issue{Title: "t", Role: "implement"}, DependsOn: []string{"other-123"}},
+	})
+	if err == nil {
+		t.Fatal("Apply accepted a dependency on a nonexistent issue")
+	}
+	// The check must fire before any create, so there is nothing to roll back: no create
+	// and no delete may have been issued.
+	for _, call := range *calls {
+		if call[0] == "create" || call[0] == "delete" {
+			t.Errorf("existence check did not fail fast before mutating; saw %v", call)
+		}
+	}
+}
+
+// A miss reported as an empty result (zero exit, empty array) — rather than a nonzero
+// exit — must also be rejected, since bd's show output shape varies by version. Get
+// turns an empty array into a not-found error, so Apply must still reject the batch.
+func TestApplyRejectsUnknownDependencyEmptyResult(t *testing.T) {
+	c, _ := recordingClient(func(args []string) ([]byte, error) {
+		if args[0] == "show" {
+			return []byte(`[]`), nil
+		}
+		return []byte(`{"id":"new-1"}`), nil
+	})
+	if _, err := c.Apply(context.Background(), []core.Proposal{
+		{Issue: core.Issue{Title: "t", Role: "implement"}, DependsOn: []string{"other-123"}},
+	}); err == nil {
+		t.Fatal("Apply accepted a dependency whose show returned no issue")
 	}
 }
 
@@ -357,9 +421,11 @@ func TestApplyIntegration(t *testing.T) {
 	}
 }
 
-// A dependency on a nonexistent issue must fail the whole Apply and leave no
-// created issue behind — proving the rollback path against real bd.
-func TestApplyRollbackIntegration(t *testing.T) {
+// A dependency on a nonexistent issue must fail the whole Apply and leave nothing
+// behind — proving the prefix-independent existence check (T3.2) against real bd. The
+// check fires before any create, so the issue count is unchanged for want of anything
+// to roll back.
+func TestApplyRejectsUnknownDependencyIntegration(t *testing.T) {
 	bdAvailable(t)
 	dir := bdInit(t)
 	c := New(WithDir(dir))
@@ -372,7 +438,29 @@ func TestApplyRollbackIntegration(t *testing.T) {
 		t.Fatal("Apply accepted a dependency on a nonexistent issue")
 	}
 	if after := len(allIssues(t, dir)); after != before {
-		t.Errorf("issue count changed %d -> %d; rollback did not delete the created child", before, after)
+		t.Errorf("issue count changed %d -> %d; existence check created an orphan child", before, after)
+	}
+}
+
+// A real edge failure (a cycle between two siblings, which all exist by construction so
+// they clear the existence check) must roll back every issue created in the call,
+// proving the all-or-nothing rollback path against real bd. bd rejects the second edge
+// because it would close a cycle.
+func TestApplyRollbackOnCycleIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+
+	before := len(allIssues(t, dir))
+	_, err := c.Apply(context.Background(), []core.Proposal{
+		{Issue: core.Issue{Title: "a", Role: "implement"}, Key: "a", DependsOn: []string{"b"}},
+		{Issue: core.Issue{Title: "b", Role: "implement"}, Key: "b", DependsOn: []string{"a"}},
+	})
+	if err == nil {
+		t.Fatal("Apply accepted a dependency cycle between siblings")
+	}
+	if after := len(allIssues(t, dir)); after != before {
+		t.Errorf("issue count changed %d -> %d; rollback did not delete the created children", before, after)
 	}
 }
 
