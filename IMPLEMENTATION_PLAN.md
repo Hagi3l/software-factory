@@ -177,19 +177,46 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
     half; `formatEvidence` renders both runs (`kind: red-green`, base + candidate
     sections) into one `gate-evidence` artifact, cited by hash like any check — no
     provenance change needed.
-  - **⚠ Was-critical-for-T2.5 (now mostly resolved by T2.4):** the proof is only
-    *meaningful* once `implement` branches from a base that holds the tests but not the
-    impl. T2.4 landed `author-tests` **and** the base threading, so `implement` now branches
-    from the author-tests candidate (part (b), done). What remains for T2.5 is (a) flip
-    `implement`'s postcondition to `tests-red-then-green` and point `runGate`'s `BaseRef`
-    at `issue.Base`. `implement` still uses `tests-pass` in the meantime, so nothing is broken.
+  - **Was-critical-for-T2.5 (now resolved):** the proof is only *meaningful* once `implement`
+    branches from a base that holds the tests but not the impl. T2.4 landed `author-tests` +
+    base threading; **T2.5 then flipped `implement`'s postcondition to `tests-red-then-green`
+    and pointed `runGate`'s `BaseRef` at `issue.Base`.** The red→green proof is now live on the
+    kernel DAG: the red half runs against the author-tests candidate (tests present, impl absent).
 - [x] **T2.4 `author-tests` soul + persona** — *done.* A `test-author` role/soul (`config/souls/test-author.yaml` + `souls/prompts/test-author.md`) that writes *failing* acceptance tests from the spec and never reads/writes the implementation. **It could not land in isolation** — three validation/runtime invariants couple the soul to a live stage, so this increment also wired `author-tests` into the DAG and pulled the candidate-threading forward (the structural half of T2.5). Learnings for downstream tasks:
   - **Three walls forced a single coherent landing, not a soul-only diff:** (1) *deadwood validation* rejects a soul whose role no stage uses, so the soul needs a stage; (2) the *gate rejects an empty postcondition set* (`gate.go` Run), so the stage needs a runnable check; (3) `advance` *dropped the predecessor candidate* (the "Phase 3" base-threading TODO), so `author-tests → implement` would have branched implement from `main` (no tests) and **regressed the kernel**. The infra to fix #3 was already in place (arbitrary base-ref worktree seeding; candidate branches persist after merge — never deleted; metadata round-trips like `Attempt`), so threading was small.
   - **New reserved proof `tests-red`** (`core.PostconditionTestsRed`) is the `author-tests` gate: like red→green it has no `checks` entry and reuses the `tests-pass` command (`core.CheckAcceptanceTests`), but runs it **once against the candidate and passes iff it FAILS** (nonzero exit) — proving the author wrote real, executing, non-vacuous failing tests. Gate plumbing mirrors red→green exactly: a `redProof` `checkKind`, `Registry.Resolve` binds both proofs to `tests-pass`, `runCheck` inverts the verdict, `formatEvidence` labels the nonzero-exit-is-pass record (`kind: tests-red`). `requiresBase` stays false for it (single ref, no base sandbox). Validation: `tests-red` joins `reservedPostconditions` and the new `reusesAcceptanceTests` set that requires a `tests-pass` command (generalized the old red→green-only check). **Known limitation:** `tests-red` (like red→green's "red" half) can't distinguish an assertion failure from a *compile* failure — a non-compiling suite passes it. It's caught downstream (the implementor can't make non-compiling tests pass without editing them, which its persona forbids → escalate). A compile-then-run split is a possible future refinement.
-  - **Base threading landed (was deferred to "Phase 3"):** `core.Issue.Base` (rides in beads metadata via `MetadataKeyBase`, like `Attempt`). `advance` sets a produced agent-stage issue's `Base = res.Branch.Ref` (the predecessor's verified candidate); `route` preserves `issue.Base` across `on_failure` retries; `buildBrief` seeds the worktree from `issue.Base` when set, else the pipeline base (`o.base`/main). So `implement` branches from the `author-tests` candidate holding the failing tests. `runGate` still passes `BaseRef: o.base` — fine while implement uses `tests-pass`; **T2.5 must switch `runGate`'s `BaseRef` to `issue.Base` when it flips implement to red→green** (so the proof's red half runs against the author-tests candidate, not main).
-  - **Live DAG is now `author-tests → implement → integrate`;** the seed enters at `author-tests` (entryRole/agentRoles/seed tests updated). `implement` deliberately **kept `tests-pass`** (not red→green) to bound this increment — see T2.5.
+  - **Base threading landed (was deferred to "Phase 3"):** `core.Issue.Base` (rides in beads metadata via `MetadataKeyBase`, like `Attempt`). `advance` sets a produced agent-stage issue's `Base = res.Branch.Ref` (the predecessor's verified candidate); `route` preserves `issue.Base` across `on_failure` retries; `buildBrief` seeds the worktree from `issue.Base` when set, else the pipeline base (`o.base`/main). So `implement` branches from the `author-tests` candidate holding the failing tests. (T2.5 has since switched `runGate`'s `BaseRef` from `o.base` to `issue.Base`, so the red→green proof's red half runs against that author-tests candidate, not main.)
+  - **Live DAG is now `author-tests → implement → integrate`;** the seed enters at `author-tests` (entryRole/agentRoles/seed tests updated). (`implement` now uses `tests-red-then-green` as of T2.5.)
   - Specs updated: `configuration.md` (author-tests gets `postcondition: [tests-red]`; `tests-red` documented alongside red→green), `verification.md` (new *Tests-red proof* subsection; the red→green base sentence is now realized, not hypothetical), `workflow.md` (depth transitions seed the produced issue with the predecessor candidate as base), `integration.md` (candidate cleanup must not remove a branch still referenced as a base).
-- [ ] **T2.5 Flip `implement` to the red→green proof** — *reduced to its remaining half* (the structural wiring, seed-entry shift, base threading, and implementor persona update all landed in T2.4). Switch `implement`'s postcondition to `tests-red-then-green` in `config/harness.yaml`, and change `runGate`'s `BaseRef` from `o.base` to the candidate's `issue.Base` (its author-tests base, where the tests are present but the impl is absent → red), falling back to `o.base`. Add an orchestrator test that the red half runs against the produced base. (needs T2.3 ✓, T2.4 ✓) ([workflow.md](specs/workflow.md), [verification.md](specs/verification.md))
+- [x] **T2.5 Flip `implement` to the red→green proof** — *done.* `implement`'s
+  postcondition is now `tests-red-then-green` in `config/harness.yaml`, and `runGate` threads
+  the candidate's `issue.Base` (its author-tests base, where the tests are present but the impl
+  is absent → red) as the gate's `BaseRef`, falling back to `o.base`. The kernel's
+  `spec → author-tests → implement → integrate` now ends-to-end proves the implementor turned
+  red tests green, not merely that they're green. Learnings:
+  - **The change was tiny because T2.3/T2.4 did the hard part.** The gate already realizes
+    red→green (two verifiers, reuses `tests-pass`, requires a base); `advance` already threads
+    the predecessor candidate as `issue.Base`; `route` preserves it across `on_failure`;
+    `buildBrief` already seeds the producer worktree from `issue.Base`. T2.5 was only: (1) the
+    one-line config flip, and (2) `runGate`'s `BaseRef: o.base` → `baseRef := o.base; if
+    issue.Base != "" { baseRef = issue.Base }`. So the gate's red half now runs against the
+    **same** ref the implementor branched from (the author-tests candidate), which is exactly
+    where the tests are red.
+  - **Why `issue.Base`, not `o.base`:** `o.base` is the pipeline base (`main`), where the
+    acceptance tests are *absent* — the red half there would be vacuously red (or worse,
+    fail to compile) for the wrong reason. The proof is only meaningful against the base that
+    holds the failing tests but not the impl, i.e. the threaded author-tests candidate. The
+    `o.base` fallback remains correct for a freshly seeded issue that carries no threaded base.
+  - **The spine e2e (`TestSpineE2ELocal`) was untouched** — it builds its own self-contained
+    fixture config (kernel `implement → integrate`, `tests-pass` = `true`) and seeds at the
+    `implementor` role directly, deliberately exercising only the implement→merge spine. The
+    shipped-config flip is guarded by `TestValidateShippedConfig` (still green: `tests-pass` is
+    registered, which validation requires for any stage declaring the reused proof).
+  - **Test:** `TestRunGateThreadsIssueBaseAsBaseRef` (two subtests: threaded base flows to the
+    gate's `BaseRef`; no base → `main` fallback). The gate-side red→green behavior is already
+    covered by `internal/gate` unit + docker-integration tests (T2.3).
+  - Specs were already aligned (`configuration.md`/`verification.md` document `implement`'s
+    `tests-red-then-green` from T2.3); no spec change needed.
 - [ ] **T2.6 Independent scanners as checks** — `gosec` (SAST), `govulncheck` (vuln), dependency/license scan, each a gate check emitting evidence. (needs T2.1, T2.2) ([verification.md](specs/verification.md), [security.md](specs/security.md))
 - [ ] **T2.7 Mutation-testing postcondition** — integrate a Go mutation tool (e.g. `gremlins`), run as a gate check, gate on a minimum score. *(OPEN: score + operators — pick a default.)* (needs T2.1) ([verification.md](specs/verification.md))
 - [ ] **T2.8 Test↔spec traceability map** — the test author emits, per test, the spec heading + sentence it claims to encode; harvested to the artifact store and surfaced in provenance. (needs T2.4) ([verification.md](specs/verification.md), [specs-process.md](specs/specs-process.md))

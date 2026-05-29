@@ -14,11 +14,14 @@
 # orchestrator threads the verified branch as the new issue's base), so the implementor
 # inherits the failing tests and only has to make them pass.
 #
-# `implement` makes those tests pass; its `tests-pass` postcondition grades the candidate
-# green in the clean verification sandbox. (Flipping it to `tests-red-then-green` — proving
-# the same tests were red on the author-tests base — is T2.5, now unblocked by the base
-# threading.) `integrate` is a trusted-merge executed inline by the orchestrator (never
-# dispatched to a runner), the terminal merge-to-main state.
+# `implement` makes those tests pass; its `tests-red-then-green` postcondition grades the
+# candidate in the clean verification sandbox by running the acceptance tests against two
+# refs: they must FAIL on the issue's base — the author-tests candidate that holds the
+# failing tests but no implementation (the orchestrator threads that branch as the gate's
+# base ref) — and PASS on the implement candidate. This proves the implementation actually
+# turned the tests green rather than the tests being vacuous. `integrate` is a trusted-merge
+# executed inline by the orchestrator (never dispatched to a runner), the terminal
+# merge-to-main state.
 #
 # `on_failure` routes a rejected candidate back through a fresh attempt of the same stage
 # (a new issue, keeping the issue graph acyclic); `max_retries` bounds how many such
@@ -34,7 +37,7 @@ dag:
   implement:
     role: implementor
     precondition: blockers-closed
-    postcondition: [tests-pass]
+    postcondition: [tests-red-then-green]
     on_failure: implement
     produces: [integrate]
   integrate:
@@ -44,9 +47,10 @@ dag:
 # gate runs in the clean verification sandbox (exit 0 = pass). These are the harness's own
 # make targets — `make test-unit` compiles every package (so a build break also fails the
 # gate) and runs the unit suite. The reserved proofs `tests-red` (author-tests) and
-# `tests-red-then-green` (implement, when enabled) have no command of their own: they
-# reuse `tests-pass`, run against the candidate and/or its base, so the acceptance tests
-# stay a single source of truth. Keeping the commands here (not as flags or code) makes
+# `tests-red-then-green` (implement) have no command of their own: they
+# reuse `tests-pass`, run against the candidate and/or its base (the implement red→green
+# proof runs it against both), so the acceptance tests stay a single source of truth.
+# Keeping the commands here (not as flags or code) makes
 # config the single source of truth the gate resolves against; see specs/configuration.md.
 checks:
   tests-pass: make test-unit

@@ -439,6 +439,65 @@ func TestScheduleReadyThreadsProducedBase(t *testing.T) {
 	}
 }
 
+// TestRunGateThreadsIssueBaseAsBaseRef proves implement's red→green proof verifies against
+// the candidate's threaded base — the author-tests candidate that holds the failing tests
+// but no implementation — rather than the pipeline base (main). This is the T2.5 wiring:
+// runGate must pass issue.Base as the gate's BaseRef, so the proof's red half runs where
+// the tests are present but the impl is absent (red on the base, green on the candidate).
+// Were it left at main, the tests would be absent on the base and the proof would be
+// meaningless. An issue carrying no threaded base falls back to the pipeline base.
+func TestRunGateThreadsIssueBaseAsBaseRef(t *testing.T) {
+	cfg := kernelConfig(2)
+	cfg.Harness.DAG["implement"] = config.Stage{
+		Role:          "implement",
+		Postcondition: []string{core.PostconditionRedGreen},
+		OnFailure:     "implement",
+		Produces:      []string{"integrate"},
+	}
+
+	t.Run("threaded base", func(t *testing.T) {
+		bd := newFakeBeads()
+		iss := inProgress("iss-1", "implement", 0)
+		iss.Base = "candidate/iss-0" // the author-tests candidate, threaded by advance
+		bd.put(iss)
+		g := &fakeGate{report: gate.Report{Passed: true}}
+		o, _ := newOrch(t, cfg, bd, g, &fakeMerger{})
+
+		if _, err := o.handleResult(context.Background(), core.Result{
+			IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: core.CandidateBranch("iss-1")},
+		}); err != nil {
+			t.Fatalf("handleResult: %v", err)
+		}
+		got := g.called()
+		if len(got) != 1 {
+			t.Fatalf("gate called %d times, want 1", len(got))
+		}
+		if got[0].BaseRef != "candidate/iss-0" {
+			t.Errorf("gate BaseRef = %q, want candidate/iss-0 (the issue's threaded base)", got[0].BaseRef)
+		}
+		if !reflect.DeepEqual(got[0].Postconditions, []string{core.PostconditionRedGreen}) {
+			t.Errorf("gate Postconditions = %v, want [tests-red-then-green]", got[0].Postconditions)
+		}
+	})
+
+	t.Run("fallback to pipeline base", func(t *testing.T) {
+		bd := newFakeBeads()
+		bd.put(inProgress("iss-2", "implement", 0)) // no threaded Base (freshly seeded)
+		g := &fakeGate{report: gate.Report{Passed: true}}
+		o, _ := newOrch(t, cfg, bd, g, &fakeMerger{})
+
+		if _, err := o.handleResult(context.Background(), core.Result{
+			IssueID: "iss-2", Status: core.StatusDone, Branch: core.Branch{Ref: core.CandidateBranch("iss-2")},
+		}); err != nil {
+			t.Fatalf("handleResult: %v", err)
+		}
+		got := g.called()
+		if len(got) != 1 || got[0].BaseRef != "main" {
+			t.Errorf("gate BaseRef = %+v, want main (the pipeline-base fallback)", got)
+		}
+	})
+}
+
 // --- route (gate fail / failed) ----------------------------------------------
 
 func TestHandleResultGateFailRetries(t *testing.T) {

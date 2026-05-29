@@ -153,18 +153,26 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 // specs/verification.md). The candidate is graded against the *stage's* declared
 // postconditions, which the gate resolves to checks through its registry, so check
 // selection is per-stage and config-driven (T2.1) rather than one hardcoded set. BaseRef
-// is the ref the candidate branched from (o.base, the same value buildBrief seeds the
-// producer's worktree at), which a red→green proof checks out to confirm the acceptance
-// tests fail without the change (T2.3, see specs/verification.md).
+// is the ref the candidate branched from — the same value buildBrief seeds the producer's
+// worktree at: the issue's threaded Base when it carries one (a stage produced from a
+// predecessor's verified candidate, e.g. implement off the author-tests candidate that
+// holds the failing acceptance tests), else the pipeline base (o.base, main). A red→green
+// proof checks that ref out to confirm the acceptance tests fail without the change — so
+// for implement the red half runs against the author-tests candidate, where the tests are
+// present but the implementation is absent (T2.3/T2.5, see specs/verification.md).
 func (o *Orchestrator) runGate(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result) (gate.Report, error) {
 	profile := ""
 	if soul, ok := o.soulForRole(issue.Role); ok {
 		profile = soul.Sandbox
 	}
+	baseRef := o.base
+	if issue.Base != "" {
+		baseRef = issue.Base
+	}
 	return o.gate.Run(ctx, gate.Candidate{
 		Repo:           o.opts.Repo,
 		Ref:            res.Branch.Ref,
-		BaseRef:        o.base,
+		BaseRef:        baseRef,
 		Postconditions: stage.Postcondition,
 		Profile:        profile,
 		Limits:         o.opts.Limits,
