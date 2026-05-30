@@ -95,8 +95,8 @@ const (
 // autonomy profile — when a human-approval gate holds an integrate (see specs/bootstrap.md).
 type Policy struct {
 	MaxRetries int    `yaml:"max_retries"` // max on_failure cycles before dead-lettering
-	Budget     Budget `yaml:"budget"`      // per-issue cap
-	EpicBudget Budget `yaml:"epic_budget"` // cumulative cap across an epic — declared/validated but NOT yet enforced (no epic_id on issues yet); T3.8b wires enforcement
+	Budget     Budget `yaml:"budget"`      // per-issue cumulative cap (tokens/USD/wall across the on_failure loop)
+	EpicBudget Budget `yaml:"epic_budget"` // cumulative tokens/USD cap across a whole epic, enforced as an aggregate read over every issue sharing an epic_id (T3.8b; the wall dimension is per-issue only)
 	DeadLetter string `yaml:"dead_letter"` // subject breached work is dead-lettered to, e.g. "harness.dlq"
 
 	// Profile is the autonomy profile: "trusted-dev" (human approval on every integrate) or

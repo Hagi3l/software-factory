@@ -141,7 +141,16 @@ checks:
 
 policy:
   max_retries: 3
+  # Per-issue cumulative cap across the on_failure loop: tokens + dollars + wall-clock. The
+  # wall here is the CROSS-LOOP wall (sum of each attempt's elapsed), distinct from the
+  # per-invocation sandbox ceiling in infra.<env>.yaml. Any zero/omitted dimension is uncapped.
   budget: { tokens: 2_000_000, usd: 20, wall: 2h }   # per issue
+  # Per-epic cumulative cap, enforced as an aggregate read over every issue sharing an epic_id
+  # (the root seed's id, threaded forward like the candidate base). An epic fans out, so its
+  # total cannot be a threaded counter without double-counting the shared prefix — the
+  # orchestrator sums each issue's own-invocation spend instead (T3.8b, specs/workflow.md). Only
+  # tokens/USD apply at epic scope; wall is per-issue above.
+  epic_budget: { usd: 200 }
   dead_letter: harness.dlq
   # Autonomy profile (T2.10). The bootstrap self-hosts in TRUSTED-DEV: the harness writes
   # code and a human reviews every diff, so a human-approved gate holds every integrate

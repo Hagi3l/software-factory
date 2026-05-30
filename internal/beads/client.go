@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/Loxstomper/harness/internal/core"
 )
@@ -179,6 +180,14 @@ func (r issueJSON) toCore() core.Issue {
 		// decodes back to 0 — a fresh or next-stage issue carries no spend.
 		SpentTokens: metaInt(r.Metadata, MetadataKeySpentTokens),
 		SpentUSD:    metaFloat(r.Metadata, MetadataKeySpentUSD),
+		// Cumulative wall of the on_failure chain (a duration string), and the epic root id,
+		// both threaded forward by the orchestrator like the token/dollar spend and Base.
+		SpentWall: metaDuration(r.Metadata, MetadataKeySpentWall),
+		EpicID:    metaString(r.Metadata, MetadataKeyEpicID),
+		// This issue's OWN invocation marginal, stamped post-hoc by StampClosingSpend; summed
+		// across an epic for the aggregate epic-budget read. Absent decodes to 0.
+		ClosingTokens: metaInt(r.Metadata, MetadataKeyClosingTokens),
+		ClosingUSD:    metaFloat(r.Metadata, MetadataKeyClosingUSD),
 		// Approval-gate state (T2.10), written by AwaitApproval when an integrate is parked
 		// for human approval; absent (empty) on every issue that is not parked.
 		CandidateRef:     metaString(r.Metadata, MetadataKeyCandidateRef),
@@ -278,6 +287,26 @@ func metaFloat(m map[string]json.RawMessage, key string) float64 {
 		return 0
 	}
 	return f
+}
+
+// metaDuration returns the time.Duration parsed from a metadata key's Go-duration string
+// value (e.g. "5m0s"), or 0 if absent, not a string, or unparsable. It backs the cumulative
+// wall spend (spent_wall), written by create() as core.Issue.SpentWall.String(); lenient for
+// the same reason as metaString/metaInt — foreign metadata must never fail a read.
+func metaDuration(m map[string]json.RawMessage, key string) time.Duration {
+	raw, ok := m[key]
+	if !ok {
+		return 0
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return 0
+	}
+	d, err := time.ParseDuration(s)
+	if err != nil {
+		return 0
+	}
+	return d
 }
 
 // decodeIssues parses bd's JSON array of issues. bd emits a JSON array for ready,

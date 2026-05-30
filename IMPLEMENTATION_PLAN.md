@@ -33,7 +33,7 @@ good autonomous implementation) — a later validation concern, never an enginee
   The verbose per-task findings were pruned once complete — that history lives in git,
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
 - **Open tasks (`- [ ]`) keep their full detail** — Phases 4–5, plus the handful left in
-  Phases 2–3 (T2.10/T2.11/T2.12, T3.7b, T3.8b).
+  Phases 2–3 (T2.11/T2.12, T3.7b).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -138,21 +138,34 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
   can add/remove/alter work items, which only the planner expresses). Then **re-pin the closed issues'
   `SpecHash`** to the new slice (idempotency latch) and **skip the spawn when an open re-derivation `plan`
   issue for that (epic, spec-path) already exists**. Known coarseness: a localized single-criterion edit
-  still triggers a full planning pass. TCB-touching (orchestrator). (needs T3.7, **T3.8b** for `EpicID`)
+  still triggers a full planning pass. TCB-touching (orchestrator). (needs T3.7; **`EpicID`** + `epicOf`
+  now available from T3.8b — group closed issues by `epicOf`, not a stored field, so a root seed is included)
   ([specs-process.md](specs/specs-process.md))
 - [x] **T3.8 Cumulative per-issue budget** — *done.*
-- [ ] **T3.8b Cumulative epic budget + cross-loop wall-clock** *(carried from T3.8; designed, workflow.md
-  updated)* — two parts. **(1) Epic budget** — add an **`EpicID`** metadata key (= root seed id, set at
-  seed time, threaded forward onto every produced child *and* `on_failure` fix issue, like `Tags`/`Base`);
-  stamp each issue's **closing spend** when it reaches a terminal state; enforce `epic_budget` as an
-  **aggregate read** (sum closing spend over all issues sharing `EpicID` via `ListAll` + filter, plus
-  in-flight accrual and the just-finished invocation) — **not** a threaded counter, since an epic fans out
-  and threading+summing would double-count the shared prefix. Breach → dead-letter with an `epic-budget`
-  reason; the single-writer orchestrator evaluates serially so siblings can't race. **(2) Cumulative wall**
-  — runner stamps **`Result.Elapsed`** (trusted side, like `Usage`); add **`core.Issue.SpentWall`** threaded
-  across the `on_failure` chain like `Spent*`; enforce cumulative `budget.wall` (distinct from the
-  per-invocation sandbox ceiling). **Decided:** wall = **cumulative invocation-wall** (sums across the loop),
-  not a calendar deadline. Unblocks `EpicID` for T3.7b. (needs T3.8) ([workflow.md](specs/workflow.md))
+- [x] **T3.8b Cumulative epic budget + cross-loop wall-clock** — *done.* Two enforcement gaps closed.
+  **(1) Epic budget** — **`core.Issue.EpicID`** (beads `epic_id`) threads forward onto every produced child,
+  `on_failure` fix, conflict-resolver, and planner child, exactly like `Base`. A root seed carries **none**:
+  the orchestrator's **`epicOf(issue) = EpicID || ID`** supplies the root's own id as the fallback (mirroring
+  how `Base` falls back to the pipeline base), so descendants all share the root id with **no extra
+  root-stamping write** and the aggregate naturally includes the root. Each result's **own-invocation marginal**
+  is stamped via the new **`StampClosingSpend`** (beads `closing_tokens`/`closing_usd`) in `handleResult` —
+  whatever the disposition, so a not-yet-terminal (transient) attempt's spend counts as in-flight accrual and
+  the just-finished invocation counts before the check; it's a *set* so redelivery is idempotent. `epic_budget`
+  (tokens/USD) is enforced as an **aggregate read** — `authorizeEpic` sums `closing_*` over all issues with the
+  same `epicOf` via **`ListAll`** + filter — at every "launch more agent work" point (`route`, `resolveConflict`,
+  `advance` to an agent stage via the new `errEpicBudgetDeadLettered` sentinel, `acceptPlan` before decomposing);
+  the terminal trusted merge is **not** gated (it burns no agent spend). Breach → dead-letter with an
+  `epic ... budget exhausted` reason; single-writer serial evaluation means siblings can't race, and an in-flight
+  sibling's threaded `Spent*` is **deliberately not** re-added (its closed ancestors already stamped their
+  marginals — re-adding would double-count). Stamping + the `ListAll` are **skipped entirely** unless an epic
+  budget is configured (`epicBudgetConfigured`), so configs that don't use it pay nothing. **(2) Cumulative
+  wall** — runner stamps **`core.Result.Elapsed`** (measured around the agent loop, trusted side like `Usage`);
+  **`core.Issue.SpentWall`** (beads `spent_wall`, a duration string via new `metaDuration`) threads across the
+  `on_failure` chain like `Spent*`; `chargeAndAuthorize` enforces cumulative `budget.wall` (distinct from the
+  per-invocation sandbox ceiling). Config: bootstrap `harness.yaml` gains `epic_budget: { usd: 200 }`; the
+  `EpicBudget` doc updated (was "NOT yet enforced"). Tests: wall thread + breach, epic aggregate breach +
+  under-budget proceed, closing-spend stamped only when configured, advance/acceptPlan epic gating, EpicID
+  root-fallback threading, and a beads round-trip for all new metadata. (needs T3.8) ([workflow.md](specs/workflow.md))
 - [x] **T3.9 Merge queue: serialized rebase onto `main`** — *done.*
 - [x] **T3.10 Re-gate the merged result** — *done.*
 - [x] **T3.11 Conflict-resolution issue** — *done.*

@@ -787,6 +787,61 @@ func TestPinSpecHashRoundTripIntegration(t *testing.T) {
 	}
 }
 
+// TestEpicAndWallRoundTripIntegration proves the T3.8b metadata round-trips through beads:
+// the epic root id and the cumulative wall (a duration string) are stamped at creation and
+// threaded forward like Base/SpentTokens, and the per-issue closing spend is stamped post-hoc
+// by StampClosingSpend and decodes back for the epic-budget aggregate read. The wall exercises
+// the metaDuration decode path; closing spend exercises a numeric --set-metadata round-trip
+// (see specs/workflow.md "epic_budget").
+func TestEpicAndWallRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+	ctx := context.Background()
+
+	created, err := c.Apply(ctx, []core.Proposal{
+		{Issue: core.Issue{Title: "fix", Role: "implement", Attempt: 1,
+			EpicID: "harness-1", SpentWall: 90 * time.Second}},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	id := created[0].ID
+
+	got, err := c.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.EpicID != "harness-1" {
+		t.Errorf("EpicID = %q, want harness-1 (round-tripped via metadata)", got.EpicID)
+	}
+	if got.SpentWall != 90*time.Second {
+		t.Errorf("SpentWall = %s, want 1m30s (round-tripped as a duration string)", got.SpentWall)
+	}
+	// Closing spend is absent until stamped — the aggregate read treats it as 0.
+	if got.ClosingTokens != 0 || got.ClosingUSD != 0 {
+		t.Errorf("ClosingTokens/USD = %d/%v, want 0/0 before StampClosingSpend", got.ClosingTokens, got.ClosingUSD)
+	}
+
+	if err := c.StampClosingSpend(ctx, id, 12_000, 0.35); err != nil {
+		t.Fatalf("StampClosingSpend: %v", err)
+	}
+	got, err = c.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get after stamp: %v", err)
+	}
+	if got.ClosingTokens != 12_000 {
+		t.Errorf("ClosingTokens = %d, want 12000 (numeric --set-metadata round-trip)", got.ClosingTokens)
+	}
+	if got.ClosingUSD != 0.35 {
+		t.Errorf("ClosingUSD = %v, want 0.35 (fractional --set-metadata round-trip)", got.ClosingUSD)
+	}
+	// The stamp must not disturb the values written at creation.
+	if got.EpicID != "harness-1" || got.SpentWall != 90*time.Second || got.Attempt != 1 {
+		t.Errorf("EpicID/SpentWall/Attempt = %q/%s/%d, want harness-1/1m30s/1 (stamp must not disturb them)", got.EpicID, got.SpentWall, got.Attempt)
+	}
+}
+
 // allIssues returns every issue id in the db (including closed) for count assertions.
 func allIssues(t *testing.T, dir string) []string {
 	t.Helper()

@@ -190,6 +190,29 @@ func (f *fakeBeads) PinSpecHash(_ context.Context, id, hash string) error {
 	return nil
 }
 
+func (f *fakeBeads) ListAll(context.Context) ([]core.Issue, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	out := make([]core.Issue, 0, len(f.issues))
+	for _, is := range f.issues {
+		out = append(out, is)
+	}
+	return out, nil
+}
+
+func (f *fakeBeads) StampClosingSpend(_ context.Context, id string, tokens int, usd float64) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Mirror the real client: the marginal is durable on the issue, so a later ListAll (the
+	// epic-budget aggregate read) sees it.
+	if is, ok := f.issues[id]; ok {
+		is.ClosingTokens = tokens
+		is.ClosingUSD = usd
+		f.issues[id] = is
+	}
+	return nil
+}
+
 // snapshot accessors (copy under lock).
 func (f *fakeBeads) snap() (claimed, released, closed, blocked []string, applied []core.Proposal) {
 	f.mu.Lock()

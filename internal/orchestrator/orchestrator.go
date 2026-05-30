@@ -49,6 +49,13 @@ type Beads interface {
 	InProgress(ctx context.Context) ([]core.Issue, error)
 	PinSpecHash(ctx context.Context, id, hash string) error
 	Reissue(ctx context.Context, id string) error
+	// ListAll returns every issue regardless of status (including closed) — the input to the
+	// cross-issue epic-budget aggregate read (sum the per-issue closing spend over all issues
+	// sharing an epic id; see authorizeEpic, specs/workflow.md).
+	ListAll(ctx context.Context) ([]core.Issue, error)
+	// StampClosingSpend records an issue's own invocation marginal (tokens, USD) so the epic
+	// budget can be summed across all issues of an epic (see core.Issue.ClosingTokens).
+	StampClosingSpend(ctx context.Context, id string, tokens int, usd float64) error
 }
 
 // Gate verifies a candidate in a fresh, orchestrator-controlled sandbox and returns a

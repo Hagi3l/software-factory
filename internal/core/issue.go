@@ -1,5 +1,7 @@
 package core
 
+import "time"
+
 // Issue is one work item in the beads dependency graph — the unit the
 // orchestrator schedules and the seed of a Brief.
 //
@@ -88,6 +90,46 @@ type Issue struct {
 	// preserved across on_failure retries (see specs/workflow.md).
 	SpentTokens int
 	SpentUSD    float64
+
+	// SpentWall is the cumulative wall-clock already consumed by EARLIER attempts in this
+	// issue's on_failure retry chain — the sum of each prior invocation's elapsed time
+	// (Result.Elapsed), not counting the just-finished one. It is the wall-clock analog of
+	// SpentTokens: threaded forward on each routed fix issue exactly like the token/dollar
+	// spend, so the orchestrator can enforce a *cumulative* wall cap (config Policy.Budget.Wall)
+	// across the feedback loop — the third dimension of the budget half of the termination
+	// guarantee. It is distinct from the per-invocation wall ceiling the sandbox enforces (that
+	// bounds one attempt; this bounds the whole chain). 0 for a freshly seeded or next-stage
+	// issue (each stage begins fresh); like SpentTokens it is stamped from the trusted side
+	// (the runner's Result.Elapsed, never the agent's self-report) and rides in beads metadata
+	// (see specs/workflow.md).
+	SpentWall time.Duration
+
+	// ClosingTokens and ClosingUSD are this issue's OWN invocation spend — the marginal tokens
+	// and dollars the single invocation answering this issue consumed (not the threaded chain
+	// total in SpentTokens/SpentUSD, which is its predecessors' spend). The orchestrator stamps
+	// them when it processes the issue's Result (whatever the disposition — accepted, routed,
+	// or dead-lettered), so an epic's total spend can be read as an *aggregate*: the sum of
+	// ClosingUSD/ClosingTokens over every issue sharing an EpicID. An epic is a fan-out DAG, not
+	// a line, so its total cannot be a counter threaded down each branch (that would double-count
+	// the shared prefix at the join) — it must be summed across the marginals, which is what these
+	// per-issue fields make possible (see EpicID, specs/workflow.md "epic_budget"). They are only
+	// stamped when an epic budget is configured (otherwise the extra write is skipped); 0/absent
+	// on an issue whose invocation has not yet been processed. Stamped post-hoc by
+	// StampClosingSpend, never at creation, so they ride in beads metadata but are not threaded.
+	ClosingTokens int
+	ClosingUSD    float64
+
+	// EpicID is the id of the root seed issue of this issue's epic — the work item a human
+	// seeded, from which the whole fan-out of plan/author-tests/implement/qa issues descends.
+	// It is threaded forward onto every produced child and every on_failure fix exactly like
+	// Base (the candidate ref): a root seed carries none (it IS its own epic, so its effective
+	// epic id is its own ID — see the orchestrator's epicOf), and each descendant carries the
+	// root's id so all issues of one epic share it. It is what makes the cross-issue epic budget
+	// enforceable as an aggregate read (sum the per-issue ClosingUSD over all issues with this
+	// EpicID) rather than a threaded counter, which a fan-out would double-count. Like Base it
+	// rides in beads metadata; empty on a root seed (the epicOf fallback supplies its own id).
+	// (See specs/workflow.md "epic_budget"; future spec-re-derivation work keys on it too.)
+	EpicID string
 
 	// Tags are the issue's selector input: the orchestrator picks which soul fulfills the
 	// issue's Role by matching these against each candidate soul's Selector (a role may map

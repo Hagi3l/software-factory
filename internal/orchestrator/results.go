@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
 
@@ -39,6 +40,13 @@ var errMergeRegateRouted = errors.New("orchestrator: integrate re-gate failure r
 // without closing the issue: a parked issue is resumed by the approvals consumer when a human
 // approves, not by reprocessing the Result, so the Result is Acked.
 var errAwaitingApproval = errors.New("orchestrator: integrate awaiting human approval")
+
+// errEpicBudgetDeadLettered is an internal sentinel: advance returns it when producing the
+// next agent stage would exceed the epic budget, so the issue was dead-lettered (blocked) with
+// an epic-budget escalation instead of advancing. Like the merge sentinels it tells accept to
+// stop without closing the issue again — the issue is already blocked — and the Result is Acked
+// (reprocessing it cannot lower the epic's spend; only a human refining the spec can).
+var errEpicBudgetDeadLettered = errors.New("orchestrator: epic budget exhausted, dead-lettered")
 
 // consumeResults is the event-driven half of the loop: it pulls Result envelopes off
 // the orchestrator's durable consumer and processes each. Ack/Nak encode the outcome:
@@ -118,6 +126,20 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 		o.log.Info("orchestrator: result for issue not in progress, ignoring as stale/duplicate",
 			"issue", issue.ID, "status", issue.Status, "result_status", res.Status)
 		return false, nil
+	}
+
+	// Record this invocation's marginal spend on the issue so the epic-budget aggregate read
+	// (authorizeEpic) can sum it — every Result reaching here is a completed invocation that
+	// burned real tokens, whatever its disposition (accepted, routed, dead-lettered). Stamped
+	// before dispatching the disposition so any epic check below sees this attempt counted; it
+	// is a set (StampClosingSpend), so an at-least-once redelivery of the same Result re-stamps
+	// the same value. Skipped entirely when no epic budget is configured, so a config that does
+	// not use it pays no extra write (see specs/workflow.md "epic_budget"). A failed stamp is
+	// transient — leave the issue in_progress for redelivery rather than under-count the epic.
+	if o.epicBudgetConfigured() {
+		if err := o.bd.StampClosingSpend(ctx, issue.ID, res.Usage.TotalTokens(), o.priceUsage(issue, res.Usage)); err != nil {
+			return true, fmt.Errorf("stamp closing spend on %s: %w", issue.ID, err)
+		}
 	}
 
 	stage, ok := o.stageForRole(issue.Role)
@@ -264,12 +286,14 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 			return false, fmt.Errorf("issue %s produces undefined stage %q", issue.ID, target)
 		}
 		if transient, err := o.advance(ctx, issue, stage, target, tstage, res, report); err != nil {
-			if errors.Is(err, errMergeConflictHandled) || errors.Is(err, errMergeRegateRouted) || errors.Is(err, errAwaitingApproval) {
+			if errors.Is(err, errMergeConflictHandled) || errors.Is(err, errMergeRegateRouted) ||
+				errors.Is(err, errAwaitingApproval) || errors.Is(err, errEpicBudgetDeadLettered) {
 				// advance already disposed of the issue: spawned a conflict-resolution issue (or
 				// dead-lettered) for an integrate rebase conflict, routed it to a fix attempt for
-				// a re-gate failure, or parked it awaiting human approval (T2.10). In every case
-				// it is no longer this accept's to close — stop here and Ack (a parked issue is
-				// resumed by the approvals consumer, not by reprocessing this Result).
+				// a re-gate failure, parked it awaiting human approval (T2.10), or dead-lettered it
+				// because producing the next agent stage would exceed the epic budget (T3.8b). In
+				// every case it is no longer this accept's to close — stop here and Ack (a parked
+				// issue is resumed by the approvals consumer, not by reprocessing this Result).
 				return false, nil
 			}
 			return transient, err
@@ -310,7 +334,27 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage c
 				fmt.Sprintf("illegal proposal: role %q is not a role stage %q produces", p.Issue.Role, issue.Role))
 		}
 	}
-	if _, err := o.bd.Apply(ctx, res.Proposes); err != nil {
+	// Decomposition fans the epic out into the author-tests/implement work that burns the bulk
+	// of its budget, so it is an "advancing a stage" point the epic budget guards: if the epic
+	// has already spent its cap, dead-letter the plan issue rather than launch the fan-out
+	// (specs/workflow.md). The plan invocation's own marginal was stamped in handleResult.
+	if ok, transient, err := o.authorizeEpic(ctx, issue, "decomposing plan"); !ok {
+		if err != nil {
+			return transient, err
+		}
+		return false, nil
+	}
+	// Stamp the epic root id onto each proposed child so every issue of the epic shares it
+	// (the planner's children branch from main as fresh work but still belong to this epic).
+	// EpicID is the orchestrator's to assign — an agent cannot self-attribute its work to an
+	// epic — so it is set here on the validated proposals, not trusted from the Result.
+	epic := epicOf(issue)
+	proposes := make([]core.Proposal, len(res.Proposes))
+	for i, p := range res.Proposes {
+		p.Issue.EpicID = epic
+		proposes[i] = p
+	}
+	if _, err := o.bd.Apply(ctx, proposes); err != nil {
 		return true, fmt.Errorf("apply planner proposals for issue %s: %w", issue.ID, err)
 	}
 	if err := o.bd.Close(ctx, issue.ID); err != nil {
@@ -347,10 +391,26 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage c
 		return o.mergeCandidate(ctx, issue, srcStage, res, res.Branch.Ref, o.provenanceFor(issue, res, report))
 	}
 
+	// Producing the next agent stage launches more sandboxed work, so it is an "advancing a
+	// stage" point the epic budget guards (specs/workflow.md): if the epic's aggregate spend
+	// has reached its cap, dead-letter this issue with an epic-budget escalation rather than
+	// fan out further work. The just-finished invocation's marginal was already stamped in
+	// handleResult, so the aggregate read counts it. The trusted merge (handled above) is the
+	// terminal landing and burns no agent spend, so it is deliberately not gated here — killing
+	// a fully-verified candidate at the finish line would waste the whole epic.
+	if ok, transient, err := o.authorizeEpic(ctx, issue, fmt.Sprintf("advancing to %q", target)); !ok {
+		if err != nil {
+			return transient, err
+		}
+		return false, errEpicBudgetDeadLettered
+	}
+
 	// Tags and Spec thread forward unchanged (issue.Tags / issue.Spec below): Tags are the
 	// soul-selector input and Spec is the governing spec file, both set at issue-creation
 	// (seed or planner), so every stage of an epic routes to the matching soul (a `lang=go`
 	// epic stays on go souls) and resolves the same spec slice. Like Base/TraceMap they ride along.
+	// EpicID threads forward likewise (epicOf(issue)) so every issue of the epic shares the root
+	// seed's id — the key the epic budget aggregates over.
 	//
 	// Thread the test↔spec traceability map forward, like Base. The author-tests result
 	// carries the freshly harvested map; later agent stages (e.g. implement) carry none of
@@ -363,7 +423,7 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage c
 	}
 
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: tstage.Role, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: traceMap, Tags: issue.Tags},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: tstage.Role, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: traceMap, Tags: issue.Tags, EpicID: epicOf(issue)},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create produced %q issue from %s: %w", target, issue.ID, err)
@@ -435,9 +495,16 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 // attempt's spend (Result.Usage, priced through the selected soul's per-model cost table)
 // to the predecessor's running total and stamps the sum on the fix issue.
 func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result, reason string) (bool, error) {
-	spentTokens, spentUSD, ok, transient, err := o.chargeAndAuthorize(ctx, issue, res, reason)
+	spentTokens, spentUSD, spentWall, ok, transient, err := o.chargeAndAuthorize(ctx, issue, res, reason)
 	if !ok {
 		return transient, err
+	}
+	// The per-issue caps passed; the cross-issue epic budget is the other spawn guard. A fix
+	// attempt is "another attempt" the epic budget bounds (specs/workflow.md), so check it
+	// before spawning — the just-finished invocation's marginal was stamped in handleResult,
+	// so the aggregate read counts it.
+	if epicOK, t, e := o.authorizeEpic(ctx, issue, reason); !epicOK {
+		return t, e
 	}
 	if stage.OnFailure == "" {
 		// Every gate that can fail must have a defined route, or there is nowhere to send
@@ -450,7 +517,7 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	}
 
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, EpicID: epicOf(issue)},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create on_failure fix issue from %s: %w", issue.ID, err)
@@ -460,7 +527,7 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	}
 	for _, c := range created {
 		o.log.Info("orchestrator: routed failure to fix issue", "from", issue.ID, "to_stage", stage.OnFailure,
-			"new", c.ID, "attempt", issue.Attempt+1, "spent_tokens", spentTokens, "spent_usd", spentUSD, "reason", reason)
+			"new", c.ID, "attempt", issue.Attempt+1, "spent_tokens", spentTokens, "spent_usd", spentUSD, "spent_wall", spentWall, "reason", reason)
 	}
 	return false, nil
 }
@@ -475,13 +542,14 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 // (merge-conflict resolution), so the budget half of termination is enforced identically
 // wherever the orchestrator spawns a follow-up attempt — a conflict loop is bounded the same
 // way a fix loop is (see specs/workflow.md, specs/integration.md).
-func (o *Orchestrator) chargeAndAuthorize(ctx context.Context, issue core.Issue, res core.Result, reason string) (spentTokens int, spentUSD float64, ok bool, transient bool, err error) {
+func (o *Orchestrator) chargeAndAuthorize(ctx context.Context, issue core.Issue, res core.Result, reason string) (spentTokens int, spentUSD float64, spentWall time.Duration, ok bool, transient bool, err error) {
 	spentTokens = issue.SpentTokens + res.Usage.TotalTokens()
 	spentUSD = issue.SpentUSD + o.priceUsage(issue, res.Usage)
+	spentWall = issue.SpentWall + res.Elapsed
 
 	if issue.Attempt >= o.opts.Config.Harness.Policy.MaxRetries {
 		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; retry cap (%d) exhausted", reason, o.opts.Config.Harness.Policy.MaxRetries))
-		return spentTokens, spentUSD, false, t, e
+		return spentTokens, spentUSD, spentWall, false, t, e
 	}
 	// A zero budget dimension is uncapped (see config.Budget); only a configured cap that
 	// the cumulative spend has reached dead-letters. Checked before spawning so a breach
@@ -489,13 +557,20 @@ func (o *Orchestrator) chargeAndAuthorize(ctx context.Context, issue core.Issue,
 	b := o.opts.Config.Harness.Policy.Budget
 	if b.Tokens > 0 && spentTokens >= b.Tokens {
 		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue token budget exhausted (%d >= %d)", reason, spentTokens, b.Tokens))
-		return spentTokens, spentUSD, false, t, e
+		return spentTokens, spentUSD, spentWall, false, t, e
 	}
 	if b.USD > 0 && spentUSD >= b.USD {
 		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue USD budget exhausted ($%.4f >= $%.2f)", reason, spentUSD, b.USD))
-		return spentTokens, spentUSD, false, t, e
+		return spentTokens, spentUSD, spentWall, false, t, e
 	}
-	return spentTokens, spentUSD, true, false, nil
+	// Cumulative wall across the on_failure loop — the wall-clock analog of the token/dollar
+	// caps, distinct from the per-invocation sandbox ceiling: it bounds how long the whole
+	// feedback loop for one issue may run, not a single attempt (see specs/workflow.md).
+	if w := b.Wall.Duration(); w > 0 && spentWall >= w {
+		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue wall budget exhausted (%s >= %s)", reason, spentWall, w))
+		return spentTokens, spentUSD, spentWall, false, t, e
+	}
+	return spentTokens, spentUSD, spentWall, true, false, nil
 }
 
 // resolveStage finds the DAG stage that handles merge-conflict resolution (kind: resolve),
@@ -536,16 +611,20 @@ func (o *Orchestrator) resolveConflict(ctx context.Context, issue core.Issue, re
 	if !ok {
 		return o.deadLetter(ctx, issue, reason+"; no resolve stage configured")
 	}
-	spentTokens, spentUSD, ok, transient, err := o.chargeAndAuthorize(ctx, issue, res, reason)
+	spentTokens, spentUSD, spentWall, ok, transient, err := o.chargeAndAuthorize(ctx, issue, res, reason)
 	if !ok {
 		return transient, err
 	}
+	if epicOK, t, e := o.authorizeEpic(ctx, issue, reason); !epicOK {
+		return t, e
+	}
 	// Base is the conflicting candidate the resolver must rebase onto main — not issue.Base
 	// (its own base), which is where it branched from. Attempt/spend thread forward like
-	// route so the conflict loop counts against the same caps; Spec/Tags/TraceMap ride along
-	// so the resolution stays on the epic's souls and keeps the traceability chain intact.
+	// route so the conflict loop counts against the same caps; Spec/Tags/TraceMap/EpicID ride
+	// along so the resolution stays on the epic's souls, keeps the traceability chain intact,
+	// and stays attributed to the same epic.
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: rstage.Role, Attempt: issue.Attempt + 1, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: rstage.Role, Attempt: issue.Attempt + 1, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, EpicID: epicOf(issue)},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create conflict-resolution issue from %s: %w", issue.ID, err)
@@ -576,6 +655,67 @@ func (o *Orchestrator) priceUsage(issue core.Issue, u core.Usage) float64 {
 		return 0
 	}
 	return mp.Cost.USD(u)
+}
+
+// epicOf returns the id of an issue's epic: its threaded EpicID when set, else its own id.
+// A root seed carries no EpicID — it IS its own epic — so it falls back to its id, exactly as
+// Base falls back to the pipeline base for a freshly seeded issue. This single definition is
+// what lets the epic-budget aggregate include the root alongside its descendants (which all
+// carry the root's id), with no extra write to stamp the root's own id onto itself.
+func epicOf(i core.Issue) string {
+	if i.EpicID != "" {
+		return i.EpicID
+	}
+	return i.ID
+}
+
+// epicBudgetConfigured reports whether any epic-budget dimension is set. When none is, the
+// orchestrator skips both the per-result closing-spend write and the aggregate read entirely,
+// so a config that does not use an epic budget pays nothing for the feature (the epic budget is
+// tokens/dollars only — the wall cap is per-issue cumulative, enforced in chargeAndAuthorize).
+func (o *Orchestrator) epicBudgetConfigured() bool {
+	eb := o.opts.Config.Harness.Policy.EpicBudget
+	return eb.Tokens > 0 || eb.USD > 0
+}
+
+// authorizeEpic enforces the cross-issue epic budget before the orchestrator spawns more work
+// for an epic (a retry, a conflict resolution, or advancing to the next agent stage). Because an
+// epic is a fan-out DAG rather than a line, its total spend cannot be a counter threaded down
+// each branch (the shared prefix would be double-counted at the join); it is read as an
+// AGGREGATE — the sum of every issue's own-invocation marginal (ClosingTokens/ClosingUSD,
+// stamped in handleResult) over all issues sharing this epic id. On a breach it dead-letters the
+// issue with an epic-budget escalation and returns ok=false; otherwise ok=true. The single-writer
+// orchestrator evaluates this serially, so concurrent siblings cannot race the check (a sibling
+// still in flight has not stamped its closing spend yet and is counted when its own Result lands,
+// never double-counted — see specs/workflow.md). It is a no-op (ok=true) when no epic budget is
+// configured, skipping the ListAll, so the common case pays nothing.
+func (o *Orchestrator) authorizeEpic(ctx context.Context, issue core.Issue, reason string) (ok, transient bool, err error) {
+	eb := o.opts.Config.Harness.Policy.EpicBudget
+	if eb.Tokens == 0 && eb.USD == 0 {
+		return true, false, nil
+	}
+	epic := epicOf(issue)
+	all, err := o.bd.ListAll(ctx)
+	if err != nil {
+		return false, true, fmt.Errorf("list all for epic budget of %s: %w", issue.ID, err)
+	}
+	var tokens int
+	var usd float64
+	for _, other := range all {
+		if epicOf(other) == epic {
+			tokens += other.ClosingTokens
+			usd += other.ClosingUSD
+		}
+	}
+	if eb.Tokens > 0 && tokens >= eb.Tokens {
+		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; epic token budget exhausted (%d >= %d)", reason, tokens, eb.Tokens))
+		return false, t, e
+	}
+	if eb.USD > 0 && usd >= eb.USD {
+		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; epic USD budget exhausted ($%.4f >= $%.2f)", reason, usd, eb.USD))
+		return false, t, e
+	}
+	return true, false, nil
 }
 
 // deadLetter terminates an issue into the dead-letter queue for human triage: it

@@ -313,7 +313,9 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	}()
 
 	r.log.Info("runner: provisioned sandbox", "id", sb.ID(), "issue", brief.Issue.ID, "profile", spec.Profile, "base", brief.Base)
+	invStart := time.Now()
 	res, invErr := r.invoker.Invoke(ctx, sb, brief, spec.Broker)
+	elapsed := time.Since(invStart)
 	u := rel.Usage()
 	r.log.Info("runner: invocation usage", "issue", brief.Issue.ID,
 		"input_tokens", u.InputTokens, "output_tokens", u.OutputTokens,
@@ -334,6 +336,10 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 			CacheCreationTokens: u.CacheCreationTokens,
 			CacheReadTokens:     u.CacheReadTokens,
 		}
+		// Stamp the measured wall-clock too (trusted side, like Usage): the orchestrator
+		// threads it onto the issue's cumulative SpentWall and enforces the cumulative wall
+		// budget across the on_failure loop (see specs/workflow.md).
+		res.Elapsed = elapsed
 		r.harvest(ctx, brief.Issue.ID, rel, &res)
 	}
 	return res, invErr

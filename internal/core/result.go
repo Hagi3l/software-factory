@@ -1,5 +1,7 @@
 package core
 
+import "time"
+
 // ResultStatus is an agent's self-reported outcome for one invocation. It is a
 // proposal, never an acceptance: even StatusDone means only "candidate ready", and
 // acceptance is decided independently by the orchestrator's gate (producer ≠
@@ -54,6 +56,16 @@ type Result struct {
 	// guarantee, since the retry cap alone bounds the number of attempts but not the
 	// tokens/dollars they burn (see specs/workflow.md, specs/models.md).
 	Usage Usage
+
+	// Elapsed is the wall-clock the invocation took, measured by the runner around the agent
+	// loop (the trusted side, like Usage — never the agent's self-report). The orchestrator
+	// threads it onto the issue's cumulative SpentWall across the on_failure loop and enforces
+	// the cumulative wall budget (config Policy.Budget.Wall) against the running sum — the
+	// wall-clock third of the budget half of the termination guarantee. It is distinct from the
+	// per-invocation wall ceiling the sandbox enforces: this accumulates across the whole
+	// feedback loop, that bounds a single attempt (see specs/workflow.md). Zero on a Result the
+	// runner could not time (a failed/discarded invocation carries no envelope).
+	Elapsed time.Duration
 }
 
 // Usage is normalized token accounting for one invocation. It mirrors model.Usage but

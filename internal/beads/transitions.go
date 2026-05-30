@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -72,6 +73,41 @@ const (
 	MetadataKeySpentUSD    = "spent_usd"
 )
 
+// MetadataKeySpentWall holds the cumulative wall-clock of an issue's on_failure retry chain
+// so far (core.Issue.SpentWall), stored as a Go-duration string (e.g. "5m0s"). Like
+// MetadataKeySpentTokens/USD it is threaded forward across the loop — each route stamps the
+// predecessor's running total plus the just-finished invocation's elapsed time — so the
+// orchestrator enforces the cumulative wall budget (config Policy.Budget.Wall) against the sum.
+// A freshly seeded or next-stage issue carries none (treated as 0). It is the wall-clock third
+// of the budget half of the termination guarantee (see specs/workflow.md).
+const MetadataKeySpentWall = "spent_wall"
+
+// MetadataKeyClosingTokens and MetadataKeyClosingUSD hold an issue's OWN invocation spend —
+// the marginal tokens/dollars the single invocation answering this issue consumed
+// (core.Issue.ClosingTokens / ClosingUSD), as opposed to the threaded chain total in
+// MetadataKeySpentTokens/USD (its predecessors' spend). Unlike every key above they are NOT
+// set at creation and NOT threaded: the orchestrator stamps them post-hoc via StampClosingSpend
+// when it processes the issue's Result, so an epic's total spend is an aggregate read — the sum
+// of MetadataKeyClosingUSD over all issues sharing an epic id. An epic fans out, so its total
+// cannot be a threaded counter (that double-counts the shared prefix); summing per-issue
+// marginals is what makes the cross-issue epic budget enforceable (see MetadataKeyEpicID,
+// specs/workflow.md "epic_budget"). Absent (treated as 0) until the issue's invocation is
+// processed, and only stamped when an epic budget is configured.
+const (
+	MetadataKeyClosingTokens = "closing_tokens"
+	MetadataKeyClosingUSD    = "closing_usd"
+)
+
+// MetadataKeyEpicID holds the id of the root seed issue of an issue's epic (core.Issue.EpicID):
+// the work item a human seeded, from which the whole fan-out descends. It is threaded forward
+// onto every produced child and on_failure fix like MetadataKeyBase — a root seed carries none
+// (it is its own epic; the orchestrator's epicOf supplies its own id as the fallback, exactly as
+// Base falls back to the pipeline base), and each descendant carries the root's id so all issues
+// of one epic share it. It is the key the cross-issue epic budget aggregates over (sum the
+// per-issue closing spend of all issues with the same epic id) and that later spec-re-derivation
+// work groups by (see specs/workflow.md, the plan's T3.7b).
+const MetadataKeyEpicID = "epic_id"
+
 // Approval-gate metadata (T2.10), written when an integrate is held for human approval and
 // read back to resume it. Unlike the keys above they are NOT set at issue creation — they
 // are written by status transitions (AwaitApproval / RecordApproval) on an already-existing
@@ -135,6 +171,28 @@ func (c *Client) PinSpecHash(ctx context.Context, id, hash string) error {
 	args := []string{"update", id, "--set-metadata", MetadataKeySpecHash + "=" + hash}
 	if _, err := c.run(ctx, args); err != nil {
 		return fmt.Errorf("beads: pin spec hash on %s: %w", id, err)
+	}
+	return nil
+}
+
+// StampClosingSpend records an issue's own invocation spend — the marginal tokens and dollars
+// the single invocation answering this issue consumed — merged into its metadata without
+// touching status or other keys (like PinSpecHash). The orchestrator calls it when it processes
+// the issue's Result, so the cross-issue epic budget can be read as an aggregate: the sum of
+// closing spend over every issue sharing an epic id (a fan-out's total cannot be a threaded
+// counter without double-counting the shared prefix — see core.Issue.ClosingTokens,
+// specs/workflow.md "epic_budget"). It is a set, not an increment, so re-stamping the same
+// Result on an at-least-once redelivery is idempotent. bd stores a numeric --set-metadata value
+// as a JSON number, so metaInt/metaFloat read these back directly.
+func (c *Client) StampClosingSpend(ctx context.Context, id string, tokens int, usd float64) error {
+	if id == "" {
+		return fmt.Errorf("beads: empty issue id")
+	}
+	args := []string{"update", id,
+		"--set-metadata", fmt.Sprintf("%s=%d", MetadataKeyClosingTokens, tokens),
+		"--set-metadata", fmt.Sprintf("%s=%s", MetadataKeyClosingUSD, strconv.FormatFloat(usd, 'f', -1, 64))}
+	if _, err := c.run(ctx, args); err != nil {
+		return fmt.Errorf("beads: stamp closing spend on %s: %w", id, err)
 	}
 	return nil
 }
@@ -378,7 +436,7 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 		args = append(args, "--description", issue.Body)
 	}
 	if issue.Role != "" || issue.Attempt > 0 || issue.Base != "" || issue.TraceMap != "" || issue.Spec != "" ||
-		issue.SpentTokens > 0 || issue.SpentUSD > 0 {
+		issue.SpentTokens > 0 || issue.SpentUSD > 0 || issue.SpentWall > 0 || issue.EpicID != "" {
 		meta := map[string]any{}
 		if issue.Role != "" {
 			meta[MetadataKeyRole] = issue.Role
@@ -411,6 +469,17 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 		}
 		if issue.SpentUSD > 0 {
 			meta[MetadataKeySpentUSD] = issue.SpentUSD
+		}
+		// Cumulative wall is threaded like the token/dollar spend; stored as a Go-duration
+		// string so it round-trips through metadata legibly (metaDuration parses it back).
+		if issue.SpentWall > 0 {
+			meta[MetadataKeySpentWall] = issue.SpentWall.String()
+		}
+		// The epic root id threads forward like Base so every issue of an epic shares it; a
+		// root seed carries none (epicOf supplies its own id). Stamped when set so a root's
+		// metadata stays minimal.
+		if issue.EpicID != "" {
+			meta[MetadataKeyEpicID] = issue.EpicID
 		}
 		b, err := json.Marshal(meta)
 		if err != nil {
