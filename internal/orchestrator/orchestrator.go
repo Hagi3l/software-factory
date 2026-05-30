@@ -39,6 +39,11 @@ type Beads interface {
 	Release(ctx context.Context, id string) error
 	Close(ctx context.Context, id string) error
 	Block(ctx context.Context, id string) error
+	// AwaitApproval parks an integrate candidate awaiting human approval (T2.10): blocks the
+	// issue and records the candidate ref + provenance to replay on approval.
+	AwaitApproval(ctx context.Context, id, candidateRef, parkedProv string) error
+	// RecordApproval stamps a human's approval (who, which candidate sha) on a parked issue.
+	RecordApproval(ctx context.Context, id, approvedRef, approver string) error
 	Apply(ctx context.Context, proposals []core.Proposal) ([]core.Issue, error)
 	ListStranded(ctx context.Context, now time.Time) ([]string, error)
 	InProgress(ctx context.Context) ([]core.Issue, error)
@@ -105,6 +110,11 @@ type Orchestrator struct {
 	tick     time.Duration
 	base     string
 	dlq      string
+
+	// diffFiles returns the repo-relative paths a candidate ref changed relative to base.
+	// It is the input to the TCB-touching approval decision (T2.10) and a seam so the
+	// decision is unit-testable without a real repo; New defaults it to a git-backed impl.
+	diffFiles func(ctx context.Context, repo, base, ref string) ([]string, error)
 }
 
 // New builds an Orchestrator from its options and injected collaborators: the beads
@@ -167,6 +177,7 @@ func New(opts Options, bd Beads, g Gate, merger Merger, js jetstream.JetStream) 
 	if dl := opts.Config.Harness.Policy.DeadLetter; dl != "" {
 		o.dlq = dl
 	}
+	o.diffFiles = gitChangedFiles
 	return o, nil
 }
 
@@ -183,14 +194,27 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	approvals, err := messaging.EnsureApprovalConsumer(ctx, o.js)
+	if err != nil {
+		return err
+	}
 
 	var wg sync.WaitGroup
-	errs := make(chan error, 2)
+	errs := make(chan error, 3)
 
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 		errs <- o.consumeResults(ctx, cons)
+	}()
+
+	// The approvals consumer is the third reader of the single-writer orchestrator: human
+	// approve/reject decisions for parked integrate candidates (T2.10). Like the result
+	// consumer its handling is idempotent (status-gated), so at-least-once redelivery is safe.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		errs <- o.consumeApprovals(ctx, approvals)
 	}()
 
 	wg.Add(1)

@@ -37,15 +37,17 @@ var knownPreconditions = map[string]bool{
 	"blockers-closed": true,
 }
 
-// reservedPostconditions are postcondition identifiers backed by a built-in gate
-// check kind rather than a configured command: the red→green proof (T2.3) and any
-// later special verifications. Command-check postconditions (tests-pass, gosec, …)
-// are deliberately NOT listed here — they are defined in harness.yaml's `checks` map
-// and validated against it, so config is the single source of truth for what command
-// each one runs (see specs/configuration.md).
+// reservedPostconditions are postcondition identifiers not backed by a configured
+// command: the red→green and tests-red proofs (T2.3/T2.4), which the gate realizes as
+// built-in check kinds, and human-approved (T2.10), which the ORCHESTRATOR evaluates
+// against beads state rather than running in the sandbox at all. Command-check
+// postconditions (tests-pass, gosec, …) are deliberately NOT listed here — they are
+// defined in harness.yaml's `checks` map and validated against it, so config is the single
+// source of truth for what command each one runs (see specs/configuration.md).
 var reservedPostconditions = map[string]bool{
-	core.PostconditionRedGreen: true,
-	core.PostconditionTestsRed: true,
+	core.PostconditionRedGreen:      true,
+	core.PostconditionTestsRed:      true,
+	core.PostconditionHumanApproved: true,
 }
 
 // reusesAcceptanceTests are the reserved proofs that have no command of their own and
@@ -82,6 +84,7 @@ func (c *Config) Validate() error {
 		add("harness configuration is missing")
 	} else {
 		c.validateDAG(add)
+		c.validatePolicy(add)
 	}
 	c.validateSouls(add)
 	if c.Infra == nil {
@@ -147,9 +150,26 @@ func (c *Config) validateDAG(add func(string, ...any)) {
 			if len(st.Postcondition) == 0 {
 				add("stage %q has kind %q but no postcondition; a resolve stage is gated and must declare the suite that re-verifies the resolved result", name, st.Kind)
 			}
-		case StageKindHuman, StageKindTrustedMerge:
+		case StageKindHuman:
 			if hasRole {
 				add("stage %q sets both role %q and kind %q; a stage is one or the other", name, st.Role, st.Kind)
+			}
+			if len(st.Postcondition) > 0 {
+				add("stage %q has kind %q and a postcondition; a human stage runs no gate and must declare none", name, st.Kind)
+			}
+		case StageKindTrustedMerge:
+			if hasRole {
+				add("stage %q sets both role %q and kind %q; a stage is one or the other", name, st.Role, st.Kind)
+			}
+			// A trusted-merge stage is the orchestrator's own inline merge — it runs no
+			// verification sandbox, so the only postcondition it can carry is human-approved,
+			// which the orchestrator evaluates against beads state. A command/proof/metric
+			// check here would have no gate to run it, so reject one rather than let it
+			// silently never run (see specs/configuration.md, PostconditionHumanApproved).
+			for _, pc := range st.Postcondition {
+				if pc != core.PostconditionHumanApproved {
+					add("stage %q has kind %q with postcondition %q; a trusted-merge stage runs no gate, so only %q is allowed", name, st.Kind, pc, core.PostconditionHumanApproved)
+				}
 			}
 		default:
 			add("stage %q has unknown kind %q (want %q, %q, %q or %q)", name, st.Kind, StageKindHuman, StageKindTrustedMerge, StageKindPlan, StageKindResolve)
@@ -173,6 +193,13 @@ func (c *Config) validateDAG(add func(string, ...any)) {
 			if !c.knownPostcondition(pc) {
 				add("stage %q postcondition %q is not a known condition (no command in checks:, not a known metric or reserved proof)", name, pc)
 				continue
+			}
+			// human-approved is orchestrator-evaluated and meaningful only on the integrate
+			// (trusted-merge) stage, where a produced candidate exists to approve. On an agent
+			// stage there is no merge to gate and the gate would try to resolve it as a command
+			// check and fail; reject it here so the misplacement is caught at startup.
+			if pc == core.PostconditionHumanApproved && st.Kind != StageKindTrustedMerge {
+				add("stage %q declares %q but is not a trusted-merge stage; human approval gates integrate only", name, pc)
 			}
 			// The red→green and tests-red proofs have no command of their own; they run
 			// the acceptance-test command against the base and/or the candidate. If a stage
@@ -256,6 +283,54 @@ func (c *Config) validateDepthGraph(add func(string, ...any)) {
 			add("stage %q is unreachable through produces edges", name)
 		}
 	}
+}
+
+// validatePolicy checks the autonomy profile and its TCB-boundary globs (T2.10). An
+// unrecognized profile would silently fall through to autonomous semantics, and a malformed
+// TCB glob would silently never match (so a TCB diff would skip the approval gate it must
+// hit) — both are config faults caught here at startup, not surprises mid-run. Under
+// trusted-dev every integrate must carry the human-approved gate, or "a human reviews every
+// diff" is not actually enforced; that cross-check between policy and the DAG lives here
+// because it needs both (see specs/configuration.md, specs/bootstrap.md).
+func (c *Config) validatePolicy(add func(string, ...any)) {
+	p := c.Harness.Policy
+	switch p.Profile {
+	case "", ProfileAutonomous, ProfileTrustedDev:
+		// "" defaults to autonomous (the permissive profile); both named profiles are valid.
+	default:
+		add("policy.profile %q is unknown (want %q or %q)", p.Profile, ProfileTrustedDev, ProfileAutonomous)
+	}
+	for _, pat := range p.TCBPaths {
+		if strings.TrimSpace(pat) == "" {
+			add("policy.tcb_paths contains an empty glob")
+			continue
+		}
+		if !validateGlob(pat) {
+			add("policy.tcb_paths glob %q is malformed", pat)
+		}
+	}
+
+	if p.Profile == ProfileTrustedDev {
+		for _, name := range sortedKeys(c.Harness.DAG) {
+			st := c.Harness.DAG[name]
+			if st.Kind != StageKindTrustedMerge {
+				continue
+			}
+			if !hasHumanApproved(st.Postcondition) {
+				add("policy.profile is %q but trusted-merge stage %q has no %q postcondition; trusted-dev requires human approval on every integrate", ProfileTrustedDev, name, core.PostconditionHumanApproved)
+			}
+		}
+	}
+}
+
+// hasHumanApproved reports whether a stage's postconditions include the human-approved gate.
+func hasHumanApproved(postconditions []string) bool {
+	for _, pc := range postconditions {
+		if pc == core.PostconditionHumanApproved {
+			return true
+		}
+	}
+	return false
 }
 
 // validateSouls checks the role<->soul binding both ways and per-soul

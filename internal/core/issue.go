@@ -101,6 +101,26 @@ type Issue struct {
 	// single-soul-per-role case ignores them).
 	Tags map[string]string
 
+	// CandidateRef is the candidate branch/sha an issue is parked on while awaiting human
+	// approval (the human-approved postcondition; see core.PostconditionHumanApproved). It
+	// is empty for every issue that is not parked, and set by the orchestrator when an
+	// integrate is held for approval: it is the exact candidate a `harness approve` must
+	// name, and the binding the orchestrator re-checks so a stale approval (the candidate
+	// changed) is invalidated. Like Base it rides in beads metadata; unlike Base it is
+	// written by a status transition (AwaitApproval), not at issue creation, so a fresh or
+	// produced issue never carries it (see specs/configuration.md, specs/bootstrap.md).
+	CandidateRef string
+
+	// ParkedProvenance is the JSON-encoded core.Provenance the orchestrator captured when it
+	// parked the issue awaiting approval. The candidate was already gate-verified before
+	// parking, so its provenance — soul/model, prompt sha, the checks it passed, the
+	// traceability map — is preserved here and replayed onto the merge commit once a human
+	// approves, rather than re-graded. It rides in beads metadata (one line, JSON, so a
+	// multi-line trailer never has to survive metadata storage), written by AwaitApproval
+	// alongside CandidateRef and decoded back into a core.Provenance on resume. Empty for an
+	// issue that is not parked.
+	ParkedProvenance string
+
 	// DependsOn carries the blocked-by edge targets beads emits inline on a read: the ids
 	// of the issues this one is blocked by (its blockers). Like Status it is populated when
 	// an issue is read back — beads owns these edges (the orchestrator writes them via

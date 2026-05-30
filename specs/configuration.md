@@ -129,9 +129,14 @@ policy:
   <issue>` denies); the approval is **bound to the candidate sha** — like an evidence hash
   pins to bytes — so any re-gate after a change invalidates a stale approval. It fails
   **closed**, and its failure does **not** route `on_failure` (it burns no retry): the issue
-  **parks in an awaiting-approval escalation** until a human approves (→ re-gate → advance)
-  or rejects (→ fix, or back to spec). It is the gate that realizes the trusted-dev
-  transition and the permanent TCB-review boundary (`policy` below, [bootstrap.md](bootstrap.md)).
+  **parks in an awaiting-approval escalation** (blocked, carrying its candidate ref and the
+  provenance the gate already verified) until a human approves or rejects. On **approve** the
+  preserved provenance is replayed onto the merge — the candidate was already gate-verified,
+  so it is not re-graded; the merge queue re-gates only if a rebase onto a moved `main` is
+  needed (the existing two-green-branches guard, [integration.md](integration.md)) — then it
+  lands. On **reject** it routes a fix attempt through the normal `on_failure`/retry machinery
+  (→ back to spec when no route or budget remains). It is the gate that realizes the
+  trusted-dev transition and the permanent TCB-review boundary (`policy` below, [bootstrap.md](bootstrap.md)).
 - `policy` is the **termination guarantee** (budgets + retry caps — see
   [workflow.md](workflow.md)) and the **autonomy profile**. `policy.profile` is
   `trusted-dev` or `autonomous`: **trusted-dev** requires a `human-approved` postcondition on

@@ -27,6 +27,7 @@ harness.work.<role>          JetStream work queue — assignments (pull consumer
 harness.result.<role>        JetStream — agent Result envelopes
 harness.agent.<id>.events    core NATS — progress/log events (fire-and-forget)
 harness.dlq                  JetStream — dead-lettered work for human triage
+harness.approvals            JetStream — human approve/reject of parked integrates
 harness.control.*            core NATS — orchestrator control/health
 ```
 
@@ -35,6 +36,15 @@ harness.control.*            core NATS — orchestrator control/health
   runners. No component needs to know which runners exist.
 - **Results** flow back on `result.<role>` as durable messages the orchestrator
   consumes and validates.
+- **Approvals** (`approvals`) carry a human's approve/reject of a parked integrate
+  candidate (the trusted-dev / TCB-review gate, [verification.md](verification.md),
+  [bootstrap.md](bootstrap.md)). Like results they are JetStream-durable and consumed
+  only by the single-writer orchestrator, which records the decision against the issue's
+  current candidate — a human never writes beads directly during a run, so an approval is
+  a *proposal* validated and applied exactly like an agent Result. In the bootstrap the
+  embedded NATS is in-process only; to let a separate `harness approve` process reach it,
+  `harness run --nats-addr <host:port>` opens an opt-in local TCP listener (a single-host
+  convenience, not the distributed cluster — that is T5.8).
 - **Events** are best-effort observability: the [control room](control-room.md)
   tails them and pushes to browsers over SSE, and they are also emitted as
   [OpenTelemetry](observability.md) spans. Losing one is harmless.

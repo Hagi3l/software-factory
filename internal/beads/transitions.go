@@ -72,6 +72,26 @@ const (
 	MetadataKeySpentUSD    = "spent_usd"
 )
 
+// Approval-gate metadata (T2.10), written when an integrate is held for human approval and
+// read back to resume it. Unlike the keys above they are NOT set at issue creation — they
+// are written by status transitions (AwaitApproval / RecordApproval) on an already-existing
+// issue — so a fresh or produced issue never carries them.
+//
+//   - MetadataKeyCandidateRef pins the exact candidate sha the parked issue is awaiting
+//     approval on (core.Issue.CandidateRef): the binding a `harness approve` must name and
+//     the orchestrator re-checks, so a stale approval (the candidate changed) is invalidated.
+//   - MetadataKeyParkedProv holds the JSON-encoded core.Provenance captured at park time
+//     (core.Issue.ParkedProvenance), replayed onto the merge commit on approval so the
+//     already-verified candidate's provenance is preserved rather than re-graded.
+//   - MetadataKeyApprover / MetadataKeyApprovedRef record who approved and which candidate
+//     sha they approved — an audit trail stamped before the merge proceeds.
+const (
+	MetadataKeyCandidateRef = "candidate_ref"
+	MetadataKeyParkedProv   = "parked_prov"
+	MetadataKeyApprover     = "approver"
+	MetadataKeyApprovedRef  = "approved_ref"
+)
+
 // The transitions below are the orchestrator's single-writer interface to beads:
 // only the orchestrator mutates the work graph, so funneling every status change
 // and proposal application through these methods is what enforces the single-writer
@@ -152,6 +172,42 @@ func (c *Client) Close(ctx context.Context, id string) error {
 // DLQ alert event is the orchestrator's job (T1.19); this is the beads-side write.
 func (c *Client) Block(ctx context.Context, id string) error {
 	return c.setStatus(ctx, id, "blocked")
+}
+
+// AwaitApproval parks an issue awaiting human approval of its integrate candidate (T2.10):
+// it marks the issue blocked (so it surfaces in the escalation/DLQ view like any other work
+// needing a human) and records the candidate ref it is parked on plus the provenance to
+// replay on approval. Unlike a dead-letter this is recoverable: a later `harness approve`
+// for this candidate resumes the merge, a reject routes a fix. candidateRef must be set
+// (there is nothing to approve otherwise); parkedProv may be empty (a degraded provenance
+// record, never a dropped park). See specs/configuration.md "human-approval".
+func (c *Client) AwaitApproval(ctx context.Context, id, candidateRef, parkedProv string) error {
+	if candidateRef == "" {
+		return fmt.Errorf("beads: await approval on %s: empty candidate ref", id)
+	}
+	extra := []string{"--set-metadata", MetadataKeyCandidateRef + "=" + candidateRef}
+	if parkedProv != "" {
+		extra = append(extra, "--set-metadata", MetadataKeyParkedProv+"="+parkedProv)
+	}
+	return c.setStatus(ctx, id, "blocked", extra...)
+}
+
+// RecordApproval stamps a human's approval on a parked issue: who approved and which
+// candidate sha they approved. It records the audit trail without changing status — the
+// caller (the orchestrator's approval handler) drives the resume (re-merge → close) after
+// recording, so the status moves blocked→closed through the merge path, not here. It is a
+// metadata-only update, like PinSpecHash.
+func (c *Client) RecordApproval(ctx context.Context, id, approvedRef, approver string) error {
+	if id == "" {
+		return fmt.Errorf("beads: empty issue id")
+	}
+	args := []string{"update", id,
+		"--set-metadata", MetadataKeyApprovedRef + "=" + approvedRef,
+		"--set-metadata", MetadataKeyApprover + "=" + approver}
+	if _, err := c.run(ctx, args); err != nil {
+		return fmt.Errorf("beads: record approval on %s: %w", id, err)
+	}
+	return nil
 }
 
 // ListStranded returns the IDs of in_progress issues whose lease has expired as of

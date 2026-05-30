@@ -39,6 +39,7 @@ func cmdRun(args []string) error {
 	repo := fs.String("repo", ".", "integration repository: candidates are pushed and merged here, and worktrees seeded from it")
 	bdBin := fs.String("bd", "bd", "path to the beads CLI")
 	serveAddr := fs.String("serve-addr", "", "if set, also serve the control room on this address (live SSE shares this run's in-process NATS)")
+	natsAddr := fs.String("nats-addr", "", "if set, expose this run's NATS on this address so `harness approve`/`reject` can reach it (default: in-process only)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -62,6 +63,7 @@ func cmdRun(args []string) error {
 	comp, err := buildRunComponents(cfg, absRepo, runOptions{
 		bdBin:     *bdBin,
 		serveAddr: *serveAddr,
+		natsAddr:  *natsAddr,
 	}, log)
 	if err != nil {
 		return err
@@ -100,6 +102,11 @@ type runOptions struct {
 	// source. Empty (the default) builds no server. Kept here, not in config, because
 	// it is a deployment knob of this command like bdBin.
 	serveAddr string
+	// natsAddr, when non-empty (host:port), exposes this run's embedded NATS on a TCP
+	// listener so a separate `harness approve`/`reject` process can publish approvals to it
+	// (the trusted-dev gate, T2.10). Empty (the default) keeps NATS in-process only. Like
+	// serveAddr it is a deployment knob of this command, not config.
+	natsAddr string
 	// backend lets a test inject a non-production sandbox backend (the non-isolating
 	// host-exec local backend) so the spine can be driven end-to-end without Docker
 	// (see TE.1 in IMPLEMENTATION_PLAN.md, specs/bootstrap.md). It is INJECTION-ONLY and
@@ -155,7 +162,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	if mkErr := os.MkdirAll(storeDir, 0o755); mkErr != nil {
 		return nil, mkErr
 	}
-	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{Name: "harness", StoreDir: storeDir})
+	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{Name: "harness", StoreDir: storeDir, ClientAddr: opts.natsAddr})
 	if err != nil {
 		return nil, err
 	}

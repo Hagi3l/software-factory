@@ -93,18 +93,29 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
 - [ ] **T2.12** *(optional)* Run-all independent scanners — aggregate every independent-scanner
   finding in one `qa` pass (better DLQ triage) instead of fail-fast, via a per-check
   "independent" config signal the gate honors (keeps proof/measurement checks fail-fast). See T2.9. ([verification.md](specs/verification.md))
-- [ ] **T2.10 Trusted-dev policy profile** — *designed; spec landed (configuration.md, bootstrap.md).*
-  Implement the **`human-approved`** postcondition kind — **orchestrator-evaluated**, not a `checks`
-  command (it reads orchestrator/beads state, not the repo): holds only when a human approved the
-  issue's *current candidate sha* via a new **`harness approve <issue>` / `harness reject <issue>`**
-  CLI (publishes approver + candidate sha over NATS; the single-writer orchestrator records it on the
-  issue; a stale approval is invalidated when the candidate sha changes). It fails **closed** and
-  **parks the issue in an awaiting-approval escalation** rather than routing `on_failure` (burns no
-  retry): approve → re-gate → advance, reject → fix / back to spec. Add **`policy.profile`**
-  (`trusted-dev` = approval on *every* `integrate`; `autonomous` = approval only on TCB-touching diffs)
-  and **`policy.tcb_paths`** (globs that force approval regardless of profile — orchestrator / runner /
-  broker / sandbox config / gate harness; also the operational TCB-boundary list, resolving a
-  bootstrap.md OPEN). TCB-touching → stays human-reviewed. ([bootstrap.md](specs/bootstrap.md), [configuration.md](specs/configuration.md))
+- [x] **T2.10 Trusted-dev policy profile** — *done.* The **`human-approved`** postcondition is
+  orchestrator-evaluated (not a `checks` command): on a passing integrate the orchestrator **parks**
+  the candidate (blocked, recording its candidate ref + the gate-verified provenance) and publishes an
+  escalation, burning no retry — `advance` returns a new `errAwaitingApproval` sentinel `accept` treats
+  like the merge sentinels. **`harness approve`/`harness reject <issue>`** read the parked candidate ref
+  and publish a `core.ApprovalRequest` over a new JetStream **`harness.approvals`** stream
+  (`EnsureApprovalConsumer`); the single-writer orchestrator's third consumer (`consumeApprovals`)
+  applies it idempotently (status-gated on blocked + a parked candidate ref; a sha mismatch is a stale
+  approval, ignored). **Approve** replays the preserved provenance onto the merge via the shared
+  `mergeCandidate` (re-gated by the merge queue only on a rebase) then closes; **reject** routes a fix
+  through `route` (→ DLQ when caps spent). **`policy.profile`** (`trusted-dev` = every integrate;
+  `autonomous`/unset = only TCB-touching diffs) + **`policy.tcb_paths`** globs (matched by a new
+  `config` doublestar matcher; `Policy.ApprovalRequired`) drive the decision; the orchestrator's
+  `diffFiles` seam (default `git diff base...ref`) supplies the changed files. Validation: profile
+  enum, trusted-dev ⇒ `human-approved` on every trusted-merge, `human-approved` only on trusted-merge,
+  no command checks on trusted-merge, well-formed/non-empty globs. The shipped `config/harness.yaml` is
+  now **trusted-dev** with `human-approved` on integrate + the TCB glob set. **Cross-process reach:**
+  `harness run --nats-addr <host:port>` opens an opt-in TCP listener on the embedded NATS
+  (`ServerConfig.ClientAddr`) so a separate `harness approve` reaches it (single-host; full distributed
+  NATS is T5.8). New metadata keys `candidate_ref`/`parked_prov`/`approved_ref`/`approver` +
+  `AwaitApproval`/`RecordApproval` transitions; `core.Issue` gains `CandidateRef`/`ParkedProvenance`.
+  Resolves the bootstrap.md TCB-boundary OPEN (the `tcb_paths` list is the operational definition).
+  ([bootstrap.md](specs/bootstrap.md), [configuration.md](specs/configuration.md), [messaging.md](specs/messaging.md))
 - [ ] **T2.11** *(OPEN)* Second, different-model reviewer soul in `qa` (N-version diversity). ([verification.md](specs/verification.md))
 
 ## Phase 3 — Full DAG, decomposition & merge queue

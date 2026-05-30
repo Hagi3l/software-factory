@@ -3,7 +3,9 @@ package messaging
 import (
 	"errors"
 	"fmt"
+	"net"
 	"os"
+	"strconv"
 	"time"
 
 	natsserver "github.com/nats-io/nats-server/v2/server"
@@ -19,6 +21,13 @@ type ServerConfig struct {
 	// real deployment should set a durable path so JetStream (and thus the
 	// orchestrator's crash recovery) survives restarts.
 	StoreDir string
+	// ClientAddr, when non-empty (host:port), makes the server ALSO listen for external
+	// TCP client connections, so a separate process — `harness approve` / `harness reject`
+	// — can publish to it. Empty keeps the server in-process only (DontListen), the default
+	// bootstrap transport (in-process connections always work regardless). This is a
+	// single-host convenience for the trusted-dev approval loop, not the distributed-NATS
+	// cluster (T5.8): no clustering, just a local listener (see specs/messaging.md).
+	ClientAddr string
 }
 
 // EmbeddedServer is an in-process NATS server with JetStream enabled — the
@@ -50,14 +59,38 @@ func NewEmbeddedServer(cfg ServerConfig) (*EmbeddedServer, error) {
 		removeStore = true
 	}
 
-	ns, err := natsserver.NewServer(&natsserver.Options{
+	nopts := &natsserver.Options{
 		ServerName: name,
 		JetStream:  true,
 		StoreDir:   storeDir,
-		DontListen: true, // in-process only; flip to a listener for distributed deployment
+		DontListen: true, // in-process only by default; ClientAddr flips on a TCP listener
 		NoLog:      true,
 		NoSigs:     true,
-	})
+	}
+	// A configured ClientAddr opens a TCP listener so a separate process can connect, in
+	// addition to the always-available in-process connection. Parse it up front so a bad
+	// address fails loudly here rather than leaving the server silently in-process only.
+	if cfg.ClientAddr != "" {
+		host, portStr, err := net.SplitHostPort(cfg.ClientAddr)
+		if err != nil {
+			if removeStore {
+				_ = os.RemoveAll(storeDir)
+			}
+			return nil, fmt.Errorf("messaging: parse client addr %q: %w", cfg.ClientAddr, err)
+		}
+		port, err := strconv.Atoi(portStr)
+		if err != nil {
+			if removeStore {
+				_ = os.RemoveAll(storeDir)
+			}
+			return nil, fmt.Errorf("messaging: client addr %q has non-numeric port: %w", cfg.ClientAddr, err)
+		}
+		nopts.DontListen = false
+		nopts.Host = host
+		nopts.Port = port
+	}
+
+	ns, err := natsserver.NewServer(nopts)
 	if err != nil {
 		if removeStore {
 			_ = os.RemoveAll(storeDir)

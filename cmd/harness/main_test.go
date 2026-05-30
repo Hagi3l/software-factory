@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/harness/internal/core"
 )
 
 // testConfigDir is the shipped bootstrap config, relative to this package dir.
@@ -28,6 +29,8 @@ func TestDispatchExitCodes(t *testing.T) {
 		{"validate missing config", []string{"validate", "--config", "/does/not/exist"}, 1},
 		{"validate unknown env", []string{"validate", "--config", testConfigDir, "--env", "nope"}, 1},
 		{"seed without title", []string{"seed", "--config", testConfigDir}, 1},
+		{"approve without issue", []string{"approve"}, 1},
+		{"reject without issue", []string{"reject"}, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -92,6 +95,28 @@ func TestShippedQAStageWired(t *testing.T) {
 		if cfg.Harness.Checks[name] == "" {
 			t.Errorf("checks[%q] is empty; the qa gate cannot resolve it", name)
 		}
+	}
+}
+
+// TestShippedTrustedDevGateWired pins T2.10: the bootstrap self-hosts under the trusted-dev
+// profile, so the human-approved gate holds every integrate and the TCB boundary is declared.
+// A refactor that drops the profile or the gate would silently let the harness merge its own
+// code with no human review — exactly what trusted-dev exists to prevent — so catch it here.
+func TestShippedTrustedDevGateWired(t *testing.T) {
+	cfg := loadTestConfig(t)
+
+	if cfg.Harness.Policy.Profile != config.ProfileTrustedDev {
+		t.Errorf("policy.profile = %q, want %q (the bootstrap self-hosts under human review)", cfg.Harness.Policy.Profile, config.ProfileTrustedDev)
+	}
+	integrate, ok := cfg.Harness.DAG["integrate"]
+	if !ok {
+		t.Fatal("shipped DAG has no integrate stage")
+	}
+	if !reflect.DeepEqual(integrate.Postcondition, []string{core.PostconditionHumanApproved}) {
+		t.Errorf("integrate.postcondition = %v, want [%s]", integrate.Postcondition, core.PostconditionHumanApproved)
+	}
+	if len(cfg.Harness.Policy.TCBPaths) == 0 {
+		t.Error("policy.tcb_paths is empty; the TCB boundary must be declared")
 	}
 }
 

@@ -81,6 +81,13 @@ dag:
     produces: [integrate]
   integrate:
     kind: trusted-merge
+    # The human-approval gate (T2.10): under policy.profile trusted-dev (below) every
+    # integrate must be approved by a human before it lands — the self-hosting transition
+    # where the harness writes code and a person reviews every diff. The orchestrator (not
+    # the sandbox gate) evaluates it: a verified candidate is PARKED awaiting `harness
+    # approve <issue>` (denied by `harness reject <issue>`), bound to the candidate sha so a
+    # stale approval is invalidated. See specs/configuration.md, specs/bootstrap.md.
+    postcondition: [human-approved]
   # `resolve` is the merge-conflict-resolution stage (kind: resolve), run by the
   # `merge-resolver` soul. It is NOT part of the linear flow and no stage `produces` it:
   # the orchestrator spawns a resolve issue only when a verified candidate cannot be
@@ -136,3 +143,22 @@ policy:
   max_retries: 3
   budget: { tokens: 2_000_000, usd: 20, wall: 2h }   # per issue
   dead_letter: harness.dlq
+  # Autonomy profile (T2.10). The bootstrap self-hosts in TRUSTED-DEV: the harness writes
+  # code and a human reviews every diff, so a human-approved gate holds every integrate
+  # (the `postcondition: [human-approved]` on the integrate stage above). Switching to
+  # `autonomous` later would require approval only for TCB-touching diffs — the tcb_paths
+  # below — earning no-human-review for non-TCB work while keeping the TCB human-reviewed
+  # permanently. See specs/bootstrap.md "Two thresholds".
+  profile: trusted-dev
+  # The TCB boundary as config: a candidate whose diff touches any of these globs requires
+  # human approval regardless of profile (so the trust-enforcing core is never silently
+  # rewritten). This same list is the operational definition of "which modules are the TCB"
+  # — the orchestrator, runner/broker, sandbox config, and gate harness. See specs/bootstrap.md.
+  tcb_paths:
+    - internal/orchestrator/**
+    - internal/runner/**
+    - internal/broker/**
+    - internal/sandbox/**
+    - internal/gate/**
+    - internal/messaging/**
+    - config/**

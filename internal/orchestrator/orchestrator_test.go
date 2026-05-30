@@ -31,14 +31,17 @@ type fakeBeads struct {
 	stranded []string
 	inflight []core.Issue
 
-	claimed  []string
-	released []string
-	reissued []string
-	closed   []string
-	blocked  []string
-	applied  []core.Proposal
-	pinned   map[string]string
-	seq      int
+	claimed     []string
+	released    []string
+	reissued    []string
+	closed      []string
+	blocked     []string
+	parked      []string
+	approvedRef []string
+	approvedBy  map[string]string
+	applied     []core.Proposal
+	pinned      map[string]string
+	seq         int
 
 	claimErr error
 	applyErr error
@@ -100,6 +103,32 @@ func (f *fakeBeads) Block(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.blocked = append(f.blocked, id)
+	return nil
+}
+
+func (f *fakeBeads) AwaitApproval(_ context.Context, id, candidateRef, parkedProv string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.parked = append(f.parked, id)
+	// Mirror the real client: the issue is blocked and durably carries the parked candidate
+	// and provenance, so a later Get (the approval handler's) sees the awaiting-approval state.
+	if is, ok := f.issues[id]; ok {
+		is.Status = "blocked"
+		is.CandidateRef = candidateRef
+		is.ParkedProvenance = parkedProv
+		f.issues[id] = is
+	}
+	return nil
+}
+
+func (f *fakeBeads) RecordApproval(_ context.Context, id, approvedRef, approver string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.approvedBy == nil {
+		f.approvedBy = map[string]string{}
+	}
+	f.approvedBy[id] = approver
+	f.approvedRef = append(f.approvedRef, approvedRef)
 	return nil
 }
 

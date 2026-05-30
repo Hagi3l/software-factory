@@ -75,14 +75,72 @@ type Stage struct {
 	Produces      []string `yaml:"produces,omitempty"`      // declarative depth: stages the orchestrator creates on success
 }
 
+// Autonomy profiles for Policy.Profile. They set when the human-approved postcondition
+// on an integrate is enforced — the trusted-dev → autonomous progression of
+// specs/bootstrap.md.
+const (
+	// ProfileTrustedDev requires human approval on EVERY integrate — the self-hosting
+	// transition where the harness writes code and a human reviews every diff before it
+	// lands. It is the bootstrap's own profile.
+	ProfileTrustedDev = "trusted-dev"
+	// ProfileAutonomous requires human approval only when a candidate's diff touches the
+	// TCB (Policy.TCBPaths) — no-human-review is earned for non-TCB work, but the TCB stays
+	// human-reviewed permanently. It is the default when Profile is unset.
+	ProfileAutonomous = "autonomous"
+)
+
 // Policy is the termination guarantee: a retry cap and budgets bound the feedback
 // loop, so a spec the factory cannot satisfy dead-letters instead of looping
-// forever (see specs/workflow.md). It is not merely cost control.
+// forever (see specs/workflow.md). It is not merely cost control. It also carries the
+// autonomy profile — when a human-approval gate holds an integrate (see specs/bootstrap.md).
 type Policy struct {
 	MaxRetries int    `yaml:"max_retries"` // max on_failure cycles before dead-lettering
 	Budget     Budget `yaml:"budget"`      // per-issue cap
 	EpicBudget Budget `yaml:"epic_budget"` // cumulative cap across an epic — declared/validated but NOT yet enforced (no epic_id on issues yet); T3.8b wires enforcement
 	DeadLetter string `yaml:"dead_letter"` // subject breached work is dead-lettered to, e.g. "harness.dlq"
+
+	// Profile is the autonomy profile: "trusted-dev" (human approval on every integrate) or
+	// "autonomous" (approval only for TCB-touching diffs). Empty defaults to "autonomous",
+	// the permissive profile, so a config that names no profile keeps the pre-T2.10 behavior
+	// (no approval unless TCBPaths forces it). See ProfileTrustedDev / ProfileAutonomous and
+	// ApprovalRequired.
+	Profile string `yaml:"profile,omitempty"`
+	// TCBPaths are globs marking a diff TCB-touching — the orchestrator, runner/broker,
+	// sandbox config, gate harness (e.g. "internal/orchestrator/**"). A candidate whose diff
+	// hits any of them requires human approval regardless of profile, which is how
+	// TCB-touching changes stay human-reviewed permanently. This list is also the
+	// operational definition of the TCB boundary (see specs/bootstrap.md, specs/configuration.md).
+	// `**` matches across path separators; `*`/`?` match within a single segment.
+	TCBPaths []string `yaml:"tcb_paths,omitempty"`
+}
+
+// ApprovalRequired reports whether a candidate whose diff changed changedFiles needs a
+// human-approved gate before it may integrate, under this policy. Trusted-dev requires it
+// on every integrate; autonomous (the default for an unset profile) requires it only when
+// a changed file matches a TCBPaths glob — and a TCB-touching diff forces approval under
+// any profile, so the TCB stays human-reviewed permanently (see specs/bootstrap.md). The
+// decision is the orchestrator's: this is the policy half, kept beside the profile/globs it
+// reads so config is the single source of truth for what gates an integrate.
+func (p Policy) ApprovalRequired(changedFiles []string) bool {
+	if p.Profile == ProfileTrustedDev {
+		return true
+	}
+	for _, f := range changedFiles {
+		if p.tcbTouches(f) {
+			return true
+		}
+	}
+	return false
+}
+
+// tcbTouches reports whether a repo-relative path matches any TCBPaths glob.
+func (p Policy) tcbTouches(path string) bool {
+	for _, pat := range p.TCBPaths {
+		if matchGlob(pat, path) {
+			return true
+		}
+	}
+	return false
 }
 
 // Budget caps spend along one or more dimensions. A zero field means that dimension

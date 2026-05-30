@@ -11,9 +11,10 @@ import (
 
 // JetStream stream names. By convention they are uppercase and contain no dots.
 const (
-	StreamWork   = "HARNESS_WORK"
-	StreamResult = "HARNESS_RESULT"
-	StreamDLQ    = "HARNESS_DLQ"
+	StreamWork      = "HARNESS_WORK"
+	StreamResult    = "HARNESS_RESULT"
+	StreamDLQ       = "HARNESS_DLQ"
+	StreamApprovals = "HARNESS_APPROVALS"
 )
 
 // resultMaxAge bounds how long Result envelopes are retained for the orchestrator
@@ -58,6 +59,13 @@ func streamConfigs() []jetstream.StreamConfig {
 			Name:        StreamDLQ,
 			Description: "Dead-lettered work awaiting human triage.",
 			Subjects:    []string{SubjectDLQ},
+			Retention:   jetstream.LimitsPolicy,
+			Storage:     jetstream.FileStorage,
+		},
+		{
+			Name:        StreamApprovals,
+			Description: "Human approve/reject decisions for parked integrate candidates.",
+			Subjects:    []string{SubjectApprovals},
 			Retention:   jetstream.LimitsPolicy,
 			Storage:     jetstream.FileStorage,
 		},
@@ -108,6 +116,22 @@ func EnsureResultConsumer(ctx context.Context, js jetstream.JetStream) (jetstrea
 	})
 	if err != nil {
 		return nil, fmt.Errorf("messaging: ensure result consumer: %w", err)
+	}
+	return cons, nil
+}
+
+// EnsureApprovalConsumer creates or updates the orchestrator's durable consumer over the
+// approvals subject. Like the result consumer it is the single reader of an at-least-once
+// stream, so the orchestrator's handling must be idempotent — its status-gated approval
+// handling (act only on a parked, awaiting-approval issue) provides exactly that (T2.10).
+func EnsureApprovalConsumer(ctx context.Context, js jetstream.JetStream) (jetstream.Consumer, error) {
+	cons, err := js.CreateOrUpdateConsumer(ctx, StreamApprovals, jetstream.ConsumerConfig{
+		Durable:       "orchestrator-approvals",
+		FilterSubject: SubjectApprovals,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("messaging: ensure approval consumer: %w", err)
 	}
 	return cons, nil
 }

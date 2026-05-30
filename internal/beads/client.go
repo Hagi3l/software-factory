@@ -179,7 +179,11 @@ func (r issueJSON) toCore() core.Issue {
 		// decodes back to 0 — a fresh or next-stage issue carries no spend.
 		SpentTokens: metaInt(r.Metadata, MetadataKeySpentTokens),
 		SpentUSD:    metaFloat(r.Metadata, MetadataKeySpentUSD),
-		Tags:        parseLabels(r.Labels),
+		// Approval-gate state (T2.10), written by AwaitApproval when an integrate is parked
+		// for human approval; absent (empty) on every issue that is not parked.
+		CandidateRef:     metaString(r.Metadata, MetadataKeyCandidateRef),
+		ParkedProvenance: metaString(r.Metadata, MetadataKeyParkedProv),
+		Tags:             parseLabels(r.Labels),
 		// Blocked-by edge targets bd emits inline on the read (the `dependencies` array),
 		// distinct from the write-side Proposal.DependsOn. Empty/absent decodes to nil.
 		DependsOn: dependsOn(r.Dependencies),

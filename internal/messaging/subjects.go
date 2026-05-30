@@ -15,6 +15,13 @@ const (
 	// retained until a human handles it (see specs/workflow.md).
 	SubjectDLQ = "harness.dlq"
 
+	// SubjectApprovals carries human approve/reject decisions published by `harness approve`
+	// / `harness reject` for the single-writer orchestrator to consume and record. It is
+	// JetStream-backed (durable, at-least-once) so a decision survives an orchestrator
+	// restart and is redelivered until acked — the orchestrator's status-gated handling is
+	// idempotent under that redelivery (see specs/configuration.md "human-approval", T2.10).
+	SubjectApprovals = "harness.approvals"
+
 	// WorkStreamSubjects matches every per-role work subject; it is the subject
 	// filter for the work stream.
 	WorkStreamSubjects = "harness.work.>"

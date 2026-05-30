@@ -33,6 +33,13 @@ var errMergeConflictHandled = errors.New("orchestrator: integrate conflict handl
 // is Acked.
 var errMergeRegateRouted = errors.New("orchestrator: integrate re-gate failure routed")
 
+// errAwaitingApproval is an internal sentinel: advance returns it when an integrate is
+// held for human approval (T2.10) — the issue is parked (blocked, with its candidate ref and
+// provenance recorded) rather than merged. Like the merge sentinels it tells accept to stop
+// without closing the issue: a parked issue is resumed by the approvals consumer when a human
+// approves, not by reprocessing the Result, so the Result is Acked.
+var errAwaitingApproval = errors.New("orchestrator: integrate awaiting human approval")
+
 // consumeResults is the event-driven half of the loop: it pulls Result envelopes off
 // the orchestrator's durable consumer and processes each. Ack/Nak encode the outcome:
 //   - a fully-processed Result (accepted, routed, or dead-lettered) is Acked.
@@ -257,11 +264,12 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 			return false, fmt.Errorf("issue %s produces undefined stage %q", issue.ID, target)
 		}
 		if transient, err := o.advance(ctx, issue, stage, target, tstage, res, report); err != nil {
-			if errors.Is(err, errMergeConflictHandled) || errors.Is(err, errMergeRegateRouted) {
+			if errors.Is(err, errMergeConflictHandled) || errors.Is(err, errMergeRegateRouted) || errors.Is(err, errAwaitingApproval) {
 				// advance already disposed of the issue: spawned a conflict-resolution issue (or
-				// dead-lettered) for an integrate rebase conflict, or routed it to a fix attempt
-				// for a re-gate failure. Either way it is no longer this accept's to close —
-				// stop here and Ack.
+				// dead-lettered) for an integrate rebase conflict, routed it to a fix attempt for
+				// a re-gate failure, or parked it awaiting human approval (T2.10). In every case
+				// it is no longer this accept's to close — stop here and Ack (a parked issue is
+				// resumed by the approvals consumer, not by reprocessing this Result).
 				return false, nil
 			}
 			return transient, err
@@ -323,41 +331,20 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage c
 // issue on it is sound.
 func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage config.Stage, target string, tstage config.Stage, res core.Result, report gate.Report) (bool, error) {
 	if tstage.Kind == config.StageKindTrustedMerge {
-		prov := o.provenanceFor(issue, res, report)
-		commit, err := o.merger.Merge(ctx, o.opts.Repo, res.Branch.Ref, prov, o.reGate(issue, srcStage, res))
+		// The human-approval gate (T2.10): under trusted-dev every integrate, or under
+		// autonomous a TCB-touching diff, must be approved by a human before it lands. When
+		// approval is required the candidate is PARKED awaiting it (burning no retry) rather
+		// than merged here; a later `harness approve` resumes the merge through the approvals
+		// consumer. An approval cannot already exist for an in_progress issue, so a required
+		// gate always parks on this first pass (see specs/configuration.md, specs/bootstrap.md).
+		required, transient, err := o.approvalRequired(ctx, issue, tstage, res.Branch.Ref)
 		if err != nil {
-			if errors.Is(err, errRebaseConflict) {
-				// The verified candidate cannot be cleanly rebased onto the current main tip:
-				// another branch landed first and they textually collide. Retrying the same
-				// candidate cannot help (the conflict is deterministic), so spawn a sandboxed
-				// conflict-resolution issue — a merge-resolver agent rebases the candidate onto
-				// main and resolves the conflicts, producing a new candidate that loops back
-				// through integrate, re-gated like any other (specs/integration.md step 2). The
-				// loop is bounded by the retry cap and budget; with no resolve stage configured
-				// it falls back to dead-lettering. resolveConflict closes (or blocks) this issue,
-				// so signal accept to stop without closing it again.
-				if transient, rerr := o.resolveConflict(ctx, issue, res, "integrate: candidate conflicts with current main; rebase needs resolution"); rerr != nil {
-					return transient, rerr
-				}
-				return false, errMergeConflictHandled
-			}
-			if errors.Is(err, errReGateFailed) {
-				// The candidate rebased cleanly but the re-gate found the combined tree broken:
-				// two branches each green in isolation, broken together (specs/integration.md).
-				// Unlike a conflict this may pass against a different main, so route a fix issue
-				// through the normal retry/budget machinery rather than dead-lettering. route
-				// closes this issue and spawns the fix, so signal accept to stop without closing
-				// it again.
-				if transient, rerr := o.route(ctx, issue, srcStage, res, "integrate: re-gate of rebased result failed"); rerr != nil {
-					return transient, rerr
-				}
-				return false, errMergeRegateRouted
-			}
-			return true, fmt.Errorf("merge candidate %s for issue %s: %w", res.Branch.Ref, issue.ID, err)
+			return transient, err
 		}
-		o.log.Info("orchestrator: merged to main", "issue", issue.ID, "ref", res.Branch.Ref, "commit", commit,
-			"soul", prov.Soul, "model", prov.Model, "prompt_sha", prov.PromptSHA, "verified", prov.Verified)
-		return false, nil
+		if required {
+			return o.parkAwaitingApproval(ctx, issue, res, report)
+		}
+		return o.mergeCandidate(ctx, issue, srcStage, res, res.Branch.Ref, o.provenanceFor(issue, res, report))
 	}
 
 	// Tags and Spec thread forward unchanged (issue.Tags / issue.Spec below): Tags are the
@@ -384,6 +371,52 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage c
 	for _, c := range created {
 		o.log.Info("orchestrator: produced next-stage issue", "from", issue.ID, "stage", target, "new", c.ID, "base", res.Branch.Ref)
 	}
+	return false, nil
+}
+
+// mergeCandidate lands a verified candidate on main via the merge queue and disposes of the
+// integrate outcomes uniformly. It is the shared merge path behind both the first-pass
+// advance (when no approval is required) and the post-approval resume (when a human approves
+// a parked candidate), so a rebase conflict or a re-gate failure is handled identically
+// whether the merge ran immediately or after approval. prov is the provenance to record on a
+// fast-forward (the parked/first-pass provenance); a rebase re-gate rebuilds it fresh from the
+// landed tree via reGate, which reads res for the prompt sha. It returns the merge sentinels
+// (errMergeConflictHandled / errMergeRegateRouted) when resolveConflict/route already disposed
+// of the issue, so callers stop without closing it again.
+func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, srcStage config.Stage, res core.Result, candidateRef string, prov core.Provenance) (bool, error) {
+	commit, err := o.merger.Merge(ctx, o.opts.Repo, candidateRef, prov, o.reGate(issue, srcStage, res))
+	if err != nil {
+		if errors.Is(err, errRebaseConflict) {
+			// The verified candidate cannot be cleanly rebased onto the current main tip:
+			// another branch landed first and they textually collide. Retrying the same
+			// candidate cannot help (the conflict is deterministic), so spawn a sandboxed
+			// conflict-resolution issue — a merge-resolver agent rebases the candidate onto
+			// main and resolves the conflicts, producing a new candidate that loops back
+			// through integrate, re-gated like any other (specs/integration.md step 2). The
+			// loop is bounded by the retry cap and budget; with no resolve stage configured
+			// it falls back to dead-lettering. resolveConflict closes (or blocks) this issue,
+			// so signal the caller to stop without closing it again.
+			if transient, rerr := o.resolveConflict(ctx, issue, res, "integrate: candidate conflicts with current main; rebase needs resolution"); rerr != nil {
+				return transient, rerr
+			}
+			return false, errMergeConflictHandled
+		}
+		if errors.Is(err, errReGateFailed) {
+			// The candidate rebased cleanly but the re-gate found the combined tree broken:
+			// two branches each green in isolation, broken together (specs/integration.md).
+			// Unlike a conflict this may pass against a different main, so route a fix issue
+			// through the normal retry/budget machinery rather than dead-lettering. route
+			// closes this issue and spawns the fix, so signal the caller to stop without
+			// closing it again.
+			if transient, rerr := o.route(ctx, issue, srcStage, res, "integrate: re-gate of rebased result failed"); rerr != nil {
+				return transient, rerr
+			}
+			return false, errMergeRegateRouted
+		}
+		return true, fmt.Errorf("merge candidate %s for issue %s: %w", candidateRef, issue.ID, err)
+	}
+	o.log.Info("orchestrator: merged to main", "issue", issue.ID, "ref", candidateRef, "commit", commit,
+		"soul", prov.Soul, "model", prov.Model, "prompt_sha", prov.PromptSHA, "verified", prov.Verified)
 	return false, nil
 }
 

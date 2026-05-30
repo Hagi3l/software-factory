@@ -8,6 +8,9 @@
 //	                     requirements wizard) via the single-writer beads path
 //	harness run        — run an in-process orchestrator + one runner over embedded
 //	                     NATS until interrupted; this is the spec -> merged-commit loop
+//	harness approve    — approve a parked integrate candidate (the trusted-dev / TCB-review
+//	harness reject       gate, T2.10); publishes the human's decision over NATS to the
+//	                     single-writer orchestrator. Needs `harness run --nats-addr`.
 //	harness serve      — start the control-room web server (the human's window); serves
 //	                     the embedded UI until interrupted
 //
@@ -48,6 +51,10 @@ func dispatch(args []string) int {
 		err = cmdSeed(rest)
 	case "run":
 		err = cmdRun(rest)
+	case "approve":
+		err = cmdApprove(rest)
+	case "reject":
+		err = cmdReject(rest)
 	case "serve":
 		err = cmdServe(rest)
 	case "version", "-v", "--version":
@@ -77,7 +84,9 @@ usage:
   harness validate [--config DIR] [--env ENV]
   harness seed     --title TITLE [--role ROLE] [--description TEXT] [--spec PATH]
                    [--config DIR] [--env ENV] [--repo DIR] [--bd PATH]
-  harness run      [--config DIR] [--env ENV] [--repo DIR] [--bd PATH]
+  harness run      [--config DIR] [--env ENV] [--repo DIR] [--bd PATH] [--serve-addr HOST:PORT] [--nats-addr HOST:PORT]
+  harness approve  [--nats URL] [--approver WHO] [--repo DIR] [--bd PATH] <issue>
+  harness reject   [--nats URL] [--approver WHO] [--repo DIR] [--bd PATH] <issue>
   harness serve    [--addr HOST:PORT]
   harness version
 
