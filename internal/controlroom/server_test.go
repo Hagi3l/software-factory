@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Loxstomper/harness/internal/controlroom/live"
 	"github.com/Loxstomper/harness/internal/controlroom/views"
 )
 
@@ -95,6 +96,65 @@ func TestNavRoutesResolve(t *testing.T) {
 		if !strings.Contains(r.body, `href="/static/app.css"`) {
 			t.Errorf("GET %s: not wrapped in the base layout", item.Href)
 		}
+	}
+}
+
+// TestActivityNotAttached proves the activity view degrades gracefully with no live
+// source (standalone `harness serve`): the page renders a notice (200, inside the
+// chrome) and the data fragment answers 503 — never a blank page or a hang.
+func TestActivityNotAttached(t *testing.T) {
+	s := New(Options{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	r := get(t, ts, "/activity")
+	if r.status != http.StatusOK {
+		t.Fatalf("/activity status = %d, want 200", r.status)
+	}
+	if !strings.Contains(r.body, "Not attached") {
+		t.Errorf("/activity missing not-attached notice, got: %s", r.body)
+	}
+	if !strings.Contains(r.body, `href="/static/app.css"`) {
+		t.Errorf("/activity not wrapped in the base layout")
+	}
+
+	frag := get(t, ts, "/activity/items")
+	if frag.status != http.StatusServiceUnavailable {
+		t.Errorf("/activity/items status = %d, want 503", frag.status)
+	}
+}
+
+// TestActivityRendersFeed proves the wired view renders the buffered events: the full
+// page carries both a coalesced token line and a discrete progress event with the agent
+// id, and the fragment endpoint returns just the rows (no page chrome) for the htmx swap.
+func TestActivityRendersFeed(t *testing.T) {
+	act := live.NewActivity(16)
+	act.Record("inv-7", []byte(`{"type":"progress","payload":{"msg":"author-tests started"}}`))
+	act.Record("inv-7", []byte(`{"type":"token","delta":"writing a test"}`))
+
+	s := New(Options{Activity: act})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	r := get(t, ts, "/activity")
+	if r.status != http.StatusOK {
+		t.Fatalf("/activity status = %d, want 200", r.status)
+	}
+	for _, want := range []string{"author-tests started", "writing a test", "inv-7"} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("/activity missing %q", want)
+		}
+	}
+
+	frag := get(t, ts, "/activity/items")
+	if frag.status != http.StatusOK {
+		t.Fatalf("/activity/items status = %d, want 200", frag.status)
+	}
+	if strings.Contains(strings.ToLower(frag.body), "<!doctype html>") {
+		t.Errorf("/activity/items should be a bare fragment, not a full page: %s", frag.body)
+	}
+	if !strings.Contains(frag.body, "writing a test") {
+		t.Errorf("/activity/items missing rendered event, got: %s", frag.body)
 	}
 }
 

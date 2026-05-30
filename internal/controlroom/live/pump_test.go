@@ -25,7 +25,8 @@ func TestAgentEventPump(t *testing.T) {
 	t.Cleanup(nc.Close)
 
 	hub := NewHub()
-	stop, err := StartAgentEventPump(nc, hub)
+	act := NewActivity(8)
+	stop, err := StartAgentEventPump(nc, hub, act)
 	if err != nil {
 		t.Fatalf("StartAgentEventPump: %v", err)
 	}
@@ -56,6 +57,17 @@ func TestAgentEventPump(t *testing.T) {
 	if string(got.Payload) != payload {
 		t.Fatalf("Payload = %q, want %q", string(got.Payload), payload)
 	}
+
+	// The same event is recorded into the activity buffer, labeled with the agent id
+	// recovered from the subject — so the pump feeds both the live nudge (hub) and the
+	// rendered feed (buffer) from one subscription.
+	rec := act.Recent()
+	if len(rec) != 1 {
+		t.Fatalf("activity entries = %d, want 1", len(rec))
+	}
+	if rec[0].AgentID != "inv-1" || rec[0].Kind != "token" || rec[0].Detail != "hi" {
+		t.Fatalf("activity entry = %+v, want inv-1 token 'hi'", rec[0])
+	}
 }
 
 // TestAgentEventPumpStopUnsubscribes confirms the stop func detaches the subscription:
@@ -73,7 +85,7 @@ func TestAgentEventPumpStopUnsubscribes(t *testing.T) {
 	t.Cleanup(nc.Close)
 
 	hub := NewHub()
-	stop, err := StartAgentEventPump(nc, hub)
+	stop, err := StartAgentEventPump(nc, hub, nil)
 	if err != nil {
 		t.Fatalf("StartAgentEventPump: %v", err)
 	}

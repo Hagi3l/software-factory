@@ -47,6 +47,7 @@ type Options struct {
 	Version    string
 	Logger     *slog.Logger
 	Events     *live.Hub
+	Activity   *live.Activity
 	Reader     *query.Reader
 	StageOrder []string
 }
@@ -59,6 +60,7 @@ type Server struct {
 	log        *slog.Logger
 	version    string
 	events     *live.Hub
+	activity   *live.Activity
 	reader     *query.Reader
 	stageOrder []string
 }
@@ -75,6 +77,7 @@ func New(opts Options) *Server {
 		log:        log,
 		version:    opts.Version,
 		events:     opts.Events,
+		activity:   opts.Activity,
 		reader:     opts.Reader,
 		stageOrder: opts.StageOrder,
 	}
@@ -107,14 +110,16 @@ func (s *Server) routes() {
 	})
 
 	// Data-backed views, registered before the placeholder loop claims their path.
-	s.mux.HandleFunc("GET /board", s.handleBoard)             // T4.4 — kanban over beads
-	s.mux.HandleFunc("GET /board/cards", s.handleBoardCards)  // the htmx/SSE live fragment
+	s.mux.HandleFunc("GET /board", s.handleBoard)            // T4.4 — kanban over beads
+	s.mux.HandleFunc("GET /board/cards", s.handleBoardCards) // the htmx/SSE live fragment
+	s.mux.HandleFunc("GET /activity", s.handleActivity)      // T4.5 — live agent feed
+	s.mux.HandleFunc("GET /activity/items", s.handleActivityItems)
 
 	// Every remaining navigation destination resolves to a placeholder until its
 	// data-backed view lands; registering them from views.NavItems keeps the navigation
 	// and the routes a single source of truth. `implemented` excludes the views wired
 	// above so the mux is not asked to register a duplicate pattern.
-	implemented := map[string]bool{"board": true}
+	implemented := map[string]bool{"board": true, "activity": true}
 	for _, item := range views.NavItems {
 		if implemented[item.Key] {
 			continue
@@ -196,6 +201,25 @@ func (s *Server) handleBoardCards(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, views.BoardColumns(board))
+}
+
+// handleActivity renders the full activity-feed page. Answers a friendly notice when
+// no activity buffer is wired (standalone `harness serve` with no live source).
+func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
+	if s.activity == nil {
+		s.render(w, r, views.ActivityMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to see live agent activity."))
+		return
+	}
+	s.render(w, r, views.ActivityPage(s.activity.Recent()))
+}
+
+// handleActivityItems renders just the feed rows fragment for htmx/SSE refresh.
+func (s *Server) handleActivityItems(w http.ResponseWriter, r *http.Request) {
+	if s.activity == nil {
+		http.Error(w, "activity unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+	s.render(w, r, views.ActivityList(s.activity.Recent()))
 }
 
 // Handler exposes the routed mux for embedding (e.g. behind middleware) and for httptest.

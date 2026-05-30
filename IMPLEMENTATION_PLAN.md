@@ -210,11 +210,35 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   not precisely on a stage transition — adequate (throttle + backstop converge it), but a dedicated
   orchestrator-emitted issue-state event (the single writer) would be crisper; filed as a future
   refinement, not blocking. (needs T4.2, T4.3) ([control-room.md](specs/control-room.md))
-- [ ] **T4.5 Activity feed** — `harness.agent.<id>.events` streamed to the browser (what agents are
-  doing right now). The substrate is live: subscribe the feed element to `GET /events` (`hx-ext="sse"
-  sse-connect="/events"`) and `sse-swap="agent-event"`. The `agent-event` data is JSON
-  (`live.AgentEvent{agentId,payload}`), so either render server-side fragments the pump emits, or have
-  this view's element fetch/format — decide here. (needs T4.3) ([control-room.md](specs/control-room.md))
+- [x] **T4.5 Activity feed** — *done.* "What agents are doing right now," server-rendered (templ) and
+  live via the T4.3 SSE substrate. **Decision (the one T4.5 left open): server-render + htmx re-fetch,
+  *not* `sse-swap`.** The raw `agent-event` SSE payload is JSON (`live.AgentEvent`), and the runner's
+  per-token stream (`{"type":"token","delta":…}`) is a firehose — neither is swappable into the DOM as
+  readable rows. So, mirroring the Board exactly, the feed element re-fetches a server-rendered fragment
+  on the SSE nudge: `<div hx-ext="sse" sse-connect="/events">` wraps `#activity` with
+  `hx-get="/activity/items" hx-trigger="sse:agent-event throttle:1s, every 10s" hx-swap="innerHTML"`
+  (tighter throttle than the Board since this *is* the live view; slow backstop converges a settled
+  feed). **New buffer:** `live.Activity` (in `live`, no view/templ coupling) — a bounded, mutex-guarded,
+  newest-first ring the existing pump now feeds. It **coalesces consecutive token deltas from the same
+  agent into one rolling line** (collapsing the per-token firehose into ~one entry per model turn,
+  rune-bounded to ~280) and renders discrete progress/log events as their own rows (summary = a
+  top-level `msg`/`message`/`text` field if present, else compact payload JSON, truncated). It is
+  in-memory + best-effort by design (durable record is the artifact-store transcript), so a restart
+  losing live entries is harmless. **Pump change:** `StartAgentEventPump(nc, hub, *Activity)` — the
+  pump records into the buffer (when non-nil) *and* broadcasts to the hub; `run --serve-addr` builds a
+  `NewActivity(200)` alongside the hub and passes both. **Server:** `Options.Activity *live.Activity`;
+  real `/activity` + `/activity/items` handlers (added to the `implemented` set); nil activity
+  (standalone `harness serve`) renders a "not attached" notice page (200, like the Board) and 503s the
+  fragment. **views:** `ActivityPage`/`ActivityList`/`activityRow` + `ActivityMessage`, with
+  `activityTime`/`activityKindClass` helpers in `views/activity.go`. Tested: token coalescing
+  (same-agent folds, cross-agent splits, discrete event breaks a token run), payload summary
+  (msg-field vs compact-JSON fallback), newest-first + monotonic Seq ordering, max-bound eviction,
+  rolling-text bound, malformed-drop, concurrent `Record` (`-race`); pump integration asserts the event
+  lands in both hub and buffer; server handlers (notice/503/render/fragment-has-no-chrome). **Known
+  coarseness (shared with the Board):** the live trigger is `agent-event` (per-invocation progress),
+  not a precise lifecycle event; throttle + backstop converge it. A future orchestrator-emitted
+  issue/turn-lifecycle event would let the feed show crisp stage transitions. (needs T4.3)
+  ([control-room.md](specs/control-room.md))
 - [ ] **T4.6 DAG view** — the issue dependency graph rendered server-side to SVG (Go → DOT/d2), hover/drill via Alpine + htmx. No client-side graph lib. (needs T4.2) ([control-room.md](specs/control-room.md))
 - [ ] **T4.7 Issue / invocation detail** — Brief, transcript, candidate diff, gate evidence, budget, retries, from beads + the artifact store. (needs T4.2) ([control-room.md](specs/control-room.md))
 - [ ] **T4.8 Dead-letter queue view** — the escalations needing a human; the primary action surface; links into Resolve (T4.15). (needs T4.2) ([control-room.md](specs/control-room.md), [workflow.md](specs/workflow.md))

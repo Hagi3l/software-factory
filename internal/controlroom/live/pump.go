@@ -21,18 +21,25 @@ type AgentEvent struct {
 // StartAgentEventPump bridges NATS to the browser: it subscribes once to every
 // invocation's core-NATS event subject (the wildcard) and broadcasts each message into
 // the hub as an "agent-event" SSE event, which the hub fans out to all connected
-// clients. This is the only piece of the substrate that touches NATS; it returns a stop
-// func that unsubscribes (wire it into the run loop's teardown).
+// clients. When act is non-nil it also records each event into the activity-feed buffer
+// (the T4.5 view reads that buffer to render the feed; the hub broadcast is the live
+// nudge that triggers the re-fetch). This is the only piece of the substrate that
+// touches NATS; it returns a stop func that unsubscribes (wire it into the run loop's
+// teardown).
 //
 // Everything here is best-effort, matching the fire-and-forget agent events it tails: a
 // payload that is not valid JSON is dropped (the broker only ever publishes JSON, so
 // this is a guard, not a path), and a stalled browser is dropped by the hub. Losing a
 // live event is harmless (specs/messaging.md); the durable record is the artifact-store
 // transcript, not this stream.
-func StartAgentEventPump(nc *nats.Conn, h *Hub) (func(), error) {
+func StartAgentEventPump(nc *nats.Conn, h *Hub, act *Activity) (func(), error) {
 	sub, err := nc.Subscribe(messaging.AgentEventsWildcard, func(msg *nats.Msg) {
+		agentID := messaging.AgentIDFromEventSubject(msg.Subject)
+		if act != nil && agentID != "" {
+			act.Record(agentID, msg.Data)
+		}
 		env := AgentEvent{
-			AgentID: messaging.AgentIDFromEventSubject(msg.Subject),
+			AgentID: agentID,
 			Payload: json.RawMessage(msg.Data),
 		}
 		data, err := json.Marshal(env)

@@ -1,0 +1,85 @@
+package views
+
+import "github.com/Loxstomper/harness/internal/controlroom/live"
+
+// ActivityPage renders the live activity feed inside the standard layout. The feed is
+// "what agents are doing right now" (specs/control-room.md, T4.5): each streamed model
+// turn coalesced into one rolling line, plus discrete progress/log events, newest
+// first. It refreshes over the T4.3 SSE substrate — an agent-event nudges an htmx
+// refetch of just the list (throttled, since this is the live view), with a slow
+// periodic backstop so a settled feed still converges when the event stream goes idle.
+// The initial rows render inline so the page shows data before htmx attaches.
+templ ActivityPage(entries []live.Entry) {
+	@Layout("Harness — Activity", "activity") {
+		<div class="space-y-4">
+			<div class="flex items-baseline justify-between">
+				<h1 class="text-xl font-semibold tracking-tight">Activity</h1>
+				<span class="text-sm text-slate-500">live</span>
+			</div>
+			<div hx-ext="sse" sse-connect="/events">
+				<div
+					id="activity"
+					hx-get="/activity/items"
+					hx-trigger="sse:agent-event throttle:1s, every 10s"
+					hx-swap="innerHTML"
+				>
+					@ActivityList(entries)
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// ActivityList renders just the feed rows. It is both embedded in ActivityPage for the
+// initial paint and returned bare from GET /activity/items as the htmx swap target, so
+// the live refresh replaces only the rows, never the chrome.
+templ ActivityList(entries []live.Entry) {
+	if len(entries) == 0 {
+		<p class="text-sm text-slate-400">No activity yet.</p>
+	} else {
+		<ul class="flex flex-col gap-1">
+			for _, e := range entries {
+				@activityRow(e)
+			}
+		</ul>
+	}
+}
+
+// activityRow renders one activity entry: time, kind badge, agent id, and detail.
+templ activityRow(e live.Entry) {
+	<li class="flex items-start gap-3 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2">
+		<span class="shrink-0 font-mono text-xs tabular-nums text-slate-500">{ activityTime(e.At) }</span>
+		@activityBadge(e.Kind)
+		<span class="shrink-0 font-mono text-xs text-slate-400">{ e.AgentID }</span>
+		<span class="whitespace-pre-wrap break-all text-sm text-slate-200">{ e.Detail }</span>
+	</li>
+}
+
+// activityBadge tints an event kind so the feed reads at a glance. The class literals
+// are kept inline (a templ switch, not a Go helper) so the Tailwind scanner — which
+// globs *.templ / *_templ.go — actually sees them, the same reason board.go's
+// statusBadge is a switch.
+templ activityBadge(kind string) {
+	switch kind {
+		case "token":
+			<span class="shrink-0 rounded-full bg-indigo-500/20 px-2 py-0.5 text-xs text-indigo-300">{ kind }</span>
+		case "progress":
+			<span class="shrink-0 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300">{ kind }</span>
+		case "log":
+			<span class="shrink-0 rounded-full bg-sky-500/20 px-2 py-0.5 text-xs text-sky-300">{ kind }</span>
+		default:
+			<span class="shrink-0 rounded-full bg-slate-700/40 px-2 py-0.5 text-xs text-slate-300">{ kind }</span>
+	}
+}
+
+// ActivityMessage renders the activity chrome with a single notice instead of the feed —
+// used when the control room is not attached to a running factory (a standalone `harness
+// serve` has no NATS to tail, so there is no live source).
+templ ActivityMessage(msg string) {
+	@Layout("Harness — Activity", "activity") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">Activity</h1>
+			<p class="mt-2 text-slate-400">{ msg }</p>
+		</div>
+	}
+}

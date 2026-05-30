@@ -197,7 +197,8 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	var server *controlroom.Server
 	if opts.serveAddr != "" {
 		hub := live.NewHub()
-		pumpStop, perr := live.StartAgentEventPump(nc, hub)
+		activity := live.NewActivity(200)
+		pumpStop, perr := live.StartAgentEventPump(nc, hub, activity)
 		if perr != nil {
 			return nil, perr
 		}
@@ -211,6 +212,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			Version:    version,
 			Logger:     log,
 			Events:     hub,
+			Activity:   activity,
 			Reader:     reader,
 			StageOrder: pipelineRoles(cfg),
 		})
