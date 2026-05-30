@@ -139,21 +139,53 @@ func orderedStages(stageOrder []string, byStage map[string][]IssueCard) []string
 	return out
 }
 
+// DeadLetter is the dead-letter queue's projection of a blocked issue — one escalation a
+// human must triage, the control room's action surface. Beyond the board card's identity
+// fields it surfaces the cumulative budget burn (SpentTokens/SpentUSD) and the retry
+// generation (Attempt), because the two non-escalation dead-letter causes are exactly a
+// budget breach and an exhausted retry cap (specs/workflow.md) — so a glance at spend and
+// attempt tells the human *why* the work is stuck without opening it. Spec is the path the
+// human refines to resolve it (the human re-entry invariant: stuck work is fixed by
+// refining the spec, never by editing code — specs/specs-process.md). The full forensic
+// trail (transcript, gate evidence, provenance) lives on the issue-detail page (T4.7) each
+// entry links into. The dead-letter *reason* is deliberately not synthesized here: it is
+// not recorded as a first-class field on the issue (the orchestrator only flips the status
+// to blocked), so inferring it would mean guessing against policy caps — the honest move is
+// to show the evidence (spend, attempt, spec) and let the detail page carry the rest.
+type DeadLetter struct {
+	ID          string
+	Title       string
+	Role        string
+	Spec        string
+	Attempt     int
+	SpentTokens int
+	SpentUSD    float64
+}
+
 // DeadLetters returns the blocked issues — the escalations awaiting a human, the control
 // room's primary action surface (specs/control-room.md, specs/workflow.md). They are the
-// blocked beads status: work the orchestrator dead-lettered on a budget breach or a
-// needs-spec-clarification escalation.
-func (r *Reader) DeadLetters(ctx context.Context) ([]IssueCard, error) {
+// blocked beads status: work the orchestrator dead-lettered on a budget breach, an
+// exhausted retry cap, or a needs-spec-clarification escalation. Ordered by id for a
+// stable render.
+func (r *Reader) DeadLetters(ctx context.Context) ([]DeadLetter, error) {
 	issues, err := r.issues.List(ctx, "blocked")
 	if err != nil {
 		return nil, fmt.Errorf("query: dead-letters: %w", err)
 	}
-	cards := make([]IssueCard, 0, len(issues))
+	dls := make([]DeadLetter, 0, len(issues))
 	for _, i := range issues {
-		cards = append(cards, cardOf(i))
+		dls = append(dls, DeadLetter{
+			ID:          i.ID,
+			Title:       i.Title,
+			Role:        i.Role,
+			Spec:        i.Spec,
+			Attempt:     i.Attempt,
+			SpentTokens: i.SpentTokens,
+			SpentUSD:    i.SpentUSD,
+		})
 	}
-	sort.Slice(cards, func(a, b int) bool { return cards[a].ID < cards[b].ID })
-	return cards, nil
+	sort.Slice(dls, func(a, b int) bool { return dls[a].ID < dls[b].ID })
+	return dls, nil
 }
 
 // ArtifactLink is a named, content-addressed evidence pointer for the issue-detail view —

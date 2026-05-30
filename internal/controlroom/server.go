@@ -117,12 +117,14 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /activity/items", s.handleActivityItems)
 	s.mux.HandleFunc("GET /issue/{id}", s.handleIssue)         // T4.7 — issue / invocation detail
 	s.mux.HandleFunc("GET /artifact/{hash}", s.handleArtifact) // raw evidence content (untrusted)
+	s.mux.HandleFunc("GET /dlq", s.handleDLQ)                  // T4.8 — dead-letter queue (action surface)
+	s.mux.HandleFunc("GET /dlq/items", s.handleDLQItems)       // the htmx/SSE live fragment
 
 	// Every remaining navigation destination resolves to a placeholder until its
 	// data-backed view lands; registering them from views.NavItems keeps the navigation
 	// and the routes a single source of truth. `implemented` excludes the views wired
 	// above so the mux is not asked to register a duplicate pattern.
-	implemented := map[string]bool{"board": true, "activity": true}
+	implemented := map[string]bool{"board": true, "activity": true, "dlq": true}
 	for _, item := range views.NavItems {
 		if implemented[item.Key] {
 			continue
@@ -270,6 +272,44 @@ func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, rc); err != nil {
 		s.log.Debug("controlroom: artifact stream interrupted", "hash", hash, "err", err)
 	}
+}
+
+// handleDLQ renders the full dead-letter queue page (T4.8) — the escalations awaiting a
+// human, the control room's primary action surface. With no read model wired (standalone
+// `harness serve`) it shows a "not attached" notice rather than an empty queue; a read
+// error renders the same chrome with the reason so the page never 500s blank, mirroring the
+// board. The live list refreshes itself from handleDLQItems over SSE.
+func (s *Server) handleDLQ(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		s.render(w, r, views.DeadLetterMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to see escalations."))
+		return
+	}
+	items, err := s.reader.DeadLetters(r.Context())
+	if err != nil {
+		s.log.Error("controlroom: dlq read failed", "err", err)
+		s.render(w, r, views.DeadLetterMessage("Could not load the dead-letter queue: "+err.Error()))
+		return
+	}
+	s.render(w, r, views.DeadLetterPage(items))
+}
+
+// handleDLQItems returns just the queue-list fragment — the htmx swap target the DLQ page
+// re-fetches on an SSE signal (throttled) and a periodic backstop. It is a data endpoint,
+// so with no read model it answers 503 (it is never wired without one), and a read error is
+// a 500: htmx leaves the last good list in place rather than swapping in an error, so the
+// live queue degrades to "stale" not "broken".
+func (s *Server) handleDLQItems(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		http.Error(w, "dlq unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+	items, err := s.reader.DeadLetters(r.Context())
+	if err != nil {
+		s.log.Error("controlroom: dlq fragment read failed", "err", err)
+		http.Error(w, "could not refresh the dead-letter queue\n", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, views.DeadLetterList(items))
 }
 
 // Handler exposes the routed mux for embedding (e.g. behind middleware) and for httptest.

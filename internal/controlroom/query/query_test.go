@@ -91,7 +91,7 @@ func TestBoardGroupsByStageInOrder(t *testing.T) {
 		{ID: "h-1", Role: "implement", Status: "open"},
 		{ID: "h-2", Role: "qa", Status: "open"},
 		{ID: "h-4", Role: "weird", Status: "open"}, // present but not in stageOrder
-		{ID: "h-5", Role: "", Status: "open"},       // unassigned
+		{ID: "h-5", Role: "", Status: "open"},      // unassigned
 	}}
 	r := NewReader(issues, &fakeArts{}, &fakeProv{})
 
@@ -139,6 +139,36 @@ func TestDeadLettersReturnsBlocked(t *testing.T) {
 	}
 	if len(dl) != 2 || dl[0].ID != "h-1" || dl[1].ID != "h-2" {
 		t.Errorf("dead letters = %+v, want blocked issues h-1,h-2 sorted", dl)
+	}
+}
+
+// TestDeadLettersCarriesTriageFields proves the DLQ projection surfaces the spend and
+// retry generation a human triages on — a budget breach and an exhausted retry cap are the
+// two non-escalation dead-letter causes, so spend/attempt must ride through verbatim from
+// the issue, not be dropped to the bare card.
+func TestDeadLettersCarriesTriageFields(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{
+		{ID: "h-1", Title: "burned budget", Status: "blocked", Role: "implement",
+			Spec: "specs/orders.md", Attempt: 3, SpentTokens: 120_000, SpentUSD: 1.2345},
+	}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+	dl, err := r.DeadLetters(context.Background())
+	if err != nil {
+		t.Fatalf("DeadLetters: %v", err)
+	}
+	want := []DeadLetter{{
+		ID: "h-1", Title: "burned budget", Role: "implement", Spec: "specs/orders.md",
+		Attempt: 3, SpentTokens: 120_000, SpentUSD: 1.2345,
+	}}
+	if !reflect.DeepEqual(dl, want) {
+		t.Errorf("dead letter =\n%+v\nwant\n%+v", dl, want)
+	}
+}
+
+func TestDeadLettersListError(t *testing.T) {
+	r := NewReader(&fakeIssues{listErr: errors.New("bd down")}, &fakeArts{}, &fakeProv{})
+	if _, err := r.DeadLetters(context.Background()); err == nil {
+		t.Fatal("DeadLetters swallowed a List error")
 	}
 }
 

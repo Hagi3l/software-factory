@@ -273,7 +273,32 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   commit hash; thread the commit through (or add a `DiffByIssue`) and render it. (a) touches the trailer
   format (mild TCB-adjacent, human-reviewed); (b) is pure read-side git. (needs T4.7)
   ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md), [security.md](specs/security.md))
-- [ ] **T4.8 Dead-letter queue view** — the escalations needing a human; the primary action surface; links into Resolve (T4.15). (needs T4.2) ([control-room.md](specs/control-room.md), [workflow.md](specs/workflow.md))
+- [x] **T4.8 Dead-letter queue view** — *done.* The escalations awaiting a human — the control room's
+  primary *action* surface — server-rendered (templ) and live over the T4.3 SSE substrate, mirroring the
+  Board/Activity two-handler pattern exactly. **Query enrichment:** `DeadLetters` now returns a dedicated
+  `query.DeadLetter` projection (was the bare `IssueCard`) carrying the triage signals a human acts on —
+  **cumulative spend (`SpentTokens`/`SpentUSD`) and retry generation (`Attempt`)** alongside id/title/role/spec
+  — because a budget breach and an exhausted retry cap are the two non-escalation dead-letter causes
+  (workflow.md), so a glance at spend+attempt tells the human *why* the work is stuck without opening it. The
+  dead-letter **reason is deliberately not synthesized**: it is not a first-class field on the issue (the
+  orchestrator only flips status→blocked), so inferring it would mean guessing against policy caps — the honest
+  move is to show the evidence (spend/attempt/spec) and let the detail page carry the rest. **views:**
+  `DeadLetterPage`/`DeadLetterList`/`deadLetterRow` + `DeadLetterMessage` in `views/dlq.templ`; each row is a
+  rose-tinted whole-card `<a href="/issue/{id}">` drill-through into the T4.7 detail view (triage at a glance →
+  forensic snapshot); an **empty queue renders as reassurance** ("Nothing needs a human"), the *good* state, not
+  an error. Reuses `formatUSD` from `views/issue.go`. **Live refresh:** the list sits in
+  `<div hx-ext="sse" sse-connect="/events">` and re-fetches the bare `GET /dlq/items` fragment on
+  `hx-trigger="sse:agent-event throttle:2s, every 15s"` (board cadence — the DLQ changes less often than the feed),
+  so a settled run that just dead-lettered an issue surfaces it without a manual refresh. **Server:** real
+  `/dlq` + `/dlq/items` handlers added to the `implemented` set ahead of the nav-placeholder loop; nil reader
+  (standalone `harness serve`) renders the not-attached notice (200, like the board) and 503s the fragment; a
+  read error renders in-chrome rather than a blank 500. No cmd wiring needed — the Reader was already passed to
+  the server in T4.4; the `dlq` nav item already existed in `views.NavItems`. Tested (query + server):
+  blocked-only filtering, triage fields threaded verbatim (spend/attempt/spec), List-error surfaced, page render
+  (cards + spend + attempt + spec + detail links + SSE wiring), bare-fragment shape, empty-state reassurance,
+  no-reader notice/503. **Resolve (T4.15) is deferred** (needs the wizard, T4.12/T4.14, which need a capable
+  model at runtime); until then the DLQ is the read surface that surfaces *what* needs a human, drilling into
+  the detail page. (needs T4.2) ([control-room.md](specs/control-room.md), [workflow.md](specs/workflow.md))
 - [ ] **T4.9 OTel spans + export** — emit spans at the broker, orchestrator, and runner (boot, llm-turn, tool-call, gate-run) and metrics (latency, throughput, cost); export to a trace backend (Tempo/Jaeger). ([observability.md](specs/observability.md))
 - [ ] **T4.10 Budgets + Provenance views** — budgets (token/$/wall burn vs. caps) from OTel metrics; provenance (trace a merged commit → issue → soul → model → prompt → evidence). (needs T4.2, T4.9) ([control-room.md](specs/control-room.md))
 - [ ] **T4.11 Replay** — reconstruct an invocation's full decision trail from the broker-captured transcript + the artifact store, live or after the fact. (needs T4.7) ([observability.md](specs/observability.md))

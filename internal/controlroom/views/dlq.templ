@@ -1,0 +1,108 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/Loxstomper/harness/internal/controlroom/query"
+)
+
+// DeadLetterPage is the dead-letter queue (specs/control-room.md, T4.8): the escalations
+// awaiting a human — work the factory dead-lettered on a budget breach, an exhausted retry
+// cap, or an escalation it cannot resolve (specs/workflow.md). It is the control room's
+// primary *action* surface: per the human re-entry invariant, stuck work is resolved by
+// refining the governing spec (never by editing code — specs/specs-process.md), so each
+// entry links into the issue-detail page (T4.7) where the brief, spend, and evidence the
+// human triages on live. Resolve mode (T4.15) — the wizard pre-loaded from an entry — is a
+// later task; until then the DLQ is the read surface that surfaces *what* needs a human.
+//
+// Like the board and the feed it is live over the T4.3 SSE substrate: an agent-event nudges
+// an htmx refetch of just the list (throttled), with a slow periodic backstop so the queue
+// still converges when the event stream is idle — a settled run that just dead-lettered an
+// issue must surface it without a manual refresh. The initial list renders inline so the
+// page shows data before htmx attaches.
+templ DeadLetterPage(items []query.DeadLetter) {
+	@Layout("Harness — Dead-letter", "dlq") {
+		<div class="space-y-4">
+			<div class="flex items-baseline justify-between">
+				<h1 class="text-xl font-semibold tracking-tight">Dead-letter queue</h1>
+				<span class="text-sm text-slate-500">{ strconv.Itoa(len(items)) } awaiting a human</span>
+			</div>
+			<p class="max-w-3xl text-sm text-slate-500">
+				Work the factory dead-lettered — budget or retries exhausted, or an escalation it could not resolve. A human triages each by refining the governing spec, never by editing code.
+			</p>
+			<div hx-ext="sse" sse-connect="/events">
+				<div
+					id="dlq"
+					hx-get="/dlq/items"
+					hx-trigger="sse:agent-event throttle:2s, every 15s"
+					hx-swap="innerHTML"
+				>
+					@DeadLetterList(items)
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// DeadLetterList renders just the queue entries. It is both embedded in DeadLetterPage for
+// the initial paint and returned bare from GET /dlq/items as the htmx swap target, so the
+// live refresh replaces only the list, never the chrome. An empty queue is the *good*
+// state — nothing needs a human — so it reads as reassurance, not an error.
+templ DeadLetterList(items []query.DeadLetter) {
+	if len(items) == 0 {
+		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-6 text-center">
+			<p class="text-sm text-slate-300">Nothing needs a human.</p>
+			<p class="mt-1 text-xs text-slate-500">No work has dead-lettered — the queue is empty.</p>
+		</div>
+	} else {
+		<ul class="flex flex-col gap-2">
+			for _, dl := range items {
+				@deadLetterRow(dl)
+			}
+		</ul>
+	}
+}
+
+// deadLetterRow is one escalation. The whole row is a click-through into the issue/
+// invocation detail view (T4.7) — the DLQ's role is triage at a glance, the detail page is
+// where a human reads the brief, evidence, and provenance before refining the spec. It is
+// tinted rose to read as "needs attention" the moment the eye lands on it. The spend and
+// attempt are shown inline because they are the two non-escalation dead-letter causes
+// (budget breach, exhausted retry cap), so they tell the human the likely reason without a
+// drill-down.
+templ deadLetterRow(dl query.DeadLetter) {
+	<li>
+		<a
+			href={ templ.URL("/issue/" + dl.ID) }
+			class="block rounded-md border border-rose-900/50 bg-rose-950/20 p-3 transition hover:border-rose-700 hover:bg-rose-950/40"
+		>
+			<div class="flex items-center justify-between gap-2">
+				<span class="font-mono text-xs text-slate-500">{ dl.ID }</span>
+				<span class="rounded bg-rose-500/20 px-1.5 py-0.5 text-xs text-rose-300">blocked</span>
+			</div>
+			<p class="mt-1 text-sm text-slate-100">{ dl.Title }</p>
+			<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+				if dl.Role != "" {
+					<span>{ dl.Role }</span>
+				}
+				if dl.Spec != "" {
+					<span class="font-mono text-slate-500">{ dl.Spec }</span>
+				}
+				<span class="text-amber-400">attempt { strconv.Itoa(dl.Attempt) }</span>
+				<span>{ strconv.Itoa(dl.SpentTokens) } tokens · { formatUSD(dl.SpentUSD) }</span>
+			</div>
+		</a>
+	</li>
+}
+
+// DeadLetterMessage renders the DLQ chrome with a single notice instead of the queue —
+// used when the control room is not attached to a running factory (a standalone `harness
+// serve` has no beads to read) or when the queue read fails.
+templ DeadLetterMessage(msg string) {
+	@Layout("Harness — Dead-letter", "dlq") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">Dead-letter queue</h1>
+			<p class="mt-2 text-slate-400">{ msg }</p>
+		</div>
+	}
+}
