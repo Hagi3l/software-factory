@@ -1,0 +1,184 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/Loxstomper/harness/internal/controlroom/query"
+)
+
+// BudgetsPage is the budgets view (specs/control-room.md, T4.10): token / $ / wall-clock burn
+// vs. caps, per epic and per issue. The numbers are beads' stamped cumulative + marginal
+// spend — the very quantities the orchestrator enforces the termination-guarantee budgets on
+// (specs/workflow.md) — so the view is self-contained and exact, not a query against the OTel
+// metric backend (that backend is the buy/Grafana cost-over-time surface; specs/observability.md
+// "build vs buy"). A breach (burn over a configured cap, or attempts at the retry cap) is one
+// of the two non-escalation dead-letter causes, so the meters tint rose at a breach to point a
+// human at *why* work stalled before they open the DLQ.
+//
+// Like the board and DLQ it is live over the T4.3 SSE substrate: spend changes as invocations
+// complete, so an agent-event nudges an htmx refetch of just the tables (throttled), with a
+// slow periodic backstop so a settled run still converges. The initial body renders inline so
+// the page shows data before htmx attaches.
+templ BudgetsPage(b query.Budgets) {
+	@Layout("Harness — Budgets", "budgets") {
+		<div class="space-y-6">
+			<div class="flex items-baseline justify-between gap-4">
+				<h1 class="text-xl font-semibold tracking-tight">Budgets</h1>
+				<span class="text-xs text-slate-500">{ capsSummary(b.Caps) }</span>
+			</div>
+			<p class="max-w-3xl text-sm text-slate-500">
+				Token, dollar, and wall-clock burn against the configured caps — the termination guarantee that bounds the on_failure loop. Burn is the spend stamped on beads, the same number the orchestrator enforces budgets on. A rose meter is a breach.
+			</p>
+			<div hx-ext="sse" sse-connect="/events">
+				<div
+					id="budgets"
+					hx-get="/budgets/items"
+					hx-trigger="sse:agent-event throttle:2s, every 15s"
+					hx-swap="innerHTML"
+				>
+					@BudgetsBody(b)
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// BudgetsBody is the live fragment: the epic and issue tables. It is embedded in BudgetsPage
+// for the initial paint and returned bare from GET /budgets/items as the htmx swap target, so
+// the refresh replaces only the data, never the chrome.
+templ BudgetsBody(b query.Budgets) {
+	<div class="space-y-6">
+		@epicBudgets(b.Epics)
+		@issueBudgets(b.Issues)
+	</div>
+}
+
+templ epicBudgets(epics []query.EpicBudgetRow) {
+	<section class="space-y-2">
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Epics</h2>
+		if len(epics) == 0 {
+			<p class="text-sm text-slate-500">No epics yet.</p>
+		} else {
+			<div class="overflow-x-auto rounded-lg border border-slate-800">
+				<table class="min-w-full divide-y divide-slate-800 text-sm">
+					<thead class="bg-slate-900/60 text-left text-xs uppercase tracking-wide text-slate-500">
+						<tr>
+							<th class="px-3 py-2 font-medium">Epic</th>
+							<th class="px-3 py-2 font-medium">Issues</th>
+							<th class="px-3 py-2 font-medium">Tokens</th>
+							<th class="px-3 py-2 font-medium">Spend</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-800/60">
+						for _, e := range epics {
+							@epicBudgetRow(e)
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</section>
+}
+
+templ epicBudgetRow(e query.EpicBudgetRow) {
+	<tr class="hover:bg-slate-900/40">
+		<td class="px-3 py-2 font-mono text-xs text-slate-300">{ e.EpicID }</td>
+		<td class="px-3 py-2 text-slate-400">{ strconv.Itoa(e.Issues) }</td>
+		<td class="px-3 py-2 whitespace-nowrap">
+			<span class="text-slate-200">{ formatTokens(e.Tokens) }</span>
+			<span class="text-slate-600">/ { capTokens(e.TokenCap) }</span>
+			@budgetPct(e.TokenPct, e.TokenOver, e.TokenCap > 0)
+		</td>
+		<td class="px-3 py-2 whitespace-nowrap">
+			<span class="text-slate-200">{ formatUSD(e.USD) }</span>
+			<span class="text-slate-600">/ { capUSD(e.USDCap) }</span>
+			@budgetPct(e.USDPct, e.USDOver, e.USDCap > 0)
+		</td>
+	</tr>
+}
+
+templ issueBudgets(issues []query.IssueBudgetRow) {
+	<section class="space-y-2">
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Issues</h2>
+		if len(issues) == 0 {
+			<p class="text-sm text-slate-500">No issues yet.</p>
+		} else {
+			<div class="overflow-x-auto rounded-lg border border-slate-800">
+				<table class="min-w-full divide-y divide-slate-800 text-sm">
+					<thead class="bg-slate-900/60 text-left text-xs uppercase tracking-wide text-slate-500">
+						<tr>
+							<th class="px-3 py-2 font-medium">Issue</th>
+							<th class="px-3 py-2 font-medium">Role</th>
+							<th class="px-3 py-2 font-medium">Retries</th>
+							<th class="px-3 py-2 font-medium">Tokens</th>
+							<th class="px-3 py-2 font-medium">Spend</th>
+							<th class="px-3 py-2 font-medium">Wall</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-slate-800/60">
+						for _, i := range issues {
+							@issueBudgetRow(i)
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+	</section>
+}
+
+templ issueBudgetRow(i query.IssueBudgetRow) {
+	<tr class="hover:bg-slate-900/40">
+		<td class="px-3 py-2">
+			<a href={ templ.URL("/issue/" + i.ID) } class="font-mono text-xs text-sky-300 hover:underline">{ i.ID }</a>
+		</td>
+		<td class="px-3 py-2 text-slate-400">{ orDash(i.Role) }</td>
+		<td class="px-3 py-2 whitespace-nowrap">
+			<span class="text-slate-200">{ strconv.Itoa(i.Attempt) }</span>
+			<span class="text-slate-600">/ { capRetries(i.MaxRetries) }</span>
+			@budgetPct(i.RetryPct, i.RetryOver, i.MaxRetries > 0)
+		</td>
+		<td class="px-3 py-2 whitespace-nowrap">
+			<span class="text-slate-200">{ formatTokens(i.Tokens) }</span>
+			<span class="text-slate-600">/ { capTokens(i.TokenCap) }</span>
+			@budgetPct(i.TokenPct, i.TokenOver, i.TokenCap > 0)
+		</td>
+		<td class="px-3 py-2 whitespace-nowrap">
+			<span class="text-slate-200">{ formatUSD(i.USD) }</span>
+			<span class="text-slate-600">/ { capUSD(i.USDCap) }</span>
+			@budgetPct(i.USDPct, i.USDOver, i.USDCap > 0)
+		</td>
+		<td class="px-3 py-2 whitespace-nowrap">
+			<span class="text-slate-200">{ formatDuration(i.Wall) }</span>
+			<span class="text-slate-600">/ { capDur(i.WallCap) }</span>
+			@budgetPct(i.WallPct, i.WallOver, i.WallCap > 0)
+		</td>
+	</tr>
+}
+
+// budgetPct is the per-dimension burn badge. An uncapped dimension shows nothing (a percent
+// of no cap is meaningless); a breach is rose, near-cap (≥80%) amber, otherwise emerald — the
+// tinting that turns a wall of numbers into a glanceable "what's stalled" signal. The class
+// literals live here (a templ switch) so the Tailwind scanner compiles them.
+templ budgetPct(pct int, over bool, capped bool) {
+	if capped {
+		if over {
+			<span class="ml-1 rounded bg-rose-500/20 px-1.5 py-0.5 text-xs text-rose-300">{ strconv.Itoa(pct) }%</span>
+		} else if pct >= 80 {
+			<span class="ml-1 rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-300">{ strconv.Itoa(pct) }%</span>
+		} else {
+			<span class="ml-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-300">{ strconv.Itoa(pct) }%</span>
+		}
+	}
+}
+
+// BudgetsMessage renders the budgets chrome with a single notice instead of the tables —
+// used when the control room is not attached to a running factory (standalone `harness serve`
+// has no beads to read) or when the read fails.
+templ BudgetsMessage(msg string) {
+	@Layout("Harness — Budgets", "budgets") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">Budgets</h1>
+			<p class="mt-2 text-slate-400">{ msg }</p>
+		</div>
+	}
+}

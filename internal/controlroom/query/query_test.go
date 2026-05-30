@@ -259,3 +259,89 @@ func TestRecentProvenancePassesThrough(t *testing.T) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
+
+// --- Budgets ---
+
+// Epic burn aggregates each member's OWN marginal spend (ClosingTokens/ClosingUSD) under its
+// epic — the same sum the orchestrator enforces against — with the root folding into its own
+// epic via core.EpicOf. Summing the marginal (never the chain-cumulative Spent*) is what keeps
+// a fan-out from double-counting shared ancestry.
+func TestBudgetsAggregatesEpicMarginalSpend(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{
+		// Root seed e1 (no EpicID → its own epic) + two descendants carrying EpicID e1.
+		{ID: "e1", ClosingTokens: 100, ClosingUSD: 1.0},
+		{ID: "c1", EpicID: "e1", ClosingTokens: 200, ClosingUSD: 2.0},
+		{ID: "c2", EpicID: "e1", ClosingTokens: 50, ClosingUSD: 0.5},
+		// A separate root with its own marginal.
+		{ID: "e2", ClosingTokens: 10, ClosingUSD: 0.1},
+	}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+	b, err := r.Budgets(context.Background(), BudgetCaps{EpicTokens: 1000, EpicUSD: 5})
+	if err != nil {
+		t.Fatalf("Budgets: %v", err)
+	}
+	if len(b.Epics) != 2 {
+		t.Fatalf("epics = %d, want 2", len(b.Epics))
+	}
+	// Ordered USD desc, so e1 (3.5) comes before e2 (0.1).
+	e1 := b.Epics[0]
+	if e1.EpicID != "e1" || e1.Issues != 3 || e1.Tokens != 350 || e1.USD != 3.5 {
+		t.Errorf("epic e1 = %+v, want {e1, 3 issues, 350 tok, $3.5}", e1)
+	}
+	// 350/1000 = 35%, under cap so not over.
+	if e1.TokenPct != 35 || e1.TokenOver {
+		t.Errorf("e1 token meter = %d%% over=%v, want 35%% not-over", e1.TokenPct, e1.TokenOver)
+	}
+}
+
+// A breach is flagged and the meter clamps to 100%. The per-issue burn is the chain-cumulative
+// Spent* plus this attempt's marginal Closing* — the quantity the per-issue budget bounds.
+func TestBudgetsPerIssueBurnAndBreach(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{
+		{ID: "h-1", Role: "implement", Status: "in_progress",
+			SpentUSD: 8, ClosingUSD: 5, SpentTokens: 800, ClosingTokens: 500, Attempt: 3},
+	}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+	b, err := r.Budgets(context.Background(), BudgetCaps{IssueUSD: 10, IssueTokens: 2000, MaxRetries: 3})
+	if err != nil {
+		t.Fatalf("Budgets: %v", err)
+	}
+	row := b.Issues[0]
+	if row.USD != 13 || row.Tokens != 1300 {
+		t.Errorf("burn = $%.0f / %d tok, want $13 / 1300 (Spent+Closing)", row.USD, row.Tokens)
+	}
+	// $13 over the $10 cap → breach, meter clamped to 100%.
+	if !row.USDOver || row.USDPct != 100 {
+		t.Errorf("usd meter = %d%% over=%v, want 100%% breached", row.USDPct, row.USDOver)
+	}
+	// Attempt 3 at MaxRetries 3 → retry cap exhausted.
+	if !row.RetryOver {
+		t.Error("RetryOver = false, want true (attempt == max)")
+	}
+	// Tokens 1300/2000 = 65%, under cap.
+	if row.TokenOver || row.TokenPct != 65 {
+		t.Errorf("token meter = %d%% over=%v, want 65%% not-over", row.TokenPct, row.TokenOver)
+	}
+}
+
+// An uncapped dimension (zero cap) is never a breach and reports a zero fill — the view shows
+// it as ∞, not a misleading 0% bar.
+func TestBudgetsUncappedDimensionNeverBreaches(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{{ID: "h-1", ClosingUSD: 999, SpentUSD: 999}}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+	b, err := r.Budgets(context.Background(), BudgetCaps{}) // all caps zero
+	if err != nil {
+		t.Fatalf("Budgets: %v", err)
+	}
+	row := b.Issues[0]
+	if row.USDOver || row.USDPct != 0 {
+		t.Errorf("uncapped usd meter = %d%% over=%v, want 0%% not-over", row.USDPct, row.USDOver)
+	}
+}
+
+func TestBudgetsListAllError(t *testing.T) {
+	r := NewReader(&fakeIssues{allErr: errors.New("bd down")}, &fakeArts{}, &fakeProv{})
+	if _, err := r.Budgets(context.Background(), BudgetCaps{}); err == nil {
+		t.Fatal("Budgets swallowed a ListAll error")
+	}
+}

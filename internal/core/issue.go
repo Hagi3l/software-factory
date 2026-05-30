@@ -175,3 +175,18 @@ type Issue struct {
 	// with no blockers (see specs/control-room.md, specs/components/orchestrator.md).
 	DependsOn []string
 }
+
+// EpicOf returns the id of the epic an issue belongs to: its EpicID when set, else its own
+// ID. A root seed carries no EpicID (it IS its own epic), so it folds into its own epic via
+// the fallback, with no extra write to stamp its id onto itself; every descendant carries
+// the root's id, so all issues of one epic share this value. It is the single source of
+// truth for epic grouping — the orchestrator enforces the aggregate epic budget over it
+// (summing each member's ClosingUSD/ClosingTokens, which a threaded counter would
+// double-count across a fan-out), and the control room's budget view groups by it the same
+// way (see specs/workflow.md "epic_budget", specs/control-room.md).
+func EpicOf(i Issue) string {
+	if i.EpicID != "" {
+		return i.EpicID
+	}
+	return i.ID
+}

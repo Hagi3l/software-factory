@@ -51,6 +51,10 @@ type Options struct {
 	Activity   *live.Activity
 	Reader     *query.Reader
 	StageOrder []string
+	// BudgetCaps are the configured termination-guarantee ceilings the Budgets view (T4.10)
+	// measures burn against (config.Harness.Policy → query.BudgetCaps). Passed in by the
+	// composition root so the read model stays free of a config dependency, like StageOrder.
+	BudgetCaps query.BudgetCaps
 }
 
 // Server renders the control room. It is an http.Handler (via Handler) so its routes can
@@ -64,6 +68,7 @@ type Server struct {
 	activity   *live.Activity
 	reader     *query.Reader
 	stageOrder []string
+	budgetCaps query.BudgetCaps
 }
 
 // New builds the server and registers every route. Routes are registered eagerly so a
@@ -81,6 +86,7 @@ func New(opts Options) *Server {
 		activity:   opts.Activity,
 		reader:     opts.Reader,
 		stageOrder: opts.StageOrder,
+		budgetCaps: opts.BudgetCaps,
 	}
 	s.routes()
 	return s
@@ -121,12 +127,19 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /artifact/{hash}", s.handleArtifact) // raw evidence content (untrusted)
 	s.mux.HandleFunc("GET /dlq", s.handleDLQ)                  // T4.8 — dead-letter queue (action surface)
 	s.mux.HandleFunc("GET /dlq/items", s.handleDLQItems)       // the htmx/SSE live fragment
+	s.mux.HandleFunc("GET /budgets", s.handleBudgets)          // T4.10 — burn vs caps, per epic/issue
+	s.mux.HandleFunc("GET /budgets/items", s.handleBudgetsItems)
+	s.mux.HandleFunc("GET /provenance", s.handleProvenance) // T4.10 — merged-commit provenance chain
+	s.mux.HandleFunc("GET /provenance/items", s.handleProvenanceItems)
 
 	// Every remaining navigation destination resolves to a placeholder until its
 	// data-backed view lands; registering them from views.NavItems keeps the navigation
 	// and the routes a single source of truth. `implemented` excludes the views wired
 	// above so the mux is not asked to register a duplicate pattern.
-	implemented := map[string]bool{"board": true, "dag": true, "activity": true, "dlq": true}
+	implemented := map[string]bool{
+		"board": true, "dag": true, "activity": true, "dlq": true,
+		"budgets": true, "provenance": true,
+	}
 	for _, item := range views.NavItems {
 		if implemented[item.Key] {
 			continue
@@ -349,6 +362,79 @@ func (s *Server) handleDLQItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, views.DeadLetterList(items))
+}
+
+// provenanceLimit bounds the merged-commit history the provenance view loads — enough to
+// browse recent merges without walking the whole history of main on every refresh.
+const provenanceLimit = 50
+
+// handleBudgets renders the full budgets page (T4.10): burn vs caps, per epic and per issue.
+// With no read model wired (standalone `harness serve`) it shows a "not attached" notice; a
+// read error renders the same chrome with the reason so the page never 500s blank, mirroring
+// the board/DLQ. The tables refresh themselves from handleBudgetsItems over SSE.
+func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		s.render(w, r, views.BudgetsMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to see budget burn."))
+		return
+	}
+	b, err := s.reader.Budgets(r.Context(), s.budgetCaps)
+	if err != nil {
+		s.log.Error("controlroom: budgets read failed", "err", err)
+		s.render(w, r, views.BudgetsMessage("Could not load budgets: "+err.Error()))
+		return
+	}
+	s.render(w, r, views.BudgetsPage(b))
+}
+
+// handleBudgetsItems returns just the tables fragment — the htmx swap target the budgets page
+// re-fetches on an SSE signal (throttled) and a periodic backstop. As a data endpoint it
+// answers 503 with no read model and 500 on a read error, so htmx leaves the last good tables
+// in place rather than swapping in an error (the live view degrades to "stale", not "broken").
+func (s *Server) handleBudgetsItems(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		http.Error(w, "budgets unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+	b, err := s.reader.Budgets(r.Context(), s.budgetCaps)
+	if err != nil {
+		s.log.Error("controlroom: budgets fragment read failed", "err", err)
+		http.Error(w, "could not refresh budgets\n", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, views.BudgetsBody(b))
+}
+
+// handleProvenance renders the full provenance page (T4.10): recent merged commits traced
+// back to issue→soul→model→prompt→evidence. Same not-attached / read-error handling as the
+// other Reader-backed views; the list refreshes from handleProvenanceItems over SSE.
+func (s *Server) handleProvenance(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		s.render(w, r, views.ProvenanceMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to trace merged commits."))
+		return
+	}
+	commits, err := s.reader.RecentProvenance(r.Context(), provenanceLimit)
+	if err != nil {
+		s.log.Error("controlroom: provenance read failed", "err", err)
+		s.render(w, r, views.ProvenanceMessage("Could not load provenance: "+err.Error()))
+		return
+	}
+	s.render(w, r, views.ProvenancePage(commits))
+}
+
+// handleProvenanceItems returns just the commit-list fragment — the htmx swap target over SSE.
+// Data endpoint: 503 with no read model, 500 on a read error.
+func (s *Server) handleProvenanceItems(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		http.Error(w, "provenance unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+	commits, err := s.reader.RecentProvenance(r.Context(), provenanceLimit)
+	if err != nil {
+		s.log.Error("controlroom: provenance fragment read failed", "err", err)
+		http.Error(w, "could not refresh provenance\n", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, views.ProvenanceList(commits))
 }
 
 // Handler exposes the routed mux for embedding (e.g. behind middleware) and for httptest.

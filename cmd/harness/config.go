@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/harness/internal/controlroom/query"
 )
 
 // loadConfig loads the configuration rooted at dir for the named environment,
@@ -122,6 +123,26 @@ func pipelineRoles(cfg *config.Config) []string {
 	sort.Strings(remainder)
 	bfs(remainder)
 	return order
+}
+
+// budgetCaps projects the configured termination-guarantee policy into the control room's
+// budget-view caps (T4.10): the per-issue cumulative Budget, the per-epic aggregate
+// EpicBudget, and the retry cap. The composition root owns this mapping so the read model
+// (query) stays free of a config dependency. A nil Harness (never the case on the run path,
+// which validates first) yields zero caps — every dimension reads as uncapped.
+func budgetCaps(cfg *config.Config) query.BudgetCaps {
+	if cfg.Harness == nil {
+		return query.BudgetCaps{}
+	}
+	p := cfg.Harness.Policy
+	return query.BudgetCaps{
+		IssueTokens: p.Budget.Tokens,
+		IssueUSD:    p.Budget.USD,
+		IssueWall:   p.Budget.Wall.Duration(),
+		EpicTokens:  p.EpicBudget.Tokens,
+		EpicUSD:     p.EpicBudget.USD,
+		MaxRetries:  p.MaxRetries,
+	}
 }
 
 // roleIsAgentStage reports whether role is fulfilled by an agent stage in the DAG.

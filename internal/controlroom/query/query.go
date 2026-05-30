@@ -13,6 +13,7 @@ import (
 	"io"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Loxstomper/harness/internal/core"
 )
@@ -287,6 +288,199 @@ func (r *Reader) RecentProvenance(ctx context.Context, limit int) ([]MergedCommi
 		return nil, fmt.Errorf("query: recent provenance: %w", err)
 	}
 	return commits, nil
+}
+
+// BudgetCaps are the configured ceilings the budget view measures burn against — the
+// termination-guarantee limits from config.Harness.Policy (specs/workflow.md): the per-issue
+// cumulative Budget, the per-epic aggregate EpicBudget, and the retry cap. A zero field means
+// that dimension is uncapped. They are passed in by the caller (the server, from config) so
+// the query layer stays free of a config dependency — mirroring how Board takes stageOrder.
+type BudgetCaps struct {
+	IssueTokens int
+	IssueUSD    float64
+	IssueWall   time.Duration
+	EpicTokens  int
+	EpicUSD     float64
+	MaxRetries  int
+}
+
+// EpicBudgetRow is one epic's aggregate burn against the epic cap. Burn is the sum of each
+// member issue's own marginal spend (ClosingTokens/ClosingUSD) over all issues sharing the
+// epic — exactly what the orchestrator's authorizeEpic sums (T3.8b), so the view shows the
+// same number enforcement acts on. (Marginal, never cumulative Spent*, because summing the
+// cumulative across a fan-out would double-count shared ancestry.) The epic budget has no
+// wall dimension — wall is per-issue cumulative only (config.Policy comment).
+type EpicBudgetRow struct {
+	EpicID    string
+	Issues    int
+	Tokens    int
+	TokenCap  int
+	TokenPct  int  // burn as a clamped 0..100% of cap for the meter; 0 when uncapped
+	TokenOver bool // a breach: burn exceeds a configured cap
+	USD       float64
+	USDCap    float64
+	USDPct    int
+	USDOver   bool
+}
+
+// IssueBudgetRow is one issue's cumulative burn against the per-issue caps. Token/USD burn is
+// the chain-cumulative Spent* (inherited across the on_failure retry chain) plus this issue's
+// own marginal Closing* — i.e. the total spend the issue's chain has reached at this attempt,
+// the quantity the orchestrator's per-issue budget bounds (T3.8). Wall is the cumulative
+// SpentWall. Retry burn is Attempt against MaxRetries — an exhausted retry cap is one of the
+// two non-escalation dead-letter causes, so it sits alongside spend (specs/workflow.md).
+type IssueBudgetRow struct {
+	ID         string
+	Role       string
+	Spec       string
+	Status     string
+	Attempt    int
+	MaxRetries int
+	RetryPct   int
+	RetryOver  bool
+	Tokens     int
+	TokenCap   int
+	TokenPct   int
+	TokenOver  bool
+	USD        float64
+	USDCap     float64
+	USDPct     int
+	USDOver    bool
+	Wall       time.Duration
+	WallCap    time.Duration
+	WallPct    int
+	WallOver   bool
+}
+
+// Budgets is the budget view's projection: epic aggregates and per-issue burn, each measured
+// against the configured caps (specs/control-room.md, "token/$/wall-clock burn vs. caps, per
+// epic/issue"). The numbers come from beads' stamped cumulative/closing spend — the same
+// values the orchestrator enforces budgets on — not from the OTel metric backend, so the view
+// is self-contained and exact (the OTel metrics are the buy/Grafana cost-over-time surface;
+// see specs/observability.md "build vs buy"). Caps is echoed for the header.
+type Budgets struct {
+	Epics  []EpicBudgetRow
+	Issues []IssueBudgetRow
+	Caps   BudgetCaps
+}
+
+// Budgets aggregates every issue's stamped spend into the epic and per-issue burn-vs-cap
+// view. Epics are grouped by core.EpicOf (the single source the orchestrator's epic budget
+// also groups by) and ordered by USD burn descending so the heaviest epics surface first;
+// issues likewise, so the top spenders and any breaches read at a glance. A breach (burn over
+// a configured cap, or Attempt at the retry cap) is flagged per dimension for the view to tint.
+func (r *Reader) Budgets(ctx context.Context, caps BudgetCaps) (Budgets, error) {
+	issues, err := r.issues.ListAll(ctx)
+	if err != nil {
+		return Budgets{}, fmt.Errorf("query: budgets: %w", err)
+	}
+
+	// Epic aggregation: sum each member's marginal Closing* under its epic id.
+	type epicAgg struct {
+		tokens int
+		usd    float64
+		issues int
+	}
+	byEpic := make(map[string]*epicAgg)
+	for _, i := range issues {
+		ep := core.EpicOf(i)
+		a := byEpic[ep]
+		if a == nil {
+			a = &epicAgg{}
+			byEpic[ep] = a
+		}
+		a.tokens += i.ClosingTokens
+		a.usd += i.ClosingUSD
+		a.issues++
+	}
+
+	out := Budgets{Caps: caps}
+	for ep, a := range byEpic {
+		out.Epics = append(out.Epics, EpicBudgetRow{
+			EpicID:    ep,
+			Issues:    a.issues,
+			Tokens:    a.tokens,
+			TokenCap:  caps.EpicTokens,
+			TokenPct:  meterPct(float64(a.tokens), float64(caps.EpicTokens)),
+			TokenOver: meterOver(float64(a.tokens), float64(caps.EpicTokens)),
+			USD:       a.usd,
+			USDCap:    caps.EpicUSD,
+			USDPct:    meterPct(a.usd, caps.EpicUSD),
+			USDOver:   meterOver(a.usd, caps.EpicUSD),
+		})
+	}
+	sort.Slice(out.Epics, func(x, y int) bool { return epicLess(out.Epics[x], out.Epics[y]) })
+
+	for _, i := range issues {
+		tokens := i.SpentTokens + i.ClosingTokens
+		usd := i.SpentUSD + i.ClosingUSD
+		out.Issues = append(out.Issues, IssueBudgetRow{
+			ID:         i.ID,
+			Role:       i.Role,
+			Spec:       i.Spec,
+			Status:     i.Status,
+			Attempt:    i.Attempt,
+			MaxRetries: caps.MaxRetries,
+			RetryPct:   meterPct(float64(i.Attempt), float64(caps.MaxRetries)),
+			RetryOver:  caps.MaxRetries > 0 && i.Attempt >= caps.MaxRetries,
+			Tokens:     tokens,
+			TokenCap:   caps.IssueTokens,
+			TokenPct:   meterPct(float64(tokens), float64(caps.IssueTokens)),
+			TokenOver:  meterOver(float64(tokens), float64(caps.IssueTokens)),
+			USD:        usd,
+			USDCap:     caps.IssueUSD,
+			USDPct:     meterPct(usd, caps.IssueUSD),
+			USDOver:    meterOver(usd, caps.IssueUSD),
+			Wall:       i.SpentWall,
+			WallCap:    caps.IssueWall,
+			WallPct:    meterPct(float64(i.SpentWall), float64(caps.IssueWall)),
+			WallOver:   meterOver(float64(i.SpentWall), float64(caps.IssueWall)),
+		})
+	}
+	sort.Slice(out.Issues, func(x, y int) bool { return issueBudgetLess(out.Issues[x], out.Issues[y]) })
+	return out, nil
+}
+
+// meterPct is burn as a whole-number percent of cap, clamped to [0,100] for the meter fill.
+// An uncapped dimension (cap <= 0) has no meaningful fill, so it reports 0.
+func meterPct(used, cap float64) int {
+	if cap <= 0 {
+		return 0
+	}
+	p := int(used / cap * 100)
+	if p < 0 {
+		return 0
+	}
+	if p > 100 {
+		return 100
+	}
+	return p
+}
+
+// meterOver reports a breach: burn strictly past a configured (non-zero) cap.
+func meterOver(used, cap float64) bool { return cap > 0 && used > cap }
+
+// epicLess orders epics by USD burn desc, then tokens desc, then id, for a stable
+// heaviest-first render.
+func epicLess(a, b EpicBudgetRow) bool {
+	if a.USD != b.USD {
+		return a.USD > b.USD
+	}
+	if a.Tokens != b.Tokens {
+		return a.Tokens > b.Tokens
+	}
+	return a.EpicID < b.EpicID
+}
+
+// issueBudgetLess orders issues by USD burn desc, then tokens desc, then id.
+func issueBudgetLess(a, b IssueBudgetRow) bool {
+	if a.USD != b.USD {
+		return a.USD > b.USD
+	}
+	if a.Tokens != b.Tokens {
+		return a.Tokens > b.Tokens
+	}
+	return a.ID < b.ID
 }
 
 // Artifact streams a single artifact's content by hash — the backing read for the evidence

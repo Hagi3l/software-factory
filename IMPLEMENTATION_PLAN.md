@@ -391,7 +391,40 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   `IssueIDFromCandidateBranch` round-trip + rejection, and the gate-run span+metric end-to-end (verdict recorded,
   infra error **not** recorded) through the real `Run` via `NewWith`. `make check` green (lint 0, 548 pass / 2 skip).
   ([observability.md](specs/observability.md))
-- [ ] **T4.10 Budgets + Provenance views** — budgets (token/$/wall burn vs. caps) from OTel metrics; provenance (trace a merged commit → issue → soul → model → prompt → evidence). (needs T4.2, T4.9) ([control-room.md](specs/control-room.md))
+- [x] **T4.10 Budgets + Provenance views** — *done.* The two remaining data-backed nav views, both
+  server-rendered (templ) and **live** over the T4.3 SSE substrate (two-handler page+fragment pattern, board
+  cadence `sse:agent-event throttle:2s, every 15s`) — mirroring the Board/DLQ exactly. The `budgets`/`provenance`
+  `NavItems` placeholders are replaced with real handlers (added to the server's `implemented` set).
+  **Sourcing decision (resolves the plan's "from OTel metrics" ambiguity):** the in-app budget view reads
+  **beads' stamped cumulative + marginal spend** — the *exact same numbers the orchestrator enforces budgets on* —
+  not a query against the OTel metric backend. Per observability.md's build-vs-buy line, generic cost-over-time is
+  the *buy* side (Tempo/Grafana); the bespoke in-app view is self-contained and exact off beads, keeping the
+  zero-dependency / self-contained-binary property (control-room.md lists the source as "beads + OTel metrics" —
+  beads supplies the burn). **Budgets:** new `query.Reader.Budgets(ctx, caps)` returns per-**epic** aggregates and
+  per-**issue** burn-vs-cap. Epic burn sums each member's **marginal** `ClosingTokens/ClosingUSD` grouped by
+  **`core.EpicOf`** — exactly what the orchestrator's `authorizeEpic` sums (marginal, never chain-cumulative
+  `Spent*`, so a fan-out doesn't double-count shared ancestry). Per-issue burn is `Spent*+Closing*` (the
+  chain-cumulative the per-issue budget bounds) for tokens/USD plus `SpentWall`, with `Attempt` vs `MaxRetries`.
+  Each dimension carries a clamped 0..100 `Pct` and an `Over` breach flag computed in the query layer (testable),
+  tinted in the view (rose breach / amber ≥80% / emerald) — **tinting lives in templ switches because the Tailwind
+  `@source` scanner only reads `*.templ` + generated `*_templ.go`, never hand-written `.go`**, so class literals in
+  a Go helper would silently never compile (text-only helpers — number/duration/∞-cap formatting — stay in
+  `budgets.go`). Rows sort by USD-burn desc (heaviest/breaches first). **`core.EpicOf` extracted as the single
+  source** for epic grouping; the orchestrator's `epicOf` now delegates to it (no logic duplication across the
+  enforcement and view sides). **Provenance:** `RecentProvenance` already existed (T4.2) — this is just the view +
+  handler: a live list of recent merged commits, each tracing **commit → issue → soul → model → prompt → evidence**
+  with the prompt and each passing gate check (`name@<hash>`, split in a view helper) linking to their raw
+  `/artifact/{hash}` (the colon in a content address survives Go 1.22 path routing), and the issue linking into its
+  T4.7 detail page. **Caps wiring:** `cmd/harness budgetCaps(cfg)` projects `config.Harness.Policy` (per-issue
+  `Budget`, `EpicBudget`, `MaxRetries`) into a new `query.BudgetCaps`, passed via `controlroom.Options.BudgetCaps`
+  — so the read model (`query`) stays free of a `config` import, mirroring how `StageOrder` is threaded. nil-reader
+  (standalone `harness serve`) renders the not-attached notice (200) and 503s the fragment, like every other
+  Reader-backed view. Ran `make generate` (templ + Tailwind; verified the new emerald/amber/rose/table utilities
+  compiled into `app.css`). Tests: `query.Budgets` (epic marginal aggregation + grouping, per-issue Spent+Closing
+  burn + breach + 100% clamp, uncapped-never-breaches, ListAll-error), `core.EpicOf` (root fallback + descendant),
+  and server handlers for both views (not-attached notice/503, full render incl. issue/artifact links + breach
+  meter, bare-fragment shape). `make check` green (lint 0, 557 pass / 2 skip). Non-TCB, human-reviewed.
+  (needs T4.2, T4.9) ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md))
 - [ ] **T4.11 Replay** — reconstruct an invocation's full decision trail from the broker-captured transcript + the artifact store, live or after the fact. (needs T4.7) ([observability.md](specs/observability.md))
 - [ ] **T4.12 Requirements-planner conversation loop** — the trusted, **non-sandboxed** LLM that drives toward aligned, testable intent, streaming over SSE; reuses the canonical model layer. *(Machinery builds offline — drive it with `modeltest` / local Ollama; only the subjective elicitation quality awaits a capable model, never the engineering.)* Scope note: control-room.md gives this planner three jobs — elicit testable intent (this task), author/maintain `specs/` markdown, and gate on human approval. The conversation loop is T4.12; the **spec-authoring persona and its link-integrity ownership** (specs-process.md: "every link resolves; every spec maps to ≥1 issue") land in **T4.14** — keep that validation a first-class postcondition on the planner's output there, not an afterthought. ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
 - [ ] **T4.13 Alignment ledger** — forks rendered as selectable chips (with tradeoffs); each item agreed/open with a one-line rationale; freeform typing always available. (needs T4.12) ([control-room.md](specs/control-room.md))

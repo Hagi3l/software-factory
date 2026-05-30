@@ -675,15 +675,12 @@ func (o *Orchestrator) priceUsage(issue core.Issue, u core.Usage) float64 {
 
 // epicOf returns the id of an issue's epic: its threaded EpicID when set, else its own id.
 // A root seed carries no EpicID — it IS its own epic — so it falls back to its id, exactly as
-// Base falls back to the pipeline base for a freshly seeded issue. This single definition is
-// what lets the epic-budget aggregate include the root alongside its descendants (which all
-// carry the root's id), with no extra write to stamp the root's own id onto itself.
-func epicOf(i core.Issue) string {
-	if i.EpicID != "" {
-		return i.EpicID
-	}
-	return i.ID
-}
+// epicOf is the orchestrator's local spelling of the epic-grouping rule, delegating to the
+// single source core.EpicOf so the aggregate epic budget here and the control room's budget
+// view (T4.10) group identically. It lets the epic-budget aggregate include the root
+// alongside its descendants (which all carry the root's id), with no write to stamp the
+// root's own id onto itself.
+func epicOf(i core.Issue) string { return core.EpicOf(i) }
 
 // epicBudgetConfigured reports whether any epic-budget dimension is set. When none is, the
 // orchestrator skips both the per-result closing-spend write and the aggregate read entirely,

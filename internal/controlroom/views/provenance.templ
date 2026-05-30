@@ -1,0 +1,113 @@
+package views
+
+import "github.com/Loxstomper/harness/internal/controlroom/query"
+
+// ProvenancePage is the provenance view (specs/control-room.md, T4.10): every merged
+// integration commit traced back along its chain — commit → issue → soul → model → prompt →
+// evidence. It is the provenance-by-construction principle made browsable (specs/security.md):
+// each merge carries a trailer the orchestrator wrote, parsed back here so a human can audit
+// what produced any landed change. The prompt and each passing gate check link to their raw
+// artifact (the /artifact endpoint streams untrusted bytes as text/plain), and the issue links
+// into its detail page — so the chain is navigable, not just printed.
+//
+// Live over the T4.3 SSE substrate like the board and DLQ: a new merge should surface without
+// a manual refresh, so an agent-event nudges an htmx refetch of just the list (throttled, with
+// a slow backstop). git on main only changes on a merge, so the refetch is a bounded `git log`.
+templ ProvenancePage(commits []query.MergedCommit) {
+	@Layout("Harness — Provenance", "provenance") {
+		<div class="space-y-4">
+			<div class="flex items-baseline justify-between gap-4">
+				<h1 class="text-xl font-semibold tracking-tight">Provenance</h1>
+				<span class="text-sm text-slate-500">most recent merges to main</span>
+			</div>
+			<p class="max-w-3xl text-sm text-slate-500">
+				Every merged commit traced back to the issue, soul, model, prompt, and gate evidence that produced it. Follow a prompt or check to its raw artifact; follow an issue to its detail page.
+			</p>
+			<div hx-ext="sse" sse-connect="/events">
+				<div
+					id="provenance"
+					hx-get="/provenance/items"
+					hx-trigger="sse:agent-event throttle:2s, every 15s"
+					hx-swap="innerHTML"
+				>
+					@ProvenanceList(commits)
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// ProvenanceList renders just the commit rows — embedded in ProvenancePage for the initial
+// paint and returned bare from GET /provenance/items as the htmx swap target. An empty history
+// is a normal early state (nothing has merged yet), so it reads as a plain note, not an error.
+templ ProvenanceList(commits []query.MergedCommit) {
+	if len(commits) == 0 {
+		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-6 text-center">
+			<p class="text-sm text-slate-300">No merges yet.</p>
+			<p class="mt-1 text-xs text-slate-500">Provenance appears here as candidates are accepted and merged to main.</p>
+		</div>
+	} else {
+		<ul class="flex flex-col gap-2">
+			for _, c := range commits {
+				@provenanceRow(c)
+			}
+		</ul>
+	}
+}
+
+templ provenanceRow(c query.MergedCommit) {
+	<li class="rounded-md border border-slate-800 bg-slate-900/40 p-3">
+		<div class="flex items-center justify-between gap-2">
+			<span class="font-mono text-xs text-emerald-300">{ shortHash(c.Commit) }</span>
+			if c.Provenance.Issue != "" {
+				<a href={ templ.URL("/issue/" + c.Provenance.Issue) } class="font-mono text-xs text-sky-300 hover:underline">{ c.Provenance.Issue }</a>
+			}
+		</div>
+		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+			<span>soul <span class="text-slate-200">{ orDash(c.Provenance.Soul) }</span></span>
+			<span>model <span class="text-slate-200">{ orDash(c.Provenance.Model) }</span></span>
+			@provLink("prompt", c.Provenance.PromptSHA)
+			@provLink("tests", c.Provenance.Traceability)
+		</div>
+		if len(c.Provenance.Verified) > 0 {
+			<div class="mt-2 flex flex-wrap gap-1">
+				for _, v := range c.Provenance.Verified {
+					@verifiedBadge(v)
+				}
+			</div>
+		}
+	</li>
+}
+
+// provLink renders a labeled link to an artifact hash, degrading to a dash when the trailer
+// cited none (e.g. an invocation that ran no traceability map). The colon in a content address
+// survives the /artifact/{hash} route (Go 1.22 path routing) and templ.URL passes it through.
+templ provLink(label string, hash string) {
+	if hash != "" {
+		<span>{ label } <a href={ templ.URL("/artifact/" + hash) } class="font-mono text-sky-300 hover:underline">{ shortHash(hash) }</a></span>
+	} else {
+		<span class="text-slate-600">{ label } —</span>
+	}
+}
+
+// verifiedBadge renders one passing gate check. When its evidence was persisted (a name@hash
+// entry) the badge links to the evidence artifact; a bare name (evidence unpersisted) renders
+// as a plain badge so the check still shows it passed.
+templ verifiedBadge(v string) {
+	if verifiedHash(v) != "" {
+		<a href={ templ.URL("/artifact/" + verifiedHash(v)) } class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-300 hover:bg-emerald-500/25">{ verifiedName(v) }</a>
+	} else {
+		<span class="rounded bg-slate-700/40 px-1.5 py-0.5 text-xs text-slate-400">{ verifiedName(v) }</span>
+	}
+}
+
+// ProvenanceMessage renders the provenance chrome with a single notice instead of the list —
+// the not-attached / read-error fallback, mirroring the other views.
+templ ProvenanceMessage(msg string) {
+	@Layout("Harness — Provenance", "provenance") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">Provenance</h1>
+			<p class="mt-2 text-slate-400">{ msg }</p>
+		</div>
+	}
+}

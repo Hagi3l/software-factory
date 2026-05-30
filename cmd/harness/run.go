@@ -237,6 +237,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			Activity:   activity,
 			Reader:     reader,
 			StageOrder: pipelineRoles(cfg),
+			BudgetCaps: budgetCaps(cfg),
 		})
 	}
 
