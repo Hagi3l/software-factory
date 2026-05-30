@@ -26,6 +26,7 @@ import (
 	"github.com/Loxstomper/harness/internal/controlroom/live"
 	"github.com/Loxstomper/harness/internal/controlroom/query"
 	"github.com/Loxstomper/harness/internal/controlroom/views"
+	"github.com/Loxstomper/harness/internal/controlroom/wizard"
 )
 
 // sseHeartbeat is the idle interval at which an open SSE stream gets a comment line, to
@@ -55,6 +56,11 @@ type Options struct {
 	// measures burn against (config.Harness.Policy → query.BudgetCaps). Passed in by the
 	// composition root so the read model stays free of a config dependency, like StageOrder.
 	BudgetCaps query.BudgetCaps
+	// Planner is the trusted, non-sandboxed requirements planner behind the Create-Task
+	// wizard (T4.12). It is nil for a standalone `harness serve` or a config that omits the
+	// requirements_planner block, in which case /create renders a "wizard disabled" notice
+	// and its data endpoints 503 — mirroring how a nil Reader degrades the data views.
+	Planner *wizard.Planner
 }
 
 // Server renders the control room. It is an http.Handler (via Handler) so its routes can
@@ -69,6 +75,7 @@ type Server struct {
 	reader     *query.Reader
 	stageOrder []string
 	budgetCaps query.BudgetCaps
+	planner    *wizard.Planner
 }
 
 // New builds the server and registers every route. Routes are registered eagerly so a
@@ -87,6 +94,7 @@ func New(opts Options) *Server {
 		reader:     opts.Reader,
 		stageOrder: opts.StageOrder,
 		budgetCaps: opts.BudgetCaps,
+		planner:    opts.Planner,
 	}
 	s.routes()
 	return s
@@ -133,13 +141,21 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /provenance", s.handleProvenance) // T4.10 — merged-commit provenance chain
 	s.mux.HandleFunc("GET /provenance/items", s.handleProvenanceItems)
 
+	// Create-Task wizard (T4.12) — the human's action surface. GET /create mints a fresh
+	// conversation session and renders the page; the per-session SSE stream carries the live
+	// reply; POST seeds a turn; the messages fragment is the `turn`-nudge re-fetch target.
+	s.mux.HandleFunc("GET /create", s.handleCreate)
+	s.mux.HandleFunc("GET /create/stream/{session}", s.handleCreateStream)
+	s.mux.HandleFunc("GET /create/messages/{session}", s.handleCreateMessages)
+	s.mux.HandleFunc("POST /create/message", s.handleCreateMessage)
+
 	// Every remaining navigation destination resolves to a placeholder until its
 	// data-backed view lands; registering them from views.NavItems keeps the navigation
 	// and the routes a single source of truth. `implemented` excludes the views wired
 	// above so the mux is not asked to register a duplicate pattern.
 	implemented := map[string]bool{
 		"board": true, "dag": true, "activity": true, "dlq": true,
-		"budgets": true, "provenance": true,
+		"budgets": true, "provenance": true, "create": true,
 	}
 	for _, item := range views.NavItems {
 		if implemented[item.Key] {
@@ -458,6 +474,90 @@ func (s *Server) handleProvenanceItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, views.ProvenanceList(commits))
+}
+
+// handleCreate renders the Create-Task wizard page (T4.12). With no planner wired (a
+// standalone `harness serve`, or a config that omits requirements_planner) it shows a notice
+// that the wizard is disabled rather than a dead form, mirroring how the data views degrade
+// without a Reader. Otherwise it mints a fresh conversation session — each page load starts
+// a blank conversation — and renders it; the session id is embedded so the SSE stream, the
+// message fragment, and the POST all address this conversation.
+func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
+	if s.planner == nil {
+		s.render(w, r, views.CreateMessage("The requirements planner is not configured — the Create-Task wizard is available when the control room runs with `harness run --serve-addr` and a requirements_planner is set in harness.yaml."))
+		return
+	}
+	sess := s.planner.New()
+	s.render(w, r, views.CreatePage(sess.ID, sess.Messages()))
+}
+
+// handleCreateStream serves one conversation's live SSE stream — the wizard's `delta`
+// (token-by-token reply) and `turn` (reply-complete nudge) events, scoped to a single
+// session's hub so a human's stream never leaks to another. With no planner it 503s (a data
+// endpoint, like /events); an unknown/evicted session id 404s rather than holding open a
+// stream that would never emit.
+func (s *Server) handleCreateStream(w http.ResponseWriter, r *http.Request) {
+	if s.planner == nil {
+		http.Error(w, "wizard unavailable: the requirements planner is not configured\n", http.StatusServiceUnavailable)
+		return
+	}
+	sess := s.planner.Get(r.PathValue("session"))
+	if sess == nil {
+		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
+		return
+	}
+
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	h.Set("X-Accel-Buffering", "no")
+
+	sub, cancel := sess.Hub().Subscribe()
+	defer cancel()
+
+	if err := live.Stream(r.Context(), w, sub, sseHeartbeat); err != nil {
+		s.log.Debug("controlroom: wizard sse stream closed", "session", sess.ID, "err", err)
+	}
+}
+
+// handleCreateMessages returns just the transcript fragment — the htmx swap target the page
+// re-fetches on a `turn` SSE nudge (and a slow periodic backstop, so a settled conversation
+// converges even if a `delta`/`turn` frame is dropped). Data endpoint: 503 with no planner,
+// 404 for an unknown session.
+func (s *Server) handleCreateMessages(w http.ResponseWriter, r *http.Request) {
+	if s.planner == nil {
+		http.Error(w, "wizard unavailable: the requirements planner is not configured\n", http.StatusServiceUnavailable)
+		return
+	}
+	sess := s.planner.Get(r.PathValue("session"))
+	if sess == nil {
+		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
+		return
+	}
+	s.render(w, r, views.WizardTranscript(sess.Messages()))
+}
+
+// handleCreateMessage records the human's message and kicks off the planner's reply, then
+// returns the transcript fragment so the just-sent message appears immediately (the reply
+// itself streams in over SSE). A blank message or a reply already in flight simply records
+// nothing — the returned transcript is unchanged, and the in-flight turn keeps streaming.
+// Data endpoint: 503 with no planner, 404 for an unknown session.
+func (s *Server) handleCreateMessage(w http.ResponseWriter, r *http.Request) {
+	if s.planner == nil {
+		http.Error(w, "wizard unavailable: the requirements planner is not configured\n", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "could not parse the message\n", http.StatusBadRequest)
+		return
+	}
+	sess := s.planner.Get(r.FormValue("session"))
+	if sess == nil {
+		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
+		return
+	}
+	sess.Send(r.FormValue("text"))
+	s.render(w, r, views.WizardTranscript(sess.Messages()))
 }
 
 // Handler exposes the routed mux for embedding (e.g. behind middleware) and for httptest.

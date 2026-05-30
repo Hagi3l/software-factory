@@ -53,6 +53,23 @@ func (c *Config) PersonaPath(s core.Soul) string {
 	return filepath.Join(c.Root, s.Persona)
 }
 
+// RequirementsPlannerPersonaPath resolves the requirements planner's persona path against
+// the config root, mirroring PersonaPath for souls. It returns "" when no requirements
+// planner is configured, so the composition root can skip building the wizard.
+func (c *Config) RequirementsPlannerPersonaPath() string {
+	if c.Harness == nil || c.Harness.RequirementsPlanner == nil {
+		return ""
+	}
+	p := c.Harness.RequirementsPlanner.Persona
+	if p == "" {
+		return ""
+	}
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(c.Root, p)
+}
+
 // unmarshalStrict decodes YAML into out, rejecting unknown keys. Strictness is a
 // safety feature, not pedantry: in an autonomous pipeline a typo'd key would
 // silently fall back to a zero value and fail badly mid-run, so it must fail loud at

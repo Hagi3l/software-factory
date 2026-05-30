@@ -52,6 +52,20 @@
 # neighbours (enough to carry a contract and the terms it leans on); see specs/specs-process.md.
 spec_depth: 1
 
+# The requirements planner (T4.12): the trusted, NON-sandboxed LLM behind the control-room
+# Create-Task wizard. It is the one place a human is in the loop — a steered conversation
+# that converges on testable intent (and, later T4.14, drafts specs + seed issues). It runs
+# no untrusted code, so it sits correctly outside the sandbox and reuses the canonical model
+# layer directly, not the runner/broker. Its model resolves through infra.<env>.yaml's
+# `models` registry like a soul's; the API key comes from the environment, never config. The
+# wizard is co-located in `harness run --serve-addr` (it shares no NATS — the model call is a
+# direct trusted adapter call), so a standalone `harness serve` shows it disabled. Omitting
+# this whole block disables the wizard. See specs/control-room.md, specs/workflow.md.
+requirements_planner:
+  model:      claude-opus-4-8
+  persona:    souls/prompts/requirements-planner.md
+  max_tokens: 4096
+
 dag:
   requirements:
     kind: human

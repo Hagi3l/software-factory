@@ -28,6 +28,30 @@ type Harness struct {
 	// on, small enough not to slurp the whole tree (see internal/spec, specs/specs-process.md).
 	// Unset (0) is a safe minimal slice; the bootstrap sets 1.
 	SpecDepth int `yaml:"spec_depth,omitempty"`
+
+	// RequirementsPlanner configures the trusted, non-sandboxed requirements planner —
+	// the interactive LLM behind the control-room Create-Task wizard (T4.12,
+	// specs/control-room.md, specs/workflow.md). Unlike a soul it fulfills no DAG role and
+	// is never dispatched to a runner or sandbox: it runs no untrusted code (it converses
+	// with a human and, later, drafts specs + seed issues), so it reuses the canonical
+	// model layer directly rather than the runner/broker. It is optional — a config that
+	// omits it builds a control room with the wizard disabled — and validated at startup
+	// like a soul (its model must resolve in the infra registry; its persona file must
+	// exist). See RequirementsPlanner and validateRequirementsPlanner.
+	RequirementsPlanner *RequirementsPlanner `yaml:"requirements_planner,omitempty"`
+}
+
+// RequirementsPlanner is the requirements-stage planner config: the interactive,
+// trusted, non-sandboxed LLM the control-room wizard drives a steered conversation with
+// to converge on testable intent (specs/control-room.md). Its Model resolves through the
+// infra model registry exactly like a soul's (the runner does not dispatch it, but the
+// composition root resolves the same registry to an adapter); Persona is the markdown
+// prompt that gives it its elicitation behavior, resolved against the config root like a
+// soul persona. MaxTokens bounds one reply turn (0 = the adapter default).
+type RequirementsPlanner struct {
+	Model     string `yaml:"model"`
+	Persona   string `yaml:"persona"`
+	MaxTokens int    `yaml:"max_tokens,omitempty"`
 }
 
 // Stage kinds for non-agent stages. An agent stage names a Role instead; a stage is

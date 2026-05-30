@@ -472,7 +472,49 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   work would need the orchestrator to thread the transcript hash onto the issue (a TCB-adjacent beads-field
   change) rather than only onto the merge trailer — valuable for DLQ triage, but out of scope for this
   read/render task. (needs T4.7) ([observability.md](specs/observability.md), [control-room.md](specs/control-room.md))
-- [ ] **T4.12 Requirements-planner conversation loop** — the trusted, **non-sandboxed** LLM that drives toward aligned, testable intent, streaming over SSE; reuses the canonical model layer. *(Machinery builds offline — drive it with `modeltest` / local Ollama; only the subjective elicitation quality awaits a capable model, never the engineering.)* Scope note: control-room.md gives this planner three jobs — elicit testable intent (this task), author/maintain `specs/` markdown, and gate on human approval. The conversation loop is T4.12; the **spec-authoring persona and its link-integrity ownership** (specs-process.md: "every link resolves; every spec maps to ≥1 issue") land in **T4.14** — keep that validation a first-class postcondition on the planner's output there, not an afterthought. ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
+- [x] **T4.12 Requirements-planner conversation loop** — *done.* The trusted, **non-sandboxed**
+  requirements planner behind the control-room **Create-Task wizard**, streaming over SSE, reusing the
+  canonical model layer **directly** (no broker/sandbox/NATS — it runs no untrusted code, so it is correctly
+  outside the sandbox; this is the *requirements* planner, kept distinct from the autonomous, sandboxed
+  *decomposition* `plan` stage). **New leaf package `internal/controlroom/wizard`** owns only the conversation:
+  a `Planner` (resolved `model.Adapter` + persona + per-turn `MaxTokens`) managing in-memory `Session`s; each
+  `Session` holds the running `[]model.Message` and **its own `live.Hub`** (so one human's stream never leaks to
+  another). `Session.Send(text)` records the user turn and launches one background `adapter.Complete` whose
+  growing reply is broadcast as coalesced, **HTML-escaped** `delta` SSE events (cumulative, so a dropped frame
+  self-heals; coalesced by rune-count to tame the token firehose) and finalized with a `turn` nudge; it guards
+  **one turn at a time** (a second Send while busy records nothing), always clears `busy` + emits `turn` even on
+  error (a failed turn appends an assistant error note rather than wedging), and runs on a `context.Background()`
+  + per-turn timeout (it outlives the POST). Sessions are bounded (oldest-evicted, `defaultMaxSessions=64`) —
+  best-effort working state, not the durable record (that lands on APPROVE, T4.14). Crypto-random session ids
+  (unguessable before auth, which is OPEN). The package depends only on `model` + `live` — **no config/filesystem
+  import**: the composition root resolves the adapter and reads the persona, keeping the engine a self-contained,
+  testable unit. **Config:** new optional `config.Harness.RequirementsPlanner{Model,Persona,MaxTokens}`
+  (`requirements_planner:` in harness.yaml), validated like a soul (model must resolve in the infra registry;
+  persona file must exist; non-negative max_tokens) but **NOT** cross-checked against the DAG — it fulfills no
+  role (the `requirements` stage stays `kind: human`). New `Config.RequirementsPlannerPersonaPath()` mirrors
+  `PersonaPath`. Bootstrap `config/harness.yaml` now sets it (`claude-opus-4-8`,
+  `souls/prompts/requirements-planner.md`, 4096) with a new elicitation persona prompt that probes for
+  examples/edge-cases/what-to-reject/out-of-scope and converges on testable acceptance criteria. **Control room:**
+  `Options.Planner *wizard.Planner` + a new **"Create Task"** nav item; routes `GET /create` (mints a fresh
+  session, renders the page), `GET /create/stream/{session}` (the per-session SSE stream — 503 no planner, 404
+  unknown session), `GET /create/messages/{session}` (the `turn`-nudge transcript re-fetch fragment), `POST
+  /create/message` (records the turn, returns the fragment so the prompt shows at once while the reply streams).
+  **views/wizard.templ** (`CreatePage`/`WizardTranscript`/`wizardBubble`/`CreateMessage`): the transcript sits in
+  one SSE-connected element; it re-fetches on `sse:turn` (board-style server-render-a-fragment) **and** a live
+  `sse-swap="delta"` target streams the partial reply token-by-token — the two-channel pattern a streaming chat
+  needs (the `turn` refetch + `every 8s` backstop make it functional even if a `delta` frame is missed). nil
+  planner (standalone `harness serve`, or a config omitting the block) renders a "wizard disabled" notice (200),
+  mirroring how a nil Reader degrades the data views. **Wiring:** `buildRunComponents` builds the registry before
+  the control-room block, resolves `rp.Model` to an adapter, reads the persona, and constructs the `Planner`
+  (only when `requirements_planner` is set). Non-TCB, human-reviewed; `make generate` ran (templ + Tailwind).
+  Tests: engine (real OpenAI adapter via `modeltest` — stream+escape+record, busy-guard, blank-ignored,
+  error-doesn't-wedge, unique+bounded sessions; `-race`) and server (not-configured notice/503, page+session
+  render, POST round-trip with a live per-session SSE stream delivering `delta`+`turn`, unknown-session 404s,
+  finalized escaped transcript). `make check` green (lint 0, 579 pass / 2 skip). **Deferred to T4.13/T4.14:** the
+  conversation is the *only* deliverable here — the alignment ledger (chips/agreed-open, T4.13), and
+  spec-authoring + seed-issue creation + the APPROVE consent gate with spec link-integrity (T4.14) build on this
+  session loop. *(Machinery builds offline; only the subjective elicitation quality awaits a capable model.)*
+  ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md), [workflow.md](specs/workflow.md))
 - [ ] **T4.13 Alignment ledger** — forks rendered as selectable chips (with tradeoffs); each item agreed/open with a one-line rationale; freeform typing always available. (needs T4.12) ([control-room.md](specs/control-room.md))
 - [ ] **T4.14 Spec authoring + consent gate** — the planner drafts spec markdown + seed issues (keeping link integrity + the README index); on explicit human **APPROVE**, the spec is committed to git, the decisions sidecar written, the conversation transcript stored, and the seed issues created through the single-writer path. The single-writer seam already exists — `beads.Apply` (the validated, referential-integrity-checked write `cmd/harness/seed.go` already uses, "written exactly as the orchestrator would write"); the wizard reuses it, plus a `produces`-legality check on the batch mirroring `acceptPlan`'s validation of planner output. So no separate orchestrator-integration task is needed. (needs T4.12) ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md))
 - [ ] **T4.15 Resolve mode** — Create and Resolve are one component; Resolve pre-loads the escalation + spec slice + the agent transcript that raised it and shows the spec diff + blast radius before commit. (needs T4.14) ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))

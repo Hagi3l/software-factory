@@ -88,6 +88,7 @@ func (c *Config) Validate() error {
 		c.validatePolicy(add)
 	}
 	c.validateSouls(add)
+	c.validateRequirementsPlanner(add)
 	if c.Infra == nil {
 		add("infra configuration is missing")
 	} else {
@@ -433,6 +434,36 @@ func (c *Config) validatePersona(s core.Soul, add func(string, ...any)) {
 	path := c.PersonaPath(s)
 	if _, err := os.Stat(path); err != nil {
 		add("soul %q persona file %q does not exist", s.Name, path)
+	}
+}
+
+// validateRequirementsPlanner checks the optional requirements-planner block (T4.12): if
+// present, it must name a model the infra registry defines (the composition root resolves
+// it to an adapter, exactly like a soul's model — an unregistered one would fail when the
+// wizard first dispatches) and a persona file that exists on disk (the planner's entire
+// elicitation behavior, like a soul persona). It fulfills no DAG role, so unlike a soul it
+// is NOT cross-checked against the dag — it is the trusted, non-sandboxed requirements
+// stage realized as the control-room wizard, not a dispatchable agent stage. Absent, the
+// wizard is simply disabled and nothing is checked.
+func (c *Config) validateRequirementsPlanner(add func(string, ...any)) {
+	if c.Harness == nil || c.Harness.RequirementsPlanner == nil {
+		return
+	}
+	rp := c.Harness.RequirementsPlanner
+	if rp.Model == "" {
+		add("requirements_planner has no model")
+	} else if c.Infra != nil {
+		if _, ok := c.Infra.Models[rp.Model]; !ok {
+			add("requirements_planner references model %q which the infra model registry does not define", rp.Model)
+		}
+	}
+	if rp.Persona == "" {
+		add("requirements_planner has no persona path")
+	} else if _, err := os.Stat(c.RequirementsPlannerPersonaPath()); err != nil {
+		add("requirements_planner persona file %q does not exist", c.RequirementsPlannerPersonaPath())
+	}
+	if rp.MaxTokens < 0 {
+		add("requirements_planner max_tokens is %d; it must be >= 0", rp.MaxTokens)
 	}
 }
 

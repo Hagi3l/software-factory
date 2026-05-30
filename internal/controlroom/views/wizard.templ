@@ -1,0 +1,114 @@
+package views
+
+import "github.com/Loxstomper/harness/internal/controlroom/wizard"
+
+// CreatePage is the Create-Task wizard (specs/control-room.md "The wizard"): a steered
+// conversation with the trusted, non-sandboxed requirements planner that converges on
+// testable intent. It is the human's primary action surface — the one place intent is
+// authored before autonomous work is seeded.
+//
+// It is server-rendered and made live with the same SSE substrate the other views use, but
+// in a richer two-channel form because this *is* a streaming conversation: the transcript
+// container re-fetches the finalized messages on a `turn` nudge (the server-render-a-fragment
+// pattern), while the planner's reply streams token-by-token into a live target via `delta`
+// events as it is generated. Both bindings sit inside one SSE-connected element scoped to
+// this session, so one human's stream never reaches another.
+//
+// T4.12 scope is the conversation loop only: the alignment ledger (T4.13) and the
+// spec-authoring + APPROVE consent gate (T4.14) are deliberately not here yet.
+templ CreatePage(sessionID string, msgs []wizard.Message) {
+	@Layout("Harness — Create Task", "create") {
+		<div class="mx-auto flex max-w-3xl flex-col gap-4">
+			<div>
+				<h1 class="text-xl font-semibold tracking-tight">Create Task</h1>
+				<p class="mt-1 text-sm text-slate-400">
+					A steered conversation with the requirements planner. Describe what you want
+					built; it will probe for examples, edge cases, what to reject, and what is out
+					of scope — converging on testable intent. Nothing is written until you approve.
+				</p>
+			</div>
+			<div hx-ext="sse" sse-connect={ "/create/stream/" + sessionID } class="flex flex-col gap-3">
+				<div
+					id="wizard-transcript"
+					hx-get={ "/create/messages/" + sessionID }
+					hx-trigger="sse:turn, every 8s"
+					hx-swap="innerHTML"
+					class="flex min-h-64 flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/40 p-4"
+				>
+					@WizardTranscript(msgs)
+				</div>
+				<form
+					hx-post="/create/message"
+					hx-target="#wizard-transcript"
+					hx-swap="innerHTML"
+					hx-on::after-request="this.reset()"
+					class="flex flex-col gap-2"
+				>
+					<input type="hidden" name="session" value={ sessionID }/>
+					<textarea
+						name="text"
+						rows="3"
+						required
+						placeholder="Describe the change you want, or answer the planner's question…"
+						class="w-full resize-y rounded-md border border-slate-700 bg-slate-900 p-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-slate-500 focus:outline-none"
+					></textarea>
+					<div class="flex justify-end">
+						<button
+							type="submit"
+							class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
+						>Send</button>
+					</div>
+				</form>
+			</div>
+		</div>
+	}
+}
+
+// WizardTranscript renders the conversation: every finalized message, then a live target
+// the in-flight reply streams into. It is embedded in CreatePage for the initial paint and
+// returned bare from both GET /create/messages/{session} (the `turn` re-fetch) and POST
+// /create/message (so the human's just-sent message appears at once). Because the live
+// `delta` target is re-rendered empty on every re-fetch, a completed turn cleanly finalizes
+// the streamed reply into a proper bubble and resets the live line for the next turn.
+templ WizardTranscript(msgs []wizard.Message) {
+	if len(msgs) == 0 {
+		<p class="text-sm text-slate-500">No messages yet — say what you'd like built to begin.</p>
+	} else {
+		for _, m := range msgs {
+			@wizardBubble(m)
+		}
+	}
+	// The streaming target: assistant `delta` events replace its content as the reply is
+	// generated. Empty (between turns) it renders nothing; whitespace-pre-wrap preserves the
+	// model's line breaks while it streams.
+	<div id="wizard-live" sse-swap="delta" class="whitespace-pre-wrap text-sm leading-relaxed text-slate-300"></div>
+}
+
+// wizardBubble renders one finalized turn — the human's prompt aligned right, the planner's
+// reply left — with whitespace-pre-wrap so the model's formatting (lists, line breaks)
+// survives. Text is templ-escaped as inert content; the planner is trusted but its output is
+// still model text, never markup.
+templ wizardBubble(m wizard.Message) {
+	if m.Role == "user" {
+		<div class="flex justify-end">
+			<div class="max-w-[85%] whitespace-pre-wrap rounded-lg bg-indigo-600/30 px-3 py-2 text-sm text-slate-100">{ m.Text }</div>
+		</div>
+	} else {
+		<div class="flex justify-start">
+			<div class="max-w-[85%] whitespace-pre-wrap rounded-lg bg-slate-800/70 px-3 py-2 text-sm text-slate-200">{ m.Text }</div>
+		</div>
+	}
+}
+
+// CreateMessage renders the wizard chrome with a single notice instead of the conversation —
+// shown when no requirements planner is wired (a standalone `harness serve`, or a config that
+// omits the requirements_planner block), so the action surface degrades to an explanation
+// rather than a dead form.
+templ CreateMessage(msg string) {
+	@Layout("Harness — Create Task", "create") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">Create Task</h1>
+			<p class="mt-2 text-slate-400">{ msg }</p>
+		</div>
+	}
+}

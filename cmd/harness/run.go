@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -18,6 +19,7 @@ import (
 	"github.com/Loxstomper/harness/internal/controlroom"
 	"github.com/Loxstomper/harness/internal/controlroom/live"
 	"github.com/Loxstomper/harness/internal/controlroom/query"
+	"github.com/Loxstomper/harness/internal/controlroom/wizard"
 	"github.com/Loxstomper/harness/internal/gate"
 	"github.com/Loxstomper/harness/internal/messaging"
 	"github.com/Loxstomper/harness/internal/model/registry"
@@ -209,6 +211,14 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	}
 	releases = append(releases, func() { _ = tel.Shutdown(context.Background()) })
 
+	// Model registry: soul.model -> provider adapter. Keys come from the environment
+	// inside the registry, never from config. Built before the control room so the
+	// requirements-planner wizard (T4.12) can resolve its configured model to an adapter.
+	reg, err := registry.New(cfg.Infra.Models)
+	if err != nil {
+		return nil, err
+	}
+
 	// Control room, co-located when serving is enabled. It shares this run's in-process
 	// NATS (the pump tails the agent-event subjects into the SSE hub) and reads the same
 	// three stores the loops write — beads (read-only; the orchestrator is the single
@@ -230,6 +240,24 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			store,
 			query.NewGitProvenance(repo),
 		)
+		// The requirements-planner wizard (T4.12), when configured. It is trusted and
+		// non-sandboxed — a direct model.Adapter conversation, no broker/sandbox/NATS — so it
+		// needs only the resolved adapter and the persona text (read here so the wizard package
+		// depends on neither config nor the filesystem). Absent the requirements_planner block
+		// the wizard stays disabled (/create renders a notice).
+		var planner *wizard.Planner
+		if rp := cfg.Harness.RequirementsPlanner; rp != nil {
+			adapter, aerr := reg.Adapter(rp.Model)
+			if aerr != nil {
+				return nil, aerr
+			}
+			personaBytes, rerr := os.ReadFile(cfg.RequirementsPlannerPersonaPath())
+			if rerr != nil {
+				return nil, fmt.Errorf("read requirements planner persona: %w", rerr)
+			}
+			planner = wizard.NewPlanner(adapter, string(personaBytes), wizard.WithMaxTokens(rp.MaxTokens), wizard.WithLogger(log))
+		}
+
 		server = controlroom.New(controlroom.Options{
 			Version:    version,
 			Logger:     log,
@@ -238,14 +266,8 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			Reader:     reader,
 			StageOrder: pipelineRoles(cfg),
 			BudgetCaps: budgetCaps(cfg),
+			Planner:    planner,
 		})
-	}
-
-	// Model registry: soul.model -> provider adapter. Keys come from the environment
-	// inside the registry, never from config.
-	reg, err := registry.New(cfg.Infra.Models)
-	if err != nil {
-		return nil, err
 	}
 
 	// Production uses the Docker backend; a test may inject the local host-exec backend
