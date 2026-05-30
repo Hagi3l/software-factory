@@ -1,0 +1,122 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/Loxstomper/harness/internal/controlroom/query"
+)
+
+// IssueDetailPage is the issue / invocation detail view (specs/control-room.md, T4.7): the
+// single-issue forensic surface that stitches beads (the issue and its brief), git (the
+// merge provenance, once the work has landed on main), and the artifact store (the
+// evidence — the prompt, the test↔spec traceability map, each passing gate check — every
+// one a click-through to its raw content). It is the drill-target the board cards, the
+// dead-letter queue, and the provenance view all link into, so it is the keystone of the
+// read surface. Unlike the board and the feed it is *not* live: a detail page is a
+// forensic snapshot of one issue, so it is plainly server-rendered with no SSE refresh.
+templ IssueDetailPage(d query.IssueDetail) {
+	@Layout("Harness — "+d.Issue.ID, "") {
+		<div class="mx-auto max-w-4xl space-y-6">
+			<div class="space-y-2">
+				<div class="flex flex-wrap items-center gap-3">
+					<span class="font-mono text-sm text-slate-500">{ d.Issue.ID }</span>
+					@statusBadge(d.Issue.Status)
+					if d.Merged {
+						<span class="rounded bg-emerald-500/20 px-1.5 py-0.5 text-xs text-emerald-300">merged</span>
+					}
+				</div>
+				<h1 class="text-2xl font-semibold tracking-tight">{ d.Issue.Title }</h1>
+			</div>
+			<section class="space-y-2">
+				<h2 class="text-sm font-medium text-slate-400">Brief</h2>
+				<dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+					@field("Role", orDash(d.Issue.Role), false)
+					@field("Spec", orDash(d.Issue.Spec), true)
+					if d.Issue.SpecHash != "" {
+						@field("Spec version", shortHash(d.Issue.SpecHash), true)
+					}
+					if d.Issue.Base != "" {
+						@field("Base", d.Issue.Base, true)
+					}
+					@field("Attempt", strconv.Itoa(d.Issue.Attempt), false)
+					@field("Spend", strconv.Itoa(d.Issue.SpentTokens)+" tokens · "+formatUSD(d.Issue.SpentUSD), false)
+				</dl>
+				if d.Issue.Body != "" {
+					<pre class="whitespace-pre-wrap break-words rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-200">{ d.Issue.Body }</pre>
+				}
+			</section>
+			if d.Merged {
+				<section class="space-y-2">
+					<h2 class="text-sm font-medium text-slate-400">Provenance</h2>
+					<dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+						@field("Soul", orDash(d.Provenance.Soul), false)
+						@field("Model", orDash(d.Provenance.Model), true)
+					</dl>
+				</section>
+			}
+			<section class="space-y-2">
+				<h2 class="text-sm font-medium text-slate-400">Evidence</h2>
+				if len(d.Evidence) == 0 {
+					<p class="text-sm text-slate-500">No evidence recorded yet.</p>
+				} else {
+					<ul class="flex flex-col gap-2">
+						for _, e := range d.Evidence {
+							@evidenceItem(e)
+						}
+					</ul>
+				}
+			</section>
+		</div>
+	}
+}
+
+// field renders one definition-list cell of the detail grid. mono tags the value as a
+// machine token (a path, a ref, a hash) so it renders in a monospace face.
+templ field(label, value string, mono bool) {
+	<div>
+		<dt class="text-slate-500">{ label }</dt>
+		if mono {
+			<dd class="break-all font-mono text-slate-200">{ value }</dd>
+		} else {
+			<dd class="text-slate-200">{ value }</dd>
+		}
+	</div>
+}
+
+// evidenceItem renders one cited artifact: its human label, its kind, and a link to the
+// raw content when the store can resolve it. A check cited with no persisted evidence (a
+// bare name in the provenance trailer) still shows — that the check ran is itself signal —
+// just without a click-through. The hash is rendered short for legibility; the anchor
+// carries the full address.
+templ evidenceItem(e query.ArtifactLink) {
+	<li class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm">
+		<div class="flex items-center gap-3">
+			<span class="text-slate-200">{ e.Label }</span>
+			<span class="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400">{ e.Kind }</span>
+		</div>
+		if e.Available {
+			<a
+				href={ templ.URL("/artifact/" + e.Hash) }
+				target="_blank"
+				rel="noopener"
+				class="font-mono text-xs text-sky-400 hover:text-sky-300 hover:underline"
+			>{ shortHash(e.Hash) }</a>
+		} else if e.Hash != "" {
+			<span class="font-mono text-xs text-slate-600" title="not resolvable in the artifact store">{ shortHash(e.Hash) } · unavailable</span>
+		} else {
+			<span class="text-xs text-slate-600">no evidence persisted</span>
+		}
+	</li>
+}
+
+// IssueDetailMessage renders the detail chrome with a single notice instead of an issue —
+// used when the control room is not attached to a running factory (a standalone `harness
+// serve` has no beads to read) or when the issue cannot be loaded (an unknown id).
+templ IssueDetailMessage(msg string) {
+	@Layout("Harness — Issue", "") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">Issue</h1>
+			<p class="mt-2 text-slate-400">{ msg }</p>
+		</div>
+	}
+}

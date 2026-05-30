@@ -65,10 +65,14 @@ templ boardColumn(col query.BoardColumn) {
 	</div>
 }
 
-// boardCard is the compact issue projection. It is a plain block for now; the click
-// target into the issue/invocation detail view lands with that view (T4.7).
+// boardCard is the compact issue projection. The whole card is the click-through into the
+// issue/invocation detail view (T4.7) — the board's role is triage, the detail page is
+// where a human reads the brief, evidence, and provenance.
 templ boardCard(card query.IssueCard) {
-	<div class="rounded-md border border-slate-800 bg-slate-900/60 p-3">
+	<a
+		href={ templ.URL("/issue/" + card.ID) }
+		class="block rounded-md border border-slate-800 bg-slate-900/60 p-3 transition hover:border-slate-600 hover:bg-slate-900"
+	>
 		<div class="flex items-center justify-between gap-2">
 			<span class="font-mono text-xs text-slate-500">{ card.ID }</span>
 			@statusBadge(card.Status)
@@ -80,7 +84,7 @@ templ boardCard(card query.IssueCard) {
 		if card.Attempt > 1 {
 			<p class="mt-1 text-xs text-amber-400">attempt { strconv.Itoa(card.Attempt) }</p>
 		}
-	</div>
+	</a>
 }
 
 // statusBadge tints the beads status so the board reads at a glance — blocked work (the

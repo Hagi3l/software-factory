@@ -240,7 +240,39 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   issue/turn-lifecycle event would let the feed show crisp stage transitions. (needs T4.3)
   ([control-room.md](specs/control-room.md))
 - [ ] **T4.6 DAG view** — the issue dependency graph rendered server-side to SVG (Go → DOT/d2), hover/drill via Alpine + htmx. No client-side graph lib. (needs T4.2) ([control-room.md](specs/control-room.md))
-- [ ] **T4.7 Issue / invocation detail** — Brief, transcript, candidate diff, gate evidence, budget, retries, from beads + the artifact store. (needs T4.2) ([control-room.md](specs/control-room.md))
+- [x] **T4.7 Issue / invocation detail** — *done.* The single-issue forensic page, the drill-target the
+  board cards, DLQ (T4.8), and provenance view all link into. `views.IssueDetailPage` renders
+  `query.Reader.IssueDetail(id)` (already built in T4.2 — zero new query-layer work): a header
+  (id/title/status/merged badge), the **brief** (Role, Spec path, pinned Spec version, Base, Attempt,
+  cumulative Spend = `SpentTokens`/`SpentUSD`, plus the issue Body), the **merge provenance** (Soul, Model)
+  when landed, and an **evidence** list — each cited artifact (Prompt, Traceability map, each passing gate
+  check) a click-through to its raw content, degrading to "unavailable"/"no evidence persisted" rather than
+  a dead link when the store can't resolve it or the check was cited bare. **New artifact endpoint:**
+  `GET /artifact/{hash}` streams content via `query.Reader.Artifact` as **`text/plain` + `X-Content-Type-Options:
+  nosniff`** — the security contract, since artifact bytes are *untrusted agent output* and must never be
+  interpreted as HTML/script (the content-address colon survives Go 1.22 `{hash}` path routing — `templ.URL`
+  passes the leading-slash path through unchanged). **Server:** real `/issue/{id}` + `/artifact/{hash}`
+  handlers; nil reader (standalone `harness serve`) renders the not-attached notice (200, like the board) and
+  503s the artifact endpoint; an unknown id / read fault renders an in-chrome notice rather than a blank 500.
+  **Board wiring:** `boardCard` is now a whole-card `<a href="/issue/{id}">` drill-through. The page is
+  deliberately **not live** (no SSE) — a detail page is a forensic snapshot of one issue, not a feed. No cmd
+  wiring needed: the Reader (with its artifact-store port) was already passed to the server in T4.4. Tested:
+  merged render (brief+budget+provenance+evidence, all three evidence states), in-flight fallback to the
+  threaded TraceMap with no provenance section, unknown-id notice, no-reader notice/503, artifact content +
+  content-type/nosniff + colon-in-path round-trip, artifact-404, and board-card→detail links. (needs T4.2)
+  ([control-room.md](specs/control-room.md))
+- [ ] **T4.7b Surface transcript + candidate diff on the detail page** *(carried from T4.7)* — the spec's
+  detail view also lists the **transcript** and the **candidate diff**, which T4.7 could not render because
+  neither hash is reachable from the read stores today. (a) **Transcript:** the runner harvests it to the
+  artifact store (`ArtifactKindTranscript`) and stamps the hash on `Result.Evidence`, but the orchestrator
+  consumes the Result without persisting that hash — the provenance trailer carries only PromptSHA / Verified
+  / Traceability (security.md's format). Surfacing it needs the trailer (and `core.Provenance`) extended with a
+  `Transcript:` field, written by the merger and parsed back by `GitProvenance` — a single-source provenance-
+  format change, so **update security.md first**. (b) **Candidate diff:** reachable read-side for a *merged*
+  issue (`git show <commit>`), but `ProvenanceReader.ByIssue` returns only the parsed provenance, not the
+  commit hash; thread the commit through (or add a `DiffByIssue`) and render it. (a) touches the trailer
+  format (mild TCB-adjacent, human-reviewed); (b) is pure read-side git. (needs T4.7)
+  ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md), [security.md](specs/security.md))
 - [ ] **T4.8 Dead-letter queue view** — the escalations needing a human; the primary action surface; links into Resolve (T4.15). (needs T4.2) ([control-room.md](specs/control-room.md), [workflow.md](specs/workflow.md))
 - [ ] **T4.9 OTel spans + export** — emit spans at the broker, orchestrator, and runner (boot, llm-turn, tool-call, gate-run) and metrics (latency, throughput, cost); export to a trace backend (Tempo/Jaeger). ([observability.md](specs/observability.md))
 - [ ] **T4.10 Budgets + Provenance views** — budgets (token/$/wall burn vs. caps) from OTel metrics; provenance (trace a merged commit → issue → soul → model → prompt → evidence). (needs T4.2, T4.9) ([control-room.md](specs/control-room.md))

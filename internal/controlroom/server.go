@@ -14,6 +14,7 @@ package controlroom
 import (
 	"context"
 	"errors"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -114,6 +115,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /board/cards", s.handleBoardCards) // the htmx/SSE live fragment
 	s.mux.HandleFunc("GET /activity", s.handleActivity)      // T4.5 — live agent feed
 	s.mux.HandleFunc("GET /activity/items", s.handleActivityItems)
+	s.mux.HandleFunc("GET /issue/{id}", s.handleIssue)         // T4.7 — issue / invocation detail
+	s.mux.HandleFunc("GET /artifact/{hash}", s.handleArtifact) // raw evidence content (untrusted)
 
 	// Every remaining navigation destination resolves to a placeholder until its
 	// data-backed view lands; registering them from views.NavItems keeps the navigation
@@ -220,6 +223,53 @@ func (s *Server) handleActivityItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, views.ActivityList(s.activity.Recent()))
+}
+
+// handleIssue renders the issue / invocation detail page (T4.7) — the drill-target the
+// board, dead-letter queue, and provenance views link into. With no read model wired
+// (standalone `harness serve`) it shows the not-attached notice; an unknown id or a read
+// fault renders the same chrome with the reason rather than a blank 500, mirroring the
+// board's "never 500 blank" handling. The page is a forensic snapshot, so it is plainly
+// rendered with no live refresh.
+func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		s.render(w, r, views.IssueDetailMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to inspect issues."))
+		return
+	}
+	id := r.PathValue("id")
+	detail, err := s.reader.IssueDetail(r.Context(), id)
+	if err != nil {
+		s.log.Error("controlroom: issue detail read failed", "id", id, "err", err)
+		s.render(w, r, views.IssueDetailMessage("Could not load issue "+id+": "+err.Error()))
+		return
+	}
+	s.render(w, r, views.IssueDetailPage(detail))
+}
+
+// handleArtifact streams an evidence artifact's raw content by hash — the click-through
+// target of the detail view's evidence links (the prompt, the traceability map, a gate
+// check's captured output). The content is UNTRUSTED agent output, so it is served as
+// text/plain with X-Content-Type-Options: nosniff: the browser must never be coaxed into
+// interpreting a harvested transcript or gate log as HTML/script. With no read model it
+// 503s (a data endpoint, like /board/cards); an unresolvable hash 404s.
+func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		http.Error(w, "artifact unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+	hash := r.PathValue("hash")
+	rc, err := s.reader.Artifact(r.Context(), hash)
+	if err != nil {
+		s.log.Debug("controlroom: artifact fetch failed", "hash", hash, "err", err)
+		http.Error(w, "artifact not found\n", http.StatusNotFound)
+		return
+	}
+	defer func() { _ = rc.Close() }()
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	if _, err := io.Copy(w, rc); err != nil {
+		s.log.Debug("controlroom: artifact stream interrupted", "hash", hash, "err", err)
+	}
 }
 
 // Handler exposes the routed mux for embedding (e.g. behind middleware) and for httptest.

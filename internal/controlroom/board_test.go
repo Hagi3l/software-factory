@@ -82,10 +82,10 @@ func TestBoardRendersColumnsInPipelineOrder(t *testing.T) {
 		"Build the thing", "Write the tests", "Plan the epic", // every card
 		"harness-1", "harness-2", "harness-3", // ids
 		"planner", "test-author", "implementor", // role column headers
-		"attempt 2",                  // the retried card surfaces its generation
-		`sse-connect="/events"`,      // wired to the T4.3 substrate
-		`hx-get="/board/cards"`,      // live fragment refresh target
-		`href="/static/app.css"`,     // inside the base layout chrome
+		"attempt 2",              // the retried card surfaces its generation
+		`sse-connect="/events"`,  // wired to the T4.3 substrate
+		`hx-get="/board/cards"`,  // live fragment refresh target
+		`href="/static/app.css"`, // inside the base layout chrome
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("board page missing %q", want)
@@ -135,6 +135,26 @@ func TestBoardWithoutReader(t *testing.T) {
 	frag := get(t, ts, "/board/cards")
 	if frag.status != http.StatusServiceUnavailable {
 		t.Errorf("/board/cards status = %d, want 503", frag.status)
+	}
+}
+
+// TestBoardCardsLinkToDetail proves every card is a drill-through into the issue/invocation
+// detail view (T4.7) — the board is triage, the detail page is where the brief and evidence
+// are read.
+func TestBoardCardsLinkToDetail(t *testing.T) {
+	ts := boardServer(t)
+	r := get(t, ts, "/board")
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	for _, want := range []string{
+		`href="/issue/harness-1"`,
+		`href="/issue/harness-2"`,
+		`href="/issue/harness-3"`,
+	} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("board card missing detail link %q", want)
+		}
 	}
 }
 
