@@ -40,7 +40,7 @@ func TestGateIntegration(t *testing.T) {
 		g := New(be, Registry{
 			"build": "grep -q candidate marker.txt",
 			"test":  "true",
-		}, store, t.TempDir(), nil)
+		}, store, t.TempDir(), nil, nil)
 		report, err := g.Run(ctx, cand("build", "test"))
 		if err != nil {
 			t.Fatalf("Run: %v", err)
@@ -70,7 +70,7 @@ func TestGateIntegration(t *testing.T) {
 	// — through real docker + git, the way the orchestrator threads o.base as BaseRef.
 	t.Run("red→green proof", func(t *testing.T) {
 		store := testStore(t)
-		g := New(be, Registry{core.CheckAcceptanceTests: "grep -q candidate marker.txt"}, store, t.TempDir(), nil)
+		g := New(be, Registry{core.CheckAcceptanceTests: "grep -q candidate marker.txt"}, store, t.TempDir(), nil, nil)
 		c := cand(core.PostconditionRedGreen)
 		c.BaseRef = "main"
 		report, err := g.Run(ctx, c)
@@ -94,7 +94,7 @@ func TestGateIntegration(t *testing.T) {
 		g := New(be, Registry{
 			"build": "true",
 			"test":  "exit 7",
-		}, testStore(t), t.TempDir(), nil)
+		}, testStore(t), t.TempDir(), nil, nil)
 		report, err := g.Run(ctx, cand("build", "test"))
 		if err != nil {
 			t.Fatalf("Run: %v", err)

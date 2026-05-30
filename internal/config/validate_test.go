@@ -386,6 +386,31 @@ func TestValidateOpenAICompatNeedsEndpoint(t *testing.T) {
 	mustContain(t, problems(t, c), "has no endpoint")
 }
 
+// The telemetry endpoint is validated at the startup gate so a typo becomes a loud error
+// rather than silently-dropped exports — the contract telemetry.Setup relies on. The three
+// valid forms (off / stdout / host:port) must pass; anything else must fail.
+func TestValidateOTelEndpointValidForms(t *testing.T) {
+	for _, ep := range []string{"", "stdout", "localhost:4317", "127.0.0.1:4317", "[::1]:4317"} {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.OTel = OTelConfig{Endpoint: ep}
+		if err := c.Validate(); err != nil {
+			t.Errorf("endpoint %q: Validate returned %v, want nil", ep, err)
+		}
+	}
+}
+
+func TestValidateOTelEndpointRejectsMalformed(t *testing.T) {
+	// A bare hostname (no port), an empty host, and an empty port are all unusable as an
+	// OTLP/gRPC collector address and must be caught, not passed through to a lazy dial.
+	for _, ep := range []string{"not-a-host-port", "localhost", ":4317", "host:"} {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.OTel = OTelConfig{Endpoint: ep}
+		mustContain(t, problems(t, c), "otel.endpoint")
+	}
+}
+
 func TestValidateEmptyDAG(t *testing.T) {
 	c := validConfig()
 	c.Souls = nil

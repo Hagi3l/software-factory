@@ -16,6 +16,8 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Loxstomper/harness/internal/artifact"
 	"github.com/Loxstomper/harness/internal/broker"
@@ -24,6 +26,7 @@ import (
 	"github.com/Loxstomper/harness/internal/messaging"
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/harness/internal/telemetry"
 )
 
 // teardownTimeout bounds the reap of a sandbox. Teardown runs on a fresh context
@@ -83,6 +86,10 @@ type Options struct {
 	AckWait time.Duration
 	// Logger receives lifecycle logs. Defaults to a discard logger.
 	Logger *slog.Logger
+	// Telemetry receives the invocation/boot trace spans and the per-invocation throughput
+	// + duration metrics (specs/observability.md). A nil Provider defaults to telemetry.Noop
+	// so instrumentation runs unconditionally with zero overhead when export is off.
+	Telemetry *telemetry.Provider
 }
 
 // Runner is the per-host daemon: it pulls ready work for its roles, provisions a
@@ -98,6 +105,7 @@ type Runner struct {
 	store    artifact.Store
 	js       jetstream.JetStream
 	log      *slog.Logger
+	tel      *telemetry.Provider
 }
 
 // New builds a Runner from its options and injected collaborators: the sandbox
@@ -157,7 +165,11 @@ func New(opts Options, backend sandbox.Backend, resolver AdapterResolver, pub Pu
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return &Runner{opts: opts, backend: backend, resolver: resolver, pub: pub, invoker: invoker, store: store, js: js, log: log}, nil
+	tel := opts.Telemetry
+	if tel == nil {
+		tel = telemetry.Noop()
+	}
+	return &Runner{opts: opts, backend: backend, resolver: resolver, pub: pub, invoker: invoker, store: store, js: js, log: log, tel: tel}, nil
 }
 
 // Run binds a pull consumer per role and serves each until ctx is canceled. It
@@ -259,6 +271,21 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		return core.Result{}, err
 	}
 
+	// An invocation is one trace (specs/observability.md): this is its root span. The
+	// brokered llm-turn / tool-call spans the relay opens parent off it in-process (the
+	// agent loop is co-located with the runner), and the boot span below covers sandbox
+	// provisioning beneath it. ctx now carries the span, so everything downstream inherits it.
+	ctx, span := r.tel.Tracer().Start(ctx, telemetry.SpanInvocation, trace.WithAttributes(
+		attribute.String(telemetry.AttrComponent, telemetry.ComponentRunner),
+		attribute.String(telemetry.AttrInvocationID, invID),
+		attribute.String(telemetry.AttrIssueID, brief.Issue.ID),
+		attribute.String(telemetry.AttrIssueRole, brief.Issue.Role),
+		attribute.String(telemetry.AttrSoul, brief.Soul.Name),
+		attribute.String(telemetry.AttrModel, brief.Soul.Model),
+		attribute.String(telemetry.AttrBase, brief.Base),
+	))
+	defer span.End()
+
 	// Resolve the provider adapter for this invocation's soul up front: the runner
 	// holds the key and the adapter, so the agent's brokered model calls are
 	// provider-unaware. config.Validate already guarantees the model resolves; this is
@@ -280,11 +307,18 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		Limits:    r.opts.Limits,
 		Broker:    sandbox.Endpoint{Network: "unix", Address: sockPath},
 	}
-	sb, err := r.backend.Provision(ctx, spec)
+	bootCtx, bootSpan := r.tel.Tracer().Start(ctx, telemetry.SpanBoot, trace.WithAttributes(
+		attribute.String(telemetry.AttrComponent, telemetry.ComponentRunner),
+		attribute.String(telemetry.AttrSandboxProfile, spec.Profile),
+	))
+	sb, err := r.backend.Provision(bootCtx, spec)
 	if err != nil {
+		bootSpan.End()
 		_ = ln.Close() // unlinks the unix socket we just bound
 		return core.Result{}, fmt.Errorf("runner: provision sandbox: %w", err)
 	}
+	bootSpan.SetAttributes(attribute.String(telemetry.AttrSandboxID, sb.ID()))
+	bootSpan.End()
 	defer func() {
 		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownTimeout)
 		defer cancel()
@@ -302,6 +336,12 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		repo:          r.opts.Repo,
 		allowedBranch: core.CandidateBranch(brief.Issue.ID),
 		log:           r.log.With("invocation", invID, "issue", brief.Issue.ID),
+		tel:           r.tel,
+		model:         brief.Soul.Model,
+		// parentCtx carries the invocation span so the relay's per-turn llm-turn / tool-call
+		// spans parent off it. The broker serves the relay on a separate connection-scoped
+		// context, so without this the brokered spans would be orphan roots, not children.
+		parentCtx: ctx,
 	})
 	srv := broker.NewServer(rel, broker.WithAllowlist(r.opts.Allowlist))
 	brokerCtx, stopBroker := context.WithCancel(ctx)
@@ -316,6 +356,18 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	invStart := time.Now()
 	res, invErr := r.invoker.Invoke(ctx, sb, brief, spec.Broker)
 	elapsed := time.Since(invStart)
+
+	// Record the invocation's throughput + duration whatever the disposition — the counter
+	// measures real agent work, including failed/retried attempts (specs/observability.md).
+	// An invErr is an infra/agent-loop failure with no clean Result status, recorded under a
+	// distinct "error" status so it is visible but never mistaken for a graded outcome.
+	status := string(res.Status)
+	if invErr != nil {
+		status = "error"
+	}
+	r.tel.RecordInvocation(ctx, brief.Issue.Role, status, elapsed)
+	span.SetAttributes(attribute.String(telemetry.AttrResultStatus, status))
+
 	u := rel.Usage()
 	r.log.Info("runner: invocation usage", "issue", brief.Issue.ID,
 		"input_tokens", u.InputTokens, "output_tokens", u.OutputTokens,

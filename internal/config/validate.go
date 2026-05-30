@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"os"
 	"sort"
 	"strings"
@@ -91,6 +92,7 @@ func (c *Config) Validate() error {
 		add("infra configuration is missing")
 	} else {
 		c.validateModels(add)
+		c.validateOTel(add)
 	}
 
 	if len(problems) == 0 {
@@ -461,6 +463,35 @@ func (c *Config) validateModels(add func(string, ...any)) {
 		}
 		if _, ok := c.Infra.Models[s.Model]; !ok {
 			add("soul %q references model %q which the infra model registry does not define", s.Name, s.Model)
+		}
+	}
+}
+
+// otelEndpointStdout is the one non-address endpoint value config accepts: it selects the
+// stdout exporter (offline dev). It mirrors telemetry.EndpointStdout, which owns the
+// *behavior* — duplicated as a bare literal here only to avoid pulling the heavy OTel SDK
+// (telemetry's transitive deps) into this foundational config package just for one string.
+const otelEndpointStdout = "stdout"
+
+// validateOTel checks the telemetry export endpoint is one telemetry.Setup can act on:
+// "" (export off), "stdout" (the offline stdout exporter), or a host:port OTLP/gRPC
+// collector address. Catching a malformed endpoint here — at the startup validation gate
+// — turns a silently-dropped-exports misconfiguration into a loud, actionable error, the
+// same contract telemetry.go documents ("config.Validate enforces this set before Setup
+// runs"). See specs/observability.md.
+func (c *Config) validateOTel(add func(string, ...any)) {
+	ep := c.Infra.OTel.Endpoint
+	switch ep {
+	case "", otelEndpointStdout:
+		// "" disables export; "stdout" prints to the process stdout — both need no address.
+	default:
+		// Anything else must be a well-formed host:port the OTLP/gRPC exporter can dial.
+		// net.SplitHostPort is the stdlib grammar (incl. IPv6 brackets) the embedded NATS
+		// listener uses too; require both halves non-empty so ":4317" or "host:" is rejected.
+		host, port, err := net.SplitHostPort(ep)
+		if err != nil || host == "" || port == "" {
+			add("otel.endpoint %q must be empty (off), %q, or a host:port OTLP/gRPC collector address",
+				ep, otelEndpointStdout)
 		}
 	}
 }

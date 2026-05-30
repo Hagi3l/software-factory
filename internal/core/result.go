@@ -1,6 +1,9 @@
 package core
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // ResultStatus is an agent's self-reported outcome for one invocation. It is a
 // proposal, never an acceptance: even StatusDone means only "candidate ready", and
@@ -114,6 +117,20 @@ type Branch struct {
 // in particular refusing main). It lives in core so neither side owns it — see
 // specs/components/runner.md, specs/security.md.
 func CandidateBranch(issueID string) string { return "candidate/" + issueID }
+
+// IssueIDFromCandidateBranch is the inverse of CandidateBranch: it recovers the issue id
+// from a candidate ref, returning false for a ref that does not follow the convention. It
+// lets the trusted side correlate a candidate back to its issue from the ref alone — the
+// gate runs in a fresh sandbox a separate trace from the producer (producer ≠ verifier),
+// so its telemetry span carries no inherited issue context and reconstructs it from here.
+func IssueIDFromCandidateBranch(ref string) (string, bool) {
+	const prefix = "candidate/"
+	id, ok := strings.CutPrefix(ref, prefix)
+	if !ok || id == "" {
+		return "", false
+	}
+	return id, true
+}
 
 // Evidence is the proof attached to a Result. Large items (transcripts, gate
 // output, diffs) are not inlined — they are written to the content-addressed

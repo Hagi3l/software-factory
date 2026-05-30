@@ -15,6 +15,7 @@ import (
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/gate"
 	"github.com/Loxstomper/harness/internal/messaging"
+	"github.com/Loxstomper/harness/internal/telemetry"
 )
 
 // defaultTick is how often the orchestrator runs a schedule + sweep pass when no
@@ -99,6 +100,9 @@ type Options struct {
 	Tick time.Duration
 	// Logger receives lifecycle logs. Defaults to a discard logger.
 	Logger *slog.Logger
+	// Telemetry receives the per-invocation cost metric (the orchestrator is the only
+	// component holding the per-model price table). A nil Provider defaults to telemetry.Noop.
+	Telemetry *telemetry.Provider
 }
 
 // Orchestrator is the single scheduler, gatekeeper, and sole beads writer. It runs a
@@ -112,6 +116,7 @@ type Orchestrator struct {
 	merger Merger
 	js     jetstream.JetStream
 	log    *slog.Logger
+	tel    *telemetry.Provider
 
 	leaseTTL time.Duration
 	tick     time.Duration
@@ -160,6 +165,10 @@ func New(opts Options, bd Beads, g Gate, merger Merger, js jetstream.JetStream) 
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
+	tel := opts.Telemetry
+	if tel == nil {
+		tel = telemetry.Noop()
+	}
 	o := &Orchestrator{
 		opts:     opts,
 		bd:       bd,
@@ -167,6 +176,7 @@ func New(opts Options, bd Beads, g Gate, merger Merger, js jetstream.JetStream) 
 		merger:   merger,
 		js:       js,
 		log:      log,
+		tel:      tel,
 		leaseTTL: opts.LeaseTTL,
 		tick:     opts.Tick,
 		base:     opts.Base,

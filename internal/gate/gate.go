@@ -13,12 +13,16 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/Loxstomper/harness/internal/artifact"
 	"github.com/Loxstomper/harness/internal/broker"
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/harness/internal/telemetry"
 )
 
 // teardownTimeout bounds the reap of the verification sandbox. Teardown runs on a
@@ -222,6 +226,7 @@ type Runner struct {
 	store     artifact.Store
 	socketDir string
 	log       *slog.Logger
+	tel       *telemetry.Provider
 }
 
 // New builds a gate Runner over a sandbox backend and the check registry that resolves
@@ -230,12 +235,16 @@ type Runner struct {
 // harvest it is best-effort (a nil store, or a write that fails, degrades provenance
 // but never the verdict). socketDir is where the per-gate broker socket is minted (the
 // verification sandbox still needs a broker endpoint to provision, but it is a deny-all
-// one — see Run). A nil logger discards.
-func New(backend sandbox.Backend, registry Registry, store artifact.Store, socketDir string, log *slog.Logger) *Runner {
+// one — see Run). A nil logger discards; a nil telemetry Provider defaults to Noop, so the
+// gate-run span and metric are emitted unconditionally with no overhead when export is off.
+func New(backend sandbox.Backend, registry Registry, store artifact.Store, socketDir string, log *slog.Logger, tel *telemetry.Provider) *Runner {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
-	return &Runner{backend: backend, registry: registry, store: store, socketDir: socketDir, log: log}
+	if tel == nil {
+		tel = telemetry.Noop()
+	}
+	return &Runner{backend: backend, registry: registry, store: store, socketDir: socketDir, log: log, tel: tel}
 }
 
 // Run provisions a fresh verification sandbox seeded with the candidate branch, runs
@@ -246,6 +255,21 @@ func New(backend sandbox.Backend, registry Registry, store artifact.Store, socke
 // failure the orchestrator retries, distinct from a clean Report whose Passed is false
 // (a real gate failure routed via on_failure). Every sandbox is always torn down.
 func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
+	// The gate is the verification span. It runs in the trusted orchestrator's own process —
+	// a fresh sandbox, a distinct trace from the untrusted producer (producer ≠ verifier) —
+	// so it carries no inherited invocation context and correlates back to its issue by id,
+	// recovered from the candidate ref (specs/observability.md). start times the whole run for
+	// both the span and the gate-duration metric; both are emitted on every exit path below.
+	start := time.Now()
+	ctx, span := r.tel.Tracer().Start(ctx, telemetry.SpanGateRun, trace.WithAttributes(
+		attribute.String(telemetry.AttrComponent, telemetry.ComponentGate),
+		attribute.String(telemetry.AttrCandidateRef, c.Ref),
+	))
+	if id, ok := core.IssueIDFromCandidateBranch(c.Ref); ok {
+		span.SetAttributes(attribute.String(telemetry.AttrIssueID, id))
+	}
+	defer span.End()
+
 	// Resolve the stage's declared postconditions to runnable checks before spending
 	// a sandbox: an unresolvable postcondition is a config fault, and a stage that
 	// declared none would pass every candidate — both defeat verification and must
@@ -312,6 +336,15 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 	// passing and failing checks are persisted — a rejected gate's output is precisely
 	// what a human triages from the dead-letter queue.
 	r.persistEvidence(ctx, c.Ref, &report)
+
+	// A verdict was reached: record it. The early returns above are infra errors (no verdict)
+	// — deliberately not recorded, so the throughput counter and pass/fail split count only
+	// real gate outcomes, never a sandbox that died mid-run (specs/observability.md).
+	span.SetAttributes(
+		attribute.Bool(telemetry.AttrGatePassed, report.Passed),
+		attribute.Int(telemetry.AttrGateChecksRun, len(report.Checks)),
+	)
+	r.tel.RecordGateRun(ctx, report.Passed, time.Since(start))
 
 	r.log.Info("gate: verdict", "ref", c.Ref, "passed", report.Passed, "checks_run", len(report.Checks))
 	return report, nil

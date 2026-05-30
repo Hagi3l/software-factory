@@ -24,6 +24,7 @@ import (
 	"github.com/Loxstomper/harness/internal/orchestrator"
 	"github.com/Loxstomper/harness/internal/runner"
 	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/harness/internal/telemetry"
 )
 
 // cmdRun boots the kernel: validate config, assemble every component over an
@@ -194,6 +195,20 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		return nil, err
 	}
 
+	// Telemetry: one Provider shared by the orchestrator, runner, and gate. Endpoint comes
+	// from the validated infra overlay ("" off / "stdout" / OTLP host:port). Setup is
+	// network-free (the OTLP exporter dials lazily), so it is safe in this network-free
+	// composition root; a missing collector degrades to dropped exports, never a boot
+	// failure. Shutdown joins the teardown stack so a clean exit flushes the final batch.
+	tel, err := telemetry.Setup(context.Background(), telemetry.Config{
+		Endpoint:    cfg.Infra.OTel.Endpoint,
+		ServiceName: "harness",
+	})
+	if err != nil {
+		return nil, err
+	}
+	releases = append(releases, func() { _ = tel.Shutdown(context.Background()) })
+
 	// Control room, co-located when serving is enabled. It shares this run's in-process
 	// NATS (the pump tails the agent-event subjects into the SSE hub) and reads the same
 	// three stores the loops write — beads (read-only; the orchestrator is the single
@@ -263,6 +278,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		Limits:    cfg.Infra.Sandbox.Limits,
 		Allowlist: cfg.Infra.Broker.Allowlist,
 		Logger:    log,
+		Telemetry: tel,
 	}, backend, reg, nc, loop, store, js)
 	if err != nil {
 		return nil, err
@@ -274,14 +290,15 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// commands run — the checks are data, not code. It shares the same artifact store as
 	// the runner: each check's stdout/stderr is harvested there before teardown so the
 	// provenance trailer can cite the evidence by hash.
-	gateRunner := gate.New(backend, gate.Registry(cfg.Harness.Checks), store, sockDir, log)
+	gateRunner := gate.New(backend, gate.Registry(cfg.Harness.Checks), store, sockDir, log, tel)
 
 	orch, err := orchestrator.New(orchestrator.Options{
-		Config: cfg,
-		Repo:   repo,
-		Base:   "main",
-		Limits: cfg.Infra.Sandbox.Limits,
-		Logger: log,
+		Config:    cfg,
+		Repo:      repo,
+		Base:      "main",
+		Limits:    cfg.Infra.Sandbox.Limits,
+		Logger:    log,
+		Telemetry: tel,
 	}, beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)), gateRunner, orchestrator.NewGitMerger(""), js)
 	if err != nil {
 		return nil, err

@@ -156,7 +156,7 @@ func TestRunAllChecksPass(t *testing.T) {
 	}}
 	be := &fakeBackend{sb: sb}
 	store := testStore(t)
-	g := New(be, testRegistry(), store, t.TempDir(), nil)
+	g := New(be, testRegistry(), store, t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), testCandidate())
 	if err != nil {
@@ -216,7 +216,7 @@ func TestRunStopsAtFirstFailure(t *testing.T) {
 	}}
 	be := &fakeBackend{sb: sb}
 	store := testStore(t)
-	g := New(be, testRegistry(), store, t.TempDir(), nil)
+	g := New(be, testRegistry(), store, t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), testCandidate())
 	if err != nil {
@@ -253,7 +253,7 @@ func TestRunStopsAtFirstFailure(t *testing.T) {
 func TestRunExecErrorIsInfraFailure(t *testing.T) {
 	sb := &scriptedSandbox{id: "gate-sb", execErr: errors.New("sandbox is gone")}
 	be := &fakeBackend{sb: sb}
-	g := New(be, testRegistry(), nil, t.TempDir(), nil)
+	g := New(be, testRegistry(), nil, t.TempDir(), nil, nil)
 
 	if _, err := g.Run(context.Background(), testCandidate()); err == nil {
 		t.Fatal("Run returned nil error for a dead sandbox, want an error")
@@ -267,7 +267,7 @@ func TestRunExecErrorIsInfraFailure(t *testing.T) {
 // every candidate — a configuration error, caught before any sandbox is provisioned.
 func TestRunNoChecksErrors(t *testing.T) {
 	be := &fakeBackend{sb: &scriptedSandbox{id: "gate-sb"}}
-	g := New(be, testRegistry(), nil, t.TempDir(), nil)
+	g := New(be, testRegistry(), nil, t.TempDir(), nil, nil)
 	c := testCandidate()
 	c.Postconditions = nil
 	if _, err := g.Run(context.Background(), c); err == nil {
@@ -282,7 +282,7 @@ func TestRunNoChecksErrors(t *testing.T) {
 // fails the gate before a sandbox is spent, not after.
 func TestRunUnresolvablePostconditionErrors(t *testing.T) {
 	be := &fakeBackend{sb: &scriptedSandbox{id: "gate-sb"}}
-	g := New(be, testRegistry(), nil, t.TempDir(), nil)
+	g := New(be, testRegistry(), nil, t.TempDir(), nil, nil)
 	c := testCandidate()
 	c.Postconditions = []string{"build", "no-such-check"}
 	if _, err := g.Run(context.Background(), c); err == nil {
@@ -296,7 +296,7 @@ func TestRunUnresolvablePostconditionErrors(t *testing.T) {
 // A provisioning failure surfaces as an error (the gate could not produce a verdict).
 func TestRunProvisionFailure(t *testing.T) {
 	be := &fakeBackend{provErr: errors.New("no host capacity")}
-	g := New(be, testRegistry(), nil, t.TempDir(), nil)
+	g := New(be, testRegistry(), nil, t.TempDir(), nil, nil)
 	if _, err := g.Run(context.Background(), testCandidate()); err == nil {
 		t.Fatal("Run returned nil error when provisioning failed, want an error")
 	}
@@ -311,7 +311,7 @@ func TestRunEvidencePersistenceIsBestEffort(t *testing.T) {
 		"make test-unit": {ExitCode: 0, Stdout: []byte("ok")},
 	}}
 	be := &fakeBackend{sb: sb}
-	g := New(be, testRegistry(), erroringStore{}, t.TempDir(), nil)
+	g := New(be, testRegistry(), erroringStore{}, t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), testCandidate())
 	if err != nil {
@@ -382,7 +382,7 @@ func TestRunRedGreenProofPasses(t *testing.T) {
 		core.CandidateBranch("issue-1"): cand,
 	}}
 	store := testStore(t)
-	g := New(be, redGreenRegistry(), store, t.TempDir(), nil)
+	g := New(be, redGreenRegistry(), store, t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), redGreenCandidate())
 	if err != nil {
@@ -437,7 +437,7 @@ func TestRunRedGreenFailsWhenBaseIsNotRed(t *testing.T) {
 		core.CandidateBranch("issue-1"): cand,
 	}}
 	store := testStore(t)
-	g := New(be, redGreenRegistry(), store, t.TempDir(), nil)
+	g := New(be, redGreenRegistry(), store, t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), redGreenCandidate())
 	if err != nil {
@@ -466,7 +466,7 @@ func TestRunRedGreenFailsWhenCandidateIsNotGreen(t *testing.T) {
 		"main":                          base,
 		core.CandidateBranch("issue-1"): cand,
 	}}
-	g := New(be, redGreenRegistry(), testStore(t), t.TempDir(), nil)
+	g := New(be, redGreenRegistry(), testStore(t), t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), redGreenCandidate())
 	if err != nil {
@@ -481,7 +481,7 @@ func TestRunRedGreenFailsWhenCandidateIsNotGreen(t *testing.T) {
 // sandbox is provisioned, the way other resolution faults do.
 func TestRunRedGreenMissingBaseRefErrors(t *testing.T) {
 	be := &fakeBackend{sb: &scriptedSandbox{id: "gate-sb"}}
-	g := New(be, redGreenRegistry(), nil, t.TempDir(), nil)
+	g := New(be, redGreenRegistry(), nil, t.TempDir(), nil, nil)
 	c := redGreenCandidate()
 	c.BaseRef = ""
 	if _, err := g.Run(context.Background(), c); err == nil {
@@ -507,7 +507,7 @@ func TestRunRedGreenWithCommandCheck(t *testing.T) {
 		core.CandidateBranch("issue-1"): cand,
 	}}
 	reg := Registry{core.CheckAcceptanceTests: "make test-unit", "gosec": "gosec ./..."}
-	g := New(be, reg, testStore(t), t.TempDir(), nil)
+	g := New(be, reg, testStore(t), t.TempDir(), nil, nil)
 	c := redGreenCandidate()
 	c.Postconditions = []string{core.PostconditionRedGreen, "gosec"}
 
@@ -560,7 +560,7 @@ func TestRunTestsRedProofPassesWhenCandidateFails(t *testing.T) {
 	}}
 	be := &fakeBackend{sb: cand}
 	store := testStore(t)
-	g := New(be, redGreenRegistry(), store, t.TempDir(), nil)
+	g := New(be, redGreenRegistry(), store, t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), testsRedCandidate())
 	if err != nil {
@@ -594,7 +594,7 @@ func TestRunTestsRedProofFailsWhenCandidatePasses(t *testing.T) {
 	}}
 	be := &fakeBackend{sb: cand}
 	store := testStore(t)
-	g := New(be, redGreenRegistry(), store, t.TempDir(), nil)
+	g := New(be, redGreenRegistry(), store, t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), testsRedCandidate())
 	if err != nil {
@@ -659,7 +659,7 @@ func TestRunMetricPassesAboveThreshold(t *testing.T) {
 	}}
 	be := &fakeBackend{sb: sb}
 	store := testStore(t)
-	g := New(be, mutationRegistry(), store, t.TempDir(), nil)
+	g := New(be, mutationRegistry(), store, t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), mutationCandidate())
 	if err != nil {
@@ -691,7 +691,7 @@ func TestRunMetricFailsBelowThreshold(t *testing.T) {
 	}}
 	be := &fakeBackend{sb: sb}
 	store := testStore(t)
-	g := New(be, mutationRegistry(), store, t.TempDir(), nil)
+	g := New(be, mutationRegistry(), store, t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), mutationCandidate())
 	if err != nil {
@@ -717,7 +717,7 @@ func TestRunMetricFailsWhenToolErrors(t *testing.T) {
 		"measure-mutation": {ExitCode: 1, Stdout: []byte("0.99"), Stderr: []byte("gremlins: build failed")},
 	}}
 	be := &fakeBackend{sb: sb}
-	g := New(be, mutationRegistry(), testStore(t), t.TempDir(), nil)
+	g := New(be, mutationRegistry(), testStore(t), t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), mutationCandidate())
 	if err != nil {
@@ -736,7 +736,7 @@ func TestRunMetricFailsOnUnparseableScore(t *testing.T) {
 	}}
 	be := &fakeBackend{sb: sb}
 	store := testStore(t)
-	g := New(be, mutationRegistry(), store, t.TempDir(), nil)
+	g := New(be, mutationRegistry(), store, t.TempDir(), nil, nil)
 
 	report, err := g.Run(context.Background(), mutationCandidate())
 	if err != nil {
@@ -802,7 +802,7 @@ func TestRunScannerChecksEmitEvidence(t *testing.T) {
 	}}
 	be := &fakeBackend{sb: sb}
 	store := testStore(t)
-	g := New(be, scannerRegistry(), store, t.TempDir(), nil)
+	g := New(be, scannerRegistry(), store, t.TempDir(), nil, nil)
 
 	c := testCandidate()
 	c.Postconditions = []string{"gosec", "govulncheck", "license-scan"}
@@ -847,7 +847,7 @@ func TestRunScannerFindingsFailClosed(t *testing.T) {
 	}}
 	be := &fakeBackend{sb: sb}
 	store := testStore(t)
-	g := New(be, scannerRegistry(), store, t.TempDir(), nil)
+	g := New(be, scannerRegistry(), store, t.TempDir(), nil, nil)
 
 	c := testCandidate()
 	c.Postconditions = []string{"govulncheck"}

@@ -9,10 +9,15 @@ import (
 	"os/exec"
 	"strings"
 	"sync"
+	"time"
+
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Loxstomper/harness/internal/broker"
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/harness/internal/telemetry"
 )
 
 // relay is the runner's concrete broker.Handler for one invocation: it performs the
@@ -31,6 +36,10 @@ type relay struct {
 	pub     Publisher       // core-NATS connection for the live event/token feed
 	sb      sandbox.Sandbox // the live sandbox, used to extract the candidate branch on push
 	log     *slog.Logger
+
+	tel       *telemetry.Provider // per-turn llm-turn / tool-call spans + the llm-turn metric
+	model     string              // soul.Model, for AttrModel + RecordLLMTurn (model.Request omits it)
+	parentCtx context.Context     // carries the invocation span so brokered spans parent off it
 
 	eventSubject  string // harness.agent.<id>.events — where token/progress events fan out
 	repo          string // source repository the candidate branch is pushed into
@@ -68,19 +77,40 @@ type relayConfig struct {
 	repo          string
 	allowedBranch string
 	log           *slog.Logger
+	tel           *telemetry.Provider
+	model         string
+	parentCtx     context.Context
 }
 
 func newRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox, cfg relayConfig) *relay {
+	tel := cfg.tel
+	if tel == nil {
+		tel = telemetry.Noop()
+	}
 	return &relay{
 		adapter:       adapter,
 		pub:           pub,
 		sb:            sb,
 		log:           cfg.log,
+		tel:           tel,
+		model:         cfg.model,
+		parentCtx:     cfg.parentCtx,
 		eventSubject:  cfg.eventSubject,
 		repo:          cfg.repo,
 		allowedBranch: cfg.allowedBranch,
 		pushBundle:    pushBundleToRepo,
 	}
+}
+
+// spanParent returns ctx with its parent span replaced by the invocation span (captured at
+// relay construction). The relay is served on a connection-scoped context that carries no
+// span, so without re-parenting the brokered llm-turn / tool-call spans would be orphan
+// roots. ctx's own deadline/cancellation is preserved — only the trace parentage changes.
+func (r *relay) spanParent(ctx context.Context) context.Context {
+	if r.parentCtx == nil {
+		return ctx
+	}
+	return trace.ContextWithSpan(ctx, trace.SpanFromContext(r.parentCtx))
 }
 
 // tokenEvent is the live-feed envelope for one streamed assistant text delta. It is
@@ -104,11 +134,35 @@ func (r *relay) Complete(ctx context.Context, req model.Request) (model.Response
 		r.publishEvent(tokenEvent{Type: "token", Delta: ev.TextDelta})
 	}
 
+	// One model turn = one llm-turn span, parented to the invocation and timed around the
+	// adapter call (the latency the turn-duration metric records). The span carries the
+	// per-turn token breakdown a replay reads; the aggregate counter is RecordLLMTurn below.
+	_, span := r.tel.Tracer().Start(r.spanParent(ctx), telemetry.SpanLLMTurn, trace.WithAttributes(
+		attribute.String(telemetry.AttrComponent, telemetry.ComponentBroker),
+		attribute.String(telemetry.AttrModel, r.model),
+	))
+	defer span.End()
+
+	start := time.Now()
 	resp, err := r.adapter.Complete(ctx, req, onEvent)
+	d := time.Since(start)
 	if err != nil {
+		span.RecordError(err)
 		r.log.Error("broker: model completion failed", "err", err)
 		return model.Response{}, err
 	}
+
+	span.SetAttributes(
+		attribute.String(telemetry.AttrStopReason, string(resp.Stop)),
+		attribute.Int(telemetry.AttrToolCalls, len(resp.ToolCalls)),
+		attribute.Int(telemetry.AttrInputTokens, resp.Usage.InputTokens),
+		attribute.Int(telemetry.AttrOutputTokens, resp.Usage.OutputTokens),
+		attribute.Int(telemetry.AttrCacheReadTokens, resp.Usage.CacheReadTokens),
+		attribute.Int(telemetry.AttrCacheWriteTokens, resp.Usage.CacheCreationTokens),
+	)
+	r.tel.RecordLLMTurn(ctx, r.model,
+		resp.Usage.InputTokens, resp.Usage.OutputTokens,
+		resp.Usage.CacheReadTokens, resp.Usage.CacheCreationTokens, d)
 
 	r.addUsage(resp.Usage)
 	r.record(req, resp)
@@ -131,23 +185,38 @@ func (r *relay) Complete(ctx context.Context, req model.Request) (model.Response
 // from the network-less sandbox as a git bundle over Exec stdout — never a bind mount
 // or copy-out — preserving the microVM-shaped isolation (see specs/components/sandbox.md).
 func (r *relay) GitPush(ctx context.Context, req broker.GitPushRequest) (broker.GitPushResult, error) {
+	// The git-push is the one egress tool the broker mediates, so it gets a tool-call span
+	// (workspace tools run unbrokered inside the sandbox and are invisible by design). The
+	// span opens before the branch guard so a denied push is traced too, not silently dropped.
+	_, span := r.tel.Tracer().Start(r.spanParent(ctx), telemetry.SpanToolCall, trace.WithAttributes(
+		attribute.String(telemetry.AttrComponent, telemetry.ComponentBroker),
+		attribute.String(telemetry.AttrToolName, telemetry.ToolGitPush),
+		attribute.String(telemetry.AttrGitBranch, req.Branch),
+	))
+	defer span.End()
+
 	if req.Branch != r.allowedBranch {
 		r.log.Warn("broker: git push refused, not the task branch", "requested", req.Branch, "allowed", r.allowedBranch)
-		return broker.GitPushResult{}, fmt.Errorf("git push denied: branch %q is not this task's branch %q", req.Branch, r.allowedBranch)
+		err := fmt.Errorf("git push denied: branch %q is not this task's branch %q", req.Branch, r.allowedBranch)
+		span.RecordError(err)
+		return broker.GitPushResult{}, err
 	}
 
 	bundle, err := r.extractBundle(ctx, req.Branch)
 	if err != nil {
+		span.RecordError(err)
 		r.log.Error("broker: git push failed extracting branch", "branch", req.Branch, "err", err)
 		return broker.GitPushResult{}, err
 	}
 
 	commit, err := r.pushBundle(ctx, r.repo, req.Branch, bundle)
 	if err != nil {
+		span.RecordError(err)
 		r.log.Error("broker: git push failed applying branch", "branch", req.Branch, "err", err)
 		return broker.GitPushResult{}, err
 	}
 
+	span.SetAttributes(attribute.String(telemetry.AttrGitCommit, commit))
 	r.log.Info("broker: git push", "branch", req.Branch, "commit", commit)
 	return broker.GitPushResult{Commit: commit}, nil
 }

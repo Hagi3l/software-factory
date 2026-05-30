@@ -133,6 +133,17 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 		return false, nil
 	}
 
+	// Record this invocation's priced spend for the cost view (specs/control-room.md T4.10).
+	// The orchestrator is the only component that holds the per-model price table, so it
+	// prices here, once per result, keyed by the model that ran. Recorded for every
+	// disposition (the spend was real); a zero cost (unpriced model) records nothing. Unlike
+	// the beads closing-spend stamp below — which is idempotent under redelivery because
+	// budget enforcement must be exact — this is a monotonic observability counter, so an
+	// at-least-once redelivery may modestly over-count it; that is acceptable for a metric.
+	if soul, ok := o.selectSoul(issue); ok {
+		o.tel.RecordCost(ctx, soul.Model, o.priceUsage(issue, res.Usage))
+	}
+
 	// Record this invocation's marginal spend on the issue so the epic-budget aggregate read
 	// (authorizeEpic) can sum it — every Result reaching here is a completed invocation that
 	// burned real tokens, whatever its disposition (accepted, routed, dead-lettered). Stamped

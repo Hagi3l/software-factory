@@ -350,7 +350,47 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   no-reader notice/503. **Resolve (T4.15) is deferred** — it follows the wizard (T4.12/T4.14) in build
   order; until then the DLQ is the read surface that surfaces *what* needs a human, drilling into
   the detail page. (needs T4.2) ([control-room.md](specs/control-room.md), [workflow.md](specs/workflow.md))
-- [ ] **T4.9 OTel spans + export** — emit spans at the broker, orchestrator, and runner (boot, llm-turn, tool-call, gate-run) and metrics (latency, throughput, cost). **Decided:** export over **OTLP** to a configurable endpoint that defaults to off / stdout in dev, preserving the offline / self-contained-binary property; wiring an external backend (Tempo/Jaeger) is deferred to Phase 5 where distribution lands. Settle the **span-attribute + event schema first** — it's the contract T4.10/T4.11 read. ([observability.md](specs/observability.md))
+- [x] **T4.9 OTel spans + export** — *done.* OpenTelemetry tracing + metrics across the kernel, exported
+  over **OTLP/gRPC** to a configurable endpoint that defaults to **off** (`""`) with **`stdout`** for offline
+  dev — preserving the self-contained-binary / zero-network property (an external Tempo/Jaeger backend is a
+  Phase 5 deployment step, T5.8; the exporter wiring is complete so the knob is real, not stubbed). **New leaf
+  package `internal/telemetry`** is the single source of truth for the **schema** — the contract T4.10/T4.11
+  read — split into `conventions.go` (span names `invocation`/`boot`/`llm-turn`/`tool-call`/`gate-run`; the
+  `harness.*` attribute namespace; token-kind/component values; the three metric families latency/throughput/cost,
+  durations in seconds) and `telemetry.go` (the `Provider`). **`Provider` is nil-safe by construction:** `Noop()`
+  (inert tracer + no-op instruments) is what an unset endpoint and a nil Provider both resolve to, so every call
+  site instruments **unconditionally** with zero overhead when export is off (mirrors the nil-logger→discard
+  pattern). `Setup(ctx, Config)` is **network-free** (the OTLP exporter dials lazily on first export, so a missing
+  collector degrades to dropped exports + logged errors, never a boot failure) — safe in the network-free
+  composition root; `Shutdown` flushes the final batch and joins the run's teardown stack. `NewWith(tp, mp)` is a
+  legitimate seam (build a Provider over caller-supplied OTel pipelines) so cross-package tests assert call sites
+  emit against in-memory recorders. **Emit sites (one shared Provider threaded through `runner.Options`,
+  `orchestrator.Options`, and `gate.New`):** the **runner** opens the root **`invocation`** span (an invocation =
+  one trace) with issue/role/soul/model/base/invocation-id attrs, wraps **`boot`** around `backend.Provision`, and
+  records `RecordInvocation` (throughput + the already-measured `Elapsed`) for **every** disposition — an infra
+  error records under a distinct `"error"` status. The **broker relay** opens **`llm-turn`** per model turn
+  (timed around `adapter.Complete`, carrying stop-reason + per-kind token attrs) and `RecordLLMTurn`, and
+  **`tool-call`** around the brokered git-push (opened **before** the branch guard so a denied push is traced too)
+  — the relay needed a new `model string` field (`model.Request` omits the model name) and a `parentCtx` so its
+  per-turn spans **parent off the invocation span** (the broker serves on a separate connection-scoped context, so
+  without re-parenting via `trace.ContextWithSpan` the spans would be orphan roots). The **orchestrator** records
+  `RecordCost` in `handleResult` (it alone holds the per-model price table), once per result, keyed by model —
+  documented as a monotonic observability counter that may modestly over-count under at-least-once redelivery
+  (budget enforcement stays exact via the idempotent beads closing-spend stamp). The **gate** opens **`gate-run`**
+  in its own trace (producer ≠ verifier — no inherited context; issue id is recovered from the candidate ref via
+  the new `core.IssueIDFromCandidateBranch`, the inverse of `CandidateBranch`) and records `RecordGateRun`
+  **only on a reached verdict** — infra errors (no verdict) are deliberately unrecorded so the pass/fail split
+  counts real outcomes only. **Config:** `config.OTelConfig.Endpoint` (already existed) is now validated at the
+  startup gate by a new `validateOTel` — `""`/`"stdout"`/`host:port` (via `net.SplitHostPort`, both halves
+  required), turning a typo into a loud error rather than silently-dropped exports (the contract telemetry.go
+  documents). `config` deliberately does **not** import `telemetry` (would drag the OTel SDK into a foundational
+  package) — the `"stdout"` sentinel is a documented literal cross-referencing `telemetry.EndpointStdout`. **Deps:**
+  added the OTel v1.44.0 tree (SDK + OTLP/stdout exporters) to go.mod/go.sum via `go mod tidy`. Non-TCB
+  observability, human-reviewed. Tests: telemetry schema/provider (Noop safety, off/stdout/OTLP-lazy Setup,
+  Record* emit + per-kind token split + zero-skip), `validateOTel` (valid forms incl. IPv6 / malformed rejection),
+  `IssueIDFromCandidateBranch` round-trip + rejection, and the gate-run span+metric end-to-end (verdict recorded,
+  infra error **not** recorded) through the real `Run` via `NewWith`. `make check` green (lint 0, 548 pass / 2 skip).
+  ([observability.md](specs/observability.md))
 - [ ] **T4.10 Budgets + Provenance views** — budgets (token/$/wall burn vs. caps) from OTel metrics; provenance (trace a merged commit → issue → soul → model → prompt → evidence). (needs T4.2, T4.9) ([control-room.md](specs/control-room.md))
 - [ ] **T4.11 Replay** — reconstruct an invocation's full decision trail from the broker-captured transcript + the artifact store, live or after the fact. (needs T4.7) ([observability.md](specs/observability.md))
 - [ ] **T4.12 Requirements-planner conversation loop** — the trusted, **non-sandboxed** LLM that drives toward aligned, testable intent, streaming over SSE; reuses the canonical model layer. *(Machinery builds offline — drive it with `modeltest` / local Ollama; only the subjective elicitation quality awaits a capable model, never the engineering.)* Scope note: control-room.md gives this planner three jobs — elicit testable intent (this task), author/maintain `specs/` markdown, and gate on human approval. The conversation loop is T4.12; the **spec-authoring persona and its link-integrity ownership** (specs-process.md: "every link resolves; every spec maps to ≥1 issue") land in **T4.14** — keep that validation a first-class postcondition on the planner's output there, not an afterthought. ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
