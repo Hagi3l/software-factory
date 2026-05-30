@@ -1,6 +1,10 @@
 package views
 
-import "github.com/Loxstomper/harness/internal/controlroom/wizard"
+import (
+	"fmt"
+
+	"github.com/Loxstomper/harness/internal/controlroom/wizard"
+)
 
 // CreatePage is the Create-Task wizard (specs/control-room.md "The wizard"): a steered
 // conversation with the trusted, non-sandboxed requirements planner that converges on
@@ -28,6 +32,14 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 				</p>
 			</div>
 			<div hx-ext="sse" sse-connect={ "/create/stream/" + sessionID } class="flex flex-col gap-3">
+				<div
+					id="wizard-ledger"
+					hx-get={ "/create/ledger/" + sessionID }
+					hx-trigger="sse:ledger, sse:turn, every 8s"
+					hx-swap="innerHTML"
+				>
+					@LedgerPanel(sessionID, nil)
+				</div>
 				<div
 					id="wizard-transcript"
 					hx-get={ "/create/messages/" + sessionID }
@@ -98,6 +110,102 @@ templ wizardBubble(m wizard.Message) {
 			<div class="max-w-[85%] whitespace-pre-wrap rounded-lg bg-slate-800/70 px-3 py-2 text-sm text-slate-200">{ m.Text }</div>
 		</div>
 	}
+}
+
+// LedgerPanel renders the alignment ledger (T4.13, specs/control-room.md "The alignment
+// ledger") beside the conversation: a lightly-structured snapshot of what is agreed and what
+// is still open, each with a one-line rationale, and — for an unsettled fork — selectable
+// option chips. It is the htmx swap target the page re-fetches on a `ledger`/`turn` SSE nudge
+// (with a slow periodic backstop). Empty, it shows a muted invitation rather than nothing, so
+// the panel reads as a deliberate surface from the first paint.
+templ LedgerPanel(session string, items []wizard.LedgerItem) {
+	if len(items) == 0 {
+		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500">
+			Alignment ledger — decisions appear here as you converge.
+		</div>
+	} else {
+		<div class="flex flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+			<h2 class="text-sm font-semibold tracking-tight text-slate-200">Alignment ledger</h2>
+			<ul class="flex flex-col gap-3">
+				for i, it := range items {
+					@ledgerRow(session, i, it)
+				}
+			</ul>
+		</div>
+	}
+}
+
+// ledgerRow renders one ledger item: a status badge (agreed/open), the question, an optional
+// muted one-line rationale, and — when the point is an unsettled fork — a flex-wrap row of
+// selectable option chips. The question is templ-escaped as inert model text.
+templ ledgerRow(session string, idx int, it wizard.LedgerItem) {
+	<li class="flex flex-col gap-1.5">
+		<div class="flex items-start gap-2">
+			<span class={ ledgerStatusClass(it.Status) }>{ it.Status }</span>
+			<span class="text-sm text-slate-200">{ it.Question }</span>
+		</div>
+		if it.Rationale != "" {
+			<p class="pl-1 text-xs text-slate-500">{ it.Rationale }</p>
+		}
+		if len(it.Options) > 0 {
+			<div class="flex flex-wrap gap-2 pt-0.5">
+				for j, opt := range it.Options {
+					@ledgerChip(session, idx, j, opt)
+				}
+			</div>
+		}
+	</li>
+}
+
+// ledgerChip renders one fork option as a clickable button. Clicking POSTs the choice to
+// /create/ledger/select, which funnels it through the planner (re-emitting the ledger) and
+// returns the transcript fragment swapped into #wizard-transcript so the human's choice
+// appears at once; the refreshed ledger arrives over the `ledger` SSE nudge. The tradeoff
+// rides in the title (hover) and as a small muted suffix. htmx serializes hx-vals as form
+// fields, matching the POST handler's FormValue reads.
+templ ledgerChip(session string, itemIdx, optIdx int, opt wizard.LedgerOption) {
+	<button
+		type="button"
+		hx-post="/create/ledger/select"
+		hx-vals={ ledgerVals(session, itemIdx, optIdx) }
+		hx-target="#wizard-transcript"
+		hx-swap="innerHTML"
+		title={ opt.Tradeoff }
+		class={ chipClass(opt.Selected) }
+	>
+		{ opt.Label }
+		if opt.Tradeoff != "" {
+			<span class="text-xs opacity-70">— { opt.Tradeoff }</span>
+		}
+	</button>
+}
+
+// ledgerVals builds the hx-vals JSON htmx posts as form fields for a chip click: the session
+// id plus the item/option indices the select handler resolves against the latest ledger.
+func ledgerVals(session string, itemIdx, optIdx int) string {
+	return fmt.Sprintf("{\"session\":%q,\"item\":%d,\"option\":%d}", session, itemIdx, optIdx)
+}
+
+// chipClass returns the Tailwind classes for an option chip: a selected (chosen) chip gets an
+// emerald tint matching the agreed palette; an unselected one is a neutral slate pill that
+// brightens on hover. Kept inside this .templ file so the class literals are scanned by the
+// Tailwind @source pass (literals in hand-written views/*.go are NOT scanned).
+func chipClass(selected bool) string {
+	base := "rounded-full border px-3 py-1 text-xs transition focus:outline-none "
+	if selected {
+		return base + "border-emerald-500/40 bg-emerald-500/20 text-emerald-200"
+	}
+	return base + "border-slate-700 bg-slate-800/70 text-slate-200 hover:border-slate-500 hover:bg-slate-700/70"
+}
+
+// ledgerStatusClass returns the Tailwind classes for the status badge: agreed → emerald tint,
+// open → amber. Lives here (not in a views/*.go file) so the literals reach the Tailwind scan.
+func ledgerStatusClass(status string) string {
+	base := "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide "
+	if status == "agreed" {
+		return base + "bg-emerald-500/20 text-emerald-300"
+	}
+	return base + "bg-amber-500/20 text-amber-300"
 }
 
 // CreateMessage renders the wizard chrome with a single notice instead of the conversation —

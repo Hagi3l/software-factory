@@ -62,6 +62,9 @@ func TestCreateNotConfigured(t *testing.T) {
 	if stream := get(t, ts, "/create/stream/anything"); stream.status != http.StatusServiceUnavailable {
 		t.Errorf("/create/stream status = %d, want 503", stream.status)
 	}
+	if led := get(t, ts, "/create/ledger/anything"); led.status != http.StatusServiceUnavailable {
+		t.Errorf("/create/ledger status = %d, want 503", led.status)
+	}
 }
 
 // TestCreateRendersPageAndSession proves a wired wizard renders the conversation page with a
@@ -159,6 +162,99 @@ func TestCreateMessageRoundTrip(t *testing.T) {
 	// templ escapes the assistant text at render time, so the angle brackets appear escaped.
 	if !strings.Contains(frag.body, "reject &lt;empty&gt; rows") {
 		t.Errorf("transcript missing the finalized (escaped) assistant reply: %s", frag.body)
+	}
+}
+
+// TestCreateLedgerRendersPanel proves GET /create/ledger/{session} renders the alignment-
+// ledger fragment: the empty state before any turn, and — after driving a ledger-bearing turn
+// through the planner — the titled panel with the question and its option chips. An unknown
+// session 404s.
+func TestCreateLedgerRendersPanel(t *testing.T) {
+	const reply = "Where we stand.\n```ledger\n" +
+		`[{"question":"Which datastore?","status":"open","rationale":"Driven by query shape.",` +
+		`"options":[{"label":"Postgres","tradeoff":"mature ops","selected":false},` +
+		`{"label":"SQLite","tradeoff":"single-node","selected":false}]}]` +
+		"\n```"
+	ts, p := wizardServer(t, reply)
+	sess := p.New()
+
+	// Empty state before any turn.
+	empty := get(t, ts, "/create/ledger/"+sess.ID)
+	if empty.status != http.StatusOK {
+		t.Fatalf("ledger status = %d, want 200", empty.status)
+	}
+	if !strings.Contains(empty.body, "decisions appear here") {
+		t.Errorf("empty ledger missing the invitation, got: %s", empty.body)
+	}
+
+	// Drive a ledger-bearing turn, then the panel shows the parsed item + chips.
+	if !sess.Send("pick a datastore") {
+		t.Fatal("Send returned false")
+	}
+	waitFor(t, func() bool { return !sess.Busy() && len(sess.Ledger()) == 1 }, "ledger not seeded")
+
+	frag := get(t, ts, "/create/ledger/"+sess.ID)
+	if frag.status != http.StatusOK {
+		t.Fatalf("ledger status = %d, want 200", frag.status)
+	}
+	for _, want := range []string{
+		"Alignment ledger",        // the titled panel
+		"Which datastore?",        // the question
+		"Postgres",                // a chip label
+		"SQLite",                  // the other chip
+		`hx-post="/create/ledger/select"`, // the chip funnels through the planner
+	} {
+		if !strings.Contains(frag.body, want) {
+			t.Errorf("ledger panel missing %q\nbody: %s", want, frag.body)
+		}
+	}
+
+	if u := get(t, ts, "/create/ledger/deadbeef"); u.status != http.StatusNotFound {
+		t.Errorf("/create/ledger unknown session = %d, want 404", u.status)
+	}
+}
+
+// TestCreateLedgerSelectRecordsTurn proves POST /create/ledger/select funnels a chip choice
+// through the planner — recording the canned user message and returning the transcript
+// fragment — and that an unknown session 404s.
+func TestCreateLedgerSelectRecordsTurn(t *testing.T) {
+	const reply = "Where we stand.\n```ledger\n" +
+		`[{"question":"Which datastore?","status":"open","options":[` +
+		`{"label":"Postgres","tradeoff":"mature ops","selected":false}]}]` +
+		"\n```"
+	ts, p := wizardServer(t, reply)
+	sess := p.New()
+
+	// Seed the ledger so there is a chip to choose.
+	if !sess.Send("pick a datastore") {
+		t.Fatal("Send returned false")
+	}
+	waitFor(t, func() bool { return !sess.Busy() && len(sess.Ledger()) == 1 }, "ledger not seeded")
+
+	form := url.Values{"session": {sess.ID}, "item": {"0"}, "option": {"0"}}
+	pr, err := http.PostForm(ts.URL+"/create/ledger/select", form)
+	if err != nil {
+		t.Fatalf("POST select: %v", err)
+	}
+	data, _ := io.ReadAll(pr.Body)
+	_ = pr.Body.Close()
+	if pr.StatusCode != http.StatusOK {
+		t.Fatalf("select status = %d, want 200", pr.StatusCode)
+	}
+	if !strings.Contains(string(data), "I choose: Postgres") {
+		t.Errorf("transcript fragment missing the canned choice: %s", string(data))
+	}
+	waitFor(t, func() bool { return !sess.Busy() }, "choice turn did not complete")
+
+	// Unknown session 404s.
+	bad := url.Values{"session": {"deadbeef"}, "item": {"0"}, "option": {"0"}}
+	ur, err := http.PostForm(ts.URL+"/create/ledger/select", bad)
+	if err != nil {
+		t.Fatalf("POST select unknown: %v", err)
+	}
+	_ = ur.Body.Close()
+	if ur.StatusCode != http.StatusNotFound {
+		t.Errorf("select unknown session = %d, want 404", ur.StatusCode)
 	}
 }
 

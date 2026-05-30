@@ -230,6 +230,129 @@ func TestNewSessionsUniqueAndBounded(t *testing.T) {
 	}
 }
 
+// TestLedgerTurnParsesAndStreamsClean proves a turn whose scripted reply carries a trailing
+// ```ledger block: the parsed ledger is stored on the session, the recorded transcript holds
+// only the clean prose (no JSON), and the streamed delta never contains the fence — so the raw
+// ledger JSON never reaches the browser. It runs through the real adapter via modeltest.
+func TestLedgerTurnParsesAndStreamsClean(t *testing.T) {
+	const reply = "Here is where we stand.\n\n```ledger\n" +
+		`[{"question":"Which datastore?","status":"open","rationale":"Driven by query shape.",` +
+		`"options":[{"label":"Postgres","tradeoff":"mature ops","selected":false},` +
+		`{"label":"SQLite","tradeoff":"single-node","selected":false}]}]` +
+		"\n```"
+	srv := modeltest.NewServer(t, []modeltest.Turn{{Text: reply}})
+	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
+	sess := p.New()
+
+	sub, cancel := sess.Hub().Subscribe()
+	defer cancel()
+
+	if !sess.Send("build me a CSV importer") {
+		t.Fatal("Send returned false")
+	}
+
+	var lastDelta string
+	deadline := time.After(5 * time.Second)
+	for {
+		done := false
+		select {
+		case ev := <-sub:
+			switch ev.Name {
+			case "delta":
+				lastDelta = ev.Data
+			case "turn":
+				done = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for the turn to complete")
+		}
+		if done {
+			break
+		}
+	}
+
+	// The streamed delta must never carry the fence or the raw JSON.
+	if strings.Contains(lastDelta, "ledger") || strings.Contains(lastDelta, "Postgres") || strings.Contains(lastDelta, "```") {
+		t.Errorf("delta leaked the ledger block: %q", lastDelta)
+	}
+
+	waitFor(t, func() bool { return !sess.Busy() }, "turn did not complete")
+
+	msgs := sess.Messages()
+	if len(msgs) != 2 {
+		t.Fatalf("messages = %d, want 2", len(msgs))
+	}
+	if msgs[1].Text != "Here is where we stand." {
+		t.Errorf("assistant message = %q, want the clean prose with the block stripped", msgs[1].Text)
+	}
+
+	led := sess.Ledger()
+	if len(led) != 1 {
+		t.Fatalf("ledger = %d items, want 1", len(led))
+	}
+	if led[0].Question != "Which datastore?" || len(led[0].Options) != 2 {
+		t.Errorf("ledger item wrong: %+v", led[0])
+	}
+}
+
+// TestChooseFunnelsThroughPlanner proves a chip choice with valid indices appends a user turn
+// carrying the canned choice message and dispatches a fresh planner turn; out-of-range indices
+// are a no-op. The first turn seeds a ledger so Choose has something to pick from.
+func TestChooseFunnelsThroughPlanner(t *testing.T) {
+	const seed = "Where we stand.\n```ledger\n" +
+		`[{"question":"Which datastore?","status":"open","options":[` +
+		`{"label":"Postgres","tradeoff":"mature ops","selected":false},` +
+		`{"label":"SQLite","tradeoff":"single-node","selected":false}]}]` +
+		"\n```"
+	const after = "Agreed on Postgres.\n```ledger\n" +
+		`[{"question":"Which datastore?","status":"agreed","options":[` +
+		`{"label":"Postgres","selected":true},{"label":"SQLite","selected":false}]}]` +
+		"\n```"
+	srv := modeltest.NewServer(t, []modeltest.Turn{{Text: seed}, {Text: after}})
+	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
+	sess := p.New()
+
+	// First turn seeds the ledger.
+	if !sess.Send("pick a datastore") {
+		t.Fatal("first Send returned false")
+	}
+	waitFor(t, func() bool { return !sess.Busy() && len(sess.Ledger()) == 1 }, "ledger was not seeded")
+
+	// Out-of-range indices are a no-op: no new turn, no new message.
+	before := len(sess.Messages())
+	if got := sess.Choose(5, 0); got != "" {
+		t.Errorf("Choose with bad item index returned %q, want empty", got)
+	}
+	if got := sess.Choose(0, 9); got != "" {
+		t.Errorf("Choose with bad option index returned %q, want empty", got)
+	}
+	if len(sess.Messages()) != before {
+		t.Errorf("an out-of-range Choose recorded a message")
+	}
+
+	// A valid choice appends the canned user message and runs a planner turn.
+	msg := sess.Choose(0, 0)
+	want := `For "Which datastore?", I choose: Postgres.`
+	if msg != want {
+		t.Errorf("Choose message = %q, want %q", msg, want)
+	}
+	waitFor(t, func() bool { return !sess.Busy() && len(sess.Messages()) == 4 }, "the choice did not drive a planner turn")
+
+	msgs := sess.Messages()
+	if msgs[2].Role != "user" || msgs[2].Text != want {
+		t.Errorf("message[2] = %+v, want the canned user choice", msgs[2])
+	}
+	if msgs[3].Role != "assistant" || !strings.Contains(msgs[3].Text, "Agreed on Postgres") {
+		t.Errorf("message[3] = %+v, want the planner's follow-up", msgs[3])
+	}
+	if led := sess.Ledger(); len(led) != 1 || led[0].Status != "agreed" {
+		t.Errorf("ledger after choice = %+v, want the item flipped to agreed", led)
+	}
+	if srv.Requests() != 2 {
+		t.Errorf("model requests = %d, want 2 (seed + choice)", srv.Requests())
+	}
+}
+
 func waitFor(t *testing.T, cond func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

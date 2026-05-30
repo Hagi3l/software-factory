@@ -43,6 +43,10 @@ import (
 const (
 	eventDelta = "delta"
 	eventTurn  = "turn"
+	// eventLedger nudges the alignment-ledger panel to re-fetch (T4.13). It fires only on a
+	// turn that emitted a ledger snapshot, so the panel refreshes exactly when the planner
+	// updates the ledger (the panel also has a slow periodic backstop in the view).
+	eventLedger = "ledger"
 )
 
 const (
@@ -191,6 +195,7 @@ type Session struct {
 	mu       sync.Mutex
 	messages []model.Message
 	busy     bool
+	ledger   []LedgerItem // latest-wins alignment-ledger snapshot (T4.13), guarded by mu
 }
 
 // Hub is the session's SSE hub — the control-room stream handler subscribes to it and the
@@ -214,6 +219,41 @@ func (s *Session) Messages() []Message {
 		}
 	}
 	return out
+}
+
+// Ledger returns a copy of the latest alignment-ledger snapshot (T4.13) the planner emitted
+// — the items the view renders beside the conversation. The copy is safe to render without
+// holding the lock; it is empty until the planner emits its first ```ledger block.
+func (s *Session) Ledger() []LedgerItem {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return slices.Clone(s.ledger)
+}
+
+// Choose funnels a chip click back through the conversation: it reads the option the human
+// picked from the latest ledger and Sends a canned message naming the question and choice, so
+// the planner re-emits the ledger reflecting the decision (the planner stays the single source
+// of truth — there is no client-side ledger mutation). Out-of-range indices are a no-op (the
+// ledger may have moved on since the page was rendered) and return "". On success it returns
+// the message it sent.
+func (s *Session) Choose(itemIdx, optIdx int) string {
+	s.mu.Lock()
+	if itemIdx < 0 || itemIdx >= len(s.ledger) {
+		s.mu.Unlock()
+		return ""
+	}
+	it := s.ledger[itemIdx]
+	if optIdx < 0 || optIdx >= len(it.Options) {
+		s.mu.Unlock()
+		return ""
+	}
+	question := it.Question
+	label := it.Options[optIdx].Label
+	s.mu.Unlock() // release before Send, which takes the lock itself
+
+	msg := fmt.Sprintf("For %q, I choose: %s.", question, label)
+	s.Send(msg)
+	return msg
 }
 
 // Busy reports whether a reply turn is currently in flight.
@@ -271,7 +311,9 @@ func (s *Session) run() {
 		b.WriteString(ev.TextDelta)
 		if n := utf8.RuneCountInString(b.String()); n-lastLen >= deltaFlushRunes {
 			lastLen = n
-			s.hub.Broadcast(live.Event{Name: eventDelta, Data: html.EscapeString(b.String())})
+			// Stream only the prose: suppress the trailing ```ledger JSON block so its raw text
+			// never flashes in the live stream as it accumulates (the panel renders it instead).
+			s.hub.Broadcast(live.Event{Name: eventDelta, Data: html.EscapeString(displayProse(b.String()))})
 		}
 	}
 
@@ -287,14 +329,25 @@ func (s *Session) run() {
 		reply = fmt.Sprintf("The requirements planner hit an error and could not reply: %v\n\nPlease try again.", err)
 	}
 
+	// Split the trailing ```ledger block off the reply: the transcript records only the prose,
+	// and the parsed items become the new latest-wins ledger snapshot. A ledger-less turn (no
+	// block, or a malformed one) leaves the prior ledger untouched.
+	items, prose := parseLedger(reply)
+
 	s.mu.Lock()
-	s.messages = append(s.messages, model.Message{Role: model.RoleAssistant, Text: reply})
+	s.messages = append(s.messages, model.Message{Role: model.RoleAssistant, Text: prose})
+	if items != nil {
+		s.ledger = items
+	}
 	s.busy = false
 	s.mu.Unlock()
 
 	// Terminal nudge: the transcript re-fetches and renders the finalized reply, which also
 	// resets the live delta target. Emitted last so the refetch sees the appended message.
 	s.hub.Broadcast(live.Event{Name: eventTurn, Data: ""})
+	if items != nil {
+		s.hub.Broadcast(live.Event{Name: eventLedger, Data: ""})
+	}
 }
 
 // newID returns an unguessable session id. Crypto-random rather than a counter so a session

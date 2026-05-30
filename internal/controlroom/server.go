@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"strconv"
 	"time"
 
 	"github.com/a-h/templ"
@@ -148,6 +149,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /create/stream/{session}", s.handleCreateStream)
 	s.mux.HandleFunc("GET /create/messages/{session}", s.handleCreateMessages)
 	s.mux.HandleFunc("POST /create/message", s.handleCreateMessage)
+	s.mux.HandleFunc("GET /create/ledger/{session}", s.handleCreateLedger)       // T4.13 — alignment-ledger panel fragment
+	s.mux.HandleFunc("POST /create/ledger/select", s.handleCreateLedgerSelect)   // T4.13 — chip click funnels through the planner
 
 	// Every remaining navigation destination resolves to a placeholder until its
 	// data-backed view lands; registering them from views.NavItems keeps the navigation
@@ -557,6 +560,48 @@ func (s *Server) handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess.Send(r.FormValue("text"))
+	s.render(w, r, views.WizardTranscript(sess.Messages()))
+}
+
+// handleCreateLedger returns just the alignment-ledger panel fragment (T4.13) — the htmx swap
+// target the page re-fetches on a `ledger`/`turn` SSE nudge (and a slow periodic backstop).
+// Data endpoint: 503 with no planner, 404 for an unknown session.
+func (s *Server) handleCreateLedger(w http.ResponseWriter, r *http.Request) {
+	if s.planner == nil {
+		http.Error(w, "wizard unavailable: the requirements planner is not configured\n", http.StatusServiceUnavailable)
+		return
+	}
+	sess := s.planner.Get(r.PathValue("session"))
+	if sess == nil {
+		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
+		return
+	}
+	s.render(w, r, views.LedgerPanel(sess.ID, sess.Ledger()))
+}
+
+// handleCreateLedgerSelect records a chip click: it funnels the chosen fork option back
+// through the planner (Session.Choose Sends a canned message so the planner re-emits the
+// ledger reflecting the decision), then returns the transcript fragment so the human's choice
+// shows immediately. The refreshed ledger arrives separately over the `ledger` SSE nudge. An
+// out-of-range index is a no-op inside Choose. Data endpoint: 503 with no planner, 400 on a
+// malformed form, 404 for an unknown session.
+func (s *Server) handleCreateLedgerSelect(w http.ResponseWriter, r *http.Request) {
+	if s.planner == nil {
+		http.Error(w, "wizard unavailable: the requirements planner is not configured\n", http.StatusServiceUnavailable)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "could not parse the selection\n", http.StatusBadRequest)
+		return
+	}
+	sess := s.planner.Get(r.FormValue("session"))
+	if sess == nil {
+		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
+		return
+	}
+	itemIdx, _ := strconv.Atoi(r.FormValue("item"))
+	optIdx, _ := strconv.Atoi(r.FormValue("option"))
+	sess.Choose(itemIdx, optIdx)
 	s.render(w, r, views.WizardTranscript(sess.Messages()))
 }
 
