@@ -43,12 +43,24 @@ of the build (`go generate`), not the runtime.
 
 ### Rendering
 - **Live:** NATS → SSE → htmx swaps; the board and feed update without refresh.
+  The live pattern is **server-render-a-fragment + htmx re-fetch**, *not* DOM
+  `sse-swap`: a live view wraps its content in an SSE-connected element and
+  re-fetches a bare server-rendered fragment on `hx-trigger="sse:agent-event
+  throttle:Ns, every Ns"` — the SSE event is a *nudge* to refetch, with a slow
+  periodic `every Ns` backstop so a settled view still converges when the event
+  stream goes idle. `sse-swap` is deliberately avoided because the raw
+  `agent-event` payload is JSON (and the runner's per-token stream is a firehose),
+  not DOM-ready HTML; rendering stays on the server where the templ components live.
 - **Historical/forensic:** plain server-rendered pages from the stores, with the
   structured timeline from the OTel trace backend. Supports **replay** of an
-  invocation's decision trail (see [observability.md](observability.md)).
+  invocation's decision trail (see [observability.md](observability.md)). A detail
+  page is a forensic snapshot, not a feed — it is deliberately *not* live.
 - **Graph viz:** render the DAG **server-side to SVG** (Go → DOT/Graphviz or d2)
   and embed it; hover/click-to-drill via Alpine + htmx on the SVG nodes. No
   client-side graph library.
+- **Serving artifacts:** artifact bytes are untrusted agent output, served
+  `text/plain` + `nosniff` and never interpreted as markup — see
+  [security.md](security.md) Control 7.
 
 ---
 
@@ -146,4 +158,10 @@ fresh or unsticking dead-lettered work.
 - **In-session ledger shape:** plain agreed/open checklist vs. the lightly-structured
   items described above (just enough to bind chips/confirm). Currently specified as
   the latter. — *minor, under discussion.*
+- **Coarse live trigger → precise issue-state event:** the live views key their
+  refresh off `agent-event` (per-invocation progress), so a refresh fires on agent
+  *activity*, not precisely on an issue/stage transition. The throttle + periodic
+  backstop converge it, but a dedicated **orchestrator-emitted issue-state event**
+  (from the single writer) would let the board/DAG/DLQ refresh crisply on the actual
+  transition rather than polling around it. — *future refinement, not blocking.*
 - Auth / who may operate the control room — TBD.

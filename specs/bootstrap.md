@@ -120,8 +120,13 @@ full product factory                 no-human-review for others' work; TCB still
 
 ## OPEN questions
 
-- Exactly which modules are drawn into the TCB boundary — needs a precise list
-  before autonomy is switched on for harness work.
-- Whether early self-hosted changes should be gated by a lighter "trusted-dev"
-  policy profile (e.g. human-approval postcondition) expressed in
-  [configuration.md](configuration.md).
+- ~~Whether early self-hosted changes should be gated by a lighter "trusted-dev"
+  policy profile (human-approval postcondition).~~ **Decided (T2.10):** yes — a
+  `policy.profile: trusted-dev` requires a `human-approved` postcondition on *every*
+  `integrate`, satisfied by `harness approve <issue>`; `autonomous` requires it only for
+  TCB-touching diffs. See [configuration.md](configuration.md).
+- **TCB boundary as config.** The precise module list is operationally the
+  `policy.tcb_paths` globs (orchestrator, runner/broker, sandbox config, gate harness) that
+  force `human-approved` regardless of profile — so "which modules are in the TCB" is
+  answered by that list. It must still be reviewed and pinned before autonomy is switched on
+  for harness work.

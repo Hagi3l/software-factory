@@ -102,6 +102,19 @@ queue rather than consuming unbounded compute.
 
 ---
 
+## Control 7 — Untrusted artifacts are never interpreted
+
+The [control room](control-room.md) serves agent-produced artifacts (transcripts,
+gate evidence, diffs, prompts) back to a human's browser. Those bytes are
+**untrusted agent output** and must never be interpreted as markup or script. The
+artifact endpoint therefore serves content as **`text/plain`** with
+**`X-Content-Type-Options: nosniff`**, defeating both direct HTML/JS execution and
+MIME-sniffing into an executable type. This keeps a hostile agent from turning the
+human's one window into the factory into an XSS vector. See
+[control-room.md](control-room.md), [components/artifact-store.md](components/artifact-store.md).
+
+---
+
 ## Provenance by construction
 
 Because no human reviews the code, the **audit trail is the accountability**.

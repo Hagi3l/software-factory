@@ -122,8 +122,27 @@ policy:
   `govulncheck`, licence metadata for `license-scan`) reads it from data baked into the
   role's sandbox image, never the network — the same offline guarantee the build relies
   on (see [sandbox](components/sandbox.md), and rootfs composition in the build plan).
-- `policy` is the **termination guarantee** — see budgets in
-  [workflow.md](workflow.md).
+- **Human-approval** (`human-approved`) is a postcondition kind evaluated by the
+  **orchestrator**, not a `checks` command — it reads orchestrator/beads state, not the
+  repository, so it carries no `checks` entry. It holds only when a human has explicitly
+  approved the issue's *current candidate* via `harness approve <issue>` (`harness reject
+  <issue>` denies); the approval is **bound to the candidate sha** — like an evidence hash
+  pins to bytes — so any re-gate after a change invalidates a stale approval. It fails
+  **closed**, and its failure does **not** route `on_failure` (it burns no retry): the issue
+  **parks in an awaiting-approval escalation** until a human approves (→ re-gate → advance)
+  or rejects (→ fix, or back to spec). It is the gate that realizes the trusted-dev
+  transition and the permanent TCB-review boundary (`policy` below, [bootstrap.md](bootstrap.md)).
+- `policy` is the **termination guarantee** (budgets + retry caps — see
+  [workflow.md](workflow.md)) and the **autonomy profile**. `policy.profile` is
+  `trusted-dev` or `autonomous`: **trusted-dev** requires a `human-approved` postcondition on
+  *every* `integrate` (the self-hosting transition — a human reviews every diff);
+  **autonomous** requires it only when a candidate's diff touches the **TCB**.
+  `policy.tcb_paths` is the glob set that marks a diff TCB-touching (the orchestrator,
+  runner/broker, sandbox config, gate harness — e.g. `internal/orchestrator/**`,
+  `internal/runner/**`, `internal/broker/**`); a candidate hitting any requires approval
+  regardless of profile, which is how *TCB-touching changes stay human-reviewed permanently*
+  ([bootstrap.md](bootstrap.md)). This same list is the operational definition of the TCB
+  boundary.
 
 ---
 
@@ -259,4 +278,9 @@ validate` step must run before anything executes and check:
 - Config format: YAML assumed; HCL/CUE are candidates if stronger typing/validation
   is wanted.
 - Hot-reload vs. restart on config change — restart is fine for v1.
-- A condition-expression language for predicates (shell exit-code vs. CEL) — TBD.
+- ~~A condition-expression language for predicates (shell exit-code vs. CEL).~~
+  **Decided:** the **shell-exit-code form** (shipped). Command-check postconditions
+  resolve to commands via the `checks:` registry above; the gate runs them with
+  `sh -c` (exit 0 = pass). Bare identifiers (reserved proofs, metric comparisons like
+  `mutation>=0.8`) are validated against explicit registries at `harness validate`
+  time. CEL is not used.

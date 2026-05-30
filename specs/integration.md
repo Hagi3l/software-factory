@@ -143,7 +143,17 @@ the batch, bisect on failure — as large CI merge queues do) can be added later
   the *only* part handed to a [Role](glossary.md#role) is **conflict resolution**, via
   the sandboxed `resolve` stage / `merge-resolver` soul, which merely *proposes* a
   rebased candidate the orchestrator then re-gates and merges.
-- Branch retention / cleanup policy after merge — TBD. Note that downstream agent
-  stages now rely on the predecessor candidate branch persisting (it is the base a
-  produced issue branches from — see base threading in [workflow.md](workflow.md)), so
-  any future cleanup policy must not remove a candidate still referenced as a base.
+- Branch retention / cleanup policy after merge — TBD, but bounded by a hard
+  invariant (below).
+
+---
+
+## Invariant — never GC a referenced candidate base
+
+Downstream agent stages branch from their **predecessor's candidate branch** (it is
+the base a produced issue branches from — see base threading in
+[workflow.md](workflow.md)). Therefore **branch cleanup must never delete a candidate
+branch still referenced as a base by an open/in-flight issue.** Any cleanup policy
+that lands must check live base references first; a naive "delete the branch on
+merge" breaks base threading and orphans downstream work. This holds regardless of
+the retention policy eventually chosen.

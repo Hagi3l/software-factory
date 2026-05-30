@@ -36,7 +36,9 @@ is Phases 2–5, filed as beads issues. See `IMPLEMENTATION_PLAN.md`.
   silently accepts a nonexistent foreign-prefix target as an external ref — `beads.Apply`'s
   own existence check (T3.2) is what holds against this, not `dep add` strictness. (Earlier
   it ran v0.62.0, which still rejected such targets; install Linux builds from the
-  `steveyegge/beads` GitHub releases — `beads_<ver>_linux_amd64.tar.gz`.)
+  `steveyegge/beads` GitHub releases — `beads_<ver>_linux_amd64.tar.gz`.) Note `bd
+  list` **hides closed issues** by default — surfacing them (e.g. a board/DAG over
+  all statuses) needs `--all` / `--status ... --flat` (this is `beads.ListAll`).
 - Model layer: canonical types + thin per-provider adapters over official Go SDKs.
   No agent framework.
 - Control room (later): htmx + Alpine + templ + Tailwind standalone CLI + embed.FS.

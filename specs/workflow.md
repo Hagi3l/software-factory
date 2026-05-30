@@ -159,9 +159,24 @@ not the agent's self-report), and the orchestrator accumulates that spend across
 pricing it to USD through the model registry's per-model `cost` table
 ([configuration.md](configuration.md)). When the running per-issue total reaches a
 configured `budget.tokens` or `budget.usd`, the issue dead-letters instead of spawning
-another attempt. (The cumulative `epic_budget` and a cumulative wall-clock cap are not yet
-enforced — a per-invocation wall ceiling is enforced by the sandbox; cross-loop wall and
-the cross-issue epic total remain ahead.)
+another attempt.
+
+The cumulative **wall-clock** cap works the same way: the runner stamps each invocation's
+elapsed time onto its Result (the trusted side, like `Usage` — never the agent's
+self-report), and the orchestrator threads a cumulative `SpentWall` across the `on_failure`
+chain, dead-lettering when it reaches `budget.wall`. This is the *cross-loop cumulative*
+wall; a *per-invocation* wall ceiling is separately enforced by the sandbox.
+
+The cross-issue **`epic_budget`** cannot be a counter threaded forward like `Spent*`,
+because an epic is a **fan-out DAG, not a line** — the planner emits parallel `implement`
+issues, so threading a running total down each branch and summing at the `qa → integrate`
+join would double-count the shared prefix. It is therefore an **aggregate read**: every
+issue carries an `epic_id` (the root seed's id, threaded forward like the candidate base),
+each issue records its closing spend when it reaches a terminal state, and before spawning
+another attempt or advancing a stage the orchestrator sums the closing spend of all issues
+sharing the `epic_id` — plus in-flight accrual and the just-finished invocation — and
+dead-letters with an `epic-budget` escalation on a breach. The **single-writer**
+orchestrator evaluates this serially, so concurrent siblings cannot race the check.
 
 When either is breached, the work is **dead-lettered**: marked blocked, an alert
 event emitted, and left for a human to triage by refining the spec (see the human

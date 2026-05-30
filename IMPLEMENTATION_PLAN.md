@@ -18,10 +18,13 @@ not self-hosted.** Bootstrap's threshold (a) ("the harness builds itself as a
 trusted dev tool, human reviews diffs") assumes a capable model drives the
 harness's *own* sandboxed agents; without a hosted key for one, that autonomous
 path is deferred. The remaining work is ordinary Go / config / web development, so
-it proceeds the same way the kernel was built. **Nothing below is *blocked* by the
-missing key** — only the autonomous self-hosting milestone and the requirements
-wizard (T4.12) need a capable model *at runtime*; everything builds and tests
-offline.
+it proceeds the same way the kernel was built. **This project is about the *machinery*,
+not model quality — nothing below is blocked for lack of a capable model.** A model is
+already available in dev (the deterministic `modeltest` server; local Ollama via
+`openai-compat`). The wizard (T4.12–T4.15) and the autonomous self-hosting loop are
+buildable and testable *offline*; the only thing a *capable* model gates is the subjective
+*quality* of their outputs (good requirements elicitation, trustworthy auto-drafted specs,
+good autonomous implementation) — a later validation concern, never an engineering blocker.
 
 ## How to read this
 
@@ -90,7 +93,18 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
 - [ ] **T2.12** *(optional)* Run-all independent scanners — aggregate every independent-scanner
   finding in one `qa` pass (better DLQ triage) instead of fail-fast, via a per-check
   "independent" config signal the gate honors (keeps proof/measurement checks fail-fast). See T2.9. ([verification.md](specs/verification.md))
-- [ ] **T2.10 Trusted-dev policy profile** — a lighter policy profile with a human-approval postcondition for the self-hosting transition (a CLI `approve` command satisfies it). *(OPEN, configuration.md.)* ([bootstrap.md](specs/bootstrap.md), [configuration.md](specs/configuration.md))
+- [ ] **T2.10 Trusted-dev policy profile** — *designed; spec landed (configuration.md, bootstrap.md).*
+  Implement the **`human-approved`** postcondition kind — **orchestrator-evaluated**, not a `checks`
+  command (it reads orchestrator/beads state, not the repo): holds only when a human approved the
+  issue's *current candidate sha* via a new **`harness approve <issue>` / `harness reject <issue>`**
+  CLI (publishes approver + candidate sha over NATS; the single-writer orchestrator records it on the
+  issue; a stale approval is invalidated when the candidate sha changes). It fails **closed** and
+  **parks the issue in an awaiting-approval escalation** rather than routing `on_failure` (burns no
+  retry): approve → re-gate → advance, reject → fix / back to spec. Add **`policy.profile`**
+  (`trusted-dev` = approval on *every* `integrate`; `autonomous` = approval only on TCB-touching diffs)
+  and **`policy.tcb_paths`** (globs that force approval regardless of profile — orchestrator / runner /
+  broker / sandbox config / gate harness; also the operational TCB-boundary list, resolving a
+  bootstrap.md OPEN). TCB-touching → stays human-reviewed. ([bootstrap.md](specs/bootstrap.md), [configuration.md](specs/configuration.md))
 - [ ] **T2.11** *(OPEN)* Second, different-model reviewer soul in `qa` (N-version diversity). ([verification.md](specs/verification.md))
 
 ## Phase 3 — Full DAG, decomposition & merge queue
@@ -104,22 +118,30 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
 - [x] **T3.5 Spec-slice resolution** — *done.*
 - [x] **T3.6 Spec-version pinning** — *done.*
 - [x] **T3.7 Recompile-the-delta** — *done.*
-- [ ] **T3.7b Re-derive already-merged work on a spec edit** — when a spec edit drifts the pinned hash of
-  a *closed/merged* issue, spawn new issue(s) for the delta. Deferred from T3.7 (underspecified) because
-  it must: (a) dedupe across an epic's many closed issues that share one spec path (else one edit spawns
-  N duplicate epics); (b) decide which stage to re-enter (pipeline entry / planner vs. author-tests);
-  (c) stay idempotent (re-pin or mark the closed issues so they don't respawn every tick). Likely needs a
-  beads query for closed issues by spec path. (needs T3.7) ([specs-process.md](specs/specs-process.md))
+- [ ] **T3.7b Re-derive already-merged work on a spec edit** — *designed; spec landed (specs-process.md).*
+  Extend the reconcile sweep to the closed/merged case, keyed by **(epic, spec-path)** not per-issue:
+  group closed issues by `EpicID`+`Spec` (via `ListAll` + in-process filter — no new bd query),
+  re-resolve+re-hash the slice, and on a mismatch against the pinned `SpecHash` spawn **one fresh `plan`
+  issue** for that epic+path (carrying `EpicID`/`Tags`, branched from the epic's merged tip) so the planner
+  decomposes only the delta against merged code. Re-entry at **planning, not author-tests** (a spec edit
+  can add/remove/alter work items, which only the planner expresses). Then **re-pin the closed issues'
+  `SpecHash`** to the new slice (idempotency latch) and **skip the spawn when an open re-derivation `plan`
+  issue for that (epic, spec-path) already exists**. Known coarseness: a localized single-criterion edit
+  still triggers a full planning pass. TCB-touching (orchestrator). (needs T3.7, **T3.8b** for `EpicID`)
+  ([specs-process.md](specs/specs-process.md))
 - [x] **T3.8 Cumulative per-issue budget** — *done.*
-- [ ] **T3.8b Cumulative epic budget + cross-loop wall-clock** *(carried from T3.8)* — enforce the
-  cross-issue `epic_budget` (sum spend over all issues of one epic) and a cumulative wall-clock cap.
-  Both need design first: (a) **epic identity** — there is no epic id on issues today (an epic is
-  implicit: a seed + all its `advance`/planner descendants), so this needs an `epic_id` metadata key
-  threaded forward (like Base) or a beads ancestry query, then an aggregate-spend read. (b) **wall** —
-  `core.Issue` has no `SpentWall` field and `core.Result` carries no invocation duration; the runner
-  must stamp elapsed time and the orchestrator thread/accumulate it like Spent*. The per-invocation
-  wall ceiling (sandbox limit) already exists; this is the cumulative cross-loop cap. (needs T3.8)
-  ([workflow.md](specs/workflow.md))
+- [ ] **T3.8b Cumulative epic budget + cross-loop wall-clock** *(carried from T3.8; designed, workflow.md
+  updated)* — two parts. **(1) Epic budget** — add an **`EpicID`** metadata key (= root seed id, set at
+  seed time, threaded forward onto every produced child *and* `on_failure` fix issue, like `Tags`/`Base`);
+  stamp each issue's **closing spend** when it reaches a terminal state; enforce `epic_budget` as an
+  **aggregate read** (sum closing spend over all issues sharing `EpicID` via `ListAll` + filter, plus
+  in-flight accrual and the just-finished invocation) — **not** a threaded counter, since an epic fans out
+  and threading+summing would double-count the shared prefix. Breach → dead-letter with an `epic-budget`
+  reason; the single-writer orchestrator evaluates serially so siblings can't race. **(2) Cumulative wall**
+  — runner stamps **`Result.Elapsed`** (trusted side, like `Usage`); add **`core.Issue.SpentWall`** threaded
+  across the `on_failure` chain like `Spent*`; enforce cumulative `budget.wall` (distinct from the
+  per-invocation sandbox ceiling). **Decided:** wall = **cumulative invocation-wall** (sums across the loop),
+  not a calendar deadline. Unblocks `EpicID` for T3.7b. (needs T3.8) ([workflow.md](specs/workflow.md))
 - [x] **T3.9 Merge queue: serialized rebase onto `main`** — *done.*
 - [x] **T3.10 Re-gate the merged result** — *done.*
 - [x] **T3.11 Conflict-resolution issue** — *done.*
@@ -295,13 +317,13 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   the server in T4.4; the `dlq` nav item already existed in `views.NavItems`. Tested (query + server):
   blocked-only filtering, triage fields threaded verbatim (spend/attempt/spec), List-error surfaced, page render
   (cards + spend + attempt + spec + detail links + SSE wiring), bare-fragment shape, empty-state reassurance,
-  no-reader notice/503. **Resolve (T4.15) is deferred** (needs the wizard, T4.12/T4.14, which need a capable
-  model at runtime); until then the DLQ is the read surface that surfaces *what* needs a human, drilling into
+  no-reader notice/503. **Resolve (T4.15) is deferred** — it follows the wizard (T4.12/T4.14) in build
+  order; until then the DLQ is the read surface that surfaces *what* needs a human, drilling into
   the detail page. (needs T4.2) ([control-room.md](specs/control-room.md), [workflow.md](specs/workflow.md))
-- [ ] **T4.9 OTel spans + export** — emit spans at the broker, orchestrator, and runner (boot, llm-turn, tool-call, gate-run) and metrics (latency, throughput, cost); export to a trace backend (Tempo/Jaeger). ([observability.md](specs/observability.md))
+- [ ] **T4.9 OTel spans + export** — emit spans at the broker, orchestrator, and runner (boot, llm-turn, tool-call, gate-run) and metrics (latency, throughput, cost). **Decided:** export over **OTLP** to a configurable endpoint that defaults to off / stdout in dev, preserving the offline / self-contained-binary property; wiring an external backend (Tempo/Jaeger) is deferred to Phase 5 where distribution lands. Settle the **span-attribute + event schema first** — it's the contract T4.10/T4.11 read. ([observability.md](specs/observability.md))
 - [ ] **T4.10 Budgets + Provenance views** — budgets (token/$/wall burn vs. caps) from OTel metrics; provenance (trace a merged commit → issue → soul → model → prompt → evidence). (needs T4.2, T4.9) ([control-room.md](specs/control-room.md))
 - [ ] **T4.11 Replay** — reconstruct an invocation's full decision trail from the broker-captured transcript + the artifact store, live or after the fact. (needs T4.7) ([observability.md](specs/observability.md))
-- [ ] **T4.12 Requirements-planner conversation loop** — the trusted, **non-sandboxed** LLM that drives toward aligned, testable intent, streaming over SSE; reuses the canonical model layer. *(Needs a capable model at runtime.)* Scope note: control-room.md gives this planner three jobs — elicit testable intent (this task), author/maintain `specs/` markdown, and gate on human approval. The conversation loop is T4.12; the **spec-authoring persona and its link-integrity ownership** (specs-process.md: "every link resolves; every spec maps to ≥1 issue") land in **T4.14** — keep that validation a first-class postcondition on the planner's output there, not an afterthought. ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
+- [ ] **T4.12 Requirements-planner conversation loop** — the trusted, **non-sandboxed** LLM that drives toward aligned, testable intent, streaming over SSE; reuses the canonical model layer. *(Machinery builds offline — drive it with `modeltest` / local Ollama; only the subjective elicitation quality awaits a capable model, never the engineering.)* Scope note: control-room.md gives this planner three jobs — elicit testable intent (this task), author/maintain `specs/` markdown, and gate on human approval. The conversation loop is T4.12; the **spec-authoring persona and its link-integrity ownership** (specs-process.md: "every link resolves; every spec maps to ≥1 issue") land in **T4.14** — keep that validation a first-class postcondition on the planner's output there, not an afterthought. ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
 - [ ] **T4.13 Alignment ledger** — forks rendered as selectable chips (with tradeoffs); each item agreed/open with a one-line rationale; freeform typing always available. (needs T4.12) ([control-room.md](specs/control-room.md))
 - [ ] **T4.14 Spec authoring + consent gate** — the planner drafts spec markdown + seed issues (keeping link integrity + the README index); on explicit human **APPROVE**, the spec is committed to git, the decisions sidecar written, the conversation transcript stored, and the seed issues created through the single-writer path. The single-writer seam already exists — `beads.Apply` (the validated, referential-integrity-checked write `cmd/harness/seed.go` already uses, "written exactly as the orchestrator would write"); the wizard reuses it, plus a `produces`-legality check on the batch mirroring `acceptPlan`'s validation of planner output. So no separate orchestrator-integration task is needed. (needs T4.12) ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md))
 - [ ] **T4.15 Resolve mode** — Create and Resolve are one component; Resolve pre-loads the escalation + spec slice + the agent transcript that raised it and shows the spec diff + blast radius before commit. (needs T4.14) ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
@@ -327,28 +349,11 @@ store) with the production stack.
 
 ## Open decisions affecting the plan
 
-These are `OPEN:` in the specs and may reshape tasks above:
+These are still `OPEN:` in the specs and may reshape tasks above. (Decisions once open
+here — mutation threshold, gate fail-fast, `integrate` ownership, the condition-expression
+language — are now recorded in the specs they informed, not duplicated here.)
 
-- ~~Mutation score threshold + operators~~ — **decided (T2.9):** the kernel commits
-  `mutation>=0.8` (>=, 0.8) on the live qa stage; still config, tunable per role.
-- ~~Gate fail-fast vs. run-all for independent scanners~~ — **decided (T2.9): keep
-  fail-fast.** Deliberate for proof/measurement checks (a mutation score is meaningless on
-  red tests). Aggregating all independent-scanner findings in one pass (better DLQ triage)
-  needs a per-check "independent" config signal and is filed as **T2.12** (optional).
-- ~~`integrate` as its own role/soul vs. orchestrator-owned with sandboxed conflict help~~ —
-  **decided (T3.11): orchestrator-owned.** The trusted layer does the rebase + final `git` write;
-  only conflict resolution is handed to a role (the sandboxed `resolve` stage / `merge-resolver`
-  soul), which proposes a rebased candidate the orchestrator re-gates and merges.
 - HA orchestrator: single instance (fine for v1) vs. leader election (T5.11).
-- Condition-expression language for pre/postconditions (shell exit-code vs. CEL) — affects
-  config validation + the gate runner. T2.1 landed the shell-exit-code form: command-check
-  postconditions resolve to commands via the `checks:` registry in `harness.yaml`; the gate
-  runs them via `sh -c` (exit 0 = pass). `harness validate` still gates *bare* identifiers
-  (reserved proofs, known metrics) against explicit registries that must be extended as new
-  built-in check kinds are added. T2.3 added the red→green kind (reuses the `tests-pass`
-  command, run against two refs); T2.7 added the metric-comparison kind (`mutation>=0.8`
-  parsed by `core.ParseMetricComparison`, the score read from the registered command's
-  stdout and graded by `core.CompareMetric`, failing closed on a nonzero exit or
-  unparseable output).
 - Rootfs / base-image composition per role (T5.3).
-- Exact module set drawn into the TCB boundary — must be pinned before autonomy is switched on for harness work.
+- Exact module set in the TCB boundary — operationally the `policy.tcb_paths` globs (T2.10);
+  the concrete list must still be reviewed and pinned before autonomy is switched on for harness work.

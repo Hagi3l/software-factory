@@ -123,10 +123,22 @@ next dispatch re-pins the edited slice), and its in-flight attempt's eventual re
 ignored because the issue is no longer in_progress. The sweep is best-effort and
 deliberately conservative: an issue with no spec or no pin, or whose slice fails to
 resolve (the file is mid-edit or was deleted — an ambiguous signal), is left untouched
-rather than disrupting live work. Re-deriving **already-merged** work for a spec diff
-(spawning fresh issues for the delta) is a distinct, less-settled concern — it must
-dedupe across an epic's many issues that share one spec path and decide which stage to
-re-enter — and is handled separately from the in-flight reissue path.
+rather than disrupting live work.
+
+Re-deriving **already-merged** work for a spec diff is handled per **(epic, spec-path)**
+unit, not per closed issue — which is precisely what dedupes one edit across an epic's many
+closed issues that share a path. On each sweep the orchestrator groups closed issues by
+their `epic_id` and spec path, re-resolves and re-hashes that slice, and on a mismatch
+against the pinned hash spawns **one fresh `plan` issue** for that epic and path (carrying
+the epic's id and tags, branched from the epic's merged tip). Re-entry is at the
+**planning** stage, not `author-tests`: a spec change can add, remove, or alter work items,
+which only the decomposition planner can express, and the planner — reading the edited spec
+against the already-merged code — decomposes only the delta. The orchestrator then **re-pins
+the closed issues' hash to the new slice** so the next sweep sees them settled and does not
+respawn, and it **skips the spawn when an open re-derivation `plan` issue for that
+`(epic, spec-path)` already exists** (idempotency). Known coarseness: a provably-localized
+single-criterion edit still triggers a full planning pass; a future refinement could
+re-enter at `author-tests` when the drift is local.
 
 ---
 
