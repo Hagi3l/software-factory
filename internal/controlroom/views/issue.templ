@@ -54,6 +54,15 @@ templ IssueDetailPage(d query.IssueDetail) {
 					</dl>
 				</section>
 			}
+			if d.Diff != "" {
+				<section class="space-y-2">
+					<h2 class="text-sm font-medium text-slate-400">Candidate diff</h2>
+					// The diff is agent-authored output, but templ escapes this text node, so it
+					// renders as inert text rather than markup — safe inline (the raw-bytes nosniff
+					// contract is for the /artifact endpoint, not this server-rendered page).
+					<pre class="overflow-x-auto whitespace-pre rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-200">{ d.Diff }</pre>
+				</section>
+			}
 			<section class="space-y-2">
 				<h2 class="text-sm font-medium text-slate-400">Evidence</h2>
 				if len(d.Evidence) == 0 {

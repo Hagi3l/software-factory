@@ -71,12 +71,18 @@ func (f *fakeArts) Get(_ context.Context, hash string) (io.ReadCloser, error) {
 
 type fakeProv struct {
 	byIssue map[string]core.Provenance
+	diff    map[string]string
 	recent  []MergedCommit
 }
 
 func (f *fakeProv) ByIssue(_ context.Context, id string) (core.Provenance, bool, error) {
 	p, ok := f.byIssue[id]
 	return p, ok, nil
+}
+
+func (f *fakeProv) DiffByIssue(_ context.Context, id string) (string, bool, error) {
+	d, ok := f.diff[id]
+	return d, ok, nil
 }
 
 func (f *fakeProv) Recent(_ context.Context, _ int) ([]MergedCommit, error) {
@@ -181,14 +187,19 @@ func TestIssueDetailMergedStitchesEvidence(t *testing.T) {
 		PromptSHA:    "sha256:prompt",
 		Verified:     []string{"build@sha256:bb", "gosec"}, // gosec degraded: bare name, no hash
 		Traceability: "sha256:trace",
+		Transcript:   "sha256:tx",
 	}
 	arts := &fakeArts{present: map[string]string{
 		"sha256:prompt": "the prompt",
+		"sha256:tx":     "the conversation",
 		"sha256:trace":  "the map",
 		"sha256:bb":     "build output",
 		// no entry for the gosec citation (it has no hash anyway)
 	}}
-	r := NewReader(&fakeIssues{all: []core.Issue{issue}}, arts, &fakeProv{byIssue: map[string]core.Provenance{"h-1": prov}})
+	r := NewReader(&fakeIssues{all: []core.Issue{issue}}, arts, &fakeProv{
+		byIssue: map[string]core.Provenance{"h-1": prov},
+		diff:    map[string]string{"h-1": "diff --git a/x b/x\n+added"},
+	})
 
 	d, err := r.IssueDetail(context.Background(), "h-1")
 	if err != nil {
@@ -197,14 +208,21 @@ func TestIssueDetailMergedStitchesEvidence(t *testing.T) {
 	if !d.Merged {
 		t.Error("Merged = false, want true")
 	}
+	// The transcript (the replayable decision trail) is cited right after the prompt, so a
+	// human drilling in can reach the full conversation, not just the opening prompt.
 	want := []ArtifactLink{
 		{Label: "Prompt", Kind: core.ArtifactKindPrompt, Hash: "sha256:prompt", Available: true},
+		{Label: "Transcript", Kind: core.ArtifactKindTranscript, Hash: "sha256:tx", Available: true},
 		{Label: "Traceability", Kind: core.ArtifactKindTraceabilityMap, Hash: "sha256:trace", Available: true},
 		{Label: "build", Kind: core.ArtifactKindGateEvidence, Hash: "sha256:bb", Available: true},
 		{Label: "gosec", Kind: core.ArtifactKindGateEvidence, Hash: "", Available: false},
 	}
 	if !reflect.DeepEqual(d.Evidence, want) {
 		t.Errorf("evidence =\n%+v\nwant\n%+v", d.Evidence, want)
+	}
+	// The candidate diff that landed is stitched in for a merged issue.
+	if d.Diff != "diff --git a/x b/x\n+added" {
+		t.Errorf("diff = %q, want the landed candidate diff", d.Diff)
 	}
 }
 

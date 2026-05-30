@@ -46,6 +46,9 @@ type fakeProv struct{}
 func (fakeProv) ByIssue(context.Context, string) (core.Provenance, bool, error) {
 	return core.Provenance{}, false, nil
 }
+func (fakeProv) DiffByIssue(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
 func (fakeProv) Recent(context.Context, int) ([]query.MergedCommit, error) { return nil, nil }
 
 func boardReader() *query.Reader {

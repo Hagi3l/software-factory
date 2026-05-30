@@ -40,7 +40,10 @@ func (d detailArts) Get(_ context.Context, h string) (io.ReadCloser, error) {
 	return nil, fmt.Errorf("artifact %s: not found", h)
 }
 
-type detailProv struct{ byIssue map[string]core.Provenance }
+type detailProv struct {
+	byIssue map[string]core.Provenance
+	diff    map[string]string
+}
 
 func (d detailProv) ByIssue(_ context.Context, id string) (core.Provenance, bool, error) {
 	if p, ok := d.byIssue[id]; ok {
@@ -48,12 +51,19 @@ func (d detailProv) ByIssue(_ context.Context, id string) (core.Provenance, bool
 	}
 	return core.Provenance{}, false, nil
 }
+func (d detailProv) DiffByIssue(_ context.Context, id string) (string, bool, error) {
+	if diff, ok := d.diff[id]; ok {
+		return diff, true, nil
+	}
+	return "", false, nil
+}
 func (detailProv) Recent(context.Context, int) ([]query.MergedCommit, error) { return nil, nil }
 
 const (
-	promptHash = "sha256:promptaaaaaaaaaa"
-	gateHash   = "sha256:gatebbbbbbbbbbbb"
-	traceHash  = "sha256:tracedddddddddd"
+	promptHash     = "sha256:promptaaaaaaaaaa"
+	transcriptHash = "sha256:transcriptccccc"
+	gateHash       = "sha256:gatebbbbbbbbbbbb"
+	traceHash      = "sha256:tracedddddddddd"
 )
 
 func detailServer(t *testing.T) *httptest.Server {
@@ -72,17 +82,24 @@ func detailServer(t *testing.T) *httptest.Server {
 		},
 	}}
 	arts := detailArts{content: map[string]string{
-		promptHash: "you are an implementor; build the widget",
-		gateHash:   "PASS: tests-pass\nok\tpkg\t0.1s",
+		promptHash:     "you are an implementor; build the widget",
+		transcriptHash: `[{"request":{},"response":{}}]`,
+		gateHash:       "PASS: tests-pass\nok\tpkg\t0.1s",
 	}}
-	prov := detailProv{byIssue: map[string]core.Provenance{
-		"harness-1": {
-			Soul: "go-implementor", Model: "claude-test", Issue: "harness-1",
-			PromptSHA: promptHash,
-			// One check with persisted evidence (a link), one bare (ran, no evidence).
-			Verified: []string{"tests-pass@" + gateHash, "mutation"},
+	prov := detailProv{
+		byIssue: map[string]core.Provenance{
+			"harness-1": {
+				Soul: "go-implementor", Model: "claude-test", Issue: "harness-1",
+				PromptSHA:  promptHash,
+				Transcript: transcriptHash,
+				// One check with persisted evidence (a link), one bare (ran, no evidence).
+				Verified: []string{"tests-pass@" + gateHash, "mutation"},
+			},
 		},
-	}}
+		diff: map[string]string{
+			"harness-1": "diff --git a/widget.go b/widget.go\n+func Widget() {}",
+		},
+	}
 	s := New(Options{Version: "test", Reader: query.NewReader(issues, arts, prov)})
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
@@ -110,12 +127,16 @@ func TestIssueDetailMergedRendersEvidence(t *testing.T) {
 		"$0.0456",                 // budget spend in dollars
 		"go-implementor",          // provenance soul
 		"claude-test",             // provenance model
-		"tests-pass",              // a verified gate check label
-		"/artifact/" + promptHash, // the prompt link points at the content endpoint
-		"/artifact/" + gateHash,   // the gate-evidence link too
-		"mutation",                // the bare-name check still shows
-		"no evidence persisted",   // …without a link
-		`href="/static/app.css"`,  // inside the base layout chrome
+		"tests-pass",                  // a verified gate check label
+		"/artifact/" + promptHash,     // the prompt link points at the content endpoint
+		"/artifact/" + transcriptHash, // the transcript (replayable decision trail) link too
+		"Transcript",                  // its label
+		"/artifact/" + gateHash,       // the gate-evidence link too
+		"mutation",                    // the bare-name check still shows
+		"no evidence persisted",       // …without a link
+		"Candidate diff",              // the diff section heading
+		"diff --git a/widget.go",      // the landed candidate diff, rendered inline
+		`href="/static/app.css"`,      // inside the base layout chrome
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("issue detail missing %q", want)
@@ -148,6 +169,10 @@ func TestIssueDetailInFlightFallsBackToTraceMap(t *testing.T) {
 	}
 	if !strings.Contains(r.body, "Traceability") {
 		t.Errorf("in-flight issue missing the threaded traceability evidence")
+	}
+	// No candidate diff exists until the work lands, so the diff section must be absent.
+	if strings.Contains(r.body, "Candidate diff") {
+		t.Errorf("in-flight issue must not render a candidate-diff section")
 	}
 	// The trace artifact is not in the store fake, so the link degrades to unavailable
 	// rather than a dead href.

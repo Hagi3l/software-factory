@@ -29,6 +29,7 @@ func (o *Orchestrator) provenanceFor(issue core.Issue, res core.Result, report g
 		PromptSHA:    res.Evidence.PromptSHA,
 		Verified:     verifiedChecks(report),
 		Traceability: issue.TraceMap,
+		Transcript:   transcriptHash(res),
 	}
 	if soul, ok := o.selectSoul(issue); ok {
 		prov.Soul = soul.Name
@@ -45,6 +46,21 @@ func (o *Orchestrator) provenanceFor(issue core.Issue, res core.Result, report g
 func traceMapHash(res core.Result) string {
 	for _, a := range res.Evidence.Artifacts {
 		if a.Kind == core.ArtifactKindTraceabilityMap {
+			return a.Hash
+		}
+	}
+	return ""
+}
+
+// transcriptHash returns the artifact-store hash of a Result's harvested agent transcript
+// — the full broker-captured conversation the runner stores under core.ArtifactKindTranscript
+// — or "" if the runner could not persist it. The transcript is the replayable decision
+// trail (specs/observability.md); citing it by hash in the merge trailer is what makes it
+// reachable from the read stores (the control-room issue-detail / replay views), since the
+// orchestrator otherwise consumes the Result without retaining its evidence references.
+func transcriptHash(res core.Result) string {
+	for _, a := range res.Evidence.Artifacts {
+		if a.Kind == core.ArtifactKindTranscript {
 			return a.Hash
 		}
 	}

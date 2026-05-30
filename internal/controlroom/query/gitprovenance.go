@@ -86,30 +86,71 @@ func (g *GitProvenance) Recent(ctx context.Context, limit int) ([]MergedCommit, 
 	return commits, nil
 }
 
-// ByIssue finds the integration commit that landed the given issue and parses its
-// provenance. It matches on the trailer's "Issue: <id> |" form — the same fixed-string
-// grep the merger uses for its merge-idempotency check (internal/orchestrator/merge.go) —
-// so a substring of a longer id cannot match. found is false (with a nil error) when the
-// issue has not been merged or the ref does not exist; an error is reserved for a real git
-// fault.
-func (g *GitProvenance) ByIssue(ctx context.Context, issueID string) (core.Provenance, bool, error) {
+// commitForIssue finds the integration commit that landed the given issue, returning its
+// hash and full message. It matches on the trailer's "Issue: <id> |" form — the same
+// fixed-string grep the merger uses for its merge-idempotency check
+// (internal/orchestrator/merge.go) — so a substring of a longer id cannot match. found is
+// false (with a nil error) when the issue has not been merged or the ref does not exist; an
+// error is reserved for a real git fault. It is the shared lookup behind ByIssue (which
+// parses the message) and DiffByIssue (which diffs the hash), so the two never drift on how
+// "the commit that landed this issue" is resolved.
+func (g *GitProvenance) commitForIssue(ctx context.Context, issueID string) (hash, body string, found bool, err error) {
 	if issueID == "" {
-		return core.Provenance{}, false, fmt.Errorf("query: empty issue id")
+		return "", "", false, fmt.Errorf("query: empty issue id")
 	}
 	if !g.refExists(ctx) {
-		return core.Provenance{}, false, nil
+		return "", "", false, nil
 	}
 	out, err := g.run(ctx, []string{"log", g.ref, "--fixed-strings",
-		"--grep=Issue: " + issueID + " |", "--format=%B" + recordSep, "-n", "1"})
+		"--grep=Issue: " + issueID + " |", "--format=%H" + fieldSep + "%B" + recordSep, "-n", "1"})
 	if err != nil {
-		return core.Provenance{}, false, fmt.Errorf("query: git log grep %s: %w", issueID, err)
+		return "", "", false, fmt.Errorf("query: git log grep %s: %w", issueID, err)
 	}
-	body := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(string(out)), recordSep))
-	if body == "" {
-		return core.Provenance{}, false, nil
+	rec := strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(string(out)), recordSep))
+	if rec == "" {
+		return "", "", false, nil
 	}
-	prov, found := core.ParseCommitMessage(body)
-	return prov, found, nil
+	h, b, ok := strings.Cut(rec, fieldSep)
+	if !ok {
+		return "", "", false, nil
+	}
+	return strings.TrimSpace(h), b, true, nil
+}
+
+// ByIssue finds the integration commit that landed the given issue and parses its
+// provenance. found is false (with a nil error) when the issue has not been merged or the
+// ref does not exist; an error is reserved for a real git fault.
+func (g *GitProvenance) ByIssue(ctx context.Context, issueID string) (core.Provenance, bool, error) {
+	_, body, found, err := g.commitForIssue(ctx, issueID)
+	if err != nil || !found {
+		return core.Provenance{}, false, err
+	}
+	prov, ok := core.ParseCommitMessage(body)
+	return prov, ok, nil
+}
+
+// DiffByIssue returns the unified diff the integration commit landed — the candidate diff
+// for a merged issue, the read-side complement to the transcript on the issue-detail view
+// (specs/control-room.md). The integration commit is a single-parent provenance commit
+// sitting on the candidate tree atop the prior main tip (internal/orchestrator/merge.go),
+// so `git show` against it yields exactly the change the candidate introduced. found is
+// false when the issue has not merged; an error is reserved for a real git fault. The diff
+// is agent-authored content, but it is rendered as escaped text in the detail page (never
+// served as markup), so it is safe inline — the raw-bytes nosniff contract is for the
+// artifact endpoint, not this server-rendered view.
+func (g *GitProvenance) DiffByIssue(ctx context.Context, issueID string) (string, bool, error) {
+	hash, _, found, err := g.commitForIssue(ctx, issueID)
+	if err != nil || !found {
+		return "", false, err
+	}
+	out, err := g.run(ctx, []string{"show", "--no-color", "--format=", hash})
+	if err != nil {
+		return "", false, fmt.Errorf("query: git show %s: %w", hash, err)
+	}
+	// `--format=` (empty) prints a leading blank line before the patch; trim it so the diff
+	// renders flush. An empty diff (an --allow-empty merge) yields found=false.
+	diff := strings.TrimLeft(string(out), "\n")
+	return diff, diff != "", nil
 }
 
 // refExists reports whether the configured ref resolves. --verify --quiet makes git exit

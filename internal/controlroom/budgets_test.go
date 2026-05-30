@@ -18,6 +18,9 @@ type recentProv struct{ commits []query.MergedCommit }
 func (recentProv) ByIssue(context.Context, string) (core.Provenance, bool, error) {
 	return core.Provenance{}, false, nil
 }
+func (recentProv) DiffByIssue(context.Context, string) (string, bool, error) {
+	return "", false, nil
+}
 func (p recentProv) Recent(context.Context, int) ([]query.MergedCommit, error) {
 	return p.commits, nil
 }

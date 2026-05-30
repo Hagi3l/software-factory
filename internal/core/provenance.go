@@ -25,17 +25,19 @@ type Provenance struct {
 	PromptSHA    string   // artifact-store hash of the exact prompt the invocation ran with
 	Verified     []string // gate checks that passed, each cited as name@<evidence-hash> when persisted
 	Traceability string   // artifact-store hash of the author-tests test↔spec traceability map
+	Transcript   string   // artifact-store hash of the full agent conversation (the replayable decision trail)
 }
 
 // Trailer renders the provenance block exactly as specs/security.md and
 // specs/integration.md specify: two lines of pipe-separated fields. Empty fields render
 // as "(none)" rather than blank so a degraded record (e.g. a prompt that failed to
-// harvest, or a change merged without an author-tests stage and so no traceability map)
-// stays self-describing instead of looking truncated.
+// harvest, a change merged without an author-tests stage and so no traceability map, or an
+// invocation whose transcript could not be harvested) stays self-describing instead of
+// looking truncated.
 func (p Provenance) Trailer() string {
-	return fmt.Sprintf("Soul: %s | Model: %s\nIssue: %s | Prompt-SHA: %s | Verified: %s | Traceability: %s",
+	return fmt.Sprintf("Soul: %s | Model: %s\nIssue: %s | Prompt-SHA: %s | Verified: %s | Traceability: %s | Transcript: %s",
 		orNone(p.Soul), orNone(p.Model), orNone(p.Issue), orNone(p.PromptSHA),
-		orNone(strings.Join(p.Verified, ",")), orNone(p.Traceability))
+		orNone(strings.Join(p.Verified, ",")), orNone(p.Traceability), orNone(p.Transcript))
 }
 
 // CommitMessage is the full message for the integration commit: a one-line subject plus
@@ -75,6 +77,8 @@ func ParseCommitMessage(msg string) (Provenance, bool) {
 				prov.PromptSHA = v
 			case "Traceability":
 				prov.Traceability = v
+			case "Transcript":
+				prov.Transcript = v
 			case "Verified":
 				prov.Verified = splitVerified(v)
 			}
@@ -105,7 +109,7 @@ func parseTrailerLine(line string) (map[string]string, bool) {
 		val = noneToEmpty(strings.TrimSpace(val))
 		fields[key] = val
 		switch key {
-		case "Soul", "Model", "Issue", "Prompt-SHA", "Verified", "Traceability":
+		case "Soul", "Model", "Issue", "Prompt-SHA", "Verified", "Traceability", "Transcript":
 			recognized = true
 		}
 	}

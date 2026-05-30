@@ -123,7 +123,7 @@ recorded as a commit trailer:
 
 ```
 Soul: implementor-go | Model: claude-opus-4-7
-Issue: bd-1234 | Prompt-SHA: 9af… | Verified: build@sha256:1c2…,test@sha256:8be…,gosec@sha256:0a4… | Traceability: sha256:7c1…
+Issue: bd-1234 | Prompt-SHA: 9af… | Verified: build@sha256:1c2…,test@sha256:8be…,gosec@sha256:0a4… | Traceability: sha256:7c1… | Transcript: sha256:3d2…
 ```
 
 This is a SLSA-style provenance record: every autonomous change is attributable to
@@ -133,12 +133,16 @@ content-addressed [artifact store](components/artifact-store.md) at that check's
 captured output — so verification is auditable down to the exact bytes, not merely a
 list of check names. `Traceability` cites the [test↔spec traceability map](verification.md)
 the `author-tests` stage produced (threaded forward to the merge), the window into how the
-test author read the pure-prose spec. The `Prompt-SHA`, the evidence hashes, and the
-traceability hash are all such pointers, so a record cannot be silently altered. A check
-whose evidence failed to persist degrades to a bare `<name>`, and a change with no
-`author-tests` stage in its lineage carries `Traceability: (none)` (self-describing, like a
-missing `Prompt-SHA`), never a dropped verdict. Commits/artifacts should be signed with the
-harness's identity.
+test author read the pure-prose spec. `Transcript` cites the full broker-captured agent
+conversation — every LLM request/response the runner relayed for the producing invocation —
+the **replayable decision trail** that lets a human reconstruct exactly what the model saw
+and did (see [observability.md](observability.md)). The `Prompt-SHA`, the evidence hashes,
+the traceability hash, and the transcript hash are all such pointers, so a record cannot be
+silently altered. A check whose evidence failed to persist degrades to a bare `<name>`, and
+a change with no `author-tests` stage in its lineage carries `Traceability: (none)` (and an
+invocation whose transcript could not be harvested carries `Transcript: (none)`) —
+self-describing, like a missing `Prompt-SHA`, never a dropped verdict. Commits/artifacts
+should be signed with the harness's identity.
 
 So the trailer can be vouched for by the trusted layer, the tip of `main` is always
 a **harness-authored provenance commit** sitting on top of the verified candidate,

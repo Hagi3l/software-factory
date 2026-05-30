@@ -706,7 +706,12 @@ func TestHandleResultAcceptBuildsProvenance(t *testing.T) {
 		IssueID:  "iss-1",
 		Status:   core.StatusDone,
 		Branch:   core.Branch{Ref: core.CandidateBranch("iss-1")},
-		Evidence: core.Evidence{PromptSHA: "sha256:9af"},
+		Evidence: core.Evidence{
+			PromptSHA: "sha256:9af",
+			// The runner harvested the agent conversation; its hash rides on Evidence and must
+			// be cited in the trailer so the transcript stays reachable from the read stores.
+			Artifacts: []core.ArtifactRef{{Kind: core.ArtifactKindTranscript, Hash: "sha256:tx"}},
+		},
 	}
 	if _, err := o.handleResult(context.Background(), res); err != nil {
 		t.Fatalf("handleResult: %v", err)
@@ -723,9 +728,13 @@ func TestHandleResultAcceptBuildsProvenance(t *testing.T) {
 	if len(p.Verified) != 2 || p.Verified[0] != "build" || p.Verified[1] != "test" {
 		t.Errorf("provenance Verified = %v, want [build test]", p.Verified)
 	}
+	if p.Transcript != "sha256:tx" {
+		t.Errorf("provenance Transcript = %q, want sha256:tx (the harvested conversation)", p.Transcript)
+	}
 	// The rendered trailer matches the spec's exact two-line format. This issue carried no
-	// threaded author-tests map (seeded directly at implement), so Traceability is (none).
-	want := "Soul: implementor-go | Model: claude-opus-4-7\nIssue: iss-1 | Prompt-SHA: sha256:9af | Verified: build,test | Traceability: (none)"
+	// threaded author-tests map (seeded directly at implement), so Traceability is (none);
+	// the harvested transcript hash is cited.
+	want := "Soul: implementor-go | Model: claude-opus-4-7\nIssue: iss-1 | Prompt-SHA: sha256:9af | Verified: build,test | Traceability: (none) | Transcript: sha256:tx"
 	if got := p.Trailer(); got != want {
 		t.Errorf("trailer =\n%q\nwant\n%q", got, want)
 	}

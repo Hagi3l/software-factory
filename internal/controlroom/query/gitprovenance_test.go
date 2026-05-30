@@ -3,6 +3,7 @@ package query
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
 	"strings"
 	"testing"
@@ -91,13 +92,59 @@ func TestRecentEmptyWhenRefMissing(t *testing.T) {
 
 func TestByIssueParsesMatch(t *testing.T) {
 	p := core.Provenance{Issue: "h-7", Soul: "s", Model: "m", PromptSHA: "sha256:p"}
-	g := newStubReader(stubRun(true, "", p.CommitMessage()+"\n"+recordSep))
+	// commitForIssue greps with --format=%H<US>%B, so the grep output frames the hash and
+	// the message with the field separator.
+	g := newStubReader(stubRun(true, "", "c7"+fieldSep+p.CommitMessage()+"\n"+recordSep))
 	got, found, err := g.ByIssue(context.Background(), "h-7")
 	if err != nil {
 		t.Fatalf("ByIssue: %v", err)
 	}
 	if !found || got.Issue != "h-7" || got.PromptSHA != "sha256:p" {
 		t.Errorf("got %+v found=%v", got, found)
+	}
+}
+
+// TestDiffByIssueShowsPatch proves DiffByIssue resolves the issue's integration commit and
+// returns the patch git show emits, with the leading blank line `--format=` produces
+// trimmed off so the diff renders flush.
+func TestDiffByIssueShowsPatch(t *testing.T) {
+	p := core.Provenance{Issue: "h-7", Soul: "s", Model: "m"}
+	patch := "diff --git a/x b/x\nindex 000..111 100644\n+++ b/x\n+hello"
+	run := func(_ context.Context, args []string) ([]byte, error) {
+		switch args[0] {
+		case "rev-parse":
+			return []byte("ok\n"), nil
+		case "log":
+			return []byte("c7" + fieldSep + p.CommitMessage() + "\n" + recordSep), nil
+		case "show":
+			// git show --format= prints a leading newline before the patch; assert that the
+			// commit hash commitForIssue resolved is the one diffed.
+			if args[len(args)-1] != "c7" {
+				t.Errorf("git show on %q, want the resolved commit c7", args[len(args)-1])
+			}
+			return []byte("\n" + patch), nil
+		}
+		return nil, errors.New("unexpected git call")
+	}
+	g := newStubReader(run)
+	diff, found, err := g.DiffByIssue(context.Background(), "h-7")
+	if err != nil {
+		t.Fatalf("DiffByIssue: %v", err)
+	}
+	if !found || diff != patch {
+		t.Errorf("diff = %q found=%v, want the trimmed patch", diff, found)
+	}
+}
+
+// TestDiffByIssueNotFound proves an unmerged issue yields found=false with no git show call.
+func TestDiffByIssueNotFound(t *testing.T) {
+	g := newStubReader(stubRun(true, "", "")) // grep returns nothing
+	diff, found, err := g.DiffByIssue(context.Background(), "h-404")
+	if err != nil {
+		t.Fatalf("DiffByIssue: %v", err)
+	}
+	if found || diff != "" {
+		t.Errorf("diff = %q found=%v, want empty/not-found for an unmerged issue", diff, found)
 	}
 }
 
@@ -178,6 +225,50 @@ func TestGitProvenanceIntegration(t *testing.T) {
 	// An unmerged issue is cleanly not-found.
 	if _, found, _ := g.ByIssue(context.Background(), "harness-999"); found {
 		t.Error("ByIssue found a never-merged issue")
+	}
+}
+
+// TestDiffByIssueIntegration proves DiffByIssue speaks real git: it commits a file under a
+// genuine provenance message and reads back the unified diff that commit landed — the
+// candidate diff the issue-detail view renders.
+func TestDiffByIssueIntegration(t *testing.T) {
+	gitAvailable(t)
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-b", "main")
+	git("config", "user.name", "harness")
+	git("config", "user.email", "harness@localhost")
+	if err := os.WriteFile(repo+"/widget.go", []byte("package widget\n"), 0o644); err != nil {
+		t.Fatalf("write file: %v", err)
+	}
+	git("add", "widget.go")
+	prov := core.Provenance{Soul: "implementor-go", Model: "claude", Issue: "harness-77", Transcript: "sha256:tx"}
+	git("commit", "-m", prov.CommitMessage())
+
+	g := NewGitProvenance(repo)
+	diff, found, err := g.DiffByIssue(context.Background(), "harness-77")
+	if err != nil || !found {
+		t.Fatalf("DiffByIssue: found=%v err=%v", found, err)
+	}
+	if !strings.Contains(diff, "widget.go") || !strings.Contains(diff, "+package widget") {
+		t.Errorf("diff missing the landed change:\n%s", diff)
+	}
+	// The diff must not carry the commit-message header `--format=` suppresses.
+	if strings.Contains(diff, "harness-77") {
+		t.Errorf("diff leaked the commit message header:\n%s", diff)
+	}
+
+	// An unmerged issue is cleanly not-found, with no diff.
+	if d, found, _ := g.DiffByIssue(context.Background(), "harness-999"); found || d != "" {
+		t.Errorf("DiffByIssue found a never-merged issue: %q", d)
 	}
 }
 

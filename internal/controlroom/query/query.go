@@ -38,6 +38,7 @@ type ArtifactReader interface {
 // ProvenanceReader reads merged-commit provenance from git (*GitProvenance satisfies it).
 type ProvenanceReader interface {
 	ByIssue(ctx context.Context, issueID string) (core.Provenance, bool, error)
+	DiffByIssue(ctx context.Context, issueID string) (string, bool, error)
 	Recent(ctx context.Context, limit int) ([]MergedCommit, error)
 }
 
@@ -199,13 +200,14 @@ type ArtifactLink struct {
 }
 
 // IssueDetail is the full single-issue view: the issue itself, its provenance (if it has
-// been merged to main), and the evidence artifacts derivable from that provenance, each
-// resolved against the store for availability.
+// been merged to main), the candidate diff that landed it, and the evidence artifacts
+// derivable from that provenance, each resolved against the store for availability.
 type IssueDetail struct {
 	Issue      core.Issue
 	Merged     bool
 	Provenance core.Provenance
 	Evidence   []ArtifactLink
+	Diff       string // the unified diff the integration commit landed; empty until merged
 }
 
 // IssueDetail stitches all three stores for one issue: beads for the issue, git for its
@@ -231,6 +233,12 @@ func (r *Reader) IssueDetail(ctx context.Context, id string) (IssueDetail, error
 
 	if merged {
 		detail.Evidence = r.evidenceFromProvenance(ctx, prov, issue)
+		// The candidate diff is supplementary forensic context, not the spine of the page,
+		// so a git fault reading it leaves the diff empty rather than blanking the whole
+		// view — the same best-effort posture as the store availability check above.
+		if diff, ok, derr := r.prov.DiffByIssue(ctx, id); derr == nil && ok {
+			detail.Diff = diff
+		}
 	} else if issue.TraceMap != "" {
 		detail.Evidence = []ArtifactLink{r.link(ctx, "Traceability", core.ArtifactKindTraceabilityMap, issue.TraceMap)}
 	}
@@ -238,14 +246,18 @@ func (r *Reader) IssueDetail(ctx context.Context, id string) (IssueDetail, error
 }
 
 // evidenceFromProvenance turns a provenance record into resolved artifact links: the
-// prompt, the traceability map (preferring the trailer's hash, falling back to the issue's
-// threaded one), and each passing gate check. A check cited as a bare name (its evidence
-// could not be persisted) is kept with an empty hash and Available=false so the view shows
-// the check ran rather than hiding it.
+// prompt, the transcript (the full agent conversation — the replayable decision trail),
+// the traceability map (preferring the trailer's hash, falling back to the issue's threaded
+// one), and each passing gate check. A check cited as a bare name (its evidence could not be
+// persisted) is kept with an empty hash and Available=false so the view shows the check ran
+// rather than hiding it.
 func (r *Reader) evidenceFromProvenance(ctx context.Context, prov core.Provenance, issue core.Issue) []ArtifactLink {
 	var links []ArtifactLink
 	if prov.PromptSHA != "" {
 		links = append(links, r.link(ctx, "Prompt", core.ArtifactKindPrompt, prov.PromptSHA))
+	}
+	if prov.Transcript != "" {
+		links = append(links, r.link(ctx, "Transcript", core.ArtifactKindTranscript, prov.Transcript))
 	}
 	trace := prov.Traceability
 	if trace == "" {

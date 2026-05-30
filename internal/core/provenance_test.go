@@ -18,6 +18,7 @@ func TestProvenanceRoundTrip(t *testing.T) {
 			PromptSHA:    "sha256:9af",
 			Verified:     []string{"build@sha256:aa", "test@sha256:bb"},
 			Traceability: "sha256:cc",
+			Transcript:   "sha256:dd",
 		},
 		"no traceability or prompt": {
 			Soul:     "implementor-go",

@@ -312,17 +312,28 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   threaded TraceMap with no provenance section, unknown-id notice, no-reader notice/503, artifact content +
   content-type/nosniff + colon-in-path round-trip, artifact-404, and board-card→detail links. (needs T4.2)
   ([control-room.md](specs/control-room.md))
-- [ ] **T4.7b Surface transcript + candidate diff on the detail page** *(carried from T4.7)* — the spec's
-  detail view also lists the **transcript** and the **candidate diff**, which T4.7 could not render because
-  neither hash is reachable from the read stores today. (a) **Transcript:** the runner harvests it to the
-  artifact store (`ArtifactKindTranscript`) and stamps the hash on `Result.Evidence`, but the orchestrator
-  consumes the Result without persisting that hash — the provenance trailer carries only PromptSHA / Verified
-  / Traceability (security.md's format). Surfacing it needs the trailer (and `core.Provenance`) extended with a
-  `Transcript:` field, written by the merger and parsed back by `GitProvenance` — a single-source provenance-
-  format change, so **update security.md first**. (b) **Candidate diff:** reachable read-side for a *merged*
-  issue (`git show <commit>`), but `ProvenanceReader.ByIssue` returns only the parsed provenance, not the
-  commit hash; thread the commit through (or add a `DiffByIssue`) and render it. (a) touches the trailer
-  format (mild TCB-adjacent, human-reviewed); (b) is pure read-side git. (needs T4.7)
+- [x] **T4.7b Surface transcript + candidate diff on the detail page** — *done.* Both hashes are now reachable
+  from the read stores. **(a) Transcript:** `core.Provenance` gains a **`Transcript`** field (artifact-store hash
+  of the full broker-captured conversation — the replayable decision trail), rendered as a new pipe-segment on
+  trailer line 2 (`| Transcript: <hash>`, `(none)` when unharvested) and parsed back by `ParseCommitMessage` —
+  one format, both sides, **security.md + integration.md updated first**. The orchestrator's `provenanceFor` threads
+  it via a new **`transcriptHash(res)`** helper (mirrors `traceMapHash`, scans `Result.Evidence.Artifacts` for
+  `ArtifactKindTranscript`) — the runner already harvests the transcript and stamps the ref, so no runner change.
+  The query layer's `evidenceFromProvenance` emits a **"Transcript"** evidence link (right after the prompt) →
+  click-through to `/artifact/{hash}`. Transcript surfaces only for **merged** work (the trailer is the only place
+  the hash is retained; the orchestrator otherwise discards `Result.Evidence`). **(b) Candidate diff:** new
+  **`ProvenanceReader.DiffByIssue`** on `GitProvenance` — a shared **`commitForIssue`** helper (greps the trailer's
+  `Issue: <id> |` with `--format=%H<US>%B`, so `ByIssue` and `DiffByIssue` never drift on "which commit landed this
+  issue") resolves the integration commit hash, then `git show --no-color --format= <hash>` yields the candidate
+  diff (the integration commit is a single-parent provenance commit on the candidate tree, so its patch *is* the
+  candidate diff; the leading blank `--format=` emits is trimmed). `IssueDetail` gains a **`Diff`** field, fetched
+  best-effort for merged issues (a git fault leaves it empty rather than blanking the page), and the detail view
+  renders a **"Candidate diff"** `<pre>` — agent-authored content, but templ-escaped as inert text (the raw-bytes
+  nosniff contract is for the `/artifact` endpoint, not this server-rendered page). TCB-adjacent (trailer format),
+  human-reviewed. Tests: provenance round-trip with `Transcript`, orchestrator trailer cites the harvested
+  transcript hash, `DiffByIssue` (stub patch-trim + not-found + real-git integration), query stitches transcript
+  link + diff, and the detail page renders both (and omits the diff section in-flight). This unblocks **T4.11
+  Replay** (the transcript hash is now reachable). (needs T4.7)
   ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md), [security.md](specs/security.md))
 - [x] **T4.8 Dead-letter queue view** — *done.* The escalations awaiting a human — the control room's
   primary *action* surface — server-rendered (templ) and live over the T4.3 SSE substrate, mirroring the
