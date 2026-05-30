@@ -130,7 +130,21 @@ The human's read-only window + the wizard (their only action surface). Stack: te
 + Tailwind standalone CLI + `embed.FS` + htmx/Alpine + SSE.
 ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md))
 
-- [ ] **T4.1 Web server scaffold + asset pipeline** — `internal/controlroom` + a `harness serve` command; `go generate` running `templ generate` + the Tailwind standalone CLI; `embed.FS` for htmx, Alpine, and compiled CSS; a base templ layout. Single self-contained binary, no runtime toolchain. ([control-room.md](specs/control-room.md))
+- [x] **T4.1 Web server scaffold + asset pipeline** — *done.* `internal/controlroom`
+  (`Server`: `http.ServeMux`, exact-match routes via Go 1.22+ method patterns, `Handler()`
+  for httptest, `ListenAndServe(ctx, addr)` with ctx-driven graceful drain) + `harness serve`
+  (`--addr`, SIGTERM = clean stop). Views are **templ** in `internal/controlroom/views`
+  (base `Layout` + `Home`/`Placeholder`); nav is a single source of truth (`views.NavItems`)
+  the server iterates to register placeholder routes. Assets embedded via
+  `internal/controlroom/assets` (`//go:embed static`): vendored htmx 2.0.4 + htmx-ext-sse
+  2.2.2 + Alpine 3.14.9 (committed) and Tailwind-compiled `app.css`. Build pipeline is
+  `make generate` → `go generate` (`generate.go`): `templ generate` first (so `*_templ.go`
+  carry the class strings), then the pinned Tailwind v4 standalone CLI (`make tailwind`
+  fetches it into gitignored `bin/`; `app.tw.css` uses `@source` globs at the views dir).
+  Generated `*_templ.go` + compiled CSS are committed so a plain `go build` needs no
+  toolchain — the binary is self-contained. Later views (T4.2+) are thin templ panels
+  rendered into `Layout`; SSE attaches via the already-loaded htmx-ext-sse (T4.3).
+  ([control-room.md](specs/control-room.md))
 - [ ] **T4.2 Read/query layer** — render-ready reads over beads + the artifact store + git provenance, decoupled from the views. ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md))
 - [ ] **T4.3 SSE plumbing** — NATS events → an SSE endpoint consumed by the htmx SSE extension; the live-update substrate for the board and feed. ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
 - [ ] **T4.4 Board view** — kanban over beads issues by stage, live via T4.3. (needs T4.2, T4.3) ([control-room.md](specs/control-room.md))

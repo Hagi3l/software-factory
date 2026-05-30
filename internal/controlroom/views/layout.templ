@@ -1,0 +1,70 @@
+package views
+
+// Layout is the base HTML shell every control-room page renders into. It wires the
+// three embedded front-end assets — the compiled Tailwind stylesheet, htmx (for
+// server-rendered swaps), and Alpine (for small client-side state) — all served from
+// the binary's own embed.FS under /static, so a deployed harness needs no runtime
+// asset toolchain (see specs/control-room.md, "Stack"). The htmx SSE extension is
+// loaded here too so the live views (T4.3+) can attach without a second round trip.
+//
+// active names the current top-level view so the nav can highlight it; child content
+// is the page body. Keeping the chrome in one component is what lets every later view
+// (Board, DAG, Activity, …) be a thin templ that only renders its own panel.
+templ Layout(title string, active string) {
+	<!DOCTYPE html>
+	<html lang="en" class="h-full bg-slate-950 text-slate-100">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title }</title>
+			<link rel="stylesheet" href="/static/app.css"/>
+			<script src="/static/htmx.min.js" defer></script>
+			<script src="/static/htmx-ext-sse.min.js" defer></script>
+			<script src="/static/alpine.min.js" defer></script>
+		</head>
+		<body class="flex h-full flex-col">
+			<header class="flex items-center gap-6 border-b border-slate-800 bg-slate-900/60 px-6 py-3">
+				<a href="/" class="text-sm font-semibold tracking-tight text-slate-100">
+					harness <span class="text-slate-500">control room</span>
+				</a>
+				<nav class="flex flex-wrap gap-1 text-sm">
+					for _, item := range NavItems {
+						@navLink(item, active)
+					}
+				</nav>
+			</header>
+			<main class="flex-1 overflow-auto p-6">
+				{ children... }
+			</main>
+		</body>
+	</html>
+}
+
+// NavItem is one top-level view in the header. The views themselves land in T4.2+;
+// here the chrome simply names the destinations so the scaffold renders the real
+// information architecture rather than a blank page. It is exported so the server can
+// register the matching routes from this single source of truth.
+type NavItem struct {
+	Key   string
+	Label string
+	Href  string
+}
+
+// NavItems is the ordered top-level navigation, shared by the layout, the home page,
+// and the server's placeholder route registration.
+var NavItems = []NavItem{
+	{Key: "board", Label: "Board", Href: "/board"},
+	{Key: "dag", Label: "DAG", Href: "/dag"},
+	{Key: "activity", Label: "Activity", Href: "/activity"},
+	{Key: "dlq", Label: "Dead-letter", Href: "/dlq"},
+	{Key: "budgets", Label: "Budgets", Href: "/budgets"},
+	{Key: "provenance", Label: "Provenance", Href: "/provenance"},
+}
+
+templ navLink(item NavItem, active string) {
+	if item.Key == active {
+		<a href={ templ.SafeURL(item.Href) } class="rounded px-2 py-1 font-medium bg-slate-700 text-white">{ item.Label }</a>
+	} else {
+		<a href={ templ.SafeURL(item.Href) } class="rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100">{ item.Label }</a>
+	}
+}

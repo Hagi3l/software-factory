@@ -1,0 +1,44 @@
+package views
+
+// Home is the landing page for the control room. T4.1 is the scaffold — the web
+// server, the asset pipeline, and this base layout — so the page deliberately renders
+// status and the view map rather than live data; the data-backed views (Board, DAG,
+// Activity, DLQ, Budgets, Provenance) attach in T4.2+ via the read/query layer and SSE.
+templ Home(version string) {
+	@Layout("Harness — Control Room", "home") {
+		<div class="mx-auto max-w-3xl space-y-6">
+			<div>
+				<h1 class="text-2xl font-semibold tracking-tight">Control room</h1>
+				<p class="mt-1 text-slate-400">
+					The human's read-only window into the factory and the only place to act.
+					Build <span class="font-mono text-slate-300">{ version }</span>.
+				</p>
+			</div>
+			<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
+				<p class="text-sm text-slate-300">
+					The server scaffold and asset pipeline are live (T4.1). The views below are
+					wired into the navigation and land in subsequent tasks.
+				</p>
+			</div>
+			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+				for _, item := range NavItems {
+					<a href={ templ.SafeURL(item.Href) } class="block rounded-lg border border-slate-800 bg-slate-900/40 p-4 hover:border-slate-600 hover:bg-slate-900">
+						<span class="font-medium text-slate-100">{ item.Label }</span>
+					</a>
+				}
+			</div>
+		</div>
+	}
+}
+
+// Placeholder renders a not-yet-built view inside the chrome so every nav destination
+// resolves to a real page. Each is replaced by its data-backed implementation in T4.2+;
+// until then this keeps the navigation honest rather than dead-linking.
+templ Placeholder(label string, active string) {
+	@Layout("Harness — "+label, active) {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-2xl font-semibold tracking-tight">{ label }</h1>
+			<p class="mt-2 text-slate-400">This view is not built yet — it lands in a later Phase 4 task.</p>
+		</div>
+	}
+}

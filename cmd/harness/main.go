@@ -8,6 +8,8 @@
 //	                     requirements wizard) via the single-writer beads path
 //	harness run        — run an in-process orchestrator + one runner over embedded
 //	                     NATS until interrupted; this is the spec -> merged-commit loop
+//	harness serve      — start the control-room web server (the human's window); serves
+//	                     the embedded UI until interrupted
 //
 // This is the composition root: it is the one place that wires every internal
 // package together. Nothing here enforces a guarantee — the components it assembles
@@ -46,6 +48,8 @@ func dispatch(args []string) int {
 		err = cmdSeed(rest)
 	case "run":
 		err = cmdRun(rest)
+	case "serve":
+		err = cmdServe(rest)
 	case "version", "-v", "--version":
 		fmt.Fprintf(os.Stdout, "harness %s\n", version)
 		return 0
@@ -74,6 +78,7 @@ usage:
   harness seed     --title TITLE [--role ROLE] [--description TEXT] [--spec PATH]
                    [--config DIR] [--env ENV] [--repo DIR] [--bd PATH]
   harness run      [--config DIR] [--env ENV] [--repo DIR] [--bd PATH]
+  harness serve    [--addr HOST:PORT]
   harness version
 
 Run a subcommand with -h for its flags.

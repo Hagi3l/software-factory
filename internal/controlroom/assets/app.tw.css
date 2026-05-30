@@ -1,0 +1,11 @@
+/* Tailwind input for the control room. The standalone Tailwind CLI compiles this to
+   static/app.css (the embedded, served stylesheet) at build time via `go generate`
+   (see ../generate.go) — there is no Node toolchain and no runtime CSS generation.
+
+   The @source globs tell Tailwind where the class names live. templ generates
+   *_templ.go from the *.templ files before Tailwind runs, so the utility classes are
+   present as Go string literals; scanning both keeps the build order-independent. */
+@import "tailwindcss";
+
+@source "../views/**/*.templ";
+@source "../views/**/*_templ.go";

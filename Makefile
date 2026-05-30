@@ -13,7 +13,17 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
 RESULTS := test/results
 
-.PHONY: all build vet lint fmt tidy test test-unit test-e2e-docker check clean \
+# Control-room build tooling. templ is a `go install` dependency; the Tailwind standalone
+# CLI is a static binary fetched on demand into bin/ (gitignored), keeping the deployable
+# harness a single self-contained binary while the toolchain stays build-time only.
+TEMPL          ?= templ
+TAILWIND       := $(BIN_DIR)/tailwindcss
+TAILWIND_VER   := v4.3.0
+TAILWIND_OS    := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+TAILWIND_ARCH  := $(shell uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')
+TAILWIND_URL   := https://github.com/tailwindlabs/tailwindcss/releases/download/$(TAILWIND_VER)/tailwindcss-$(TAILWIND_OS)-$(TAILWIND_ARCH)
+
+.PHONY: all build generate tailwind vet lint fmt tidy test test-unit test-e2e-docker check clean \
 	gosec govulncheck license-scan mutation
 
 all: build
@@ -24,6 +34,20 @@ check: vet lint test-unit
 ## build: compile the harness binary into bin/ with the version stamped in.
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/harness
+
+## generate: run all code/asset generators (control-room templ + Tailwind). The
+## generated *_templ.go and compiled CSS are committed, so this is only needed after
+## editing *.templ or the Tailwind input — a plain `make build` does not require it.
+generate: tailwind
+	TAILWIND="$(abspath $(TAILWIND))" TEMPL="$(TEMPL)" $(GO) generate $(PKG)
+
+## tailwind: fetch the pinned Tailwind standalone CLI into bin/ if absent (build tool only).
+tailwind: $(TAILWIND)
+$(TAILWIND):
+	@mkdir -p $(BIN_DIR)
+	@echo "fetching tailwindcss $(TAILWIND_VER) -> $(TAILWIND)"
+	@curl -sSL -o $(TAILWIND) "$(TAILWIND_URL)"
+	@chmod +x $(TAILWIND)
 
 ## vet: run go vet across all packages.
 vet:
