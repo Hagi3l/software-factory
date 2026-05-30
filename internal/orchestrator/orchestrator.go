@@ -240,19 +240,21 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	return nil
 }
 
-// tickLoop schedules ready work, recompiles the spec delta, and sweeps stranded leases on
-// each tick, plus an immediate pass at startup so dispatch is not delayed by one interval.
-// Every pass is idempotent and reads its state from beads, never from orchestrator memory:
-// "already dispatched" is "not in the ready set"; "stale in-flight" is "pinned spec hash no
-// longer matches the re-resolved slice"; "stranded" is "lease expired". The two reconcilers
-// (recompileSpecDelta, sweepLeases) return affected in_progress issues to the ready pool;
-// the next scheduleReady redispatches them.
+// tickLoop schedules ready work, recompiles the spec delta (in-flight and already-merged), and
+// sweeps stranded leases on each tick, plus an immediate pass at startup so dispatch is not
+// delayed by one interval. Every pass is idempotent and reads its state from beads, never from
+// orchestrator memory: "already dispatched" is "not in the ready set"; "stale in-flight" is
+// "pinned spec hash no longer matches the re-resolved slice"; "stranded" is "lease expired". The
+// in-flight reconcilers (recompileSpecDelta, sweepLeases) return affected in_progress issues to
+// the ready pool; recompileMergedDelta instead spawns a re-derivation plan for already-merged work
+// the spec edit reached. The next scheduleReady redispatches whatever they produced.
 func (o *Orchestrator) tickLoop(ctx context.Context) error {
 	t := time.NewTicker(o.tick)
 	defer t.Stop()
 	for {
 		o.scheduleReady(ctx)
 		o.recompileSpecDelta(ctx)
+		o.recompileMergedDelta(ctx)
 		o.sweepLeases(ctx)
 		select {
 		case <-ctx.Done():

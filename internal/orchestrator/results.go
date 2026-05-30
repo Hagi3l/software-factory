@@ -19,6 +19,11 @@ import (
 // keeps Result processing idempotent under at-least-once redelivery.
 const statusInProgress = "in_progress"
 
+// statusClosed is the beads status of an issue whose candidate has merged (terminal,
+// successful). The merged-delta sweep keys off it to find already-merged work whose
+// governing spec has since changed (see recompileMergedDelta).
+const statusClosed = "closed"
+
 // errMergeConflictHandled is an internal sentinel: advance returns it when an integrate
 // rebase conflict has already been handled — a sandboxed conflict-resolution issue spawned
 // (the issue closed in its favor) or, if no resolve stage is configured or a cap/budget is

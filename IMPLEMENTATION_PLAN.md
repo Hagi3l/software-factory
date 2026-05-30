@@ -33,7 +33,7 @@ good autonomous implementation) — a later validation concern, never an enginee
   The verbose per-task findings were pruned once complete — that history lives in git,
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
 - **Open tasks (`- [ ]`) keep their full detail** — Phases 4–5, plus the handful left in
-  Phases 2–3 (T2.11/T2.12, T3.7b).
+  Phases 2–3 (T2.11/T2.12).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -129,18 +129,24 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
 - [x] **T3.5 Spec-slice resolution** — *done.*
 - [x] **T3.6 Spec-version pinning** — *done.*
 - [x] **T3.7 Recompile-the-delta** — *done.*
-- [ ] **T3.7b Re-derive already-merged work on a spec edit** — *designed; spec landed (specs-process.md).*
-  Extend the reconcile sweep to the closed/merged case, keyed by **(epic, spec-path)** not per-issue:
-  group closed issues by `EpicID`+`Spec` (via `ListAll` + in-process filter — no new bd query),
-  re-resolve+re-hash the slice, and on a mismatch against the pinned `SpecHash` spawn **one fresh `plan`
-  issue** for that epic+path (carrying `EpicID`/`Tags`, branched from the epic's merged tip) so the planner
-  decomposes only the delta against merged code. Re-entry at **planning, not author-tests** (a spec edit
-  can add/remove/alter work items, which only the planner expresses). Then **re-pin the closed issues'
-  `SpecHash`** to the new slice (idempotency latch) and **skip the spawn when an open re-derivation `plan`
-  issue for that (epic, spec-path) already exists**. Known coarseness: a localized single-criterion edit
-  still triggers a full planning pass. TCB-touching (orchestrator). (needs T3.7; **`EpicID`** + `epicOf`
-  now available from T3.8b — group closed issues by `epicOf`, not a stored field, so a root seed is included)
-  ([specs-process.md](specs/specs-process.md))
+- [x] **T3.7b Re-derive already-merged work on a spec edit** — *done.* New companion sweep
+  **`recompileMergedDelta`** (in `recompile.go`, run from `tickLoop` after `recompileSpecDelta`) handles the
+  closed/merged case keyed by **(epic, spec-path)**: it `ListAll`s once, groups closed issues by
+  **`epicOf(issue)`+`Spec`** in-process (so a root seed folds into its own epic via the `epicOf` fallback — no
+  new bd query), re-resolves+re-hashes each group's slice, and on a mismatch against any closed member's pinned
+  `SpecHash` spawns **one fresh `plan` issue** for that (epic, path) via `beads.Apply` — carrying `EpicID` +
+  the epic's `Tags`, empty `Base` (the merged work is on main, so it branches from the epic's merged tip like a
+  seed) — so the planner re-enters at **planning** and decomposes only the delta against merged code. Two
+  idempotency mechanisms: **(1)** skip the spawn when a planning pass for the (epic, path) is already open (any
+  non-closed plan-role issue — a prior re-derivation or the epic's initial plan); **(2)** after spawning,
+  **re-pin every closed member's `SpecHash`** to the new slice (the latch) so once the plan settles the group
+  reads settled and does not respawn. Plan-stage role(s) come from a new **`planRoles()`** helper (reads
+  `config.StageKindPlan` from the DAG; `spawn=""` when no plan stage ⇒ sweep no-ops, skipping the `ListAll`).
+  Best-effort throughout (unresolvable slice / unpinned member left untouched), like the in-flight sweep; added
+  `statusClosed` const. Known coarseness (per spec): a localized single-criterion edit still triggers a full
+  planning pass. TCB-touching (orchestrator), human-reviewed. Tests: drift→one deduped plan spawn + re-pin,
+  no-drift no-op, open-plan idempotency skip (no spawn, no re-pin), and best-effort skips (no plan stage / no
+  pin / settled / unresolvable). (needs T3.7, T3.8b) ([specs-process.md](specs/specs-process.md))
 - [x] **T3.8 Cumulative per-issue budget** — *done.*
 - [x] **T3.8b Cumulative epic budget + cross-loop wall-clock** — *done.* Two enforcement gaps closed.
   **(1) Epic budget** — **`core.Issue.EpicID`** (beads `epic_id`) threads forward onto every produced child,
