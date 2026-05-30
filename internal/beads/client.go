@@ -143,12 +143,23 @@ func (c *Client) ListAll(ctx context.Context) ([]core.Issue, error) {
 // agent is handed are decoded. Metadata is decoded as raw values so a non-string
 // entry written by another tool cannot fail the whole read.
 type issueJSON struct {
-	ID          string                     `json:"id"`
-	Title       string                     `json:"title"`
-	Description string                     `json:"description"`
-	Status      string                     `json:"status"`
-	Labels      []string                   `json:"labels"`
-	Metadata    map[string]json.RawMessage `json:"metadata"`
+	ID           string                     `json:"id"`
+	Title        string                     `json:"title"`
+	Description  string                     `json:"description"`
+	Status       string                     `json:"status"`
+	Labels       []string                   `json:"labels"`
+	Metadata     map[string]json.RawMessage `json:"metadata"`
+	Dependencies []depJSON                  `json:"dependencies"`
+}
+
+// depJSON is one dependency edge bd emits inline on `bd list --json` (the `dependencies`
+// array). Only depends_on_id is consumed — the id of the issue this one is blocked by; the
+// edge's own issue_id is the enclosing record's id, and the type (e.g. "blocks") is not
+// needed for the DAG read. It is decoded into core.Issue.DependsOn (blocked-by targets),
+// the read-side edge source for the control room's dependency graph (T4.6), so the harness
+// need not issue a separate `bd dep` query.
+type depJSON struct {
+	DependsOnID string `json:"depends_on_id"`
 }
 
 func (r issueJSON) toCore() core.Issue {
@@ -169,7 +180,29 @@ func (r issueJSON) toCore() core.Issue {
 		SpentTokens: metaInt(r.Metadata, MetadataKeySpentTokens),
 		SpentUSD:    metaFloat(r.Metadata, MetadataKeySpentUSD),
 		Tags:        parseLabels(r.Labels),
+		// Blocked-by edge targets bd emits inline on the read (the `dependencies` array),
+		// distinct from the write-side Proposal.DependsOn. Empty/absent decodes to nil.
+		DependsOn: dependsOn(r.Dependencies),
 	}
+}
+
+// dependsOn collects the non-empty depends_on_id values from bd's inline dependency edges
+// into the blocked-by target list. An empty id is skipped (defensive against a malformed
+// edge); no edges yields nil so an issue with no blockers carries a nil slice.
+func dependsOn(deps []depJSON) []string {
+	if len(deps) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(deps))
+	for _, d := range deps {
+		if d.DependsOnID != "" {
+			out = append(out, d.DependsOnID)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // parseLabels decodes beads labels into the issue's selector tags. A tag is encoded as

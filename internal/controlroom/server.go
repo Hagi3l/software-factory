@@ -113,6 +113,8 @@ func (s *Server) routes() {
 	// Data-backed views, registered before the placeholder loop claims their path.
 	s.mux.HandleFunc("GET /board", s.handleBoard)            // T4.4 — kanban over beads
 	s.mux.HandleFunc("GET /board/cards", s.handleBoardCards) // the htmx/SSE live fragment
+	s.mux.HandleFunc("GET /dag", s.handleDAG)                // T4.6 — issue dependency graph
+	s.mux.HandleFunc("GET /dag/svg", s.handleDAGSVG)         // the htmx/SSE live SVG fragment
 	s.mux.HandleFunc("GET /activity", s.handleActivity)      // T4.5 — live agent feed
 	s.mux.HandleFunc("GET /activity/items", s.handleActivityItems)
 	s.mux.HandleFunc("GET /issue/{id}", s.handleIssue)         // T4.7 — issue / invocation detail
@@ -124,7 +126,7 @@ func (s *Server) routes() {
 	// data-backed view lands; registering them from views.NavItems keeps the navigation
 	// and the routes a single source of truth. `implemented` excludes the views wired
 	// above so the mux is not asked to register a duplicate pattern.
-	implemented := map[string]bool{"board": true, "activity": true, "dlq": true}
+	implemented := map[string]bool{"board": true, "dag": true, "activity": true, "dlq": true}
 	for _, item := range views.NavItems {
 		if implemented[item.Key] {
 			continue
@@ -206,6 +208,43 @@ func (s *Server) handleBoardCards(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, views.BoardColumns(board))
+}
+
+// handleDAG renders the full issue-dependency-graph page (T4.6). With no read model wired
+// (standalone `harness serve`) it shows a "not attached" notice rather than an empty graph; a
+// DAG read error renders the same chrome with the reason so the page never 500s blank,
+// mirroring the board. The graph refreshes itself from handleDAGSVG over SSE.
+func (s *Server) handleDAG(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		s.render(w, r, views.DAGMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to see live work."))
+		return
+	}
+	g, err := s.reader.DAG(r.Context())
+	if err != nil {
+		s.log.Error("controlroom: dag read failed", "err", err)
+		s.render(w, r, views.DAGMessage("Could not load the DAG: "+err.Error()))
+		return
+	}
+	s.render(w, r, views.DAGPage(g))
+}
+
+// handleDAGSVG returns just the rendered graph fragment — the htmx swap target the DAG page
+// re-fetches on an SSE signal (throttled) and a periodic backstop. It is a data endpoint, so
+// with no read model it answers 503 (it is never wired without one), and a read error is a
+// 500: htmx leaves the last good graph in place rather than swapping in an error, so the live
+// graph degrades to "stale" not "broken".
+func (s *Server) handleDAGSVG(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		http.Error(w, "dag unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+	g, err := s.reader.DAG(r.Context())
+	if err != nil {
+		s.log.Error("controlroom: dag fragment read failed", "err", err)
+		http.Error(w, "could not refresh the dag\n", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, views.DAGGraph(g))
 }
 
 // handleActivity renders the full activity-feed page. Answers a friendly notice when

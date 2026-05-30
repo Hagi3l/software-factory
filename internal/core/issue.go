@@ -100,4 +100,16 @@ type Issue struct {
 	// the matching soul. Empty when no soul disambiguation is needed (the trivial 1:1
 	// single-soul-per-role case ignores them).
 	Tags map[string]string
+
+	// DependsOn carries the blocked-by edge targets beads emits inline on a read: the ids
+	// of the issues this one is blocked by (its blockers). Like Status it is populated when
+	// an issue is read back — beads owns these edges (the orchestrator writes them via
+	// `bd dep`), and the read path decodes the `dependencies` array bd already returns on
+	// `bd list --json` rather than issuing a separate dependency query. It backs the control
+	// room's DAG view (T4.6): an edge runs blocker→dependent, i.e. for each id in DependsOn
+	// there is an edge from that id to this issue. This is the *read-side* dependency facet
+	// and is deliberately distinct from the write-side core.Proposal.DependsOn, which is an
+	// agent's *proposed* new edges flowing through the single-writer path. Empty for an issue
+	// with no blockers (see specs/control-room.md, specs/components/orchestrator.md).
+	DependsOn []string
 }

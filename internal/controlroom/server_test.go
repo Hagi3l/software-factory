@@ -11,7 +11,9 @@ import (
 	"time"
 
 	"github.com/Loxstomper/harness/internal/controlroom/live"
+	"github.com/Loxstomper/harness/internal/controlroom/query"
 	"github.com/Loxstomper/harness/internal/controlroom/views"
+	"github.com/Loxstomper/harness/internal/core"
 )
 
 // newTestServer builds a Server fronted by httptest, exercising the real routed handler
@@ -155,6 +157,66 @@ func TestActivityRendersFeed(t *testing.T) {
 	}
 	if !strings.Contains(frag.body, "writing a test") {
 		t.Errorf("/activity/items missing rendered event, got: %s", frag.body)
+	}
+}
+
+// TestDAGNotAttached proves the DAG view degrades gracefully with no read model (standalone
+// `harness serve`): the page renders a notice (200, inside the chrome) and the SVG fragment
+// answers 503 — never a blank page or a hang.
+func TestDAGNotAttached(t *testing.T) {
+	s := New(Options{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	r := get(t, ts, "/dag")
+	if r.status != http.StatusOK {
+		t.Fatalf("/dag status = %d, want 200", r.status)
+	}
+	if !strings.Contains(r.body, "Not attached") {
+		t.Errorf("/dag missing not-attached notice, got: %s", r.body)
+	}
+	if !strings.Contains(r.body, `href="/static/app.css"`) {
+		t.Errorf("/dag not wrapped in the base layout")
+	}
+
+	frag := get(t, ts, "/dag/svg")
+	if frag.status != http.StatusServiceUnavailable {
+		t.Errorf("/dag/svg status = %d, want 503", frag.status)
+	}
+}
+
+// TestDAGRendersGraph proves the wired view renders the dependency graph as SVG: the full
+// page carries the node ids and the SVG element, and the fragment endpoint returns just the
+// graph (no page chrome) for the htmx swap.
+func TestDAGRendersGraph(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{
+		{ID: "h-1", Title: "root", Status: "closed"},
+		{ID: "h-2", Title: "child", Status: "open", DependsOn: []string{"h-1"}},
+	}}
+	reader := query.NewReader(issues, nil, nil)
+	s := New(Options{Reader: reader})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	r := get(t, ts, "/dag")
+	if r.status != http.StatusOK {
+		t.Fatalf("/dag status = %d, want 200", r.status)
+	}
+	for _, want := range []string{"<svg", "h-1", "h-2", `data-node="h-2"`, `href="/issue/h-1"`} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("/dag missing %q", want)
+		}
+	}
+
+	frag := get(t, ts, "/dag/svg")
+	if frag.status != http.StatusOK {
+		t.Fatalf("/dag/svg status = %d, want 200", frag.status)
+	}
+	if strings.Contains(strings.ToLower(frag.body), "<!doctype html>") {
+		t.Errorf("/dag/svg should be a bare fragment, not a full page: %s", frag.body)
+	}
+	if !strings.Contains(frag.body, "<svg") {
+		t.Errorf("/dag/svg missing the rendered svg, got: %s", frag.body)
 	}
 }
 

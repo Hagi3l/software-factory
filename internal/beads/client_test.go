@@ -78,6 +78,44 @@ func TestReadyMapsFields(t *testing.T) {
 	}
 }
 
+// TestDecodesDependencies proves the read path turns bd's inline `dependencies` array
+// (the blocked-by edges bd already emits on `bd list --json`) into core.Issue.DependsOn,
+// the edge source the control-room DAG (T4.6) reads instead of a separate `bd dep` query.
+// An empty/absent array yields a nil slice; an edge with an empty depends_on_id is skipped.
+func TestDecodesDependencies(t *testing.T) {
+	const listJSON = `[
+	  {
+	    "id": "harness-child",
+	    "title": "blocked work",
+	    "status": "open",
+	    "dependencies": [
+	      {"issue_id": "harness-child", "depends_on_id": "harness-parent", "type": "blocks"},
+	      {"issue_id": "harness-child", "depends_on_id": "harness-other", "type": "blocks"},
+	      {"issue_id": "harness-child", "depends_on_id": "", "type": "blocks"}
+	    ]
+	  },
+	  {
+	    "id": "harness-parent",
+	    "title": "no blockers",
+	    "status": "open"
+	  }
+	]`
+	c, _ := fakeClient(listJSON, nil)
+	issues, err := c.List(context.Background(), "open")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("got %d issues, want 2", len(issues))
+	}
+	if want := []string{"harness-parent", "harness-other"}; strings.Join(issues[0].DependsOn, ",") != strings.Join(want, ",") {
+		t.Errorf("issue[0].DependsOn = %v, want %v (empty depends_on_id dropped)", issues[0].DependsOn, want)
+	}
+	if issues[1].DependsOn != nil {
+		t.Errorf("issue[1].DependsOn = %v, want nil (no blockers)", issues[1].DependsOn)
+	}
+}
+
 // TestParseLabels pins the label<->tag encoding: key=value splits on the first '=', a
 // label with no '=' is a valueless tag, an empty key is dropped, and no labels yields nil.
 func TestParseLabels(t *testing.T) {

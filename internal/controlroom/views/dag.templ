@@ -1,0 +1,71 @@
+package views
+
+import (
+	"github.com/Loxstomper/harness/internal/controlroom/dag"
+)
+
+// DAGPage is the issue-dependency-graph view (specs/control-room.md, "DAG", T4.6): the
+// blocked-by graph over beads issues, rendered server-side to SVG by a pure-Go layered
+// layout — no client graph library, preserving the self-contained-binary property. Like the
+// board it is made live without a graph lib on the client: the SSE substrate (T4.3) wraps
+// the graph, and an `sse:agent-event` trigger re-fetches the bare /dag/svg fragment
+// (throttled), with a slow periodic backstop so a settled graph still converges when the
+// stream is idle. The hover-to-highlight interaction is small Alpine state (dag.js); drill
+// is the per-node anchor into the issue-detail view. The dim/active CSS is an inline <style>
+// so the SVG classes need no Tailwind toolchain pass.
+templ DAGPage(g dag.Graph) {
+	@Layout("Harness — DAG", "dag") {
+		<style>
+			.dag-edge { transition: opacity .15s; }
+			.dag-node { cursor: pointer; transition: opacity .15s; }
+			.dag-dimmed .dag-node { opacity: .25; }
+			.dag-dimmed .dag-edge { opacity: .12; }
+			.dag-node.dag-active { opacity: 1; }
+			.dag-edge.dag-active { opacity: 1; stroke: #38bdf8; }
+		</style>
+		<script src="/static/dag.js" defer></script>
+		<div class="space-y-4">
+			<div class="flex items-baseline justify-between">
+				<h1 class="text-xl font-semibold tracking-tight">DAG</h1>
+				<span class="text-sm text-slate-500">issue dependency graph</span>
+			</div>
+			<div hx-ext="sse" sse-connect="/events">
+				<div
+					id="dag"
+					hx-get="/dag/svg"
+					hx-trigger="sse:agent-event throttle:2s, every 15s"
+					hx-swap="innerHTML"
+				>
+					@DAGGraph(g)
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// DAGGraph renders just the graph itself. It is both embedded in DAGPage for the initial
+// paint and returned bare from GET /dag/svg as the htmx swap target, so the live refresh
+// replaces only the graph, never the chrome. The SVG is built server-side by dag.RenderSVG
+// and injected verbatim (templ.Raw) — its dynamic text is XML-escaped inside RenderSVG. The
+// Alpine wrapper (dagHover) drives hover-to-highlight over the SVG's data attributes.
+templ DAGGraph(g dag.Graph) {
+	if len(g.Nodes) == 0 {
+		<p class="text-slate-400">No issues yet.</p>
+	} else {
+		<div x-data="dagHover()" @mouseover="hover($event)" @mouseout="clear()" class="overflow-auto">
+			@templ.Raw(dag.RenderSVG(g))
+		</div>
+	}
+}
+
+// DAGMessage renders the DAG chrome with a single notice instead of the graph — used when
+// the control room is not attached to a running factory (a standalone `harness serve` has no
+// beads to read) or when the DAG read fails. Mirrors BoardMessage / DeadLetterMessage.
+templ DAGMessage(msg string) {
+	@Layout("Harness — DAG", "dag") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">DAG</h1>
+			<p class="mt-2 text-slate-400">{ msg }</p>
+		</div>
+	}
+}
