@@ -18,8 +18,11 @@ import (
 // events as it is generated. Both bindings sit inside one SSE-connected element scoped to
 // this session, so one human's stream never reaches another.
 //
-// T4.12 scope is the conversation loop only: the alignment ledger (T4.13) and the
-// spec-authoring + APPROVE consent gate (T4.14) are deliberately not here yet.
+// The wizard is the full Create-Task flow: the conversation loop (T4.12), the live alignment
+// ledger (T4.13), and the draft + APPROVE consent gate (T4.14). The draft panel shows the spec
+// markdown and seed issues the planner proposes; APPROVE is the consent boundary — only then is
+// the spec committed to git, the decisions sidecar written, the transcript stored, and the seed
+// issues created through the single-writer path. Everything past APPROVE is autonomous.
 templ CreatePage(sessionID string, msgs []wizard.Message) {
 	@Layout("Harness — Create Task", "create") {
 		<div class="mx-auto flex max-w-3xl flex-col gap-4">
@@ -40,6 +43,15 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 				>
 					@LedgerPanel(sessionID, nil)
 				</div>
+				<div
+					id="wizard-draft"
+					hx-get={ "/create/draft/" + sessionID }
+					hx-trigger="sse:draft, sse:turn, every 8s"
+					hx-swap="innerHTML"
+				>
+					@DraftPanel(sessionID, wizard.Draft{}, true)
+				</div>
+				<div id="wizard-result"></div>
 				<div
 					id="wizard-transcript"
 					hx-get={ "/create/messages/" + sessionID }
@@ -206,6 +218,134 @@ func ledgerStatusClass(status string) string {
 		return base + "bg-emerald-500/20 text-emerald-300"
 	}
 	return base + "bg-amber-500/20 text-amber-300"
+}
+
+// DraftPanel renders the drafted spec + seed issues the planner proposes (T4.14,
+// specs/control-room.md "The wizard") and the APPROVE button — the consent boundary. It is the
+// htmx swap target the page re-fetches on a `draft`/`turn` SSE nudge (with a slow periodic
+// backstop). Empty (the planner has not drafted anything yet) it shows a muted invitation, so
+// the surface reads as deliberate from the first paint. When canApprove is false (a standalone
+// serve with no repo to write) the draft is shown read-only with a note instead of a dead
+// button. The proposed spec content is templ-escaped as inert text — it is the trusted planner's
+// output but still model-authored markdown, never rendered as markup.
+templ DraftPanel(session string, draft wizard.Draft, canApprove bool) {
+	if draft.Empty() {
+		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500">
+			Drafted spec &amp; seed issues — these appear here, with an Approve button, once the
+			planner has converged enough to propose them.
+		</div>
+	} else {
+		<div class="flex flex-col gap-4 rounded-lg border border-emerald-900/40 bg-slate-900/40 p-4">
+			<div class="flex flex-col gap-1">
+				<h2 class="text-sm font-semibold tracking-tight text-slate-200">Proposed change</h2>
+				if draft.Summary != "" {
+					<p class="text-sm text-slate-300">{ draft.Summary }</p>
+				}
+			</div>
+			if len(draft.Specs) > 0 {
+				<div class="flex flex-col gap-2">
+					<h3 class="text-xs font-medium uppercase tracking-wide text-slate-400">Spec files</h3>
+					for _, sp := range draft.Specs {
+						<details class="rounded-md border border-slate-800 bg-slate-950/40">
+							<summary class="cursor-pointer px-3 py-2 text-sm text-slate-200">{ sp.Path }</summary>
+							<pre class="overflow-x-auto whitespace-pre-wrap border-t border-slate-800 px-3 py-2 text-xs leading-relaxed text-slate-300">{ sp.Content }</pre>
+						</details>
+					}
+				</div>
+			}
+			if len(draft.Issues) > 0 {
+				<div class="flex flex-col gap-2">
+					<h3 class="text-xs font-medium uppercase tracking-wide text-slate-400">Seed issues</h3>
+					<ul class="flex flex-col gap-2">
+						for _, is := range draft.Issues {
+							@draftIssueRow(is)
+						}
+					</ul>
+				</div>
+			}
+			if canApprove {
+				<form
+					hx-post="/create/approve"
+					hx-target="#wizard-result"
+					hx-swap="innerHTML"
+					class="flex flex-col gap-2 border-t border-slate-800 pt-3"
+				>
+					<input type="hidden" name="session" value={ session }/>
+					<p class="text-xs text-amber-300/90">
+						Approving commits the spec to git, writes the decisions record, stores this
+						conversation, and creates the seed issues. This is the consent boundary —
+						everything after it is autonomous.
+					</p>
+					<div class="flex justify-end">
+						<button
+							type="submit"
+							class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500"
+						>Approve &amp; seed</button>
+					</div>
+				</form>
+			} else {
+				<p class="border-t border-slate-800 pt-3 text-xs text-slate-500">
+					Approval is unavailable here — run the wizard under <code>harness run --serve-addr</code> to commit specs and seed issues.
+				</p>
+			}
+		</div>
+	}
+}
+
+// draftIssueRow renders one proposed seed issue: its title, the role it will enter the pipeline
+// at (defaulting note left to the planner), and the spec file it is governed by. Title/body are
+// inert escaped text.
+templ draftIssueRow(is wizard.DraftIssue) {
+	<li class="flex flex-col gap-1 rounded-md border border-slate-800 bg-slate-950/40 px-3 py-2">
+		<div class="flex flex-wrap items-center gap-2">
+			<span class="text-sm font-medium text-slate-200">{ is.Title }</span>
+			if is.Role != "" {
+				<span class="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-300">{ is.Role }</span>
+			}
+		</div>
+		if is.Spec != "" {
+			<span class="text-xs text-slate-500">{ is.Spec }</span>
+		}
+		if is.Body != "" {
+			<p class="whitespace-pre-wrap text-xs text-slate-400">{ is.Body }</p>
+		}
+	</li>
+}
+
+// CreateApproveResult renders the outcome of an APPROVE (T4.14): on success the spec commit and
+// the created seed issues (each linking to its detail page), or — when err is non-empty — the
+// failure reason (a validation error, a git/beads fault, or the not-attached notice). It is the
+// fragment swapped into #wizard-result by the approve form.
+templ CreateApproveResult(res wizard.SeedResult, err string) {
+	if err != "" {
+		<div class="rounded-lg border border-rose-900/50 bg-rose-950/30 p-4 text-sm text-rose-200">
+			{ err }
+		</div>
+	} else {
+		<div class="flex flex-col gap-2 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-4">
+			<h2 class="text-sm font-semibold tracking-tight text-emerald-200">Approved — work seeded</h2>
+			<p class="text-xs text-slate-400">
+				Committed
+				if res.Commit != "" {
+					as <code>{ shortHash(res.Commit) }</code>
+				}
+				. The factory will pick up the seed issues from here.
+			</p>
+			if len(res.Issues) > 0 {
+				<ul class="flex flex-col gap-1">
+					for _, is := range res.Issues {
+						<li class="text-sm">
+							<a href={ templ.URL("/issue/" + is.ID) } class="text-indigo-300 hover:text-indigo-200">{ is.ID }</a>
+							<span class="text-slate-300">{ " " + is.Title }</span>
+							if is.Role != "" {
+								<span class="text-xs text-slate-500">{ " (" + is.Role + ")" }</span>
+							}
+						</li>
+					}
+				</ul>
+			}
+		</div>
+	}
 }
 
 // CreateMessage renders the wizard chrome with a single notice instead of the conversation —

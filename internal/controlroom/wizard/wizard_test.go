@@ -353,6 +353,87 @@ func TestChooseFunnelsThroughPlanner(t *testing.T) {
 	}
 }
 
+// TestDraftTurnParsesAndStreamsClean proves a turn whose reply carries a trailing ```draft block
+// (here alongside a ```ledger block): the parsed draft is stored on the session, a `draft` SSE
+// nudge fires, the transcript holds only the clean prose, and neither structured block leaks into
+// the streamed delta. It runs through the real adapter via modeltest.
+func TestDraftTurnParsesAndStreamsClean(t *testing.T) {
+	const reply = "I think this is ready to build.\n\n" +
+		"```ledger\n" + `[{"question":"Scope?","status":"agreed","rationale":"Export only."}]` + "\n```\n" +
+		"```draft\n" +
+		`{"summary":"CSV export","specs":[{"path":"specs/export.md","content":"# Export\n\nSpec body.\n"}],` +
+		`"issues":[{"title":"Add CSV export","body":"Build it.","spec":"specs/export.md"}]}` +
+		"\n```"
+	// NB: the \n inside the spec content above are literal backslash-n (raw string), so the
+	// embedded JSON is valid — a real newline inside a JSON string would not be.
+	srv := modeltest.NewServer(t, []modeltest.Turn{{Text: reply}})
+	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
+	sess := p.New()
+
+	sub, cancel := sess.Hub().Subscribe()
+	defer cancel()
+
+	if !sess.Send("build me a CSV exporter") {
+		t.Fatal("Send returned false")
+	}
+
+	// The draft nudge is broadcast last (after turn), so wait for it specifically — observing
+	// `turn` first and stopping there would miss the buffered `draft` event.
+	var lastDelta string
+	var sawTurn, sawDraft bool
+	deadline := time.After(5 * time.Second)
+	for !sawDraft {
+		select {
+		case ev := <-sub:
+			switch ev.Name {
+			case "delta":
+				lastDelta = ev.Data
+			case "turn":
+				sawTurn = true
+			case "draft":
+				sawDraft = true
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for the draft nudge")
+		}
+	}
+	if !sawTurn {
+		t.Error("turn nudge did not precede the draft nudge")
+	}
+
+	// Neither block may leak into the live stream.
+	if strings.Contains(lastDelta, "draft") || strings.Contains(lastDelta, "export.md") || strings.Contains(lastDelta, "```") {
+		t.Errorf("delta leaked a structured block: %q", lastDelta)
+	}
+
+	waitFor(t, func() bool { return !sess.Busy() }, "turn did not complete")
+
+	msgs := sess.Messages()
+	if len(msgs) != 2 || msgs[1].Text != "I think this is ready to build." {
+		t.Fatalf("assistant message not clean prose: %+v", msgs)
+	}
+
+	d := sess.Draft()
+	if d.Empty() {
+		t.Fatal("draft not stored on the session")
+	}
+	if d.Summary != "CSV export" || len(d.Specs) != 1 || d.Specs[0].Path != "specs/export.md" {
+		t.Errorf("draft specs wrong: %+v", d)
+	}
+	if len(d.Issues) != 1 || d.Issues[0].Title != "Add CSV export" {
+		t.Errorf("draft issues wrong: %+v", d.Issues)
+	}
+
+	// The transcript is the replayable JSON of the user/assistant turns (with blocks stripped).
+	tr := string(sess.Transcript())
+	if !strings.Contains(tr, "build me a CSV exporter") || !strings.Contains(tr, "ready to build") {
+		t.Errorf("transcript missing conversation turns: %s", tr)
+	}
+	if strings.Contains(tr, "export.md") || strings.Contains(tr, "ledger") {
+		t.Errorf("transcript leaked a structured block: %s", tr)
+	}
+}
+
 func waitFor(t *testing.T, cond func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

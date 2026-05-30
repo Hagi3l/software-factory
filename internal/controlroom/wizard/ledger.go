@@ -98,38 +98,49 @@ func parseLedger(reply string) ([]LedgerItem, string) {
 	return items, prose
 }
 
-// cutLedgerBlock splits a reply at the LAST ```ledger fence: raw is the JSON between that
-// fence and the next closing ``` after it; prose is the right-trimmed text before the fence.
-// ok is false when there is no opening fence or no closing fence after it (an unterminated
-// block is treated as not-a-ledger so a mid-stream snapshot never half-parses).
+// cutLedgerBlock splits a reply at the LAST ```ledger fence — see cutFencedBlock for the
+// framing rules.
 func cutLedgerBlock(reply string) (prose, raw string, ok bool) {
-	open := strings.LastIndex(reply, ledgerFence)
+	return cutFencedBlock(reply, ledgerFence)
+}
+
+// cutFencedBlock splits a reply at the LAST occurrence of fence (e.g. ```ledger or ```draft):
+// raw is the text between that fence and the next closing ``` after it; prose is the
+// right-trimmed text before the fence. ok is false when there is no opening fence or no closing
+// fence after it (an unterminated block is treated as absent so a mid-stream snapshot never
+// half-parses). The closing fence is a bare ``` so the block can carry arbitrary JSON without
+// colliding with the opener. The ledger and draft blocks use distinct openers and are extracted
+// independently, so their order in the reply does not matter.
+func cutFencedBlock(reply, fence string) (prose, raw string, ok bool) {
+	open := strings.LastIndex(reply, fence)
 	if open < 0 {
 		return "", "", false
 	}
-	afterFence := open + len(ledgerFence)
-	rest := reply[afterFence:]
+	rest := reply[open+len(fence):]
 	// The JSON starts after the newline that follows the opening fence (tolerate none).
 	if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
 		rest = rest[nl+1:]
 	}
-	close := strings.Index(rest, "```")
-	if close < 0 {
+	closeIdx := strings.Index(rest, "```")
+	if closeIdx < 0 {
 		return "", "", false
 	}
-	raw = rest[:close]
+	raw = rest[:closeIdx]
 	prose = strings.TrimRight(reply[:open], " \t\r\n")
 	return prose, raw, true
 }
 
-// displayProse returns the text before the FIRST ```ledger fence (right-trimmed), so the
-// accumulating JSON block never flashes in the live token stream while it is still being
-// generated. With no fence the reply is returned unchanged.
+// displayProse returns the text before the EARLIEST structured-block fence (the ledger or the
+// draft block), right-trimmed, so neither accumulating JSON block ever flashes in the live
+// token stream or lands in the stored transcript. With no fence the reply is returned unchanged.
 func displayProse(reply string) string {
-	if i := strings.Index(reply, ledgerFence); i >= 0 {
-		return strings.TrimRight(reply[:i], " \t\r\n")
+	cut := len(reply)
+	for _, fence := range []string{ledgerFence, draftFence} {
+		if i := strings.Index(reply, fence); i >= 0 && i < cut {
+			cut = i
+		}
 	}
-	return reply
+	return strings.TrimRight(reply[:cut], " \t\r\n")
 }
 
 // normalizeStatus maps the wire status to the canonical ledger status: case-insensitive

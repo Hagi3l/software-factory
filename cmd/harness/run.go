@@ -246,6 +246,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		// depends on neither config nor the filesystem). Absent the requirements_planner block
 		// the wizard stays disabled (/create renders a notice).
 		var planner *wizard.Planner
+		var seeder wizard.Seeder
 		if rp := cfg.Harness.RequirementsPlanner; rp != nil {
 			adapter, aerr := reg.Adapter(rp.Model)
 			if aerr != nil {
@@ -256,6 +257,12 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 				return nil, fmt.Errorf("read requirements planner persona: %w", rerr)
 			}
 			planner = wizard.NewPlanner(adapter, string(personaBytes), wizard.WithMaxTokens(rp.MaxTokens), wizard.WithLogger(log))
+			// The consent-gated write seam (T4.14): on APPROVE it commits the drafted spec to the
+			// integration repo, writes the decisions sidecar, stores the transcript, and creates the
+			// seed issues through the same single-writer beads path the orchestrator uses. A fresh
+			// read-only-by-convention beads client (the orchestrator stays the sole long-lived writer;
+			// the wizard write is a discrete human-approved seed, like `harness seed`).
+			seeder = newWizardSeeder(cfg, repo, beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)), store, log)
 		}
 
 		server = controlroom.New(controlroom.Options{
@@ -267,6 +274,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			StageOrder: pipelineRoles(cfg),
 			BudgetCaps: budgetCaps(cfg),
 			Planner:    planner,
+			Seeder:     seeder,
 		})
 	}
 

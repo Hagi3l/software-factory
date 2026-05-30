@@ -258,6 +258,208 @@ func TestCreateLedgerSelectRecordsTurn(t *testing.T) {
 	}
 }
 
+// fakeSeeder is a wizard.Seeder stub for the approve-handler tests: it records the request it
+// was handed and returns a canned result or error, so the handler is tested without touching git,
+// beads, or the artifact store (those are exercised by the cmd-side seeder integration test).
+type fakeSeeder struct {
+	got *wizard.SeedRequest
+	res wizard.SeedResult
+	err error
+}
+
+func (f *fakeSeeder) Seed(_ context.Context, req wizard.SeedRequest) (wizard.SeedResult, error) {
+	f.got = &req
+	return f.res, f.err
+}
+
+// draftReply is a scripted planner turn that proposes a spec + one seed issue (the JSON uses
+// raw-string \n so the embedded block is valid JSON).
+const draftReply = "Ready to build.\n```draft\n" +
+	`{"summary":"CSV export","specs":[{"path":"specs/export.md","content":"# Export\n\nBody.\n"}],` +
+	`"issues":[{"title":"Add CSV export","body":"Build it.","spec":"specs/export.md"}]}` +
+	"\n```"
+
+// TestCreateDraftRendersPanel proves GET /create/draft/{session} renders the draft fragment: the
+// empty invitation before the planner proposes anything, and — after a draft-bearing turn — the
+// proposed spec, the seed issue, and the Approve button. An unknown session 404s.
+func TestCreateDraftRendersPanel(t *testing.T) {
+	p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona", wizard.WithTurnTimeout(5*time.Second))
+	s := New(Options{Planner: p, Seeder: &fakeSeeder{}})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	sess := p.New()
+
+	empty := get(t, ts, "/create/draft/"+sess.ID)
+	if empty.status != http.StatusOK {
+		t.Fatalf("draft status = %d, want 200", empty.status)
+	}
+	if !strings.Contains(empty.body, "appear here") {
+		t.Errorf("empty draft missing the invitation: %s", empty.body)
+	}
+
+	if !sess.Send("build a CSV exporter") {
+		t.Fatal("Send returned false")
+	}
+	waitFor(t, func() bool { return !sess.Busy() && !sess.Draft().Empty() }, "draft not produced")
+
+	frag := get(t, ts, "/create/draft/"+sess.ID)
+	if frag.status != http.StatusOK {
+		t.Fatalf("draft status = %d, want 200", frag.status)
+	}
+	for _, want := range []string{
+		"specs/export.md",        // the proposed spec path
+		"Add CSV export",         // the seed issue title
+		`hx-post="/create/approve"`, // the consent-gate form
+		"Approve",                // the button
+	} {
+		if !strings.Contains(frag.body, want) {
+			t.Errorf("draft panel missing %q\nbody: %s", want, frag.body)
+		}
+	}
+
+	if u := get(t, ts, "/create/draft/deadbeef"); u.status != http.StatusNotFound {
+		t.Errorf("/create/draft unknown session = %d, want 404", u.status)
+	}
+}
+
+// TestCreateApproveSuccess proves the consent gate commits the SERVER-SIDE draft through the
+// Seeder and renders the outcome: the created issue (linking to its detail page) and the commit.
+// The Seeder receives exactly the planner's drafted spec + issues — never browser content.
+func TestCreateApproveSuccess(t *testing.T) {
+	seeder := &fakeSeeder{res: wizard.SeedResult{
+		Commit: "abc123def4567",
+		Issues: []wizard.SeededIssue{{ID: "harness-7", Title: "Add CSV export", Role: "planner"}},
+	}}
+	p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona", wizard.WithTurnTimeout(5*time.Second))
+	s := New(Options{Planner: p, Seeder: seeder})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	sess := p.New()
+
+	if !sess.Send("build a CSV exporter") {
+		t.Fatal("Send returned false")
+	}
+	waitFor(t, func() bool { return !sess.Busy() && !sess.Draft().Empty() }, "draft not produced")
+
+	pr, err := http.PostForm(ts.URL+"/create/approve", url.Values{"session": {sess.ID}})
+	if err != nil {
+		t.Fatalf("POST approve: %v", err)
+	}
+	data, _ := io.ReadAll(pr.Body)
+	_ = pr.Body.Close()
+	if pr.StatusCode != http.StatusOK {
+		t.Fatalf("approve status = %d, want 200", pr.StatusCode)
+	}
+	body := string(data)
+	if !strings.Contains(body, "work seeded") || !strings.Contains(body, "harness-7") || !strings.Contains(body, `/issue/harness-7`) {
+		t.Errorf("approve result missing the seeded issue link: %s", body)
+	}
+
+	// The Seeder was handed the planner's drafted spec + issue, verbatim.
+	if seeder.got == nil {
+		t.Fatal("Seeder was not called")
+	}
+	if len(seeder.got.Specs) != 1 || seeder.got.Specs[0].Path != "specs/export.md" {
+		t.Errorf("Seeder got wrong specs: %+v", seeder.got.Specs)
+	}
+	if len(seeder.got.Issues) != 1 || seeder.got.Issues[0].Title != "Add CSV export" {
+		t.Errorf("Seeder got wrong issues: %+v", seeder.got.Issues)
+	}
+	if len(seeder.got.Transcript) == 0 {
+		t.Error("Seeder got no transcript")
+	}
+}
+
+// TestCreateApproveGuards proves the consent gate's degenerate paths: no Seeder → an
+// approval-unavailable notice (not a 500); an empty draft → a "nothing to approve" notice
+// (Seeder never called); a Seeder error → the failure surfaced in-fragment; an unknown session
+// 404s.
+func TestCreateApproveGuards(t *testing.T) {
+	t.Run("no seeder", func(t *testing.T) {
+		ts, p := wizardServer(t, draftReply) // wizardServer wires no Seeder
+		sess := p.New()
+		pr, err := http.PostForm(ts.URL+"/create/approve", url.Values{"session": {sess.ID}})
+		if err != nil {
+			t.Fatalf("POST approve: %v", err)
+		}
+		data, _ := io.ReadAll(pr.Body)
+		_ = pr.Body.Close()
+		if pr.StatusCode != http.StatusOK {
+			t.Fatalf("status = %d, want 200", pr.StatusCode)
+		}
+		if !strings.Contains(string(data), "Approval is unavailable") {
+			t.Errorf("missing approval-unavailable notice: %s", string(data))
+		}
+	})
+
+	t.Run("empty draft", func(t *testing.T) {
+		seeder := &fakeSeeder{}
+		p := wizard.NewPlanner(scriptedAdapter{reply: "just chatting"}, "persona", wizard.WithTurnTimeout(5*time.Second))
+		s := New(Options{Planner: p, Seeder: seeder})
+		ts := httptest.NewServer(s.Handler())
+		t.Cleanup(ts.Close)
+		sess := p.New() // no draft turn driven
+
+		pr, err := http.PostForm(ts.URL+"/create/approve", url.Values{"session": {sess.ID}})
+		if err != nil {
+			t.Fatalf("POST approve: %v", err)
+		}
+		data, _ := io.ReadAll(pr.Body)
+		_ = pr.Body.Close()
+		if !strings.Contains(string(data), "Nothing to approve") {
+			t.Errorf("missing nothing-to-approve notice: %s", string(data))
+		}
+		if seeder.got != nil {
+			t.Error("Seeder was called for an empty draft")
+		}
+	})
+
+	t.Run("seeder error", func(t *testing.T) {
+		seeder := &fakeSeeder{err: errSeed}
+		p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona", wizard.WithTurnTimeout(5*time.Second))
+		s := New(Options{Planner: p, Seeder: seeder})
+		ts := httptest.NewServer(s.Handler())
+		t.Cleanup(ts.Close)
+		sess := p.New()
+		if !sess.Send("build it") {
+			t.Fatal("Send returned false")
+		}
+		waitFor(t, func() bool { return !sess.Busy() && !sess.Draft().Empty() }, "draft not produced")
+
+		pr, err := http.PostForm(ts.URL+"/create/approve", url.Values{"session": {sess.ID}})
+		if err != nil {
+			t.Fatalf("POST approve: %v", err)
+		}
+		data, _ := io.ReadAll(pr.Body)
+		_ = pr.Body.Close()
+		if !strings.Contains(string(data), "Could not commit") || !strings.Contains(string(data), "broken link") {
+			t.Errorf("missing surfaced seeder error: %s", string(data))
+		}
+	})
+
+	t.Run("unknown session", func(t *testing.T) {
+		p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona")
+		s := New(Options{Planner: p, Seeder: &fakeSeeder{}})
+		ts := httptest.NewServer(s.Handler())
+		t.Cleanup(ts.Close)
+		pr, err := http.PostForm(ts.URL+"/create/approve", url.Values{"session": {"deadbeef"}})
+		if err != nil {
+			t.Fatalf("POST approve: %v", err)
+		}
+		_ = pr.Body.Close()
+		if pr.StatusCode != http.StatusNotFound {
+			t.Errorf("unknown session = %d, want 404", pr.StatusCode)
+		}
+	})
+}
+
+// errSeed is a stand-in seeder failure carrying a representative validation message.
+var errSeed = errSeedErr("spec \"specs/x.md\" has a broken link to \"specs/missing.md\"")
+
+type errSeedErr string
+
+func (e errSeedErr) Error() string { return string(e) }
+
 // collectSSE reads SSE `event:` lines from a stream until the named terminal event is seen
 // or the deadline passes, returning the set of event names observed.
 func collectSSE(t *testing.T, resp *http.Response, until string, timeout time.Duration) map[string]bool {

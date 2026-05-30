@@ -62,6 +62,12 @@ type Options struct {
 	// requirements_planner block, in which case /create renders a "wizard disabled" notice
 	// and its data endpoints 503 — mirroring how a nil Reader degrades the data views.
 	Planner *wizard.Planner
+	// Seeder commits an approved wizard draft (T4.14): it writes the drafted specs to git,
+	// the decisions sidecar, stores the conversation transcript, and creates the seed issues
+	// through the single-writer beads path. It is the consent-gated write seam — the one place
+	// the wizard touches the durable stores. nil disables APPROVE (a standalone `harness serve`
+	// has no repo to write); /create still elicits intent but cannot commit it.
+	Seeder wizard.Seeder
 }
 
 // Server renders the control room. It is an http.Handler (via Handler) so its routes can
@@ -77,6 +83,7 @@ type Server struct {
 	stageOrder []string
 	budgetCaps query.BudgetCaps
 	planner    *wizard.Planner
+	seeder     wizard.Seeder
 }
 
 // New builds the server and registers every route. Routes are registered eagerly so a
@@ -96,6 +103,7 @@ func New(opts Options) *Server {
 		stageOrder: opts.StageOrder,
 		budgetCaps: opts.BudgetCaps,
 		planner:    opts.Planner,
+		seeder:     opts.Seeder,
 	}
 	s.routes()
 	return s
@@ -151,6 +159,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /create/message", s.handleCreateMessage)
 	s.mux.HandleFunc("GET /create/ledger/{session}", s.handleCreateLedger)       // T4.13 — alignment-ledger panel fragment
 	s.mux.HandleFunc("POST /create/ledger/select", s.handleCreateLedgerSelect)   // T4.13 — chip click funnels through the planner
+	s.mux.HandleFunc("GET /create/draft/{session}", s.handleCreateDraft)         // T4.14 — drafted spec + seed issues panel fragment
+	s.mux.HandleFunc("POST /create/approve", s.handleCreateApprove)              // T4.14 — the consent gate: commit the approved draft
 
 	// Every remaining navigation destination resolves to a placeholder until its
 	// data-backed view lands; registering them from views.NavItems keeps the navigation
@@ -603,6 +613,74 @@ func (s *Server) handleCreateLedgerSelect(w http.ResponseWriter, r *http.Request
 	optIdx, _ := strconv.Atoi(r.FormValue("option"))
 	sess.Choose(itemIdx, optIdx)
 	s.render(w, r, views.WizardTranscript(sess.Messages()))
+}
+
+// handleCreateDraft returns just the draft panel fragment (T4.14) — the proposed spec files +
+// seed issues the planner has drafted, with the APPROVE button when there is something to
+// approve. It is the htmx swap target the page re-fetches on a `draft`/`turn` SSE nudge (and a
+// slow periodic backstop). Whether APPROVE is wired (a Seeder is present) is passed to the view
+// so a standalone serve shows the draft read-only rather than a dead button. Data endpoint: 503
+// with no planner, 404 for an unknown session.
+func (s *Server) handleCreateDraft(w http.ResponseWriter, r *http.Request) {
+	if s.planner == nil {
+		http.Error(w, "wizard unavailable: the requirements planner is not configured\n", http.StatusServiceUnavailable)
+		return
+	}
+	sess := s.planner.Get(r.PathValue("session"))
+	if sess == nil {
+		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
+		return
+	}
+	s.render(w, r, views.DraftPanel(sess.ID, sess.Draft(), s.seeder != nil))
+}
+
+// handleCreateApprove is the consent gate (T4.14, specs/control-room.md "Gate on explicit
+// human approval"): the human reviews the drafted spec + seed issues and approves, and only
+// then is anything written. It commits the SERVER-SIDE draft — the trusted planner's latest
+// snapshot — never browser-supplied content, so the human approves exactly what they reviewed
+// and the planner stays the sole author of specs/issues. It assembles the SeedRequest from the
+// session's draft + the agreed alignment-ledger items (the decisions sidecar) + the
+// conversation transcript, and hands it to the Seeder, which performs the git/beads/artifact
+// writes. The result fragment (created issue ids + commit, or the error) swaps into the page.
+// Data endpoint: 503 with no planner; APPROVE-disabled notice with no seeder; 400 on a
+// malformed form; 404 for an unknown session.
+func (s *Server) handleCreateApprove(w http.ResponseWriter, r *http.Request) {
+	if s.planner == nil {
+		http.Error(w, "wizard unavailable: the requirements planner is not configured\n", http.StatusServiceUnavailable)
+		return
+	}
+	if s.seeder == nil {
+		s.render(w, r, views.CreateApproveResult(wizard.SeedResult{}, "Approval is unavailable: the control room is not attached to a repository. Run the wizard under `harness run --serve-addr` to commit specs and seed issues."))
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "could not parse the approval\n", http.StatusBadRequest)
+		return
+	}
+	sess := s.planner.Get(r.FormValue("session"))
+	if sess == nil {
+		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
+		return
+	}
+	draft := sess.Draft()
+	if draft.Empty() {
+		s.render(w, r, views.CreateApproveResult(wizard.SeedResult{}, "Nothing to approve yet — keep the conversation going until the planner drafts a spec and seed issues."))
+		return
+	}
+	res, err := s.seeder.Seed(r.Context(), wizard.SeedRequest{
+		Summary:    draft.Summary,
+		Specs:      draft.Specs,
+		Issues:     draft.Issues,
+		Decisions:  wizard.FinalizedDecisions(sess.Ledger()),
+		Transcript: sess.Transcript(),
+	})
+	if err != nil {
+		s.log.Warn("controlroom: wizard approval failed", "session", sess.ID, "err", err)
+		s.render(w, r, views.CreateApproveResult(wizard.SeedResult{}, "Could not commit the draft: "+err.Error()))
+		return
+	}
+	s.log.Info("controlroom: wizard draft approved", "session", sess.ID, "commit", res.Commit, "issues", len(res.Issues))
+	s.render(w, r, views.CreateApproveResult(res, ""))
 }
 
 // Handler exposes the routed mux for embedding (e.g. behind middleware) and for httptest.

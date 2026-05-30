@@ -23,6 +23,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"html"
 	"log/slog"
@@ -47,6 +48,10 @@ const (
 	// turn that emitted a ledger snapshot, so the panel refreshes exactly when the planner
 	// updates the ledger (the panel also has a slow periodic backstop in the view).
 	eventLedger = "ledger"
+	// eventDraft nudges the draft panel to re-fetch (T4.14). It fires only on a turn that
+	// emitted a ```draft block, so the proposed spec + seed issues (and the APPROVE button)
+	// appear exactly when the planner has something to propose.
+	eventDraft = "draft"
 )
 
 const (
@@ -196,6 +201,7 @@ type Session struct {
 	messages []model.Message
 	busy     bool
 	ledger   []LedgerItem // latest-wins alignment-ledger snapshot (T4.13), guarded by mu
+	draft    Draft        // latest-wins drafted spec + seed issues (T4.14), guarded by mu
 }
 
 // Hub is the session's SSE hub — the control-room stream handler subscribes to it and the
@@ -228,6 +234,38 @@ func (s *Session) Ledger() []LedgerItem {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return slices.Clone(s.ledger)
+}
+
+// Draft returns a copy of the latest drafted spec + seed issues (T4.14) the planner emitted —
+// what the APPROVE consent gate would write. The copy is safe to render without holding the
+// lock; it is empty (Draft.Empty()) until the planner emits its first ```draft block.
+func (s *Session) Draft() Draft {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.draft.clone()
+}
+
+// Transcript returns the conversation as JSON — the replayable provenance record the Seeder
+// stores in the artifact store on APPROVE (specs-process.md: "the conversation transcript ...
+// in the artifact store ... the 'why'"). It is the user/assistant turns only (the persona
+// system prompt is never part of the record), captured as the displayed prose with any
+// structured ledger/draft blocks already stripped (run stores the prose, not the raw reply).
+func (s *Session) Transcript() []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	type turn struct {
+		Role string `json:"role"`
+		Text string `json:"text"`
+	}
+	turns := make([]turn, 0, len(s.messages))
+	for _, m := range s.messages {
+		turns = append(turns, turn{Role: string(m.Role), Text: m.Text})
+	}
+	b, err := json.MarshalIndent(turns, "", "  ")
+	if err != nil {
+		return nil
+	}
+	return b
 }
 
 // Choose funnels a chip click back through the conversation: it reads the option the human
@@ -329,24 +367,34 @@ func (s *Session) run() {
 		reply = fmt.Sprintf("The requirements planner hit an error and could not reply: %v\n\nPlease try again.", err)
 	}
 
-	// Split the trailing ```ledger block off the reply: the transcript records only the prose,
-	// and the parsed items become the new latest-wins ledger snapshot. A ledger-less turn (no
-	// block, or a malformed one) leaves the prior ledger untouched.
-	items, prose := parseLedger(reply)
+	// Strip the trailing structured blocks off the reply: the transcript records only the prose
+	// (displayProse cuts at the earliest of the ledger/draft fences), while the ledger (T4.13)
+	// and draft (T4.14) blocks are parsed independently for their latest-wins snapshots. A turn
+	// that emits neither leaves the prior snapshots untouched (parse returns false / nil).
+	prose := displayProse(reply)
+	items, _ := parseLedger(reply)
+	draft, hasDraft := parseDraft(reply)
 
 	s.mu.Lock()
 	s.messages = append(s.messages, model.Message{Role: model.RoleAssistant, Text: prose})
 	if items != nil {
 		s.ledger = items
 	}
+	if hasDraft {
+		s.draft = draft
+	}
 	s.busy = false
 	s.mu.Unlock()
 
 	// Terminal nudge: the transcript re-fetches and renders the finalized reply, which also
-	// resets the live delta target. Emitted last so the refetch sees the appended message.
+	// resets the live delta target. Emitted last so the refetch sees the appended message; the
+	// ledger/draft nudges follow so their panels refresh only when this turn updated them.
 	s.hub.Broadcast(live.Event{Name: eventTurn, Data: ""})
 	if items != nil {
 		s.hub.Broadcast(live.Event{Name: eventLedger, Data: ""})
+	}
+	if hasDraft {
+		s.hub.Broadcast(live.Event{Name: eventDraft, Data: ""})
 	}
 }
 

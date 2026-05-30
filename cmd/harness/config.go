@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"path/filepath"
 	"sort"
 
@@ -168,8 +169,38 @@ func roleIsAgentStage(cfg *config.Config, role string) bool {
 // not a pipeline entry, so it is excluded here; otherwise it would falsely make the
 // pipeline look ambiguous (two unproduced agent stages: plan and resolve).
 func entryRole(cfg *config.Config) (string, error) {
+	roles := seedRoles(cfg)
+	switch len(roles) {
+	case 1:
+		for r := range roles {
+			return r, nil
+		}
+	case 0:
+		if cfg.Harness == nil {
+			return "", errNoHarness
+		}
+		return "", errNoEntryStage
+	}
+	names := make([]string, 0, len(roles))
+	for r := range roles {
+		names = append(names, r)
+	}
+	sort.Strings(names)
+	return "", &ambiguousEntryError{roles: names}
+}
+
+// seedRoles returns the set of roles a human-seeded issue may legally enter the pipeline at —
+// the entry agent stages (produces-indegree 0, excluding the conflict-spawned resolve stage,
+// which is reached only by the orchestrator on a merge conflict, never by a produces edge or a
+// human seed). It is the consent-gate analog of acceptPlan's produces-legality check
+// (specs/workflow.md): a seed issue may only enter where a human is allowed to inject work —
+// the head of the pipeline — never mid-flow (e.g. directly at `implement`, skipping the failing
+// tests author-tests would have written). The wizard's APPROVE path validates every drafted seed
+// issue's role against this set, exactly as the orchestrator validates a planner's children
+// against the plan stage's `produces`. Returns an empty set when there is no harness DAG.
+func seedRoles(cfg *config.Config) map[string]bool {
 	if cfg.Harness == nil {
-		return "", errNoHarness
+		return nil
 	}
 	produced := map[string]bool{}
 	for _, st := range cfg.Harness.DAG {
@@ -177,19 +208,39 @@ func entryRole(cfg *config.Config) (string, error) {
 			produced[p] = true
 		}
 	}
-	var roles []string
+	roles := map[string]bool{}
 	for name, st := range cfg.Harness.DAG {
 		if st.Role != "" && !produced[name] && st.Kind != config.StageKindResolve {
-			roles = append(roles, st.Role)
+			roles[st.Role] = true
 		}
 	}
-	sort.Strings(roles)
-	switch len(roles) {
-	case 1:
-		return roles[0], nil
-	case 0:
+	return roles
+}
+
+// resolveSeedRole validates and resolves the role a drafted seed issue will enter at: an empty
+// role defaults to the sole pipeline entry stage (the common case — one entry), while a named
+// role must be a legal seed entry stage (seedRoles). It is the per-issue half of the consent
+// gate's produces-legality check (mirroring acceptPlan rejecting an illegal planner child),
+// returning the resolved role to stamp on the issue. It errors if the role is illegal, or if no
+// role is given and the DAG has multiple entry stages (the draft must then name one per issue).
+func resolveSeedRole(cfg *config.Config, role string) (string, error) {
+	roles := seedRoles(cfg)
+	if len(roles) == 0 {
+		if cfg.Harness == nil {
+			return "", errNoHarness
+		}
 		return "", errNoEntryStage
-	default:
-		return "", &ambiguousEntryError{roles: roles}
 	}
+	if role == "" {
+		if len(roles) == 1 {
+			for r := range roles {
+				return r, nil
+			}
+		}
+		return "", fmt.Errorf("no role given and the DAG has multiple entry stages; the draft must name a role for each seed issue")
+	}
+	if !roles[role] {
+		return "", fmt.Errorf("role %q is not a legal seed entry stage", role)
+	}
+	return role, nil
 }

@@ -516,8 +516,50 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   session loop. *(Machinery builds offline; only the subjective elicitation quality awaits a capable model.)*
   ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md), [workflow.md](specs/workflow.md))
 - [x] **T4.13 Alignment ledger** — *done.* The live alignment ledger beside the wizard conversation (control-room.md "The alignment ledger"): a lightly-structured, latest-wins snapshot of where the requirements conversation stands — each item agreed/open with a one-line rationale, forks rendered as selectable chips with their tradeoff. **Single source of truth = the planner:** it re-emits the COMPLETE ledger each turn as a trailing fenced ```ledger JSON block after its prose; the engine parses it (new `internal/controlroom/wizard/ledger.go` — `parseLedger`/`cutLedgerBlock`/`displayProse`/`normalizeStatus`, exported `LedgerItem`/`LedgerOption`), stores a latest-wins snapshot on the `Session` (`ledger` field + `Ledger()` accessor), strips the block from the displayed prose, and the view renders it. **Streaming-clean:** the `delta` SSE broadcast streams `displayProse(reply)` (text before the fence) so the accumulating JSON never flashes in the live token stream; the finalized transcript message stores the stripped prose. Degrades gracefully — no/malformed/empty block → `(nil, prose)`, never errors, never clobbers a prior ledger (caller overwrites only when items != nil). **Steering funnels through the planner (no parallel client-side model):** a chip click POSTs `/create/ledger/select`; `Session.Choose(itemIdx, optIdx)` reads the option, synthesizes a `For %q, I choose: %s.` user turn and calls `Send`, so the planner folds it in and re-emits the ledger with that point agreed/selected; freeform typing stays the message box. **Live refresh:** a new `ledger` SSE event (broadcast alongside `turn` when a turn emitted a ledger) nudges a dedicated `#wizard-ledger` panel to re-fetch `GET /create/ledger/{session}` (also on `sse:turn` + an `every 8s` backstop), mirroring the board's server-render-a-fragment pattern. **views:** `LedgerPanel`/`ledgerRow`/`ledgerChip` + `chipClass`/`ledgerStatusClass`/`ledgerVals` inside `wizard.templ` (class literals stay in the .templ so the Tailwind `@source` scanner picks them up); chip `hx-vals` carries session+indices (htmx serializes as form fields), `title` shows the tradeoff. **Server:** `handleCreateLedger` (panel fragment; 404 unknown session) + `handleCreateLedgerSelect` (records the choice, returns the transcript fragment; 503 no planner, 404 unknown session) added to `routes()`. **Config:** the requirements-planner persona gains an alignment-ledger section specifying the exact emission format + rules (prose always precedes the block; re-emit the whole ledger each turn; mark agreed + selected once settled; one-line rationales; block is last). Non-TCB, human-reviewed; `make generate` ran (emerald/amber tints compiled into app.css). Tests: ledger parse/strip/displayProse/cut + malformed/empty/no-block/normalize; a ledger-bearing turn populates `Ledger()` with clean transcript prose; `Choose` valid → user turn + planner dispatch, out-of-range → no-op; server panel render + chips, select records a turn + returns transcript, unknown-session 404 / no-planner 503. `make check` green. **Deferred to T4.14:** persisting the finalized decisions sidecar + transcript on APPROVE. (needs T4.12) ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
-- [ ] **T4.14 Spec authoring + consent gate** — the planner drafts spec markdown + seed issues (keeping link integrity + the README index); on explicit human **APPROVE**, the spec is committed to git, the decisions sidecar written, the conversation transcript stored, and the seed issues created through the single-writer path. The single-writer seam already exists — `beads.Apply` (the validated, referential-integrity-checked write `cmd/harness/seed.go` already uses, "written exactly as the orchestrator would write"); the wizard reuses it, plus a `produces`-legality check on the batch mirroring `acceptPlan`'s validation of planner output. So no separate orchestrator-integration task is needed. (needs T4.12) ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md))
-- [ ] **T4.15 Resolve mode** — Create and Resolve are one component; Resolve pre-loads the escalation + spec slice + the agent transcript that raised it and shows the spec diff + blast radius before commit. (needs T4.14) ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
+- [x] **T4.14 Spec authoring + consent gate** — *done.* The planner now drafts spec markdown + seed issues
+  and an explicit human **APPROVE** commits them — the consent boundary past which everything is autonomous.
+  **Draft model (mirrors the ledger, T4.13):** the planner re-emits a latest-wins ` ```draft ` JSON block
+  after its prose (and the ` ```ledger ` block) carrying `summary` + `specs[]` (path+content) + `issues[]`
+  (title/body/role/spec/key/depends_on). New `wizard/draft.go` (`Draft`/`DraftSpec`/`DraftIssue`, `parseDraft`,
+  `Empty`/`clone`) parses it exactly like the ledger — degrades to (zero,false) on no/malformed/empty block,
+  never clobbering a prior draft. **Independent block extraction:** `cutLedgerBlock` generalized to
+  `cutFencedBlock(reply, fence)`; `displayProse` now cuts at the **earliest** of the ledger/draft fences, so
+  neither JSON block ever flashes in the live `delta` stream or lands in the stored transcript regardless of
+  their order. `Session` gains a `draft` field + `Draft()`/`Transcript()` accessors (transcript = the
+  user/assistant turns as JSON — the replayable "why"); `run()` parses both blocks independently and broadcasts
+  a new `draft` SSE nudge alongside `turn`/`ledger`. **Consent gate seam:** new `wizard.Seeder` interface +
+  `SeedRequest`/`SeedResult`/`DecisionRecord`/`SeededIssue` (co-located with the draft); `FinalizedDecisions`
+  derives the decisions sidecar from the **agreed ledger items** (the ledger is the single source of the "why",
+  not a parallel block). The wizard package stays pure (model+live only) — the Seeder is the one boundary the
+  composition root implements. **Server (T4.14):** `Options.Seeder`; routes `GET /create/draft/{session}` (panel
+  fragment, re-fetched on `sse:draft,turn`) + `POST /create/approve` (the gate). Approve commits the
+  **server-side** draft (the trusted planner's latest snapshot), never browser content — the browser only sends
+  "approve session X". Degrades: no planner→503, no seeder→"approval unavailable" notice, empty draft→"nothing to
+  approve", seeder error→surfaced in-fragment, unknown session→404. **views:** `DraftPanel` (proposed specs in
+  `<details>`/`<pre>`, seed issues, the emerald Approve form with the consent warning; read-only note when no
+  seeder) + `CreateApproveResult` (created issues linking to `/issue/{id}`, or the error) in `wizard.templ`;
+  wired into `CreatePage` with a `#wizard-result` region. **cmd-side `wizardSeeder`** (`cmd/harness/wizard_seed.go`)
+  implements the Seeder: validate → write specs → store transcript → write decisions sidecar → **git commit** →
+  `beads.Apply`. Validation enforces the spec contract (specs-process.md "every link resolves; every spec maps to
+  ≥1 issue"): safe paths under `specs/` + `.md`, **link integrity reusing the new exported `spec.Links`** (the
+  same links the orchestrator traverses — single source, refactored out of `spec.Resolve`), issue→spec coverage,
+  and **produces-legality** via a new `seedRoles`/`resolveSeedRole` (`cmd/harness/config.go`; `entryRole`
+  refactored onto `seedRoles`) — a seed issue may only enter at a pipeline **entry** stage (the human-seed analog
+  of `acceptPlan` rejecting an illegal planner child; never mid-pipeline). Seed issues are created as epic roots
+  (no `EpicID` — `epicOf` falls back to own id), each carrying its spec ref + a provenance footer linking the
+  sidecar + transcript hash. Git commit message records the same provenance. **Wiring:** `run.go` builds the
+  seeder (over the run repo + a beads client + the artifact store) only when the requirements planner is
+  configured; a standalone `harness serve` wires neither and APPROVE shows disabled. **Persona** updated to emit
+  the ` ```draft ` block only once intent has converged, owning link integrity + spec coverage and keeping seed
+  issues coarse (the autonomous `plan` stage decomposes). Non-TCB, human-reviewed; `make generate` ran. Tests:
+  wizard draft parse/degrade/drop-incomplete + displayProse-cuts-both-fences + FinalizedDecisions; a draft-bearing
+  turn populates `Draft()` with clean transcript prose + fires the `draft` nudge; server draft-panel render +
+  approve success (server-side draft handed to the Seeder verbatim) + the four guard paths; cmd-side
+  `validate` (valid + 9 rejection cases) + a real git+bd `Seed` integration (spec written+committed, transcript
+  stored, seed issue created with role+spec+footer). `make check` green (lint 0, 624 pass / 2 skip).
+  **Deferred:** the decomposition-preview dry-run (control-room.md OPEN, "leaning defer") stays deferred — seed
+  issues are coarse and the autonomous planner decomposes. (needs T4.12) ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md))
+- [ ] **T4.15 Resolve mode** — Create and Resolve are one component; Resolve pre-loads the escalation + spec slice + the agent transcript that raised it and shows the spec diff + blast radius before commit. Unblocked by T4.14 (the draft + consent-gate + `wizard.Seeder` seam now exist); Resolve is a second entry mode that pre-seeds the conversation from a dead-lettered issue's escalation and shows the recompile-the-delta blast radius before APPROVE. (needs T4.14) ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
 
 ## Phase 5 — Production isolation & distribution
 

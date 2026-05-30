@@ -113,8 +113,8 @@ func Resolve(root, ref string, depth int) (string, error) {
 		if cur.d >= depth {
 			continue
 		}
-		for _, m := range linkRe.FindAllStringSubmatch(string(data), -1) {
-			if nb := neighbor(cur.rel, m[1]); nb != "" && !seen[nb] {
+		for _, nb := range Links(cur.rel, string(data)) {
+			if !seen[nb] {
 				queue = append(queue, node{rel: nb, d: cur.d + 1})
 			}
 		}
@@ -130,6 +130,26 @@ func Resolve(root, ref string, depth int) (string, error) {
 		b.WriteByte('\n')
 	}
 	return b.String(), nil
+}
+
+// Links returns the root-relative paths of the local markdown files that content — a spec at
+// root-relative path fromRel — links to via inline links, the exact set Resolve follows when
+// building a slice. External URLs, same-file anchors, and non-.md targets are filtered out (see
+// neighbor); each distinct target is returned once in source order. The wizard's link-integrity
+// check (T4.14) reuses this so "every link resolves" means precisely the links the orchestrator
+// will traverse when it materializes the slice — one source of truth for what a spec link *is*.
+func Links(fromRel, content string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, m := range linkRe.FindAllStringSubmatch(content, -1) {
+		nb := neighbor(fromRel, m[1])
+		if nb == "" || seen[nb] {
+			continue
+		}
+		seen[nb] = true
+		out = append(out, nb)
+	}
+	return out
 }
 
 // neighbor resolves a markdown link target found in the file at fromRel (root-relative)
