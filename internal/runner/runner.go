@@ -26,14 +26,6 @@ import (
 	"github.com/Loxstomper/harness/internal/sandbox"
 )
 
-// Artifact kinds the runner harvests. kind is free-form metadata recorded on the
-// ArtifactRef (not part of the content address) — these are the single source of truth
-// for the strings the runner writes, so the control room can filter on them.
-const (
-	artifactKindPrompt     = "prompt"
-	artifactKindTranscript = "transcript"
-)
-
 // teardownTimeout bounds the reap of a sandbox. Teardown runs on a fresh context
 // (not the invocation's) so a canceled or timed-out invocation still reaps its
 // sandbox — the ephemerality guarantee must not depend on the happy path (see
@@ -359,7 +351,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 // It is logged loudly, and the orchestrator merges with whatever evidence is present.
 func (r *Runner) harvest(ctx context.Context, issueID string, rel *relay, res *core.Result) {
 	if prompt, ok := rel.Prompt(); ok {
-		ref, err := r.store.Put(ctx, artifactKindPrompt, bytes.NewReader(prompt))
+		ref, err := r.store.Put(ctx, core.ArtifactKindPrompt, bytes.NewReader(prompt))
 		if err != nil {
 			r.log.Error("runner: harvest prompt", "issue", issueID, "err", err)
 		} else {
@@ -368,7 +360,7 @@ func (r *Runner) harvest(ctx context.Context, issueID string, rel *relay, res *c
 		}
 	}
 	if transcript, ok := rel.Transcript(); ok {
-		ref, err := r.store.Put(ctx, artifactKindTranscript, bytes.NewReader(transcript))
+		ref, err := r.store.Put(ctx, core.ArtifactKindTranscript, bytes.NewReader(transcript))
 		if err != nil {
 			r.log.Error("runner: harvest transcript", "issue", issueID, "err", err)
 		} else {

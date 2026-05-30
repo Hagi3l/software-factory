@@ -205,12 +205,12 @@ func (g *fakeGate) called() []gate.Candidate {
 type fakeMerger struct {
 	mu        sync.Mutex
 	refs      []string
-	provs     []Provenance
+	provs     []core.Provenance
 	err       error
 	regateRef string
 }
 
-func (m *fakeMerger) Merge(ctx context.Context, _, ref string, prov Provenance, regate ReGate) (string, error) {
+func (m *fakeMerger) Merge(ctx context.Context, _, ref string, prov core.Provenance, regate ReGate) (string, error) {
 	m.mu.Lock()
 	m.refs = append(m.refs, ref)
 	m.mu.Unlock()
@@ -239,10 +239,10 @@ func (m *fakeMerger) merged() []string {
 	return append([]string(nil), m.refs...)
 }
 
-func (m *fakeMerger) provenance() []Provenance {
+func (m *fakeMerger) provenance() []core.Provenance {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return append([]Provenance(nil), m.provs...)
+	return append([]core.Provenance(nil), m.provs...)
 }
 
 // --- helpers -----------------------------------------------------------------

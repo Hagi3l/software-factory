@@ -145,7 +145,24 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   toolchain — the binary is self-contained. Later views (T4.2+) are thin templ panels
   rendered into `Layout`; SSE attaches via the already-loaded htmx-ext-sse (T4.3).
   ([control-room.md](specs/control-room.md))
-- [ ] **T4.2 Read/query layer** — render-ready reads over beads + the artifact store + git provenance, decoupled from the views. ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md))
+- [x] **T4.2 Read/query layer** — *done.* `internal/controlroom/query`: a `Reader` over
+  three ports (`IssueReader`, `ArtifactReader`, `ProvenanceReader`) returning presentation
+  structs — `Board(stageOrder)` (issues grouped by stage, columns in pipeline order, empty
+  stages skipped, unassigned last), `DeadLetters` (blocked issues — the action surface),
+  `IssueDetail` (stitches beads + git provenance + artifact-store availability into named
+  evidence links; merged work reads the trailer, in-flight falls back to the issue's
+  TraceMap), `RecentProvenance`, and `Artifact` (content stream). Decoupled from views (no
+  templ import); fully fake-tested. Supporting single-source moves: **`Provenance` (+ render
+  `Trailer`/`CommitMessage` and new inverse `ParseCommitMessage`) relocated to `core`** so
+  the orchestrator's write side and the control room's read side share one format —
+  `GitProvenance` (shells out to `git log`, `run` seam for tests) parses it back. Added
+  beads `List(status)` + `ListAll` (`bd list --all/--status --flat`; closed issues are
+  hidden from bd's default list — these surface them). Promoted the artifact-kind taxonomy
+  (`prompt`/`transcript`/`traceability-map`/`gate-evidence`) into `core` (was duplicated
+  literals in runner/gate). **Not yet wired into the server** — the views consume the Reader
+  in T4.4+. **T4.6 (DAG) will need dependency-edge reads** (`bd dep`), deliberately deferred
+  from here since the board/DLQ/detail/provenance views don't need the edge list.
+  ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md))
 - [ ] **T4.3 SSE plumbing** — NATS events → an SSE endpoint consumed by the htmx SSE extension; the live-update substrate for the board and feed. ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
 - [ ] **T4.4 Board view** — kanban over beads issues by stage, live via T4.3. (needs T4.2, T4.3) ([control-room.md](specs/control-room.md))
 - [ ] **T4.5 Activity feed** — `harness.agent.<id>.events` streamed to the browser (what agents are doing right now). (needs T4.3) ([control-room.md](specs/control-room.md))

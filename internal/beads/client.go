@@ -108,6 +108,36 @@ func (c *Client) InProgress(ctx context.Context) ([]core.Issue, error) {
 	return decodeIssues(out)
 }
 
+// List returns every issue in the given beads status, fully decoded. status is one of
+// bd's stored statuses (open, in_progress, blocked, closed) and may be a comma-separated
+// set (e.g. "open,in_progress"). Unlike Ready it applies no blocker precondition, so it is
+// the read the control room uses to populate the board and the dead-letter queue (blocked)
+// across the whole status — not just dispatchable work (see specs/control-room.md). --flat
+// forces a flat JSON array (the tree layout is for human terminals); --limit 0 drops bd's
+// default page cap so the whole set is returned.
+func (c *Client) List(ctx context.Context, status string) ([]core.Issue, error) {
+	if status == "" {
+		return nil, fmt.Errorf("beads: empty status")
+	}
+	out, err := c.run(ctx, []string{"list", "--status", status, "--json", "--flat", "--limit", "0"})
+	if err != nil {
+		return nil, fmt.Errorf("beads: list status %s: %w", status, err)
+	}
+	return decodeIssues(out)
+}
+
+// ListAll returns every issue regardless of status, including closed ones (bd hides closed
+// issues from `list` by default; --all overrides that). It backs the control room's board
+// and provenance views, which must show completed work, not only what is in flight. The
+// --flat/--limit 0 flags mean the same as in List.
+func (c *Client) ListAll(ctx context.Context) ([]core.Issue, error) {
+	out, err := c.run(ctx, []string{"list", "--all", "--json", "--flat", "--limit", "0"})
+	if err != nil {
+		return nil, fmt.Errorf("beads: list all: %w", err)
+	}
+	return decodeIssues(out)
+}
+
 // issueJSON is the subset of bd's --json issue object the harness consumes. bd
 // emits many more fields (priority, owner, timestamps, counts); only the facets an
 // agent is handed are decoded. Metadata is decoded as raw values so a non-string

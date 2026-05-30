@@ -180,6 +180,56 @@ func TestGetNotFoundEmptyArray(t *testing.T) {
 	}
 }
 
+func TestListPassesStatusAndDecodes(t *testing.T) {
+	c, args := fakeClient(readyJSON, nil)
+	issues, err := c.List(context.Background(), "blocked")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if want := []string{"list", "--status", "blocked", "--json", "--flat", "--limit", "0"}; strings.Join(*args, " ") != strings.Join(want, " ") {
+		t.Errorf("args = %v, want %v", *args, want)
+	}
+	if len(issues) != 2 || issues[0].ID != "harness-abc" {
+		t.Errorf("decoded %d issues = %+v", len(issues), issues)
+	}
+}
+
+func TestListEmptyStatusRejected(t *testing.T) {
+	c := New()
+	called := false
+	c.run = func(_ context.Context, _ []string) ([]byte, error) { called = true; return nil, nil }
+	if _, err := c.List(context.Background(), ""); err == nil {
+		t.Fatal("List accepted an empty status, want failure")
+	}
+	if called {
+		t.Error("List shelled out to bd for an empty status; it should reject before running")
+	}
+}
+
+func TestListRunError(t *testing.T) {
+	c, _ := fakeClient("", errors.New("bd exploded"))
+	if _, err := c.List(context.Background(), "open"); err == nil {
+		t.Fatal("List accepted a run error, want failure")
+	}
+}
+
+func TestListAllPassesArgs(t *testing.T) {
+	c, args := fakeClient(`[]`, nil)
+	if _, err := c.ListAll(context.Background()); err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if want := []string{"list", "--all", "--json", "--flat", "--limit", "0"}; strings.Join(*args, " ") != strings.Join(want, " ") {
+		t.Errorf("args = %v, want %v", *args, want)
+	}
+}
+
+func TestListAllRunError(t *testing.T) {
+	c, _ := fakeClient("", errors.New("bd exploded"))
+	if _, err := c.ListAll(context.Background()); err == nil {
+		t.Fatal("ListAll accepted a run error, want failure")
+	}
+}
+
 // --- Integration tests: drive the real bd binary ---
 
 // bdAvailable skips the test if the real bd CLI is not installed. bd is a hard
@@ -289,5 +339,53 @@ func TestReadyEmptyIntegration(t *testing.T) {
 	}
 	if len(ready) != 0 {
 		t.Errorf("fresh db ready set = %v, want empty", ready)
+	}
+}
+
+// TestListIntegration proves the new read methods speak the real bd CLI contract: a closed
+// issue is excluded from a status-filtered open list but surfaces under List("closed") and
+// ListAll. This is the property the control room relies on to show completed work (closed
+// issues are hidden from bd's default list) — exactly the gap List/ListAll close.
+func TestListIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+
+	openID := quickCreate(t, dir, "still open")
+	doneID := quickCreate(t, dir, "all finished")
+	runBD(t, dir, "close", doneID)
+
+	c := New(WithDir(dir))
+	ctx := context.Background()
+
+	ids := func(issues []core.Issue) map[string]bool {
+		m := map[string]bool{}
+		for _, is := range issues {
+			m[is.ID] = true
+		}
+		return m
+	}
+
+	openList, err := c.List(ctx, "open")
+	if err != nil {
+		t.Fatalf("List(open): %v", err)
+	}
+	if got := ids(openList); !got[openID] || got[doneID] {
+		t.Errorf("List(open) = %v, want open=%s present and closed=%s absent", openList, openID, doneID)
+	}
+
+	closedList, err := c.List(ctx, "closed")
+	if err != nil {
+		t.Fatalf("List(closed): %v", err)
+	}
+	if got := ids(closedList); !got[doneID] || got[openID] {
+		t.Errorf("List(closed) = %v, want closed=%s present and open=%s absent", closedList, doneID, openID)
+	}
+
+	all, err := c.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if got := ids(all); !got[openID] || !got[doneID] {
+		t.Errorf("ListAll = %v, want both %s and %s present", all, openID, doneID)
 	}
 }

@@ -1,0 +1,231 @@
+package query
+
+import (
+	"context"
+	"errors"
+	"io"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/Loxstomper/harness/internal/core"
+)
+
+// --- fakes for the three ports ---
+
+type fakeIssues struct {
+	all     []core.Issue
+	getErr  error
+	listErr error
+	allErr  error
+}
+
+func (f *fakeIssues) Get(_ context.Context, id string) (core.Issue, error) {
+	if f.getErr != nil {
+		return core.Issue{}, f.getErr
+	}
+	for _, i := range f.all {
+		if i.ID == id {
+			return i, nil
+		}
+	}
+	return core.Issue{}, errors.New("not found")
+}
+
+func (f *fakeIssues) List(_ context.Context, status string) ([]core.Issue, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
+	var out []core.Issue
+	for _, i := range f.all {
+		if i.Status == status {
+			out = append(out, i)
+		}
+	}
+	return out, nil
+}
+
+func (f *fakeIssues) ListAll(_ context.Context) ([]core.Issue, error) {
+	if f.allErr != nil {
+		return nil, f.allErr
+	}
+	return f.all, nil
+}
+
+type fakeArts struct {
+	present map[string]string // hash -> content
+}
+
+func (f *fakeArts) Has(_ context.Context, hash string) (bool, error) {
+	_, ok := f.present[hash]
+	return ok, nil
+}
+
+func (f *fakeArts) Get(_ context.Context, hash string) (io.ReadCloser, error) {
+	c, ok := f.present[hash]
+	if !ok {
+		return nil, errors.New("absent")
+	}
+	return io.NopCloser(strings.NewReader(c)), nil
+}
+
+type fakeProv struct {
+	byIssue map[string]core.Provenance
+	recent  []MergedCommit
+}
+
+func (f *fakeProv) ByIssue(_ context.Context, id string) (core.Provenance, bool, error) {
+	p, ok := f.byIssue[id]
+	return p, ok, nil
+}
+
+func (f *fakeProv) Recent(_ context.Context, _ int) ([]MergedCommit, error) {
+	return f.recent, nil
+}
+
+// --- Board ---
+
+func TestBoardGroupsByStageInOrder(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{
+		{ID: "h-3", Role: "implement", Status: "in_progress"},
+		{ID: "h-1", Role: "implement", Status: "open"},
+		{ID: "h-2", Role: "qa", Status: "open"},
+		{ID: "h-4", Role: "weird", Status: "open"}, // present but not in stageOrder
+		{ID: "h-5", Role: "", Status: "open"},       // unassigned
+	}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+
+	board, err := r.Board(context.Background(), []string{"plan", "implement", "qa", "integrate"})
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	if board.Total != 5 {
+		t.Errorf("Total = %d, want 5", board.Total)
+	}
+	// plan/integrate are empty so are skipped; weird is appended alphabetically; unassigned last.
+	var stages []string
+	for _, c := range board.Columns {
+		stages = append(stages, c.Stage)
+	}
+	if want := []string{"implement", "qa", "weird", unassignedStage}; !reflect.DeepEqual(stages, want) {
+		t.Errorf("column order = %v, want %v", stages, want)
+	}
+	// implement column cards are sorted by id.
+	impl := board.Columns[0]
+	if len(impl.Cards) != 2 || impl.Cards[0].ID != "h-1" || impl.Cards[1].ID != "h-3" {
+		t.Errorf("implement cards = %+v, want [h-1 h-3] in order", impl.Cards)
+	}
+}
+
+func TestBoardListAllError(t *testing.T) {
+	r := NewReader(&fakeIssues{allErr: errors.New("bd down")}, &fakeArts{}, &fakeProv{})
+	if _, err := r.Board(context.Background(), nil); err == nil {
+		t.Fatal("Board swallowed a ListAll error")
+	}
+}
+
+// --- DeadLetters ---
+
+func TestDeadLettersReturnsBlocked(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{
+		{ID: "h-2", Status: "blocked", Role: "implement"},
+		{ID: "h-1", Status: "blocked", Role: "qa"},
+		{ID: "h-3", Status: "open"},
+	}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+	dl, err := r.DeadLetters(context.Background())
+	if err != nil {
+		t.Fatalf("DeadLetters: %v", err)
+	}
+	if len(dl) != 2 || dl[0].ID != "h-1" || dl[1].ID != "h-2" {
+		t.Errorf("dead letters = %+v, want blocked issues h-1,h-2 sorted", dl)
+	}
+}
+
+// --- IssueDetail ---
+
+func TestIssueDetailMergedStitchesEvidence(t *testing.T) {
+	issue := core.Issue{ID: "h-1", Title: "do it", Status: "closed", Role: "implement"}
+	prov := core.Provenance{
+		Soul: "implementor-go", Model: "claude", Issue: "h-1",
+		PromptSHA:    "sha256:prompt",
+		Verified:     []string{"build@sha256:bb", "gosec"}, // gosec degraded: bare name, no hash
+		Traceability: "sha256:trace",
+	}
+	arts := &fakeArts{present: map[string]string{
+		"sha256:prompt": "the prompt",
+		"sha256:trace":  "the map",
+		"sha256:bb":     "build output",
+		// no entry for the gosec citation (it has no hash anyway)
+	}}
+	r := NewReader(&fakeIssues{all: []core.Issue{issue}}, arts, &fakeProv{byIssue: map[string]core.Provenance{"h-1": prov}})
+
+	d, err := r.IssueDetail(context.Background(), "h-1")
+	if err != nil {
+		t.Fatalf("IssueDetail: %v", err)
+	}
+	if !d.Merged {
+		t.Error("Merged = false, want true")
+	}
+	want := []ArtifactLink{
+		{Label: "Prompt", Kind: core.ArtifactKindPrompt, Hash: "sha256:prompt", Available: true},
+		{Label: "Traceability", Kind: core.ArtifactKindTraceabilityMap, Hash: "sha256:trace", Available: true},
+		{Label: "build", Kind: core.ArtifactKindGateEvidence, Hash: "sha256:bb", Available: true},
+		{Label: "gosec", Kind: core.ArtifactKindGateEvidence, Hash: "", Available: false},
+	}
+	if !reflect.DeepEqual(d.Evidence, want) {
+		t.Errorf("evidence =\n%+v\nwant\n%+v", d.Evidence, want)
+	}
+}
+
+func TestIssueDetailUnmergedUsesIssueTraceMap(t *testing.T) {
+	issue := core.Issue{ID: "h-9", Status: "in_progress", Role: "qa", TraceMap: "sha256:tm"}
+	arts := &fakeArts{present: map[string]string{"sha256:tm": "map"}}
+	r := NewReader(&fakeIssues{all: []core.Issue{issue}}, arts, &fakeProv{}) // fakeProv has no entry -> not merged
+
+	d, err := r.IssueDetail(context.Background(), "h-9")
+	if err != nil {
+		t.Fatalf("IssueDetail: %v", err)
+	}
+	if d.Merged {
+		t.Error("Merged = true, want false (no provenance)")
+	}
+	if len(d.Evidence) != 1 || d.Evidence[0].Label != "Traceability" || !d.Evidence[0].Available {
+		t.Errorf("evidence = %+v, want a single available Traceability link", d.Evidence)
+	}
+}
+
+func TestIssueDetailGetError(t *testing.T) {
+	r := NewReader(&fakeIssues{getErr: errors.New("boom")}, &fakeArts{}, &fakeProv{})
+	if _, err := r.IssueDetail(context.Background(), "h-1"); err == nil {
+		t.Fatal("IssueDetail swallowed a Get error")
+	}
+}
+
+// --- Artifact + RecentProvenance passthroughs ---
+
+func TestArtifactStreamsContent(t *testing.T) {
+	arts := &fakeArts{present: map[string]string{"sha256:x": "hello evidence"}}
+	r := NewReader(&fakeIssues{}, arts, &fakeProv{})
+	rc, err := r.Artifact(context.Background(), "sha256:x")
+	if err != nil {
+		t.Fatalf("Artifact: %v", err)
+	}
+	defer rc.Close()
+	b, _ := io.ReadAll(rc)
+	if string(b) != "hello evidence" {
+		t.Errorf("content = %q", b)
+	}
+}
+
+func TestRecentProvenancePassesThrough(t *testing.T) {
+	want := []MergedCommit{{Commit: "abc", Provenance: core.Provenance{Issue: "h-1"}}}
+	r := NewReader(&fakeIssues{}, &fakeArts{}, &fakeProv{recent: want})
+	got, err := r.RecentProvenance(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("RecentProvenance: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}

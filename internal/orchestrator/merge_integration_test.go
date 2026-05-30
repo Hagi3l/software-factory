@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Loxstomper/harness/internal/core"
 )
 
 // TestGitMergerIntegration drives the real git binary through the serialized merge queue:
@@ -79,8 +81,8 @@ func TestGitMergerIntegration(t *testing.T) {
 	git("checkout", "-q", "--detach", m0)
 
 	m := NewGitMerger("")
-	provFor := func(id string) Provenance {
-		return Provenance{Soul: "implementor-go", Model: "claude-opus-4-7", Issue: id, PromptSHA: "sha256:9af", Verified: []string{"build", "test"}}
+	provFor := func(id string) core.Provenance {
+		return core.Provenance{Soul: "implementor-go", Model: "claude-opus-4-7", Issue: id, PromptSHA: "sha256:9af", Verified: []string{"build", "test"}}
 	}
 
 	// --- A: base unmoved → fast-forward-able; a trusted provenance commit on the candidate.
@@ -113,7 +115,7 @@ func TestGitMergerIntegration(t *testing.T) {
 	regateProvB := provFor("iss-2")
 	regateProvB.Verified = []string{"build@sha256:re", "test@sha256:re"} // the re-gate's own checks
 	cB, err := m.Merge(context.Background(), repo, "candidate/iss-2", provFor("iss-2"),
-		func(_ context.Context, landedRef string) (Provenance, bool, error) {
+		func(_ context.Context, landedRef string) (core.Provenance, bool, error) {
 			regatedRef = git("rev-parse", "--verify", landedRef) // must resolve: the rebased result is published
 			regatedBase = git("show", landedRef+":base.txt")     // must be the combined tree
 			return regateProvB, true, nil
@@ -162,8 +164,8 @@ func TestGitMergerIntegration(t *testing.T) {
 	// result (the two-green-branches case). Merge returns errReGateFailed, main is untouched,
 	// and the published temp ref is cleaned up — the orchestrator routes a fix from here.
 	if _, err := m.Merge(context.Background(), repo, "candidate/iss-4", provFor("iss-4"),
-		func(_ context.Context, _ string) (Provenance, bool, error) {
-			return Provenance{}, false, nil // the combination broke something
+		func(_ context.Context, _ string) (core.Provenance, bool, error) {
+			return core.Provenance{}, false, nil // the combination broke something
 		}); !errors.Is(err, errReGateFailed) {
 		t.Fatalf("merge D err = %v, want errReGateFailed", err)
 	}

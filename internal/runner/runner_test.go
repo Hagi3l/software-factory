@@ -310,7 +310,7 @@ func TestHarvestStampsEvidence(t *testing.T) {
 			t.Errorf("artifact %s (%s) not present in the store", a.Kind, a.Hash)
 		}
 	}
-	if !containsStr(kinds, artifactKindPrompt) || !containsStr(kinds, artifactKindTranscript) {
+	if !containsStr(kinds, core.ArtifactKindPrompt) || !containsStr(kinds, core.ArtifactKindTranscript) {
 		t.Errorf("harvested artifact kinds = %v, want prompt + transcript", kinds)
 	}
 

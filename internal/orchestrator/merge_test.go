@@ -5,11 +5,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+
+	"github.com/Loxstomper/harness/internal/core"
 )
 
 // testProvenance is a representative provenance record for merger tests.
-func testProvenance() Provenance {
-	return Provenance{
+func testProvenance() core.Provenance {
+	return core.Provenance{
 		Soul:      "implementor-go",
 		Model:     "claude-opus-4-7",
 		Issue:     "iss-1",
@@ -226,7 +228,7 @@ func TestGitMergerReGatesRebasedResult(t *testing.T) {
 	regateProv.Verified = []string{"regate-build", "regate-test"} // distinct from the branch gate
 	var gotRef string
 	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(),
-		func(_ context.Context, landedRef string) (Provenance, bool, error) {
+		func(_ context.Context, landedRef string) (core.Provenance, bool, error) {
 			gotRef = landedRef
 			return regateProv, true, nil
 		})
@@ -299,8 +301,8 @@ func TestGitMergerReGateRejectionAbortsMerge(t *testing.T) {
 	})
 
 	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(),
-		func(_ context.Context, _ string) (Provenance, bool, error) {
-			return Provenance{}, false, nil // the combination failed the re-gate
+		func(_ context.Context, _ string) (core.Provenance, bool, error) {
+			return core.Provenance{}, false, nil // the combination failed the re-gate
 		})
 	if !errors.Is(err, errReGateFailed) {
 		t.Fatalf("Merge err = %v, want errReGateFailed", err)

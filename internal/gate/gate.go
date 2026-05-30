@@ -21,12 +21,6 @@ import (
 	"github.com/Loxstomper/harness/internal/sandbox"
 )
 
-// artifactKindEvidence is the artifact kind stamped on a persisted gate check
-// record. It mirrors the runner's prompt/transcript kinds (see
-// specs/components/artifact-store.md): kind is descriptive metadata on the ref, not
-// part of the content address.
-const artifactKindEvidence = "gate-evidence"
-
 // teardownTimeout bounds the reap of the verification sandbox. Teardown runs on a
 // context detached from the caller's so a canceled or timed-out gate still releases
 // the host resources the backend holds.
@@ -526,7 +520,7 @@ func (r *Runner) persistEvidence(ctx context.Context, ref string, report *Report
 	}
 	for i := range report.Checks {
 		cr := &report.Checks[i]
-		a, err := r.store.Put(ctx, artifactKindEvidence, bytes.NewReader(formatEvidence(*cr)))
+		a, err := r.store.Put(ctx, core.ArtifactKindGateEvidence, bytes.NewReader(formatEvidence(*cr)))
 		if err != nil {
 			r.log.Error("gate: persist check evidence", "ref", ref, "check", cr.Name, "err", err)
 			continue

@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/Loxstomper/harness/internal/core"
 )
 
 // errRebaseConflict signals that a verified candidate could not be cleanly rebased onto
@@ -36,7 +38,7 @@ var errReGateFailed = errors.New("orchestrator: rebased result failed re-gate")
 // main, so the caller can route a fix issue; a non-nil error is an infrastructure fault the
 // caller retries. A nil ReGate skips re-gating (a fast-forward lands the exact tree the
 // branch gate already graded, and pure-git merge tests pass nil).
-type ReGate func(ctx context.Context, landedRef string) (prov Provenance, accepted bool, err error)
+type ReGate func(ctx context.Context, landedRef string) (prov core.Provenance, accepted bool, err error)
 
 // gitMerger is the default Merger. It lands a verified candidate on main as a serialized
 // merge queue (a merge train): each candidate is rebased onto the CURRENT main tip before
@@ -100,7 +102,7 @@ func NewGitMerger(bin string) Merger {
 // ref and asks regate to verify it, landing only an accepted result and recording the
 // provenance regate returns. A fast-forward skips the re-gate — it lands the exact tree the
 // branch gate already verified, so there is nothing new to grade. A nil regate also skips it.
-func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov Provenance, regate ReGate) (string, error) {
+func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov core.Provenance, regate ReGate) (string, error) {
 	mainTip, err := m.run(ctx, repo, "rev-parse", "--verify", "refs/heads/main")
 	if err != nil {
 		return "", fmt.Errorf("orchestrator: resolve main tip: %w", err)

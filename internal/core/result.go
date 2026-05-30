@@ -118,12 +118,23 @@ type ArtifactRef struct {
 	Hash string // content address into the artifact store
 }
 
-// ArtifactKindTraceabilityMap is the artifact Kind under which the runner stores a
-// harvested test↔spec traceability map (see Result.Trace). It lives in core so the
-// writer (the runner's harvest) and the reader (the orchestrator threading the map's
-// hash into the provenance trailer) agree on the spelling — the same single-source
-// pattern the postcondition/metric identifiers use.
-const ArtifactKindTraceabilityMap = "traceability-map"
+// Artifact kinds: the vocabulary stamped on every item harvested into the
+// content-addressed artifact store. They live in core so the writers (the runner's
+// harvest, the gate) and the readers (the orchestrator threading hashes into the
+// provenance trailer, the control room rendering evidence) agree on the spelling — the
+// same single-source pattern the postcondition/metric identifiers use. The store keys
+// content by hash, not by kind, so kind is a descriptive tag rather than an address; one
+// canonical spelling is still what keeps writer and reader views consistent.
+const (
+	// ArtifactKindPrompt is the exact prompt an invocation ran with (cited as Prompt-SHA).
+	ArtifactKindPrompt = "prompt"
+	// ArtifactKindTranscript is the full agent conversation — the replayable decision trail.
+	ArtifactKindTranscript = "transcript"
+	// ArtifactKindTraceabilityMap is a harvested test↔spec traceability map (see Result.Trace).
+	ArtifactKindTraceabilityMap = "traceability-map"
+	// ArtifactKindGateEvidence is a gate check's captured stdout/stderr, cited as name@<hash>.
+	ArtifactKindGateEvidence = "gate-evidence"
+)
 
 // Proposal is a child issue an agent proposes (emergent breadth). The
 // orchestrator validates DAG-legality — valid role, edges keep the graph acyclic,

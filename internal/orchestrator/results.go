@@ -221,15 +221,15 @@ func (o *Orchestrator) gateCandidate(issue core.Issue, stage config.Stage, ref s
 // (accepted=false) tells the merger to abort the merge so advance can route a fix issue; a
 // gate that cannot reach a verdict surfaces as an error the merger propagates for retry.
 func (o *Orchestrator) reGate(issue core.Issue, srcStage config.Stage, res core.Result) ReGate {
-	return func(ctx context.Context, landedRef string) (Provenance, bool, error) {
+	return func(ctx context.Context, landedRef string) (core.Provenance, bool, error) {
 		report, err := o.gate.Run(ctx, o.gateCandidate(issue, srcStage, landedRef))
 		if err != nil {
-			return Provenance{}, false, err
+			return core.Provenance{}, false, err
 		}
 		if !report.Passed {
 			o.log.Info("orchestrator: re-gate rejected rebased result", "issue", issue.ID,
 				"ref", landedRef, "checks_run", len(report.Checks))
-			return Provenance{}, false, nil
+			return core.Provenance{}, false, nil
 		}
 		return o.provenanceFor(issue, res, report), true, nil
 	}

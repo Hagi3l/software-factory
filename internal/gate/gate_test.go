@@ -184,8 +184,8 @@ func TestRunAllChecksPass(t *testing.T) {
 		if cr.Evidence.Hash == "" {
 			t.Fatalf("%s check has no persisted evidence ref", want.name)
 		}
-		if cr.Evidence.Kind != artifactKindEvidence {
-			t.Errorf("%s evidence kind = %q, want %q", want.name, cr.Evidence.Kind, artifactKindEvidence)
+		if cr.Evidence.Kind != core.ArtifactKindGateEvidence {
+			t.Errorf("%s evidence kind = %q, want %q", want.name, cr.Evidence.Kind, core.ArtifactKindGateEvidence)
 		}
 		ev := readArtifact(t, store, cr.Evidence.Hash)
 		if !bytes.Contains(ev, []byte("check: "+want.name)) || !bytes.Contains(ev, []byte(want.stdout)) {

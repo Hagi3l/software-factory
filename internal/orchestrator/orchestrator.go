@@ -62,7 +62,7 @@ type Gate interface {
 // rebased result (see ReGate); a fast-forward, or a nil callback, skips it. gitMerger is
 // the default implementation (see specs/integration.md, specs/bootstrap.md).
 type Merger interface {
-	Merge(ctx context.Context, repo, ref string, prov Provenance, regate ReGate) (commit string, err error)
+	Merge(ctx context.Context, repo, ref string, prov core.Provenance, regate ReGate) (commit string, err error)
 }
 
 // Options configures an Orchestrator. They are the instance knobs (which config it
