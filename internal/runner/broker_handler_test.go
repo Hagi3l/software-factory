@@ -183,7 +183,7 @@ func TestRelayCapturesPromptAndTranscript(t *testing.T) {
 	if !ok {
 		t.Fatal("Transcript not captured after completions")
 	}
-	var turns []transcriptTurn
+	var turns []model.TranscriptTurn
 	if err := json.Unmarshal(transcriptData, &turns); err != nil {
 		t.Fatalf("unmarshal transcript: %v", err)
 	}

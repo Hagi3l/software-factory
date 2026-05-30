@@ -8,7 +8,9 @@
 package query
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"sort"
@@ -16,6 +18,7 @@ import (
 	"time"
 
 	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/harness/internal/model"
 )
 
 // IssueReader is the beads read surface the control room needs (a subset of
@@ -506,4 +509,196 @@ func (r *Reader) Artifact(ctx context.Context, hash string) (io.ReadCloser, erro
 		return nil, fmt.Errorf("query: artifact %s: %w", hash, err)
 	}
 	return rc, nil
+}
+
+// ReplayToolCall is one tool the model asked to invoke on a turn: the tool name and its
+// arguments, pretty-printed for legibility (the wire form is compact JSON). ID ties it to
+// the matching tool result fed back on the next turn.
+type ReplayToolCall struct {
+	ID   string
+	Name string
+	Args string // the model's arguments, indented JSON (falls back to the raw bytes if not JSON)
+}
+
+// ReplayToolResult is one tool result fed back to the model: the textual outcome and
+// whether the tool reported an error (so the trail shows a failure the model had to
+// recover from, not a silently-hidden one).
+type ReplayToolResult struct {
+	ToolCallID string
+	Content    string
+	IsError    bool
+}
+
+// ReplayMessage is one message the model newly saw at the start of a turn — the opening
+// brief on turn 0, or the prior turn's tool results afterwards. Assistant echoes are
+// deliberately excluded (see buildReplay): the assistant's own output is rendered once, as
+// the turn's response, not again as inbound history.
+type ReplayMessage struct {
+	Role        string
+	Text        string
+	ToolResults []ReplayToolResult
+}
+
+// ReplayTurn is one llm-turn of the decision trail: what the model newly saw (Inbound),
+// what it produced (Text + ToolCalls), why it stopped, and the tokens the turn cost. It
+// maps one-to-one to the llm-turn span in the invocation trace (specs/observability.md).
+type ReplayTurn struct {
+	Index        int
+	Inbound      []ReplayMessage
+	Text         string
+	ToolCalls    []ReplayToolCall
+	Stop         string
+	InputTokens  int
+	OutputTokens int
+	CacheRead    int
+}
+
+// Replay is the reconstructed decision trail for one invocation (specs/observability.md,
+// "Replayability — the differentiator"): the persona the model ran under (System) and each
+// turn it took, parsed from the broker-captured transcript in the artifact store. It is the
+// forensic answer to "why did the agent do that" — exactly what the LLM saw and did, step
+// by step.
+//
+// Available is false when no trail could be reconstructed: Hash == "" means no transcript is
+// reachable for this issue (it has not merged, or none was harvested — the hash is only
+// retained on the merge trailer, like the transcript evidence link, T4.7b), while a set Hash
+// with Available == false means the cited transcript could not be fetched or decoded from the
+// store. Either way the view degrades to a notice (offering the raw-bytes link when a hash is
+// known) rather than failing the page.
+type Replay struct {
+	Issue       core.Issue
+	Merged      bool
+	Available   bool
+	Hash        string // the transcript artifact's content address, when one is cited
+	System      string // the persona/system prompt the invocation ran under (from the first turn)
+	Turns       []ReplayTurn
+	TotalInput  int
+	TotalOutput int
+}
+
+// Replay reconstructs an invocation's decision trail from its broker-captured transcript.
+// It resolves the transcript hash off the merge provenance (the only place it is retained),
+// streams the JSON []model.TranscriptTurn from the artifact store, and folds it into the
+// per-turn presentation the replay view renders. The issue itself is the only hard
+// dependency — a missing/unmerged/unharvested transcript or a flaky store yields a rendered
+// page with Available=false and a notice, never an error, mirroring the detail page's
+// best-effort posture. Only an inability to read the issue or its provenance is fatal.
+func (r *Reader) Replay(ctx context.Context, id string) (Replay, error) {
+	issue, err := r.issues.Get(ctx, id)
+	if err != nil {
+		return Replay{}, fmt.Errorf("query: replay %s: %w", id, err)
+	}
+	rep := Replay{Issue: issue}
+
+	prov, merged, err := r.prov.ByIssue(ctx, id)
+	if err != nil {
+		return Replay{}, fmt.Errorf("query: replay %s provenance: %w", id, err)
+	}
+	rep.Merged = merged
+	if !merged || prov.Transcript == "" || r.arts == nil {
+		return rep, nil // nothing to replay — the view renders the no-transcript notice
+	}
+	rep.Hash = prov.Transcript
+
+	// Best-effort from here: the transcript is the spine of the page, but a store fault or a
+	// corrupt artifact degrades to "couldn't load" (with the raw-bytes link still offered)
+	// rather than blanking the issue header and notice.
+	rc, err := r.arts.Get(ctx, prov.Transcript)
+	if err != nil {
+		return rep, nil
+	}
+	defer func() { _ = rc.Close() }()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return rep, nil
+	}
+	var turns []model.TranscriptTurn
+	if err := json.Unmarshal(data, &turns); err != nil {
+		return rep, nil
+	}
+
+	rep.Available = true
+	rep.System, rep.Turns, rep.TotalInput, rep.TotalOutput = buildReplay(turns)
+	return rep, nil
+}
+
+// buildReplay folds the raw transcript turns into the render-ready trail. The persona is
+// taken from the first turn (it is constant across an invocation — the soul's identity).
+// For each turn, Inbound is the messages new to that turn's request versus the previous
+// turn's: turn 0 carries the opening brief; later turns carry the prior turn's tool results.
+// The agent loop appends (assistant turn + tool results) to the history each iteration, so
+// the message slice is append-only and the suffix beyond the previous length is exactly what
+// the model newly saw — and the leading assistant echo in that suffix is dropped, because the
+// assistant's output is already rendered as the previous turn's response. A non-monotonic
+// history (which the append-only loop never produces) falls back to showing the whole slice
+// so the trail is never silently truncated.
+func buildReplay(turns []model.TranscriptTurn) (system string, out []ReplayTurn, totalIn, totalOut int) {
+	if len(turns) == 0 {
+		return "", nil, 0, 0
+	}
+	system = turns[0].Request.System
+	prevLen := 0
+	for i, t := range turns {
+		msgs := t.Request.Messages
+		start := prevLen
+		if start > len(msgs) {
+			start = 0 // history isn't a clean superset — show all rather than truncate
+		}
+		rt := ReplayTurn{
+			Index:        i,
+			Text:         t.Response.Text,
+			Stop:         string(t.Response.Stop),
+			InputTokens:  t.Response.Usage.InputTokens,
+			OutputTokens: t.Response.Usage.OutputTokens,
+			CacheRead:    t.Response.Usage.CacheReadTokens,
+		}
+		for _, m := range msgs[start:] {
+			if m.Role == model.RoleAssistant {
+				continue // already rendered as the prior turn's response
+			}
+			rt.Inbound = append(rt.Inbound, replayMessage(m))
+		}
+		for _, tc := range t.Response.ToolCalls {
+			rt.ToolCalls = append(rt.ToolCalls, replayToolCall(tc))
+		}
+		prevLen = len(msgs)
+		totalIn += rt.InputTokens
+		totalOut += rt.OutputTokens
+		out = append(out, rt)
+	}
+	return system, out, totalIn, totalOut
+}
+
+// replayMessage projects a canonical message into the view's flattened form, keeping the
+// query layer the single place the model types are decoded (the views stay free of the
+// model package).
+func replayMessage(m model.Message) ReplayMessage {
+	rm := ReplayMessage{Role: string(m.Role), Text: m.Text}
+	for _, tr := range m.ToolResults {
+		rm.ToolResults = append(rm.ToolResults, ReplayToolResult{
+			ToolCallID: tr.ToolCallID,
+			Content:    tr.Content,
+			IsError:    tr.IsError,
+		})
+	}
+	return rm
+}
+
+// replayToolCall projects a tool call, pretty-printing its raw-JSON arguments for the trail.
+func replayToolCall(tc model.ToolCall) ReplayToolCall {
+	return ReplayToolCall{ID: tc.ID, Name: tc.Name, Args: prettyJSON(tc.Args)}
+}
+
+// prettyJSON indents a raw JSON value for legible display, falling back to the raw bytes
+// when they are not valid JSON (an agent can emit malformed arguments — the trail shows them
+// verbatim rather than hiding the fact).
+func prettyJSON(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var buf bytes.Buffer
+	if err := json.Indent(&buf, raw, "", "  "); err != nil {
+		return string(raw)
+	}
+	return buf.String()
 }

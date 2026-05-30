@@ -52,20 +52,9 @@ type relay struct {
 	pushBundle func(ctx context.Context, repo, branch string, bundle []byte) (string, error)
 
 	mu       sync.Mutex
-	usage    model.Usage      // tallied across every completion this invocation (budget input, plan T1.16)
-	firstReq *model.Request   // the prompt: the first request this invocation ran with (provenance, plan T1.20)
-	turns    []transcriptTurn // every completion this invocation made, in order (the transcript)
-}
-
-// transcriptTurn is one model exchange the relay recorded: the canonical request the
-// agent sent and the canonical response the provider returned. The ordered slice of
-// these is the invocation transcript the runner harvests to the artifact store as
-// provenance evidence (see specs/security.md, specs/observability.md). Because the
-// relay is the trusted egress chokepoint, this transcript is recorded by the runner
-// from the calls it actually relayed — never self-reported by the untrusted agent.
-type transcriptTurn struct {
-	Request  model.Request  `json:"request"`
-	Response model.Response `json:"response"`
+	usage    model.Usage            // tallied across every completion this invocation (budget input, plan T1.16)
+	firstReq *model.Request         // the prompt: the first request this invocation ran with (provenance, plan T1.20)
+	turns    []model.TranscriptTurn // every completion this invocation made, in order (the transcript)
 }
 
 var _ broker.Handler = (*relay)(nil)
@@ -286,7 +275,7 @@ func (r *relay) record(req model.Request, resp model.Response) {
 		captured := req
 		r.firstReq = &captured
 	}
-	r.turns = append(r.turns, transcriptTurn{Request: req, Response: resp})
+	r.turns = append(r.turns, model.TranscriptTurn{Request: req, Response: resp})
 }
 
 // Prompt returns the JSON-encoded prompt (the first request) the invocation ran with,

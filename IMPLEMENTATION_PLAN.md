@@ -436,7 +436,42 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   and server handlers for both views (not-attached notice/503, full render incl. issue/artifact links + breach
   meter, bare-fragment shape). `make check` green (lint 0, 557 pass / 2 skip). Non-TCB, human-reviewed.
   (needs T4.2, T4.9) ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md))
-- [ ] **T4.11 Replay** — reconstruct an invocation's full decision trail from the broker-captured transcript + the artifact store, live or after the fact. (needs T4.7) ([observability.md](specs/observability.md))
+- [x] **T4.11 Replay** — *done.* The reconstructed decision trail of one invocation — exactly what the
+  LLM saw and did, turn by turn — parsed from the broker-captured transcript in the artifact store
+  (observability.md's "differentiator"). A forensic drill-through (`/replay/{id}`) from the issue-detail
+  page, not a nav view: keyed by issue id like `/issue/{id}`, plainly server-rendered with **no SSE**
+  (a snapshot, not a feed). **Single-source transcript format:** the runner's private `transcriptTurn`
+  was promoted to **`model.TranscriptTurn`** (`internal/model/transcript.go`, json tags `request`/`response`)
+  so the write side (the relay's `turns`/`record`/`Transcript`) and the read side share **one** wire
+  format — the same single-source posture `core.Provenance` takes for the trailer (no second decode struct
+  to drift). **Query layer:** `Reader.Replay(ctx, id)` resolves the transcript hash off the merge
+  provenance (`prov.Transcript` — the **only** place it's retained, so replay is **merged-only**, exactly
+  like the T4.7b transcript evidence link), streams the JSON `[]model.TranscriptTurn` from the store, and
+  `buildReplay` folds it into per-turn presentation structs (`Replay`/`ReplayTurn`/`ReplayMessage`/
+  `ReplayToolCall`/`ReplayToolResult`, all flattened to strings/ints so **views never import `model`**).
+  Per turn: **Inbound** = the messages new to that turn's request vs the previous turn's (the append-only
+  agent loop means the suffix beyond the prior length is exactly what the model newly saw — the brief on
+  turn 0, prior-turn tool results after), with the **leading assistant echo dropped** (already rendered as
+  the prior response); plus the response text, tool calls (args pretty-printed via `json.Indent`, raw
+  fallback), stop reason, and per-turn token usage. **Best-effort spine:** only an unreadable issue/
+  provenance is fatal; a missing/unmerged/unharvested transcript → `Available=false`, empty `Hash` →
+  "none captured" notice; a cited-but-unresolvable or **corrupt** transcript → `Available=false` but `Hash`
+  retained so the view offers the raw-bytes `/artifact/{hash}` link — never a blank 500, mirroring the
+  detail page. **Server:** `GET /replay/{id}` → `handleReplay` (mirrors `handleIssue`: not-attached notice
+  with no reader, in-chrome notice on read fault). **Views:** `replay.templ` (`ReplayPage` + `replayTurn`/
+  `replayInbound`/`replayToolCall`/`replayStopBadge` + `replayNotice`/`ReplayNotAttached`) reuses
+  `statusBadge`/`shortHash`/`orDash`; stop/error tints are templ switches (Tailwind scanner). The
+  issue-detail header gains a **"▸ Replay decision trail"** drill-link, shown only when `Provenance.Transcript`
+  is set (merged work). Non-TCB, human-reviewed; `make generate` ran (templ + Tailwind). Tests: query —
+  trail reconstruction (inbound delta + assistant-echo skip + pretty args + usage totals), no-transcript/
+  not-merged/unresolvable/**malformed**/issue-error paths; server — page render, no-transcript notice,
+  not-attached, unknown-id, and the conditional detail→replay link. `make check` green (lint 0, 571 pass /
+  2 skip). **Deferred (filed, not blocking):** *(a)* **live-streaming** replay (reconstructing the trail as
+  the invocation runs) overlaps the activity feed and needs the broker to emit structured per-turn events —
+  the landed differentiator is the after-the-fact forensic trail; *(b)* replaying **dead-lettered/in-flight**
+  work would need the orchestrator to thread the transcript hash onto the issue (a TCB-adjacent beads-field
+  change) rather than only onto the merge trailer — valuable for DLQ triage, but out of scope for this
+  read/render task. (needs T4.7) ([observability.md](specs/observability.md), [control-room.md](specs/control-room.md))
 - [ ] **T4.12 Requirements-planner conversation loop** — the trusted, **non-sandboxed** LLM that drives toward aligned, testable intent, streaming over SSE; reuses the canonical model layer. *(Machinery builds offline — drive it with `modeltest` / local Ollama; only the subjective elicitation quality awaits a capable model, never the engineering.)* Scope note: control-room.md gives this planner three jobs — elicit testable intent (this task), author/maintain `specs/` markdown, and gate on human approval. The conversation loop is T4.12; the **spec-authoring persona and its link-integrity ownership** (specs-process.md: "every link resolves; every spec maps to ≥1 issue") land in **T4.14** — keep that validation a first-class postcondition on the planner's output there, not an afterthought. ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
 - [ ] **T4.13 Alignment ledger** — forks rendered as selectable chips (with tradeoffs); each item agreed/open with a one-line rationale; freeform typing always available. (needs T4.12) ([control-room.md](specs/control-room.md))
 - [ ] **T4.14 Spec authoring + consent gate** — the planner drafts spec markdown + seed issues (keeping link integrity + the README index); on explicit human **APPROVE**, the spec is committed to git, the decisions sidecar written, the conversation transcript stored, and the seed issues created through the single-writer path. The single-writer seam already exists — `beads.Apply` (the validated, referential-integrity-checked write `cmd/harness/seed.go` already uses, "written exactly as the orchestrator would write"); the wizard reuses it, plus a `produces`-legality check on the batch mirroring `acceptPlan`'s validation of planner output. So no separate orchestrator-integration task is needed. (needs T4.12) ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md))

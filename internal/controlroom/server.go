@@ -124,6 +124,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /activity", s.handleActivity)      // T4.5 — live agent feed
 	s.mux.HandleFunc("GET /activity/items", s.handleActivityItems)
 	s.mux.HandleFunc("GET /issue/{id}", s.handleIssue)         // T4.7 — issue / invocation detail
+	s.mux.HandleFunc("GET /replay/{id}", s.handleReplay)       // T4.11 — reconstructed decision trail
 	s.mux.HandleFunc("GET /artifact/{hash}", s.handleArtifact) // raw evidence content (untrusted)
 	s.mux.HandleFunc("GET /dlq", s.handleDLQ)                  // T4.8 — dead-letter queue (action surface)
 	s.mux.HandleFunc("GET /dlq/items", s.handleDLQItems)       // the htmx/SSE live fragment
@@ -298,6 +299,28 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, views.IssueDetailPage(detail))
+}
+
+// handleReplay renders the invocation replay page (T4.11) — the reconstructed decision
+// trail drilled into from the issue-detail page. It mirrors handleIssue exactly: with no
+// read model wired (standalone `harness serve`) it shows the not-attached notice, and an
+// unknown id or read fault renders the same chrome with the reason rather than a blank 500.
+// A *known* issue with no reachable transcript is not an error — Replay returns Available=
+// false and the page renders an in-chrome notice. Like the detail page it is a forensic
+// snapshot, so it is plainly rendered with no live refresh.
+func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		s.render(w, r, views.ReplayNotAttached("Not attached to a running factory — start the control room with `harness run --serve-addr` to replay invocations."))
+		return
+	}
+	id := r.PathValue("id")
+	rep, err := s.reader.Replay(r.Context(), id)
+	if err != nil {
+		s.log.Error("controlroom: replay read failed", "id", id, "err", err)
+		s.render(w, r, views.ReplayNotAttached("Could not load replay for "+id+": "+err.Error()))
+		return
+	}
+	s.render(w, r, views.ReplayPage(rep))
 }
 
 // handleArtifact streams an evidence artifact's raw content by hash — the click-through
