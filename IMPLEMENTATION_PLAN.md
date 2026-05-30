@@ -163,9 +163,42 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   in T4.4+. **T4.6 (DAG) will need dependency-edge reads** (`bd dep`), deliberately deferred
   from here since the board/DLQ/detail/provenance views don't need the edge list.
   ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md))
-- [ ] **T4.3 SSE plumbing** — NATS events → an SSE endpoint consumed by the htmx SSE extension; the live-update substrate for the board and feed. ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
-- [ ] **T4.4 Board view** — kanban over beads issues by stage, live via T4.3. (needs T4.2, T4.3) ([control-room.md](specs/control-room.md))
-- [ ] **T4.5 Activity feed** — `harness.agent.<id>.events` streamed to the browser (what agents are doing right now). (needs T4.3) ([control-room.md](specs/control-room.md))
+- [x] **T4.3 SSE plumbing** — *done.* `internal/controlroom/live`: a content-agnostic SSE
+  substrate — `Hub` (concurrent fan-out broadcaster: `Subscribe` returns a buffered channel +
+  idempotent cancel; `Broadcast` is non-blocking and *drops* for a wedged subscriber, mirroring
+  the best-effort core-NATS feed so one stalled browser can't stall the pump or other clients),
+  `WriteEvent`/`Stream` (the SSE wire format — `event:`/`data:` framing with multi-line data
+  split into multiple `data:` lines, periodic `: ping` heartbeats, stops on ctx cancel / channel
+  close / write error; requires an `http.Flusher`), and `StartAgentEventPump` (the *only*
+  NATS-touching piece: one wildcard subscribe to `harness.agent.*.events`, each message
+  broadcast as an `agent-event` SSE event carrying `{agentId, payload}` — `AgentEvent`). Server:
+  `Options.Events *live.Hub` turns on `GET /events`; the handler subscribes to the hub and
+  streams until disconnect/shutdown. `ListenAndServe` now sets `http.Server.BaseContext` to the
+  serve ctx so shutdown promptly cancels long-lived SSE streams instead of waiting out the drain.
+  Subject taxonomy stays single-source in `messaging`: added `AgentEventsWildcard` +
+  `AgentIDFromEventSubject` (inverse of `AgentEventsSubject`, rejects malformed/wildcard
+  subjects). **Wiring:** the control room is **co-located in `harness run` behind `--serve-addr`**
+  (empty = off) — it shares the run's in-process NATS so the feed has a live source. A standalone
+  `harness serve` has no NATS, so `GET /events` answers **503** there until distributed NATS lands
+  (a separate process cannot reach a `DontListen` embedded server — **T5.8**). `buildRunComponents`
+  builds the hub+pump+server only when serving is enabled and stays network-free (the server binds
+  no socket until `cmdRun` runs it in the errgroup). **Not yet consumed by a view** — the substrate
+  delivers named events; the Board (T4.4) attaches via `hx-trigger="sse:..."` → htmx refetch, and
+  the Activity feed (T4.5) via `sse-swap`. Fully tested: hub fan-out/drop/cancel (incl. `-race`),
+  SSE framing + heartbeat + flusher-required, pump over real embedded NATS, and the `/events`
+  endpoint end-to-end (broadcast → frame on the wire; disconnect → unsubscribe). ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
+- [ ] **T4.4 Board view** — kanban over beads issues by stage (use `query.Reader.Board`), live via
+  T4.3. The board is server-rendered (templ); for live refresh, attach an SSE listener that *signals*
+  staleness (`hx-trigger="sse:agent-event"` → htmx GET re-renders the board fragment) rather than
+  diffing client-side — keeps rendering server-side. Note T4.3's feed currently carries only
+  `agent-event` (per-invocation progress); a board that must react to *stage transitions* may want a
+  dedicated event — the orchestrator is the single writer of issue state, so emit a board/issue event
+  there (a new core-NATS subject + a pump branch) if `agent-event` proves too coarse. (needs T4.2, T4.3) ([control-room.md](specs/control-room.md))
+- [ ] **T4.5 Activity feed** — `harness.agent.<id>.events` streamed to the browser (what agents are
+  doing right now). The substrate is live: subscribe the feed element to `GET /events` (`hx-ext="sse"
+  sse-connect="/events"`) and `sse-swap="agent-event"`. The `agent-event` data is JSON
+  (`live.AgentEvent{agentId,payload}`), so either render server-side fragments the pump emits, or have
+  this view's element fetch/format — decide here. (needs T4.3) ([control-room.md](specs/control-room.md))
 - [ ] **T4.6 DAG view** — the issue dependency graph rendered server-side to SVG (Go → DOT/d2), hover/drill via Alpine + htmx. No client-side graph lib. (needs T4.2) ([control-room.md](specs/control-room.md))
 - [ ] **T4.7 Issue / invocation detail** — Brief, transcript, candidate diff, gate evidence, budget, retries, from beads + the artifact store. (needs T4.2) ([control-room.md](specs/control-room.md))
 - [ ] **T4.8 Dead-letter queue view** — the escalations needing a human; the primary action surface; links into Resolve (T4.15). (needs T4.2) ([control-room.md](specs/control-room.md), [workflow.md](specs/workflow.md))

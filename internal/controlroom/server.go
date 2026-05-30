@@ -22,14 +22,24 @@ import (
 	"github.com/a-h/templ"
 
 	"github.com/Loxstomper/harness/internal/controlroom/assets"
+	"github.com/Loxstomper/harness/internal/controlroom/live"
 	"github.com/Loxstomper/harness/internal/controlroom/views"
 )
 
+// sseHeartbeat is the idle interval at which an open SSE stream gets a comment line, to
+// keep intermediaries from reaping the connection and to surface a dead client as a
+// write error. Comfortably under the ~60s a typical proxy idle-times out a stream.
+const sseHeartbeat = 25 * time.Second
+
 // Options configures a Server. All fields are optional: Version is stamped into the
-// landing page for provenance, and Logger defaults to a stderr text logger.
+// landing page for provenance, Logger defaults to a stderr text logger, and Events —
+// when set — turns on the live SSE feed at GET /events. Events is nil for a standalone
+// `harness serve` (no running factory to tail); `harness run --serve-addr` supplies a
+// hub fed from the run's in-process NATS.
 type Options struct {
 	Version string
 	Logger  *slog.Logger
+	Events  *live.Hub
 }
 
 // Server renders the control room. It is an http.Handler (via Handler) so its routes can
@@ -39,6 +49,7 @@ type Server struct {
 	mux     *http.ServeMux
 	log     *slog.Logger
 	version string
+	events  *live.Hub
 }
 
 // New builds the server and registers every route. Routes are registered eagerly so a
@@ -48,7 +59,7 @@ func New(opts Options) *Server {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(noopWriter{}, nil))
 	}
-	s := &Server{mux: http.NewServeMux(), log: log, version: opts.Version}
+	s := &Server{mux: http.NewServeMux(), log: log, version: opts.Version, events: opts.Events}
 	s.routes()
 	return s
 }
@@ -66,6 +77,11 @@ func (s *Server) routes() {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 		_, _ = w.Write([]byte("ok\n"))
 	})
+
+	// Live event stream. The board and activity feed (T4.4/T4.5) attach to this via the
+	// htmx SSE extension; it is the substrate, registered whether or not a hub is wired
+	// (it answers 503 when standalone) so the URL surface is stable.
+	s.mux.HandleFunc("GET /events", s.handleEvents)
 
 	// Landing page.
 	s.mux.HandleFunc("GET /{$}", func(w http.ResponseWriter, r *http.Request) {
@@ -92,6 +108,32 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, c templ.Componen
 	}
 }
 
+// handleEvents serves the live SSE feed. It subscribes the connecting browser to the
+// hub, then streams every broadcast event until the client disconnects or the server
+// shuts down (both cancel r.Context() — see ListenAndServe's BaseContext). With no hub
+// wired (standalone `harness serve`) there is nothing to tail, so it answers 503 rather
+// than holding open a stream that would never emit.
+func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	if s.events == nil {
+		http.Error(w, "live events unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+
+	h := w.Header()
+	h.Set("Content-Type", "text/event-stream")
+	h.Set("Cache-Control", "no-cache")
+	// Defeat proxy/response buffering that would otherwise hold frames back and break
+	// the live feel (nginx honors this; harmless elsewhere).
+	h.Set("X-Accel-Buffering", "no")
+
+	sub, cancel := s.events.Subscribe()
+	defer cancel()
+
+	if err := live.Stream(r.Context(), w, sub, sseHeartbeat); err != nil {
+		s.log.Debug("controlroom: sse stream closed", "path", r.URL.Path, "err", err)
+	}
+}
+
 // Handler exposes the routed mux for embedding (e.g. behind middleware) and for httptest.
 func (s *Server) Handler() http.Handler { return s.mux }
 
@@ -103,6 +145,9 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 		Addr:              addr,
 		Handler:           s.mux,
 		ReadHeaderTimeout: 10 * time.Second,
+		// Derive every request context from ctx so a shutdown promptly cancels
+		// long-lived SSE streams instead of waiting out the drain timeout on them.
+		BaseContext: func(net.Listener) context.Context { return ctx },
 	}
 
 	ln, err := net.Listen("tcp", addr)

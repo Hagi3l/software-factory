@@ -57,6 +57,37 @@ func TestBuildRunComponents(t *testing.T) {
 	}
 }
 
+// TestBuildRunComponentsServe proves the co-located control room is assembled only when
+// serveAddr is set: with it the run carries a non-nil server (cmdRun then serves it on
+// the shared NATS), without it the server is nil and only the two loops run. The live
+// NATS->SSE path itself is covered in internal/controlroom and .../live.
+func TestBuildRunComponentsServe(t *testing.T) {
+	cfg, err := loadConfig(testConfigDir, "dev")
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+	resolvePersonas(cfg)
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	off, err := buildRunComponents(cfg, t.TempDir(), runOptions{bdBin: "bd"}, log)
+	if err != nil {
+		t.Fatalf("buildRunComponents (no serve): %v", err)
+	}
+	defer off.cleanup()
+	if off.server != nil {
+		t.Error("server built without serveAddr")
+	}
+
+	on, err := buildRunComponents(cfg, t.TempDir(), runOptions{bdBin: "bd", serveAddr: "127.0.0.1:0"}, log)
+	if err != nil {
+		t.Fatalf("buildRunComponents (serve): %v", err)
+	}
+	defer on.cleanup()
+	if on.server == nil {
+		t.Error("serveAddr set but no server built")
+	}
+}
+
 // TestBuildRunComponentsCleanupReleases confirms cleanup can be called and that a
 // second assembly on the same repo succeeds — i.e. the embedded server and JetStream
 // store dir are released/reusable, matching the crash-and-resume model.

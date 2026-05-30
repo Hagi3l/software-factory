@@ -18,10 +18,31 @@ func TestSubjectHelpers(t *testing.T) {
 		{WorkStreamSubjects, "harness.work.>"},
 		{ResultStreamSubjects, "harness.result.>"},
 		{ControlSubjects, "harness.control.*"},
+		{AgentEventsWildcard, "harness.agent.*.events"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
 			t.Errorf("subject = %q, want %q", c.got, c.want)
+		}
+	}
+}
+
+// TestAgentIDFromEventSubject proves the inverse of AgentEventsSubject round-trips and
+// that malformed subjects (the wrong shape, the wildcard itself, an empty id) yield ""
+// rather than a bogus id — the control room relies on this to label tailed events.
+func TestAgentIDFromEventSubject(t *testing.T) {
+	cases := []struct{ subj, want string }{
+		{AgentEventsSubject("abc123"), "abc123"},
+		{"harness.agent.deadbeef.events", "deadbeef"},
+		{"harness.work.implement", ""},
+		{"harness.agent..events", ""},
+		{AgentEventsWildcard, ""}, // the literal "*" carries no id
+		{"harness.agent.a.b.events", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := AgentIDFromEventSubject(c.subj); got != c.want {
+			t.Errorf("AgentIDFromEventSubject(%q) = %q, want %q", c.subj, got, c.want)
 		}
 	}
 }

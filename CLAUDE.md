@@ -95,6 +95,12 @@ neither tool (generated Go + compiled `app.css` are committed). The Tailwind inp
 (`assets/app.tw.css`) uses `@source` globs pointing at the views dir; vendored JS
 (htmx/Alpine) lives in `assets/static/` and is embedded via `//go:embed`.
 
+The live SSE feed (`GET /events`) needs the run's in-process NATS, so it is served
+**co-located**: `harness run --serve-addr 127.0.0.1:8080` runs the factory *and* the
+control room. Standalone `harness serve` has no NATS, so `/events` returns 503 there
+(static views still render). The SSE substrate is `internal/controlroom/live` (`Hub`,
+`Stream`, `StartAgentEventPump`).
+
 When **writing** a test that needs a deterministic model (no API key, no Docker), use
 `internal/model/modeltest` — `NewServer(t, []Turn)` is an `httptest` SSE server speaking
 the OpenAI streaming wire format, scripted by request count; it drives the *real* `openai`

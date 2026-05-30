@@ -15,6 +15,8 @@ import (
 	"github.com/Loxstomper/harness/internal/artifact"
 	"github.com/Loxstomper/harness/internal/beads"
 	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/harness/internal/controlroom"
+	"github.com/Loxstomper/harness/internal/controlroom/live"
 	"github.com/Loxstomper/harness/internal/gate"
 	"github.com/Loxstomper/harness/internal/messaging"
 	"github.com/Loxstomper/harness/internal/model/registry"
@@ -35,6 +37,7 @@ func cmdRun(args []string) error {
 	env := fs.String("env", "dev", "infra environment overlay to load")
 	repo := fs.String("repo", ".", "integration repository: candidates are pushed and merged here, and worktrees seeded from it")
 	bdBin := fs.String("bd", "bd", "path to the beads CLI")
+	serveAddr := fs.String("serve-addr", "", "if set, also serve the control room on this address (live SSE shares this run's in-process NATS)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -56,7 +59,8 @@ func cmdRun(args []string) error {
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	comp, err := buildRunComponents(cfg, absRepo, runOptions{
-		bdBin: *bdBin,
+		bdBin:     *bdBin,
+		serveAddr: *serveAddr,
 	}, log)
 	if err != nil {
 		return err
@@ -68,10 +72,17 @@ func cmdRun(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Info("harness run: starting", "repo", absRepo, "roles", agentRoles(cfg))
+	log.Info("harness run: starting", "repo", absRepo, "roles", agentRoles(cfg), "serve", *serveAddr)
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return comp.orch.Run(ctx) })
 	g.Go(func() error { return comp.rnr.Run(ctx) })
+	// The control room, when enabled, is co-located in this process so it can tail the
+	// in-process NATS directly (a separate `harness serve` cannot reach a DontListen
+	// embedded server — that awaits distributed NATS, T5.8). A ctx cancel drains it.
+	if comp.server != nil {
+		addr := *serveAddr
+		g.Go(func() error { return comp.server.ListenAndServe(ctx, addr) })
+	}
 	err = g.Wait()
 	log.Info("harness run: stopped", "err", err)
 	return err
@@ -83,6 +94,11 @@ func cmdRun(args []string) error {
 // here — config is their single source of truth (see specs/configuration.md).
 type runOptions struct {
 	bdBin string
+	// serveAddr, when non-empty, co-locates the control room in the run process and
+	// serves it here, sharing this run's in-process NATS so the SSE feed has a live
+	// source. Empty (the default) builds no server. Kept here, not in config, because
+	// it is a deployment knob of this command like bdBin.
+	serveAddr string
 	// backend lets a test inject a non-production sandbox backend (the non-isolating
 	// host-exec local backend) so the spine can be driven end-to-end without Docker
 	// (see TE.1 in IMPLEMENTATION_PLAN.md, specs/bootstrap.md). It is INJECTION-ONLY and
@@ -95,8 +111,11 @@ type runOptions struct {
 // runComponents holds the assembled, ready-to-run kernel and a cleanup that releases
 // everything the assembly acquired (NATS server, the broker socket dir).
 type runComponents struct {
-	orch    *orchestrator.Orchestrator
-	rnr     *runner.Runner
+	orch *orchestrator.Orchestrator
+	rnr  *runner.Runner
+	// server is the co-located control room, non-nil only when runOptions.serveAddr is
+	// set. cmdRun runs it in the same errgroup as the two loops.
+	server  *controlroom.Server
 	cleanup func()
 }
 
@@ -154,6 +173,22 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// this, idempotently).
 	if ssErr := messaging.SetupStreams(context.Background(), js); ssErr != nil {
 		return nil, ssErr
+	}
+
+	// Control room, co-located when serving is enabled. The pump tails this run's
+	// agent-event subjects on the same in-process NATS and fans them into the hub the
+	// SSE endpoint serves; the pump's unsubscribe joins the teardown stack. The server
+	// itself binds no socket until cmdRun calls ListenAndServe, so assembling it here
+	// keeps buildRunComponents network-free and testable.
+	var server *controlroom.Server
+	if opts.serveAddr != "" {
+		hub := live.NewHub()
+		pumpStop, perr := live.StartAgentEventPump(nc, hub)
+		if perr != nil {
+			return nil, perr
+		}
+		releases = append(releases, pumpStop)
+		server = controlroom.New(controlroom.Options{Version: version, Logger: log, Events: hub})
 	}
 
 	// Artifact store. Resolve a relative path against the repo so it does not depend
@@ -229,5 +264,5 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		return nil, err
 	}
 
-	return &runComponents{orch: orch, rnr: rnr, cleanup: cleanupAll}, nil
+	return &runComponents{orch: orch, rnr: rnr, server: server, cleanup: cleanupAll}, nil
 }
