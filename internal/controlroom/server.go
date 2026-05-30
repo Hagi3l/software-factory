@@ -23,6 +23,7 @@ import (
 
 	"github.com/Loxstomper/harness/internal/controlroom/assets"
 	"github.com/Loxstomper/harness/internal/controlroom/live"
+	"github.com/Loxstomper/harness/internal/controlroom/query"
 	"github.com/Loxstomper/harness/internal/controlroom/views"
 )
 
@@ -36,20 +37,30 @@ const sseHeartbeat = 25 * time.Second
 // when set — turns on the live SSE feed at GET /events. Events is nil for a standalone
 // `harness serve` (no running factory to tail); `harness run --serve-addr` supplies a
 // hub fed from the run's in-process NATS.
+//
+// Reader is the read model behind the data views (the Board, T4.4, and later DLQ /
+// detail / provenance). It is nil for a standalone serve with no stores to read, in
+// which case those views render a "not attached to a factory" notice. StageOrder is the
+// pipeline role order the board lays its columns out in (left-to-right flow); empty is
+// tolerated — the board falls back to alphabetical column order.
 type Options struct {
-	Version string
-	Logger  *slog.Logger
-	Events  *live.Hub
+	Version    string
+	Logger     *slog.Logger
+	Events     *live.Hub
+	Reader     *query.Reader
+	StageOrder []string
 }
 
 // Server renders the control room. It is an http.Handler (via Handler) so its routes can
 // be exercised with httptest without binding a socket, and it offers ListenAndServe for
 // the `harness serve` command with context-driven graceful shutdown.
 type Server struct {
-	mux     *http.ServeMux
-	log     *slog.Logger
-	version string
-	events  *live.Hub
+	mux        *http.ServeMux
+	log        *slog.Logger
+	version    string
+	events     *live.Hub
+	reader     *query.Reader
+	stageOrder []string
 }
 
 // New builds the server and registers every route. Routes are registered eagerly so a
@@ -59,7 +70,14 @@ func New(opts Options) *Server {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(noopWriter{}, nil))
 	}
-	s := &Server{mux: http.NewServeMux(), log: log, version: opts.Version, events: opts.Events}
+	s := &Server{
+		mux:        http.NewServeMux(),
+		log:        log,
+		version:    opts.Version,
+		events:     opts.Events,
+		reader:     opts.Reader,
+		stageOrder: opts.StageOrder,
+	}
 	s.routes()
 	return s
 }
@@ -88,10 +106,19 @@ func (s *Server) routes() {
 		s.render(w, r, views.Home(s.version))
 	})
 
-	// Each navigation destination resolves to a real page. These are placeholders until
-	// their data-backed views land (T4.2+); registering them from views.NavItems keeps
-	// the navigation and the routes a single source of truth.
+	// Data-backed views, registered before the placeholder loop claims their path.
+	s.mux.HandleFunc("GET /board", s.handleBoard)             // T4.4 — kanban over beads
+	s.mux.HandleFunc("GET /board/cards", s.handleBoardCards)  // the htmx/SSE live fragment
+
+	// Every remaining navigation destination resolves to a placeholder until its
+	// data-backed view lands; registering them from views.NavItems keeps the navigation
+	// and the routes a single source of truth. `implemented` excludes the views wired
+	// above so the mux is not asked to register a duplicate pattern.
+	implemented := map[string]bool{"board": true}
 	for _, item := range views.NavItems {
+		if implemented[item.Key] {
+			continue
+		}
 		s.mux.HandleFunc("GET "+item.Href, func(w http.ResponseWriter, r *http.Request) {
 			s.render(w, r, views.Placeholder(item.Label, item.Key))
 		})
@@ -132,6 +159,43 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if err := live.Stream(r.Context(), w, sub, sseHeartbeat); err != nil {
 		s.log.Debug("controlroom: sse stream closed", "path", r.URL.Path, "err", err)
 	}
+}
+
+// handleBoard renders the full kanban page. With no read model wired (standalone
+// `harness serve`) it shows a "not attached" notice rather than an empty board; a board
+// read error renders the same chrome with the error so the page never 500s blank. The
+// live columns refresh themselves from handleBoardCards over SSE.
+func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		s.render(w, r, views.BoardMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to see live work."))
+		return
+	}
+	board, err := s.reader.Board(r.Context(), s.stageOrder)
+	if err != nil {
+		s.log.Error("controlroom: board read failed", "err", err)
+		s.render(w, r, views.BoardMessage("Could not load the board: "+err.Error()))
+		return
+	}
+	s.render(w, r, views.BoardPage(board))
+}
+
+// handleBoardCards returns just the columns fragment — the htmx swap target the board
+// page re-fetches on an SSE signal (throttled) and a periodic backstop. It is a data
+// endpoint, so with no read model it answers 503 (it is never wired without one), and a
+// read error is a 500: htmx leaves the last good columns in place rather than swapping in
+// an error, so the live board degrades to "stale" not "broken".
+func (s *Server) handleBoardCards(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		http.Error(w, "board unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+	board, err := s.reader.Board(r.Context(), s.stageOrder)
+	if err != nil {
+		s.log.Error("controlroom: board fragment read failed", "err", err)
+		http.Error(w, "could not refresh the board\n", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, views.BoardColumns(board))
 }
 
 // Handler exposes the routed mux for embedding (e.g. behind middleware) and for httptest.

@@ -1,0 +1,152 @@
+package controlroom
+
+import (
+	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+
+	"github.com/Loxstomper/harness/internal/controlroom/query"
+	"github.com/Loxstomper/harness/internal/core"
+)
+
+// fakeIssues is a query.IssueReader backed by a fixed slice — enough to drive the board
+// (which only reads ListAll) without a bd binary.
+type fakeIssues struct{ all []core.Issue }
+
+func (f *fakeIssues) ListAll(context.Context) ([]core.Issue, error) { return f.all, nil }
+func (f *fakeIssues) List(_ context.Context, status string) ([]core.Issue, error) {
+	var out []core.Issue
+	for _, i := range f.all {
+		if i.Status == status {
+			out = append(out, i)
+		}
+	}
+	return out, nil
+}
+func (f *fakeIssues) Get(_ context.Context, id string) (core.Issue, error) {
+	for _, i := range f.all {
+		if i.ID == id {
+			return i, nil
+		}
+	}
+	return core.Issue{}, io.EOF
+}
+
+// fakeArts / fakeProv satisfy the other two ports; the board does not touch them.
+type fakeArts struct{}
+
+func (fakeArts) Has(context.Context, string) (bool, error)          { return false, nil }
+func (fakeArts) Get(context.Context, string) (io.ReadCloser, error) { return nil, io.EOF }
+
+type fakeProv struct{}
+
+func (fakeProv) ByIssue(context.Context, string) (core.Provenance, bool, error) {
+	return core.Provenance{}, false, nil
+}
+func (fakeProv) Recent(context.Context, int) ([]query.MergedCommit, error) { return nil, nil }
+
+func boardReader() *query.Reader {
+	return query.NewReader(&fakeIssues{all: []core.Issue{
+		{ID: "harness-1", Title: "Build the thing", Status: "in_progress", Role: "implementor", Attempt: 1, Spec: "specs/x.md"},
+		{ID: "harness-2", Title: "Write the tests", Status: "blocked", Role: "test-author", Attempt: 2},
+		{ID: "harness-3", Title: "Plan the epic", Status: "closed", Role: "planner"},
+	}}, fakeArts{}, fakeProv{})
+}
+
+func boardServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	s := New(Options{
+		Version:    "test",
+		Reader:     boardReader(),
+		StageOrder: []string{"planner", "test-author", "implementor", "security"},
+	})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// TestBoardRendersColumnsInPipelineOrder is T4.4's core contract: every issue appears as a
+// card under its role column, columns read left-to-right in the supplied pipeline order,
+// and the page wires itself to the SSE substrate for live refresh.
+func TestBoardRendersColumnsInPipelineOrder(t *testing.T) {
+	ts := boardServer(t)
+	r := get(t, ts, "/board")
+
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	for _, want := range []string{
+		"Build the thing", "Write the tests", "Plan the epic", // every card
+		"harness-1", "harness-2", "harness-3", // ids
+		"planner", "test-author", "implementor", // role column headers
+		"attempt 2",                  // the retried card surfaces its generation
+		`sse-connect="/events"`,      // wired to the T4.3 substrate
+		`hx-get="/board/cards"`,      // live fragment refresh target
+		`href="/static/app.css"`,     // inside the base layout chrome
+	} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("board page missing %q", want)
+		}
+	}
+	// Pipeline order: planner before test-author before implementor; security is empty so
+	// it is skipped (the board reflects the data, no empty columns).
+	if pos(r.body, "planner") > pos(r.body, "test-author") || pos(r.body, "test-author") > pos(r.body, "implementor") {
+		t.Errorf("columns not in pipeline order: %q", colOrder(r.body))
+	}
+	if strings.Contains(r.body, ">security<") {
+		t.Errorf("empty 'security' column should be skipped")
+	}
+}
+
+// TestBoardCardsFragmentIsBare proves the live fragment is the columns only — no <html>
+// chrome — so an htmx swap replaces the columns in place rather than nesting a whole page.
+func TestBoardCardsFragmentIsBare(t *testing.T) {
+	ts := boardServer(t)
+	r := get(t, ts, "/board/cards")
+
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	if strings.Contains(strings.ToLower(r.body), "<!doctype") || strings.Contains(r.body, "<html") {
+		t.Errorf("fragment must not include the page chrome: %q", r.body)
+	}
+	for _, want := range []string{"Build the thing", "implementor", "harness-1"} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("fragment missing %q", want)
+		}
+	}
+}
+
+// TestBoardWithoutReader covers the standalone path: with no read model the page renders a
+// "not attached" notice (still 200, still in the chrome), and the data fragment 503s.
+func TestBoardWithoutReader(t *testing.T) {
+	ts := newTestServer(t) // built without Options.Reader
+	page := get(t, ts, "/board")
+	if page.status != http.StatusOK {
+		t.Fatalf("/board status = %d, want 200", page.status)
+	}
+	if !strings.Contains(page.body, "Not attached") {
+		t.Errorf("/board missing the not-attached notice: %q", page.body)
+	}
+
+	frag := get(t, ts, "/board/cards")
+	if frag.status != http.StatusServiceUnavailable {
+		t.Errorf("/board/cards status = %d, want 503", frag.status)
+	}
+}
+
+func pos(s, sub string) int { return strings.Index(s, sub) }
+
+// colOrder is a tiny debugging aid: the role headers in document order.
+func colOrder(body string) []string {
+	var out []string
+	for _, role := range []string{"planner", "test-author", "implementor", "security"} {
+		if strings.Contains(body, role) {
+			out = append(out, role)
+		}
+	}
+	return out
+}

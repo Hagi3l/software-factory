@@ -187,13 +187,29 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   the Activity feed (T4.5) via `sse-swap`. Fully tested: hub fan-out/drop/cancel (incl. `-race`),
   SSE framing + heartbeat + flusher-required, pump over real embedded NATS, and the `/events`
   endpoint end-to-end (broadcast → frame on the wire; disconnect → unsubscribe). ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
-- [ ] **T4.4 Board view** — kanban over beads issues by stage (use `query.Reader.Board`), live via
-  T4.3. The board is server-rendered (templ); for live refresh, attach an SSE listener that *signals*
-  staleness (`hx-trigger="sse:agent-event"` → htmx GET re-renders the board fragment) rather than
-  diffing client-side — keeps rendering server-side. Note T4.3's feed currently carries only
-  `agent-event` (per-invocation progress); a board that must react to *stage transitions* may want a
-  dedicated event — the orchestrator is the single writer of issue state, so emit a board/issue event
-  there (a new core-NATS subject + a pump branch) if `agent-event` proves too coarse. (needs T4.2, T4.3) ([control-room.md](specs/control-room.md))
+- [x] **T4.4 Board view** — *done.* Kanban over beads issues, server-rendered (templ) and live via
+  the T4.3 SSE substrate. `views.BoardPage`/`BoardColumns`/`boardColumn`/`boardCard` render
+  `query.Reader.Board(stageOrder)` — issues grouped by `Role` into columns, each card showing
+  id/title/status (tinted `statusBadge`, blocked stands out)/spec/retry generation. **Live refresh**
+  is htmx-pure, no client graph lib: the columns sit in `<div hx-ext="sse" sse-connect="/events">`
+  and re-fetch the bare `GET /board/cards` fragment on `hx-trigger="sse:agent-event throttle:2s,
+  every 15s"` — SSE-responsive with a slow periodic backstop so a *settled* board still converges
+  when the event stream goes idle. Initial columns render inline so the page shows data before htmx
+  attaches. **Server:** `Options.Reader *query.Reader` + `Options.StageOrder []string`; real
+  `/board` + `/board/cards` handlers registered ahead of the nav-placeholder loop (an `implemented`
+  set keeps the mux from double-registering); nil reader (standalone `harness serve`) renders a
+  "not attached" notice page and 503s the fragment. **Column order:** new `pipelineRoles(cfg)`
+  (cmd/harness) walks the DAG `produces` edges **breadth-first** from the entry stage(s) — BFS not
+  DFS so a fork/join lays out after *both* branches — yielding `planner, test-author, implementor,
+  security` with the out-of-band `merge-resolver` (resolve stage, reached by no edge) appended last;
+  passed as `StageOrder`. **Wiring:** `run --serve-addr` builds the Reader from a read-only beads
+  client (orchestrator stays the single writer), the shared artifact store, and `query.NewGitProvenance(repo)`.
+  Tested: column/card render + pipeline order + empty-column skip + SSE wiring, bare-fragment shape,
+  no-reader notice/503, and `pipelineRoles` (linear + diamond + no-harness). **Known coarseness:**
+  the live trigger is `agent-event` (per-invocation progress), so a refresh fires on agent activity,
+  not precisely on a stage transition — adequate (throttle + backstop converge it), but a dedicated
+  orchestrator-emitted issue-state event (the single writer) would be crisper; filed as a future
+  refinement, not blocking. (needs T4.2, T4.3) ([control-room.md](specs/control-room.md))
 - [ ] **T4.5 Activity feed** — `harness.agent.<id>.events` streamed to the browser (what agents are
   doing right now). The substrate is live: subscribe the feed element to `GET /events` (`hx-ext="sse"
   sse-connect="/events"`) and `sse-swap="agent-event"`. The `agent-event` data is JSON

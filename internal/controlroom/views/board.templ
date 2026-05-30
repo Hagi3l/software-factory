@@ -1,0 +1,113 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/Loxstomper/harness/internal/controlroom/query"
+)
+
+// BoardPage is the kanban view (specs/control-room.md, T4.4): every beads issue grouped
+// into a column by the role/stage it is dispatched to, columns left-to-right in pipeline
+// order. It is server-rendered (templ) and made live without a client graph lib: the SSE
+// substrate (T4.3) wraps the columns, and an `sse:agent-event` trigger re-fetches the
+// columns fragment (throttled), with a slow periodic backstop so a settled board still
+// converges even when the event stream is idle. The initial columns are rendered inline
+// so the page shows data immediately, before htmx attaches.
+templ BoardPage(board query.Board) {
+	@Layout("Harness — Board", "board") {
+		<div class="space-y-4">
+			<div class="flex items-baseline justify-between">
+				<h1 class="text-xl font-semibold tracking-tight">Board</h1>
+				<span class="text-sm text-slate-500">{ strconv.Itoa(board.Total) } issues</span>
+			</div>
+			<div hx-ext="sse" sse-connect="/events">
+				<div
+					id="board"
+					hx-get="/board/cards"
+					hx-trigger="sse:agent-event throttle:2s, every 15s"
+					hx-swap="innerHTML"
+				>
+					@BoardColumns(board)
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// BoardColumns renders just the kanban columns. It is both embedded in BoardPage for the
+// initial paint and returned bare from GET /board/cards as the htmx swap target, so the
+// live refresh replaces only the columns, never the chrome.
+templ BoardColumns(board query.Board) {
+	if len(board.Columns) == 0 {
+		<p class="text-slate-400">No issues yet.</p>
+	} else {
+		<div class="flex gap-4 overflow-x-auto pb-4">
+			for _, col := range board.Columns {
+				@boardColumn(col)
+			}
+		</div>
+	}
+}
+
+// boardColumn is one stage's column: a header naming the stage with a live count, then
+// its cards (ordered by the query layer for a stable render).
+templ boardColumn(col query.BoardColumn) {
+	<div class="flex w-72 shrink-0 flex-col rounded-lg border border-slate-800 bg-slate-900/40">
+		<div class="flex items-center justify-between border-b border-slate-800 px-3 py-2">
+			<span class="text-sm font-medium text-slate-200">{ col.Stage }</span>
+			<span class="rounded-full bg-slate-800 px-2 text-xs text-slate-400">{ strconv.Itoa(len(col.Cards)) }</span>
+		</div>
+		<div class="flex flex-col gap-2 p-2">
+			for _, card := range col.Cards {
+				@boardCard(card)
+			}
+		</div>
+	</div>
+}
+
+// boardCard is the compact issue projection. It is a plain block for now; the click
+// target into the issue/invocation detail view lands with that view (T4.7).
+templ boardCard(card query.IssueCard) {
+	<div class="rounded-md border border-slate-800 bg-slate-900/60 p-3">
+		<div class="flex items-center justify-between gap-2">
+			<span class="font-mono text-xs text-slate-500">{ card.ID }</span>
+			@statusBadge(card.Status)
+		</div>
+		<p class="mt-1 text-sm text-slate-100">{ card.Title }</p>
+		if card.Spec != "" {
+			<p class="mt-1 truncate font-mono text-xs text-slate-500">{ card.Spec }</p>
+		}
+		if card.Attempt > 1 {
+			<p class="mt-1 text-xs text-amber-400">attempt { strconv.Itoa(card.Attempt) }</p>
+		}
+	</div>
+}
+
+// statusBadge tints the beads status so the board reads at a glance — blocked work (the
+// dead-letter action surface) stands out, closed/merged work recedes. The class literals
+// are kept inline (not a Go helper) so the Tailwind scanner, which globs *.templ /
+// *_templ.go, actually sees them.
+templ statusBadge(status string) {
+	switch status {
+		case "blocked":
+			<span class="rounded bg-rose-500/20 px-1.5 py-0.5 text-xs text-rose-300">{ status }</span>
+		case "in_progress":
+			<span class="rounded bg-sky-500/20 px-1.5 py-0.5 text-xs text-sky-300">{ status }</span>
+		case "closed":
+			<span class="rounded bg-slate-700/40 px-1.5 py-0.5 text-xs text-slate-400">{ status }</span>
+		default:
+			<span class="rounded bg-slate-700/40 px-1.5 py-0.5 text-xs text-slate-300">{ status }</span>
+	}
+}
+
+// BoardMessage renders the board chrome with a single notice instead of columns — used
+// when the control room is not attached to a running factory (a standalone `harness
+// serve` has no beads to read) or when the board read fails.
+templ BoardMessage(msg string) {
+	@Layout("Harness — Board", "board") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">Board</h1>
+			<p class="mt-2 text-slate-400">{ msg }</p>
+		</div>
+	}
+}

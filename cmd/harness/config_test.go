@@ -95,6 +95,40 @@ func TestAgentRolesAndRoleIsAgentStage(t *testing.T) {
 	}
 }
 
+// TestPipelineRoles proves the board column order follows the DAG's produces edges, not
+// alphabetical role order: the shipped pipeline is plan->author-tests->implement->qa, so
+// the columns read planner, test-author, implementor, security, with the out-of-band
+// resolve role (reached by no produces edge) appended last. This is what makes the board
+// read left-to-right like the flow rather than scrambling the stages.
+func TestPipelineRoles(t *testing.T) {
+	cfg := loadTestConfig(t)
+	roles := pipelineRoles(cfg)
+	want := []string{"planner", "test-author", "implementor", "security", "merge-resolver"}
+	if !reflect.DeepEqual(roles, want) {
+		t.Fatalf("pipelineRoles = %v, want %v", roles, want)
+	}
+
+	// Roleless stages (human requirements, trusted-merge integrate) contribute no column,
+	// and each role appears exactly once even when a diamond re-converges.
+	diamond := &config.Config{Harness: &config.Harness{DAG: map[string]config.Stage{
+		"requirements": {Kind: config.StageKindHuman, Produces: []string{"plan"}},
+		"plan":         {Role: "planner", Kind: config.StageKindPlan, Produces: []string{"a", "b"}},
+		"a":            {Role: "ra", Produces: []string{"join"}},
+		"b":            {Role: "rb", Produces: []string{"join"}},
+		"join":         {Role: "rj", Produces: []string{"integrate"}},
+		"integrate":    {Kind: config.StageKindTrustedMerge},
+	}}}
+	got := pipelineRoles(diamond)
+	want = []string{"planner", "ra", "rb", "rj"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("pipelineRoles(diamond) = %v, want %v", got, want)
+	}
+
+	if r := pipelineRoles(&config.Config{}); r != nil {
+		t.Fatalf("pipelineRoles(no harness) = %v, want nil", r)
+	}
+}
+
 // TestResolvePersonas confirms persona paths become absolute and still point at a
 // real file — the in-process agent loop reads this path directly off the host, so a
 // relative path would break the moment the process runs from another directory.

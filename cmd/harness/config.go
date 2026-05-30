@@ -50,6 +50,80 @@ func agentRoles(cfg *config.Config) []string {
 	return roles
 }
 
+// pipelineRoles returns the agent-stage roles in pipeline order — the order their
+// stages are reached by walking `produces` edges from the entry stage(s). It is the
+// left-to-right column order for the control-room board, whose issues group by role
+// (a "stage" key in the DAG carries a `role`; an issue's Role is what it dispatches to).
+// Stages with no role (the human requirements stage, the trusted-merge integrate stage)
+// contribute no column. A resolve stage is reached by no produces edge, so its role is
+// appended after the linear flow. Each role appears once, in first-reached order.
+//
+// Deterministic: entry stages and any unreached remainder are visited in sorted name
+// order, so the column order is stable across runs.
+func pipelineRoles(cfg *config.Config) []string {
+	if cfg.Harness == nil {
+		return nil
+	}
+	dag := cfg.Harness.DAG
+
+	produced := map[string]bool{}
+	for _, st := range dag {
+		for _, p := range st.Produces {
+			produced[p] = true
+		}
+	}
+
+	var order []string
+	seenRole := map[string]bool{}
+	seenStage := map[string]bool{}
+	// bfs walks produces edges breadth-first from seeds, emitting each stage's role in
+	// level order. Breadth-first (not depth-first) is what places a join stage after
+	// *both* of its upstream branches, so the board columns read left-to-right like the
+	// flow even when the DAG forks and re-converges.
+	bfs := func(seeds []string) {
+		queue := append([]string(nil), seeds...)
+		for len(queue) > 0 {
+			stage := queue[0]
+			queue = queue[1:]
+			if seenStage[stage] {
+				continue
+			}
+			seenStage[stage] = true
+			st, ok := dag[stage]
+			if !ok {
+				continue
+			}
+			if st.Role != "" && !seenRole[st.Role] {
+				seenRole[st.Role] = true
+				order = append(order, st.Role)
+			}
+			queue = append(queue, st.Produces...)
+		}
+	}
+
+	// Entry stages (produces-indegree 0), in sorted name order for stability. A resolve
+	// stage is also unproduced — the orchestrator spawns it on a conflict, not via a
+	// produces edge — but it is not a pipeline entry, so it is excluded here and picked
+	// up in the remainder pass, which appends its role after the linear flow.
+	var entries, remainder []string
+	for name, st := range dag {
+		if !produced[name] && st.Kind != config.StageKindResolve {
+			entries = append(entries, name)
+		}
+	}
+	sort.Strings(entries)
+	bfs(entries)
+
+	for name := range dag {
+		if !seenStage[name] {
+			remainder = append(remainder, name)
+		}
+	}
+	sort.Strings(remainder)
+	bfs(remainder)
+	return order
+}
+
 // roleIsAgentStage reports whether role is fulfilled by an agent stage in the DAG.
 func roleIsAgentStage(cfg *config.Config, role string) bool {
 	if cfg.Harness == nil {

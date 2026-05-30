@@ -17,6 +17,7 @@ import (
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/controlroom"
 	"github.com/Loxstomper/harness/internal/controlroom/live"
+	"github.com/Loxstomper/harness/internal/controlroom/query"
 	"github.com/Loxstomper/harness/internal/gate"
 	"github.com/Loxstomper/harness/internal/messaging"
 	"github.com/Loxstomper/harness/internal/model/registry"
@@ -175,22 +176,6 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		return nil, ssErr
 	}
 
-	// Control room, co-located when serving is enabled. The pump tails this run's
-	// agent-event subjects on the same in-process NATS and fans them into the hub the
-	// SSE endpoint serves; the pump's unsubscribe joins the teardown stack. The server
-	// itself binds no socket until cmdRun calls ListenAndServe, so assembling it here
-	// keeps buildRunComponents network-free and testable.
-	var server *controlroom.Server
-	if opts.serveAddr != "" {
-		hub := live.NewHub()
-		pumpStop, perr := live.StartAgentEventPump(nc, hub)
-		if perr != nil {
-			return nil, perr
-		}
-		releases = append(releases, pumpStop)
-		server = controlroom.New(controlroom.Options{Version: version, Logger: log, Events: hub})
-	}
-
 	// Artifact store. Resolve a relative path against the repo so it does not depend
 	// on the process working dir.
 	art := cfg.Infra.Artifacts
@@ -200,6 +185,35 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	store, err := artifact.Open(art)
 	if err != nil {
 		return nil, err
+	}
+
+	// Control room, co-located when serving is enabled. It shares this run's in-process
+	// NATS (the pump tails the agent-event subjects into the SSE hub) and reads the same
+	// three stores the loops write — beads (read-only; the orchestrator is the single
+	// writer), the artifact store, and git provenance — so the human's window shows live
+	// work. The server binds no socket until cmdRun calls ListenAndServe, so assembling
+	// it here keeps buildRunComponents network-free and testable. The pump's unsubscribe
+	// joins the teardown stack.
+	var server *controlroom.Server
+	if opts.serveAddr != "" {
+		hub := live.NewHub()
+		pumpStop, perr := live.StartAgentEventPump(nc, hub)
+		if perr != nil {
+			return nil, perr
+		}
+		releases = append(releases, pumpStop)
+		reader := query.NewReader(
+			beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)),
+			store,
+			query.NewGitProvenance(repo),
+		)
+		server = controlroom.New(controlroom.Options{
+			Version:    version,
+			Logger:     log,
+			Events:     hub,
+			Reader:     reader,
+			StageOrder: pipelineRoles(cfg),
+		})
 	}
 
 	// Model registry: soul.model -> provider adapter. Keys come from the environment
