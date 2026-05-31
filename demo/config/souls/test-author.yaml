@@ -1,0 +1,12 @@
+# Demo test author: fulfills the `author-tests` role. It writes the FAILING acceptance
+# test (a bash script that greps index.html) from the spec, and is a *different* soul
+# than the implementor — producer ≠ verifier. It reuses the `go-toolchain` sandbox image
+# (which has bash + grep + git; no Go is needed for the shell gate), so the demo needs no
+# new image. The model resolves through demo/config/infra.dev.yaml; the key comes from
+# the environment. One soul per role, so no selector is needed.
+name:    demo-test-author
+role:    test-author
+model:   "qwen3.6:27b"
+persona: souls/prompts/test-author.md
+tools:   [fs, shell, git]
+sandbox: go-toolchain

@@ -1,0 +1,10 @@
+# Demo implementor: fulfills the `implement` role. Its worktree already holds the
+# failing acceptance test the test-author wrote; its job is to write index.html so the
+# test passes. A different soul than the test-author (producer ≠ verifier). Reuses the
+# `go-toolchain` sandbox image (bash + grep + git). One soul per role, no selector.
+name:    demo-implementor
+role:    implementor
+model:   "qwen3.6:27b"
+persona: souls/prompts/implementor.md
+tools:   [fs, shell, git]
+sandbox: go-toolchain

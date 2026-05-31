@@ -1,0 +1,71 @@
+# Demo workflow — a minimal, web-flavored pipeline for the landing-page demo.
+#
+# This is a deliberately stripped-down DAG, separate from the harness's own
+# config/harness.yaml, so a weak local model has the smallest possible surface to drive
+# while still exercising the harness's signature guarantee — the red→green,
+# producer ≠ verifier gate. See demo/README.md and specs/workflow.md.
+#
+# Differences from the shipped config, and why:
+#   - No `plan` stage. The seed enters directly at `author-tests` (the entry stage —
+#     the agent stage no other stage produces). Decomposition is where weak models flail
+#     and the task is a single file, so we skip it. (The kernel itself began this way.)
+#   - No `qa` stage and no scanners. gosec/govulncheck/mutation/license-scan are
+#     Go/security checks, meaningless for a static HTML page, and aren't baked into the
+#     sandbox image. The merge-queue re-gate at integrate already re-verifies a rebased
+#     result, so the independent-verification story is intact without qa.
+#   - `profile: autonomous`. The candidate diff is index.html + acceptance.sh in a
+#     throwaway repo, which matches no TCB path, so integrate merges hands-free — no
+#     `harness approve` step. Flip to trusted-dev (and add `tcb_paths` + a
+#     `human-approved` postcondition on integrate) to demo the approval gate instead.
+#
+# The gate is a single shell command (checks.tests-pass below): the test-author writes a
+# bash script that greps index.html for the four required elements, and the red→green
+# proofs run THAT script against the base and the candidate. The acceptance test must be
+# written to the path the check names — `acceptance.sh` at the repo root — which the
+# test-author persona is told explicitly. If those two drift, the gate runs a file that
+# does not exist and fails closed.
+
+spec_depth: 1
+
+dag:
+  # Entry stage: a different soul than the implementor writes the FAILING acceptance
+  # test from the spec. `tests-red` proves the script genuinely fails with no index.html
+  # present (a vacuous or always-green test is rejected before an implement attempt).
+  author-tests:
+    role: test-author
+    precondition: blockers-closed
+    postcondition: [tests-red]
+    on_failure: author-tests
+    produces: [implement]
+
+  # Makes the test pass. `tests-red-then-green` runs the acceptance script against two
+  # refs in a clean sandbox: it must FAIL on the base (the author-tests candidate, which
+  # holds acceptance.sh but no index.html) and PASS on the implement candidate — proving
+  # the implementation actually turned the test green.
+  implement:
+    role: implementor
+    precondition: blockers-closed
+    postcondition: [tests-red-then-green]
+    on_failure: implement
+    produces: [integrate]
+
+  # Terminal merge to main, executed inline by the orchestrator. Under the autonomous
+  # profile with no TCB-touching diff, it merges without human approval.
+  integrate:
+    kind: trusted-merge
+
+# The acceptance-test command the gate runs in the clean verification sandbox: the
+# bash script the test-author commits to the repo root. Exit 0 = the page satisfies the
+# spec; non-zero = a missing element or a missing file (fail closed). This single key is
+# the source of truth the `tests-red` and `tests-red-then-green` proofs both reuse.
+checks:
+  tests-pass: bash acceptance.sh
+
+policy:
+  max_retries: 3
+  # Local inference is free, so no USD cap; tokens + wall + retries are the termination
+  # guarantee. The wall here is cumulative across the on_failure loop; the per-invocation
+  # sandbox ceiling is in infra.dev.yaml. A weak model is slow, so these are generous.
+  budget: { tokens: 8_000_000, wall: 3h }
+  dead_letter: harness.dlq
+  profile: autonomous

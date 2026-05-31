@@ -9,6 +9,16 @@ A CI/CD pipeline whose build steps are hostile-by-assumption agents.
   (index); follow links, don't read top-to-bottom. `specs/glossary.md` defines terms.
 - `IMPLEMENTATION_PLAN.md` is the build order (kernel-first).
 - If the design needs to change, **update the spec** — don't just change code.
+- `README.md` + `docs/` are the operator guide (the *how to use*, distinct from `specs/`
+  = the *what*): build/run, CLI, config, pipeline, control room. **They describe
+  observable behavior, so they must track it.** Any change to the CLI surface (commands
+  or flags in `cmd/harness`), the shipped `config/` shape (DAG stages, `checks`,
+  `policy`, soul/infra fields), or the control-room views/routes is **incomplete until
+  the matching doc is updated in the same change** — `docs/cli.md` for flags,
+  `docs/configuration.md` for config, `docs/control-room.md` for views/routes,
+  `docs/pipeline.md` for stage/flow changes, `docs/getting-started.md` for the run
+  steps. Treat a doc/reality mismatch as a bug. Where `docs/` would restate design
+  rationale, link to the spec instead of duplicating it (the spec stays the truth).
 
 ## Status
 **Phases 2–4 essentially built out (by hand, human-reviewed — not self-hosted).**
