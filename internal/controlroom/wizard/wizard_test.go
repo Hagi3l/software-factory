@@ -18,14 +18,16 @@ import (
 // it blocks on release until the test lets the reply land, so the in-flight window is
 // deterministic — which the modeltest round-trip is too fast to observe.
 type fakeAdapter struct {
-	release chan struct{}
-	reply   string
-	err     error
-	calls   int
+	release   chan struct{}
+	reply     string
+	err       error
+	calls     int
+	gotSystem string // the System prompt of the last request (so a test can assert grounding)
 }
 
-func (a *fakeAdapter) Complete(_ context.Context, _ model.Request, onEvent model.StreamHandler) (model.Response, error) {
+func (a *fakeAdapter) Complete(_ context.Context, req model.Request, onEvent model.StreamHandler) (model.Response, error) {
 	a.calls++
+	a.gotSystem = req.System
 	if a.release != nil {
 		<-a.release
 	}

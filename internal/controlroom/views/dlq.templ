@@ -11,9 +11,9 @@ import (
 // cap, or an escalation it cannot resolve (specs/workflow.md). It is the control room's
 // primary *action* surface: per the human re-entry invariant, stuck work is resolved by
 // refining the governing spec (never by editing code — specs/specs-process.md), so each
-// entry links into the issue-detail page (T4.7) where the brief, spend, and evidence the
-// human triages on live. Resolve mode (T4.15) — the wizard pre-loaded from an entry — is a
-// later task; until then the DLQ is the read surface that surfaces *what* needs a human.
+// entry's title links into the issue-detail page (T4.7) for the forensic trail and a prominent
+// "Resolve →" link launches the Resolve wizard (T4.15) — the action — pre-loaded from the
+// escalation. The orchestrator's dead-letter reason is now shown inline too (T4.15).
 //
 // Like the board and the feed it is live over the T4.3 SSE substrate: an agent-event nudges
 // an htmx refetch of just the list (throttled), with a slow periodic backstop so the queue
@@ -63,35 +63,39 @@ templ DeadLetterList(items []query.DeadLetter) {
 	}
 }
 
-// deadLetterRow is one escalation. The whole row is a click-through into the issue/
-// invocation detail view (T4.7) — the DLQ's role is triage at a glance, the detail page is
-// where a human reads the brief, evidence, and provenance before refining the spec. It is
-// tinted rose to read as "needs attention" the moment the eye lands on it. The spend and
-// attempt are shown inline because they are the two non-escalation dead-letter causes
-// (budget breach, exhausted retry cap), so they tell the human the likely reason without a
-// drill-down.
+// deadLetterRow is one escalation, tinted rose to read as "needs attention" the moment the eye
+// lands on it. The title links to the issue/invocation detail view (T4.7) for the full forensic
+// trail; the prominent "Resolve →" link launches the Resolve wizard (T4.15) — the *action* per
+// the human re-entry invariant (refine the spec, never edit code). The reason is the
+// orchestrator's own classification of why the work terminated (T4.15), shown so the human sees
+// the cause without drilling in; the spend and attempt sit alongside since a budget breach and an
+// exhausted retry cap are the two non-escalation causes (specs/workflow.md). The row is no longer
+// a single anchor — it carries two distinct links — so it is a card, not a click-through.
 templ deadLetterRow(dl query.DeadLetter) {
-	<li>
-		<a
-			href={ templ.URL("/issue/" + dl.ID) }
-			class="block rounded-md border border-rose-900/50 bg-rose-950/20 p-3 transition hover:border-rose-700 hover:bg-rose-950/40"
-		>
-			<div class="flex items-center justify-between gap-2">
-				<span class="font-mono text-xs text-slate-500">{ dl.ID }</span>
+	<li class="rounded-md border border-rose-900/50 bg-rose-950/20 p-3">
+		<div class="flex items-center justify-between gap-2">
+			<span class="font-mono text-xs text-slate-500">{ dl.ID }</span>
+			<div class="flex items-center gap-3">
 				<span class="rounded bg-rose-500/20 px-1.5 py-0.5 text-xs text-rose-300">blocked</span>
+				<a href={ templ.URL("/resolve/" + dl.ID) } class="rounded bg-emerald-600/90 px-2 py-0.5 text-xs font-medium text-white transition hover:bg-emerald-500">Resolve →</a>
 			</div>
-			<p class="mt-1 text-sm text-slate-100">{ dl.Title }</p>
-			<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-				if dl.Role != "" {
-					<span>{ dl.Role }</span>
-				}
-				if dl.Spec != "" {
-					<span class="font-mono text-slate-500">{ dl.Spec }</span>
-				}
-				<span class="text-amber-400">attempt { strconv.Itoa(dl.Attempt) }</span>
-				<span>{ strconv.Itoa(dl.SpentTokens) } tokens · { formatUSD(dl.SpentUSD) }</span>
-			</div>
-		</a>
+		</div>
+		<p class="mt-1 text-sm">
+			<a href={ templ.URL("/issue/" + dl.ID) } class="text-slate-100 hover:text-white hover:underline">{ dl.Title }</a>
+		</p>
+		if dl.Reason != "" {
+			<p class="mt-1 text-xs text-rose-200/90">{ dl.Reason }</p>
+		}
+		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+			if dl.Role != "" {
+				<span>{ dl.Role }</span>
+			}
+			if dl.Spec != "" {
+				<span class="font-mono text-slate-500">{ dl.Spec }</span>
+			}
+			<span class="text-amber-400">attempt { strconv.Itoa(dl.Attempt) }</span>
+			<span>{ strconv.Itoa(dl.SpentTokens) } tokens · { formatUSD(dl.SpentUSD) }</span>
+		</div>
 	</li>
 }
 

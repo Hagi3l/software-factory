@@ -1,0 +1,274 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/Loxstomper/harness/internal/controlroom/query"
+	"github.com/Loxstomper/harness/internal/controlroom/wizard"
+)
+
+// ResolvePage is Resolve mode (specs/control-room.md "Create and Resolve are the same
+// component", T4.15): the wizard pre-loaded from a dead-lettered issue. It is the same steered
+// conversation as Create — and reuses the same per-session SSE/transcript/ledger endpoints — but
+// grounded in the escalation it is unsticking: the escalation summary, the governing spec slice
+// the human refines, and the transcript that raised it are shown above the conversation, and the
+// draft panel shows the spec edit's *blast radius* (what the recompile-the-delta sweep will
+// reissue) before the consent gate commits. The human edits the spec; APPROVE refines it and
+// returns the issue to the ready pool.
+templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Message, canResolve bool) {
+	@Layout("Harness — Resolve", "dlq") {
+		<div class="mx-auto flex max-w-3xl flex-col gap-4">
+			<div>
+				<h1 class="text-xl font-semibold tracking-tight">Resolve</h1>
+				<p class="mt-1 text-sm text-slate-400">
+					Refine the spec to unstick dead-lettered work. The planner is pre-loaded with the
+					escalation and the governing spec slice; converge on a minimal spec edit, then approve
+					— the factory re-pins and reissues the affected work automatically.
+				</p>
+			</div>
+			@resolveEscalation(rc)
+			@resolveSpecSlice(rc)
+			<div hx-ext="sse" sse-connect={ "/create/stream/" + sessionID } class="flex flex-col gap-3">
+				<div
+					id="wizard-ledger"
+					hx-get={ "/create/ledger/" + sessionID }
+					hx-trigger="sse:ledger, sse:turn, every 8s"
+					hx-swap="innerHTML"
+				>
+					@LedgerPanel(sessionID, nil)
+				</div>
+				<div
+					id="resolve-panel"
+					hx-get={ "/resolve/blast/" + sessionID }
+					hx-trigger="sse:draft, sse:turn, every 8s"
+					hx-swap="innerHTML"
+				>
+					@ResolvePanel(sessionID, wizard.Draft{}, canResolve, query.BlastRadius{})
+				</div>
+				<div id="wizard-result"></div>
+				<div
+					id="wizard-transcript"
+					hx-get={ "/create/messages/" + sessionID }
+					hx-trigger="sse:turn, every 8s"
+					hx-swap="innerHTML"
+					class="flex min-h-64 flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/40 p-4"
+				>
+					@WizardTranscript(msgs)
+				</div>
+				<form
+					hx-post="/create/message"
+					hx-target="#wizard-transcript"
+					hx-swap="innerHTML"
+					hx-on::after-request="this.reset()"
+					class="flex flex-col gap-2"
+				>
+					<input type="hidden" name="session" value={ sessionID }/>
+					<textarea
+						name="text"
+						rows="3"
+						required
+						placeholder="Describe how the spec should be clarified, or answer the planner's question…"
+						class="w-full resize-y rounded-md border border-slate-700 bg-slate-900 p-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-slate-500 focus:outline-none"
+					></textarea>
+					<div class="flex justify-end">
+						<button
+							type="submit"
+							class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
+						>Send</button>
+					</div>
+				</form>
+			</div>
+		</div>
+	}
+}
+
+// resolveEscalation renders the escalation the wizard is unsticking: the issue's identity and
+// status, the orchestrator's reason it dead-lettered, and links into the full detail page and —
+// when a transcript was harvested — the raw transcript and the replayed decision trail. This is
+// the "pre-loaded with the escalation … and the agent transcript that raised it" surface.
+templ resolveEscalation(rc query.ResolveContext) {
+	<div class="flex flex-col gap-2 rounded-lg border border-rose-900/50 bg-rose-950/20 p-4">
+		<div class="flex flex-wrap items-center gap-2">
+			<span class="font-mono text-xs text-slate-500">{ rc.Issue.ID }</span>
+			@statusBadge(rc.Issue.Status)
+			if rc.Issue.Role != "" {
+				<span class="text-xs text-slate-400">{ rc.Issue.Role }</span>
+			}
+		</div>
+		<p class="text-sm font-medium text-slate-100">{ rc.Issue.Title }</p>
+		if rc.Issue.DeadLetterReason != "" {
+			<p class="text-xs text-rose-200">Why it is stuck: { rc.Issue.DeadLetterReason }</p>
+		}
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+			<span class="text-amber-400">attempt { strconv.Itoa(rc.Issue.Attempt) }</span>
+			<span>{ strconv.Itoa(rc.Issue.SpentTokens) } tokens · { formatUSD(rc.Issue.SpentUSD) }</span>
+		</div>
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs">
+			<a href={ templ.URL("/issue/" + rc.Issue.ID) } class="text-sky-400 hover:text-sky-300 hover:underline">issue detail</a>
+			if rc.TranscriptAvailable {
+				<a href={ templ.URL("/artifact/" + rc.TranscriptHash) } target="_blank" rel="noopener" class="text-sky-400 hover:text-sky-300 hover:underline">agent transcript</a>
+				<a href={ templ.URL("/replay/" + rc.Issue.ID) } class="text-sky-400 hover:text-sky-300 hover:underline">▸ replay decision trail</a>
+			} else if rc.TranscriptHash != "" {
+				<span class="text-slate-600" title="not resolvable in the artifact store">transcript unavailable</span>
+			}
+		</div>
+	</div>
+}
+
+// resolveSpecSlice shows the current governing spec slice the human is refining — the bounded
+// slice the agent was briefed against (specs-process.md "Spec context horizon"). Collapsible so
+// it grounds without dominating; inert escaped text. Absent (the issue names no spec, or the
+// slice failed to resolve) it says so rather than rendering an empty box.
+templ resolveSpecSlice(rc query.ResolveContext) {
+	if rc.Spec != "" {
+		<details class="rounded-lg border border-slate-800 bg-slate-900/40">
+			<summary class="cursor-pointer px-4 py-2 text-sm text-slate-200">Governing spec slice — <span class="font-mono text-xs text-slate-500">{ rc.Spec }</span></summary>
+			if rc.SpecSlice != "" {
+				<pre class="overflow-x-auto whitespace-pre-wrap border-t border-slate-800 px-4 py-3 text-xs leading-relaxed text-slate-300">{ rc.SpecSlice }</pre>
+			} else {
+				<p class="border-t border-slate-800 px-4 py-3 text-xs text-slate-500">The spec slice could not be resolved (the file may be mid-edit or missing).</p>
+			}
+		</details>
+	} else {
+		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500">
+			This issue names no governing spec — refine the spec the work should be derived from.
+		</div>
+	}
+}
+
+// ResolvePanel is the Resolve draft + blast-radius + consent gate (T4.15). It is the htmx swap
+// target re-fetched on a `draft`/`turn` SSE nudge (with a slow backstop), so the proposed spec
+// edit, its blast radius, and the Approve button all appear and update as the planner refines the
+// draft. Empty (the planner has not drafted a refinement yet) it shows a muted invitation. The
+// spec edit reuses draftSpecFiles (the same rendering as Create); seed issues are deliberately not
+// shown — Resolve refines a spec and reopens the stuck issue, it does not create new work.
+templ ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query.BlastRadius) {
+	if len(draft.Specs) == 0 {
+		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500">
+			The refined spec will appear here, with its blast radius and an Approve button, once the
+			planner proposes an edit.
+		</div>
+	} else {
+		<div class="flex flex-col gap-4 rounded-lg border border-emerald-900/40 bg-slate-900/40 p-4">
+			<div class="flex flex-col gap-1">
+				<h2 class="text-sm font-semibold tracking-tight text-slate-200">Proposed spec refinement</h2>
+				if draft.Summary != "" {
+					<p class="text-sm text-slate-300">{ draft.Summary }</p>
+				}
+			</div>
+			@draftSpecFiles(draft.Specs)
+			@blastRadius(br)
+			if canResolve {
+				<form
+					hx-post="/resolve/approve"
+					hx-target="#wizard-result"
+					hx-swap="innerHTML"
+					class="flex flex-col gap-2 border-t border-slate-800 pt-3"
+				>
+					<input type="hidden" name="session" value={ session }/>
+					<p class="text-xs text-amber-300/90">
+						Approving commits the spec refinement, stores this conversation, and returns the
+						dead-lettered issue to the ready pool. The factory then re-pins and reissues the
+						affected work shown above. This is the consent boundary.
+					</p>
+					<div class="flex justify-end">
+						<button
+							type="submit"
+							class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500"
+						>Approve &amp; resolve</button>
+					</div>
+				</form>
+			} else {
+				<p class="border-t border-slate-800 pt-3 text-xs text-slate-500">
+					Resolve is unavailable here — run the wizard under <code>harness run --serve-addr</code> to refine specs and reopen work.
+				</p>
+			}
+		</div>
+	}
+}
+
+// blastRadius renders the read-only consequence of the proposed edit (specs/control-room.md "the
+// spec diff and its blast radius before commit"): the in-flight work the recompile sweep would
+// re-pin and reissue, and the merged (epic, spec-path) units it would re-derive. Nothing affected
+// is itself signal (a localized clarification), so it reads as reassurance rather than emptiness.
+templ blastRadius(br query.BlastRadius) {
+	<div class="flex flex-col gap-2 border-t border-slate-800 pt-3">
+		<h3 class="text-xs font-medium uppercase tracking-wide text-slate-400">Blast radius</h3>
+		<p class="text-xs text-slate-500">The dead-lettered issue is reopened against the refined spec. Beyond it, this edit will:</p>
+		if len(br.InFlight) == 0 && len(br.Merged) == 0 {
+			<p class="text-xs text-slate-400">affect no other in-flight or merged work — the slice no other pinned issue depends on.</p>
+		} else {
+			if len(br.InFlight) > 0 {
+				<div class="flex flex-col gap-1">
+					<p class="text-xs text-amber-300">re-pin &amp; reissue { strconv.Itoa(len(br.InFlight)) } in-flight item(s):</p>
+					<ul class="flex flex-col gap-1 pl-1">
+						for _, it := range br.InFlight {
+							<li class="text-xs text-slate-400">
+								<a href={ templ.URL("/issue/" + it.ID) } class="font-mono text-sky-400 hover:text-sky-300 hover:underline">{ it.ID }</a>
+								if it.Role != "" {
+									<span>{ " · " + it.Role }</span>
+								}
+								<span class="font-mono text-slate-600">{ " · " + shortHash(it.SpecHash) }</span>
+							</li>
+						}
+					</ul>
+				</div>
+			}
+			if len(br.Merged) > 0 {
+				<div class="flex flex-col gap-1">
+					<p class="text-xs text-amber-300">re-derive { strconv.Itoa(len(br.Merged)) } merged unit(s) (one re-planning pass each):</p>
+					<ul class="flex flex-col gap-1 pl-1">
+						for _, g := range br.Merged {
+							<li class="text-xs text-slate-400">
+								<span class="font-mono">{ g.Spec }</span>
+								<span class="text-slate-600">{ " · epic " + g.Epic + " · " + strconv.Itoa(g.Members) + " closed" }</span>
+							</li>
+						}
+					</ul>
+				</div>
+			}
+		}
+	</div>
+}
+
+// ResolveApproveResult renders the outcome of a Resolve APPROVE (T4.15): on success the spec
+// commit and the reopened issue (linking to its detail page, where it will show back in flight),
+// or — when err is non-empty — the failure reason (a validation error, a git/beads fault, or the
+// not-attached notice). It is the fragment swapped into #wizard-result by the approve form.
+templ ResolveApproveResult(res wizard.ResolveResult, err string) {
+	if err != "" {
+		<div class="rounded-lg border border-rose-900/50 bg-rose-950/30 p-4 text-sm text-rose-200">
+			{ err }
+		</div>
+	} else {
+		<div class="flex flex-col gap-2 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-4">
+			<h2 class="text-sm font-semibold tracking-tight text-emerald-200">Resolved — spec refined</h2>
+			<p class="text-xs text-slate-400">
+				Committed
+				if res.Commit != "" {
+					as <code>{ shortHash(res.Commit) }</code>
+				}
+				. The factory will re-pin and reissue the affected work from here.
+			</p>
+			if res.ReopenedIssue != "" {
+				<p class="text-sm">
+					<span class="text-slate-300">Reopened </span>
+					<a href={ templ.URL("/issue/" + res.ReopenedIssue) } class="font-mono text-indigo-300 hover:text-indigo-200">{ res.ReopenedIssue }</a>
+					<span class="text-slate-300"> — back in flight against the refined spec.</span>
+				</p>
+			}
+		</div>
+	}
+}
+
+// ResolveMessage renders the Resolve chrome with a single notice instead of the wizard — shown
+// when no requirements planner is wired, the control room is not attached to a factory, or the
+// issue cannot be loaded — so the surface degrades to an explanation rather than a dead page.
+templ ResolveMessage(msg string) {
+	@Layout("Harness — Resolve", "dlq") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">Resolve</h1>
+			<p class="mt-2 text-slate-400">{ msg }</p>
+		</div>
+	}
+}

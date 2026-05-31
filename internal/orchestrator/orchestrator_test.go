@@ -41,6 +41,7 @@ type fakeBeads struct {
 	approvedBy  map[string]string
 	applied     []core.Proposal
 	pinned      map[string]string
+	transcripts map[string]string
 	seq         int
 
 	claimErr error
@@ -99,10 +100,17 @@ func (f *fakeBeads) Close(_ context.Context, id string) error {
 	return nil
 }
 
-func (f *fakeBeads) Block(_ context.Context, id string) error {
+func (f *fakeBeads) Block(_ context.Context, id, reason string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.blocked = append(f.blocked, id)
+	// Mirror the real client: the dead-letter reason is durable on the issue, so a later Get
+	// (the DLQ / Resolve read path) sees it.
+	if is, ok := f.issues[id]; ok {
+		is.Status = "blocked"
+		is.DeadLetterReason = reason
+		f.issues[id] = is
+	}
 	return nil
 }
 
@@ -208,6 +216,21 @@ func (f *fakeBeads) StampClosingSpend(_ context.Context, id string, tokens int, 
 	if is, ok := f.issues[id]; ok {
 		is.ClosingTokens = tokens
 		is.ClosingUSD = usd
+		f.issues[id] = is
+	}
+	return nil
+}
+
+func (f *fakeBeads) StampTranscript(_ context.Context, id, hash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.transcripts == nil {
+		f.transcripts = map[string]string{}
+	}
+	f.transcripts[id] = hash
+	// Mirror the real client: the hash is durable on the issue, so a later Get sees it.
+	if is, ok := f.issues[id]; ok {
+		is.Transcript = hash
 		f.issues[id] = is
 	}
 	return nil
@@ -1041,7 +1064,12 @@ func TestHandleResultEscalationDeadLetters(t *testing.T) {
 	o, nc := newOrch(t, kernelConfig(2), bd, &fakeGate{}, &fakeMerger{})
 	sub, _ := nc.SubscribeSync(messaging.SubjectDLQ)
 
-	_, err := o.handleResult(context.Background(), core.Result{IssueID: "iss-1", Status: core.StatusNeedsSpecClarification})
+	_, err := o.handleResult(context.Background(), core.Result{
+		IssueID: "iss-1", Status: core.StatusNeedsSpecClarification,
+		// The escalation invocation harvested a transcript; the orchestrator stamps it onto the
+		// issue for every disposition so the Resolve wizard can pre-load it (T4.15).
+		Evidence: core.Evidence{Artifacts: []core.ArtifactRef{{Kind: core.ArtifactKindTranscript, Hash: "sha256:tx"}}},
+	})
 	if err != nil {
 		t.Fatalf("handleResult: %v", err)
 	}
@@ -1050,6 +1078,18 @@ func TestHandleResultEscalationDeadLetters(t *testing.T) {
 	}
 	if _, err := sub.NextMsg(2 * time.Second); err != nil {
 		t.Errorf("no dlq alert for escalation: %v", err)
+	}
+	// The orchestrator's reason classification and the harvested transcript are stamped on the
+	// issue (T4.15), so the DLQ / Resolve read path can show *why* it stuck and pre-load the trail.
+	got, err := bd.Get(context.Background(), "iss-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.DeadLetterReason != "agent escalated: needs-spec-clarification" {
+		t.Errorf("DeadLetterReason = %q, want the escalation classification", got.DeadLetterReason)
+	}
+	if got.Transcript != "sha256:tx" {
+		t.Errorf("Transcript = %q, want the harvested transcript stamped on the dead-lettered issue", got.Transcript)
 	}
 }
 

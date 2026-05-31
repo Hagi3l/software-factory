@@ -179,3 +179,54 @@ func TestHash(t *testing.T) {
 		t.Error("Hash must differ when the slice content differs (drift detection depends on it)")
 	}
 }
+
+// TestMembersAreTheSliceFiles proves Members returns exactly the files Resolve concatenates, in
+// BFS order — the membership the Resolve-mode blast-radius preview tests "does this slice include
+// the edited spec" against (T4.15). It must share Resolve's traversal so the preview cannot
+// diverge from what the recompile sweep will reissue.
+func TestMembersAreTheSliceFiles(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"specs/a.md": "# A\nsee [b](b.md)\n", // a links b
+		"specs/b.md": "# B\n",
+		"specs/c.md": "# C\n", // unrelated
+	})
+	got, err := Members(root, "specs/a.md", 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"specs/a.md", "specs/b.md"}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Errorf("Members = %v, want %v (the slice files in BFS order)", got, want)
+	}
+	// c.md is not reachable from a.md, so it is not a member — an edit to it would not drift a.
+	for _, m := range got {
+		if m == "specs/c.md" {
+			t.Error("Members included an unreachable file")
+		}
+	}
+}
+
+// TestMembersDepthZeroIsJustTheFile proves depth bounds membership exactly as it bounds the
+// slice: at depth 0 only the referenced file is a member, so an edit to a neighbor is not in the
+// blast radius of a depth-0 issue.
+func TestMembersDepthZeroIsJustTheFile(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"specs/a.md": "# A\nsee [b](b.md)\n",
+		"specs/b.md": "# B\n",
+	})
+	got, err := Members(root, "specs/a.md", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0] != "specs/a.md" {
+		t.Errorf("Members(depth 0) = %v, want [specs/a.md] only", got)
+	}
+}
+
+// TestMembersMissingReferencedFileErrors mirrors Resolve: an issue pointing at a missing spec is
+// a fault the caller must see, not a silent empty membership.
+func TestMembersMissingReferencedFileErrors(t *testing.T) {
+	if _, err := Members(t.TempDir(), "specs/gone.md", 1); err == nil {
+		t.Error("Members must error on an unreadable referenced file")
+	}
+}

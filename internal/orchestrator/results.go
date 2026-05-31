@@ -158,6 +158,21 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 		}
 	}
 
+	// Record the most-recent invocation's transcript hash on the issue so the decision trail is
+	// reachable from the issue itself — for in-flight and dead-lettered work, not only from a
+	// merge trailer (which exists only for merged work). This is what lets the Resolve wizard
+	// (T4.15) pre-load "the agent transcript that raised the escalation" and the replay view
+	// reconstruct a non-merged invocation. Stamped for EVERY disposition (the run happened
+	// whatever the outcome) and idempotent under redelivery (a set). It is observability, not a
+	// correctness gate, so a failed stamp is logged and the disposition proceeds rather than
+	// looping the Result on a non-critical write — and an empty hash (no transcript harvested)
+	// is a no-op (see core.Issue.Transcript, specs/observability.md).
+	if hash := transcriptHash(res); hash != "" {
+		if err := o.bd.StampTranscript(ctx, issue.ID, hash); err != nil {
+			o.log.Warn("orchestrator: stamp transcript failed (non-fatal)", "issue", issue.ID, "err", err)
+		}
+	}
+
 	stage, ok := o.stageForRole(issue.Role)
 	if !ok {
 		// An in_progress issue whose role has no agent stage should never have been
@@ -745,7 +760,7 @@ func (o *Orchestrator) deadLetter(ctx context.Context, issue core.Issue, reason 
 	if _, err := o.js.Publish(ctx, o.dlq, data); err != nil {
 		return true, fmt.Errorf("publish dlq alert for %s: %w", issue.ID, err)
 	}
-	if err := o.bd.Block(ctx, issue.ID); err != nil {
+	if err := o.bd.Block(ctx, issue.ID, reason); err != nil {
 		return true, fmt.Errorf("block dead-lettered issue %s: %w", issue.ID, err)
 	}
 	o.log.Warn("orchestrator: dead-lettered", "issue", issue.ID, "role", issue.Role, "attempt", issue.Attempt, "reason", reason)

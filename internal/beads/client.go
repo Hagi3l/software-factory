@@ -192,6 +192,12 @@ func (r issueJSON) toCore() core.Issue {
 		// for human approval; absent (empty) on every issue that is not parked.
 		CandidateRef:     metaString(r.Metadata, MetadataKeyCandidateRef),
 		ParkedProvenance: metaString(r.Metadata, MetadataKeyParkedProv),
+		// Most-recent invocation transcript hash (stamped post-hoc by StampTranscript) and the
+		// dead-letter reason (stamped by Block when the issue is dead-lettered); both empty until
+		// the orchestrator processes a Result / blocks the issue. They make the decision trail and
+		// the escalation reachable from the issue for the Resolve wizard (T4.15).
+		Transcript:       metaString(r.Metadata, MetadataKeyTranscript),
+		DeadLetterReason: metaString(r.Metadata, MetadataKeyDLQReason),
 		Tags:             parseLabels(r.Labels),
 		// Blocked-by edge targets bd emits inline on the read (the `dependencies` array),
 		// distinct from the write-side Proposal.DependsOn. Empty/absent decodes to nil.

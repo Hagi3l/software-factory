@@ -247,6 +247,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		// the wizard stays disabled (/create renders a notice).
 		var planner *wizard.Planner
 		var seeder wizard.Seeder
+		var resolver wizard.Resolver
 		if rp := cfg.Harness.RequirementsPlanner; rp != nil {
 			adapter, aerr := reg.Adapter(rp.Model)
 			if aerr != nil {
@@ -257,12 +258,16 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 				return nil, fmt.Errorf("read requirements planner persona: %w", rerr)
 			}
 			planner = wizard.NewPlanner(adapter, string(personaBytes), wizard.WithMaxTokens(rp.MaxTokens), wizard.WithLogger(log))
-			// The consent-gated write seam (T4.14): on APPROVE it commits the drafted spec to the
-			// integration repo, writes the decisions sidecar, stores the transcript, and creates the
-			// seed issues through the same single-writer beads path the orchestrator uses. A fresh
-			// read-only-by-convention beads client (the orchestrator stays the sole long-lived writer;
-			// the wizard write is a discrete human-approved seed, like `harness seed`).
-			seeder = newWizardSeeder(cfg, repo, beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)), store, log)
+			// The consent-gated write seam: on Create-APPROVE it commits the drafted spec, writes the
+			// decisions sidecar, stores the transcript, and creates the seed issues; on Resolve-APPROVE
+			// (T4.15) it commits the refined spec and returns the dead-lettered issue to the ready pool.
+			// One wizardSeeder implements both wizard.Seeder and wizard.Resolver — two consent-gated
+			// write paths sharing the spec-write machinery. It uses a fresh read-only-by-convention
+			// beads client (the orchestrator stays the sole long-lived writer; the wizard write is a
+			// discrete human-approved seed/resolve, like `harness seed`).
+			ws := newWizardSeeder(cfg, repo, beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)), store, log)
+			seeder = ws
+			resolver = ws
 		}
 
 		server = controlroom.New(controlroom.Options{
@@ -275,6 +280,9 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			BudgetCaps: budgetCaps(cfg),
 			Planner:    planner,
 			Seeder:     seeder,
+			Resolver:   resolver,
+			Repo:       repo,
+			SpecDepth:  cfg.Harness.SpecDepth,
 		})
 	}
 

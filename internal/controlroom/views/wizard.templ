@@ -242,17 +242,7 @@ templ DraftPanel(session string, draft wizard.Draft, canApprove bool) {
 					<p class="text-sm text-slate-300">{ draft.Summary }</p>
 				}
 			</div>
-			if len(draft.Specs) > 0 {
-				<div class="flex flex-col gap-2">
-					<h3 class="text-xs font-medium uppercase tracking-wide text-slate-400">Spec files</h3>
-					for _, sp := range draft.Specs {
-						<details class="rounded-md border border-slate-800 bg-slate-950/40">
-							<summary class="cursor-pointer px-3 py-2 text-sm text-slate-200">{ sp.Path }</summary>
-							<pre class="overflow-x-auto whitespace-pre-wrap border-t border-slate-800 px-3 py-2 text-xs leading-relaxed text-slate-300">{ sp.Content }</pre>
-						</details>
-					}
-				</div>
-			}
+			@draftSpecFiles(draft.Specs)
 			if len(draft.Issues) > 0 {
 				<div class="flex flex-col gap-2">
 					<h3 class="text-xs font-medium uppercase tracking-wide text-slate-400">Seed issues</h3>
@@ -287,6 +277,24 @@ templ DraftPanel(session string, draft wizard.Draft, canApprove bool) {
 				<p class="border-t border-slate-800 pt-3 text-xs text-slate-500">
 					Approval is unavailable here — run the wizard under <code>harness run --serve-addr</code> to commit specs and seed issues.
 				</p>
+			}
+		</div>
+	}
+}
+
+// draftSpecFiles renders the proposed/refined spec markdown as collapsible files — the content
+// the consent gate would write. Extracted so both the Create draft panel and the Resolve panel
+// (T4.15) render spec edits identically (single source). The content is templ-escaped as inert
+// text: trusted planner output, but still model-authored markdown, never rendered as markup.
+templ draftSpecFiles(specs []wizard.DraftSpec) {
+	if len(specs) > 0 {
+		<div class="flex flex-col gap-2">
+			<h3 class="text-xs font-medium uppercase tracking-wide text-slate-400">Spec files</h3>
+			for _, sp := range specs {
+				<details class="rounded-md border border-slate-800 bg-slate-950/40">
+					<summary class="cursor-pointer px-3 py-2 text-sm text-slate-200">{ sp.Path }</summary>
+					<pre class="overflow-x-auto whitespace-pre-wrap border-t border-slate-800 px-3 py-2 text-xs leading-relaxed text-slate-300">{ sp.Content }</pre>
+				</details>
 			}
 		</div>
 	}

@@ -106,6 +106,10 @@ oddly (Soul, Role, Runner, Brief), it's defined there.
 
 ## Status
 
-Early design. Decisions are recorded as the specs assert them; open questions are
-called out inline with **OPEN:** markers. These specs predate implementation —
-they are the contract the implementation must satisfy.
+These specs are the contract the implementation satisfies, and most have been
+**validated and refined by implementation** through Phase 4 (kernel + independent
+verification + full DAG + control room; see `IMPLEMENTATION_PLAN.md`). Decisions are
+recorded as the specs assert them. Open questions are called out inline with
+**OPEN:** markers; the few that remain are concentrated in Phase 5 (production
+isolation & distribution) — the spec tree currently carries none, the live ones
+being tracked in the plan.

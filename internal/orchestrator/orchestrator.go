@@ -39,7 +39,7 @@ type Beads interface {
 	Claim(ctx context.Context, id string, ttl time.Duration) (time.Time, error)
 	Release(ctx context.Context, id string) error
 	Close(ctx context.Context, id string) error
-	Block(ctx context.Context, id string) error
+	Block(ctx context.Context, id, reason string) error
 	// AwaitApproval parks an integrate candidate awaiting human approval (T2.10): blocks the
 	// issue and records the candidate ref + provenance to replay on approval.
 	AwaitApproval(ctx context.Context, id, candidateRef, parkedProv string) error
@@ -57,6 +57,10 @@ type Beads interface {
 	// StampClosingSpend records an issue's own invocation marginal (tokens, USD) so the epic
 	// budget can be summed across all issues of an epic (see core.Issue.ClosingTokens).
 	StampClosingSpend(ctx context.Context, id string, tokens int, usd float64) error
+	// StampTranscript records the artifact hash of an issue's most recent invocation transcript
+	// so the decision trail is reachable from the issue for in-flight/dead-lettered work, not
+	// only from a merge trailer (see core.Issue.Transcript, the plan's T4.15).
+	StampTranscript(ctx context.Context, id, hash string) error
 }
 
 // Gate verifies a candidate in a fresh, orchestrator-controlled sandbox and returns a

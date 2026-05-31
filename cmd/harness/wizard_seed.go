@@ -115,13 +115,13 @@ func (s *wizardSeeder) Seed(ctx context.Context, req wizard.SeedRequest) (wizard
 	if err := os.MkdirAll(filepath.Dir(sidecarFull), 0o755); err != nil {
 		return wizard.SeedResult{}, fmt.Errorf("create decisions dir: %w", err)
 	}
-	if err := os.WriteFile(sidecarFull, []byte(decisionsSidecar(req, transcriptRef)), 0o644); err != nil {
+	if err := os.WriteFile(sidecarFull, []byte(decisionsSidecar(req.Summary, req.Decisions, transcriptRef)), 0o644); err != nil {
 		return wizard.SeedResult{}, fmt.Errorf("write decisions sidecar: %w", err)
 	}
 	written = append(written, sidecar)
 
 	// 4. commit the spec + sidecar, then create the seed issues via the single-writer path.
-	commit, err := s.commit(ctx, written, req, transcriptRef, sidecar)
+	commit, err := s.commit(ctx, written, commitMessage(req, transcriptRef, sidecar))
 	if err != nil {
 		return wizard.SeedResult{}, err
 	}
@@ -140,37 +140,9 @@ func (s *wizardSeeder) validate(req wizard.SeedRequest) error {
 	if len(req.Issues) == 0 {
 		return errors.New("the draft has no seed issues to create")
 	}
-	if len(req.Specs) == 0 {
-		return errors.New("the draft has no spec files to author")
-	}
-
-	// Spec paths: safe, under specs/, .md, no duplicates.
-	batch := map[string]bool{}
-	for _, sp := range req.Specs {
-		clean, err := s.cleanSpecPath(sp.Path)
-		if err != nil {
-			return err
-		}
-		if batch[clean] {
-			return fmt.Errorf("spec %q is drafted more than once", clean)
-		}
-		batch[clean] = true
-	}
-
-	// Link integrity: every inline markdown link in a drafted spec must resolve to another
-	// drafted spec or an existing file — the same links the orchestrator would traverse.
-	for _, sp := range req.Specs {
-		clean, _ := s.cleanSpecPath(sp.Path)
-		for _, link := range spec.Links(clean, sp.Content) {
-			rel := filepath.ToSlash(link)
-			if rel == ".." || strings.HasPrefix(rel, "../") {
-				return fmt.Errorf("spec %q links outside the repository (%q)", clean, rel)
-			}
-			if batch[rel] || s.fileExists(rel) {
-				continue
-			}
-			return fmt.Errorf("spec %q has a broken link to %q (not in the draft and not present in the repo)", clean, rel)
-		}
+	batch, err := s.validateSpecFiles(req.Specs)
+	if err != nil {
+		return err
 	}
 
 	// Issue spec references resolve, and every drafted spec is referenced by ≥1 seed issue.
@@ -201,6 +173,45 @@ func (s *wizardSeeder) validate(req wizard.SeedRequest) error {
 		}
 	}
 	return nil
+}
+
+// validateSpecFiles enforces the parts of the spec-authoring contract common to Create and
+// Resolve: at least one spec, every path safe (relative, under specs/, .md) and unique, and
+// every inline markdown link resolving to another drafted spec or an existing file — the same
+// links the orchestrator traverses when it materializes a slice (specs-process.md, reusing
+// spec.Links so "every link resolves" means precisely the links the orchestrator follows). It
+// returns the set of cleaned drafted paths (the batch) for the caller's remaining checks. The
+// issue-coverage and produces-legality checks are Create-only (Resolve writes a spec edit and
+// reopens the stuck issue rather than seeding new work), so they stay in validate.
+func (s *wizardSeeder) validateSpecFiles(specs []wizard.DraftSpec) (map[string]bool, error) {
+	if len(specs) == 0 {
+		return nil, errors.New("the draft has no spec files to author")
+	}
+	batch := map[string]bool{}
+	for _, sp := range specs {
+		clean, err := s.cleanSpecPath(sp.Path)
+		if err != nil {
+			return nil, err
+		}
+		if batch[clean] {
+			return nil, fmt.Errorf("spec %q is drafted more than once", clean)
+		}
+		batch[clean] = true
+	}
+	for _, sp := range specs {
+		clean, _ := s.cleanSpecPath(sp.Path)
+		for _, link := range spec.Links(clean, sp.Content) {
+			rel := filepath.ToSlash(link)
+			if rel == ".." || strings.HasPrefix(rel, "../") {
+				return nil, fmt.Errorf("spec %q links outside the repository (%q)", clean, rel)
+			}
+			if batch[rel] || s.fileExists(rel) {
+				continue
+			}
+			return nil, fmt.Errorf("spec %q has a broken link to %q (not in the draft and not present in the repo)", clean, rel)
+		}
+	}
+	return batch, nil
 }
 
 // cleanSpecPath normalizes and validates a drafted spec path: relative (not absolute), confined
@@ -234,14 +245,14 @@ func (s *wizardSeeder) fileExists(rel string) bool {
 	return err == nil && !info.IsDir()
 }
 
-// commit stages the written files and commits them, returning the commit sha. The message records
-// the provenance: the summary, the decisions sidecar path, the transcript hash, and the seed
-// issue titles (their ids do not exist yet — issues are created after the commit).
-func (s *wizardSeeder) commit(ctx context.Context, files []string, req wizard.SeedRequest, transcriptRef, sidecar string) (string, error) {
+// commit stages the written files and commits them with the given message, returning the commit
+// sha. The git mechanics are shared by Create (Seed) and Resolve; the message — mode-specific
+// provenance — is built by the caller (commitMessage / resolveCommitMessage).
+func (s *wizardSeeder) commit(ctx context.Context, files []string, message string) (string, error) {
 	if _, err := s.git(ctx, append([]string{"add", "--"}, files...)...); err != nil {
 		return "", err
 	}
-	if _, err := s.git(ctx, "commit", "-m", commitMessage(req, transcriptRef, sidecar)); err != nil {
+	if _, err := s.git(ctx, "commit", "-m", message); err != nil {
 		return "", err
 	}
 	sha, err := s.git(ctx, "rev-parse", "HEAD")
@@ -332,21 +343,23 @@ func commitMessage(req wizard.SeedRequest, transcriptRef, sidecar string) string
 
 // decisionsSidecar renders the finalized-decisions markdown sidecar (specs-process.md, T4.13/T4.14):
 // the summary, the agreed ledger items with their one-line rationales, and the transcript link. Git
-// history of this file is the decision-evolution record — there is no separate status machinery.
-func decisionsSidecar(req wizard.SeedRequest, transcriptRef string) string {
+// history of this file is the decision-evolution record — there is no separate status machinery. It
+// is shared by Create (authoring) and Resolve (refining): a re-run for the same spec area overwrites
+// the sidecar, and the git diff is the decision-evolution log.
+func decisionsSidecar(summary string, decisions []wizard.DecisionRecord, transcriptRef string) string {
 	var b strings.Builder
-	title := strings.TrimSpace(req.Summary)
+	title := strings.TrimSpace(summary)
 	if title == "" {
 		title = "Decisions"
 	}
 	fmt.Fprintf(&b, "# Decisions: %s\n\n", title)
-	b.WriteString("_Provenance for the spec authored via the Create-Task wizard. The spec is the source\n")
+	b.WriteString("_Provenance for the spec authored or refined via the wizard. The spec is the source\n")
 	b.WriteString("of truth; this records the decisions behind it. Git history of this file is the\n")
 	b.WriteString("decision-evolution log — there is no separate status or supersession machinery._\n\n")
-	if len(req.Decisions) == 0 {
+	if len(decisions) == 0 {
 		b.WriteString("_No structured decisions were recorded for this work._\n")
 	} else {
-		for _, d := range req.Decisions {
+		for _, d := range decisions {
 			if r := strings.TrimSpace(d.Rationale); r != "" {
 				fmt.Fprintf(&b, "- %s — %s\n", d.Point, r)
 			} else {

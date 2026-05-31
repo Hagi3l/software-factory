@@ -69,7 +69,8 @@ func TestStatusTransitions(t *testing.T) {
 		wantSub string
 	}{
 		{"close", func(c *Client) error { return c.Close(context.Background(), "i") }, "update i --status closed"},
-		{"block", func(c *Client) error { return c.Block(context.Background(), "i") }, "update i --status blocked"},
+		{"block", func(c *Client) error { return c.Block(context.Background(), "i", "") }, "update i --status blocked"},
+		{"block-reason", func(c *Client) error { return c.Block(context.Background(), "i", "agent escalated") }, "update i --status blocked --set-metadata dlq_reason=agent escalated"},
 		{"release", func(c *Client) error { return c.Release(context.Background(), "i") }, "update i --status open --unset-metadata lease_until"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -407,11 +408,19 @@ func TestTransitionsIntegration(t *testing.T) {
 	}
 
 	id2 := quickCreate(t, dir, "to block")
-	if err := c.Block(context.Background(), id2); err != nil {
+	if err := c.Block(context.Background(), id2, "agent escalated: needs-spec-clarification"); err != nil {
 		t.Fatalf("Block: %v", err)
 	}
 	if out := runBD(t, dir, "show", id2, "--json"); !strings.Contains(out, `"blocked"`) {
 		t.Errorf("Block did not block: %s", out)
+	}
+	// The reason rides in metadata so the DLQ / Resolve read path can show why (T4.15).
+	got, err := c.Get(context.Background(), id2)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.DeadLetterReason != "agent escalated: needs-spec-clarification" {
+		t.Errorf("DeadLetterReason = %q, want the blocked reason (round-tripped via metadata)", got.DeadLetterReason)
 	}
 }
 
@@ -840,6 +849,45 @@ func TestEpicAndWallRoundTripIntegration(t *testing.T) {
 	if got.EpicID != "harness-1" || got.SpentWall != 90*time.Second || got.Attempt != 1 {
 		t.Errorf("EpicID/SpentWall/Attempt = %q/%s/%d, want harness-1/1m30s/1 (stamp must not disturb them)", got.EpicID, got.SpentWall, got.Attempt)
 	}
+}
+
+// TestStampTranscriptRoundTripIntegration proves the most-recent invocation transcript hash
+// survives StampTranscript into beads metadata and decodes back on Get — so the decision trail is
+// reachable from the issue itself (for the Resolve wizard / replay of non-merged work, T4.15),
+// not only from a merge trailer. An empty hash is a no-op (nothing to cite).
+func TestStampTranscriptRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+	ctx := context.Background()
+
+	id := quickCreate(t, dir, "ran once")
+	if got := mustGetIssue(t, c, id); got.Transcript != "" {
+		t.Errorf("Transcript = %q, want empty before any stamp", got.Transcript)
+	}
+	// Empty hash is a no-op.
+	if err := c.StampTranscript(ctx, id, ""); err != nil {
+		t.Fatalf("StampTranscript(empty): %v", err)
+	}
+	if got := mustGetIssue(t, c, id); got.Transcript != "" {
+		t.Errorf("Transcript = %q, want still empty after empty-hash no-op", got.Transcript)
+	}
+	if err := c.StampTranscript(ctx, id, "sha256:deadbeef"); err != nil {
+		t.Fatalf("StampTranscript: %v", err)
+	}
+	if got := mustGetIssue(t, c, id); got.Transcript != "sha256:deadbeef" {
+		t.Errorf("Transcript = %q, want sha256:deadbeef (round-tripped via metadata)", mustGetIssue(t, c, id).Transcript)
+	}
+}
+
+// mustGetIssue is a small Get helper for the round-trip assertions.
+func mustGetIssue(t *testing.T, c *Client, id string) core.Issue {
+	t.Helper()
+	got, err := c.Get(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	return got
 }
 
 // allIssues returns every issue id in the db (including closed) for count assertions.

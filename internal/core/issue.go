@@ -163,6 +163,29 @@ type Issue struct {
 	// issue that is not parked.
 	ParkedProvenance string
 
+	// Transcript is the artifact-store hash of the broker-captured conversation from this
+	// issue's most recent invocation (core.ArtifactKindTranscript). Unlike the merge trailer's
+	// transcript — retained only for *merged* work — the orchestrator stamps this onto the
+	// issue itself when it processes the issue's Result, whatever the disposition (accepted,
+	// routed, or dead-lettered), via StampTranscript. That makes the decision trail reachable
+	// for in-flight and *dead-lettered* work too, not just merged commits — which is what lets
+	// the control room's Resolve wizard (T4.15) pre-load "the agent transcript that raised the
+	// escalation" and what unblocks replaying non-merged invocations (the T4.11 follow-up). It
+	// rides in beads metadata, is not threaded forward (each issue records its own latest run),
+	// and is empty until the issue's first invocation is processed (see specs/observability.md).
+	Transcript string
+
+	// DeadLetterReason is the orchestrator's one-line classification of *why* an issue
+	// dead-lettered — the same reason published on the DLQ alert (an escalation it cannot
+	// resolve, an exhausted retry cap, a budget breach). It is empty for every issue that is
+	// not blocked, and stamped by the orchestrator in the same write that blocks the issue
+	// (Block), so the dead-letter queue and the Resolve wizard can show the human *why* the
+	// work is stuck without re-deriving it from the transcript. The agent's detailed reasoning
+	// still lives in the Transcript (the orchestrator's reason is the classification, the
+	// transcript is the evidence). It rides in beads metadata (see specs/workflow.md,
+	// specs/control-room.md).
+	DeadLetterReason string
+
 	// DependsOn carries the blocked-by edge targets beads emits inline on a read: the ids
 	// of the issues this one is blocked by (its blockers). Like Status it is populated when
 	// an issue is read back — beads owns these edges (the orchestrator writes them via

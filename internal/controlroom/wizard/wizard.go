@@ -156,7 +156,7 @@ func NewPlanner(adapter model.Adapter, persona string, opts ...Option) *Planner 
 // New creates a fresh, empty conversation session and registers it. When the session cap is
 // reached the oldest session is evicted (best-effort working state — see defaultMaxSessions).
 func (p *Planner) New() *Session {
-	s := &Session{
+	return p.register(&Session{
 		ID:          newID(),
 		hub:         live.NewHub(),
 		adapter:     p.adapter,
@@ -164,7 +164,13 @@ func (p *Planner) New() *Session {
 		maxTokens:   p.maxTokens,
 		turnTimeout: p.turnTimeout,
 		log:         p.log,
-	}
+	})
+}
+
+// register installs a freshly built session in the bounded map (evicting the oldest past the
+// cap) and returns it. Shared by New (a blank Create session) and NewResolve (a session
+// pre-grounded in a dead-lettered issue), so both obey the same eviction discipline.
+func (p *Planner) register(s *Session) *Session {
 	p.mu.Lock()
 	for len(p.order) >= p.maxSessions {
 		oldest := p.order[0]
@@ -197,6 +203,12 @@ type Session struct {
 	turnTimeout time.Duration
 	log         *slog.Logger
 
+	// issueID is the dead-lettered issue a Resolve-mode session is unsticking (empty for a
+	// blank Create session). It is set server-side at mint by NewResolve and read back by the
+	// resolve consent gate, so the browser approves "resolve session S" and the server commits
+	// against the issue *it* bound — never an issue id the browser supplies (T4.15).
+	issueID string
+
 	mu       sync.Mutex
 	messages []model.Message
 	busy     bool
@@ -208,6 +220,11 @@ type Session struct {
 // browser receives the live `delta`/`turn` events for this conversation only (each session
 // has its own hub, so one human's stream never leaks to another).
 func (s *Session) Hub() *live.Hub { return s.hub }
+
+// ResolveIssue returns the dead-lettered issue id a Resolve-mode session is unsticking, or ""
+// for a blank Create session. The resolve consent gate reads it to commit against the issue the
+// server bound at mint, not one the browser names (T4.15).
+func (s *Session) ResolveIssue() string { return s.issueID }
 
 // Messages returns a snapshot of the conversation as presentation turns (user/assistant
 // only; the persona system prompt is never surfaced). The returned slice is a copy, safe to

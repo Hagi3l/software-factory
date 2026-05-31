@@ -65,15 +65,58 @@ var linkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
 // targets are confined to root: a `../`-traversal that would escape the repository is
 // dropped, so a hostile spec link cannot pull arbitrary host files into agent context.
 func Resolve(root, ref string, depth int) (string, error) {
+	order, contents, err := walk(root, ref, depth)
+	if err != nil {
+		return "", err
+	}
+	var b strings.Builder
+	for _, rel := range order {
+		fmt.Fprintf(&b, "<!-- spec: %s -->\n", filepath.ToSlash(rel))
+		b.WriteString(contents[rel])
+		if !strings.HasSuffix(contents[rel], "\n") {
+			b.WriteByte('\n')
+		}
+		b.WriteByte('\n')
+	}
+	return b.String(), nil
+}
+
+// Members returns the root-relative slash paths of the files that make up the bounded slice
+// rooted at ref — exactly the set Resolve concatenates, in the same breadth-first order. It
+// shares Resolve's traversal (and its confinement, skip, and error rules), so "the slice
+// includes path P" is answered by the same logic that builds the slice. The control room's
+// Resolve-mode blast-radius preview (T4.15) uses it to answer, read-only, *which* in-flight
+// and merged issues a spec edit would touch: an issue whose slice includes an edited path
+// will re-resolve to a different hash and be reissued by the recompile-the-delta sweep,
+// while one whose slice does not is left alone (see specs/specs-process.md "Spec drift",
+// orchestrator recompileSpecDelta). Like Resolve, only the *referenced* file failing to read
+// is an error; a broken/forward neighbor link is simply absent from the membership.
+func Members(root, ref string, depth int) ([]string, error) {
+	order, _, err := walk(root, ref, depth)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, len(order))
+	for i, rel := range order {
+		out[i] = filepath.ToSlash(rel)
+	}
+	return out, nil
+}
+
+// walk is the shared breadth-first traversal behind Resolve and Members: it visits the
+// referenced file and its markdown neighbors to depth, returning the visited paths in BFS
+// order (links taken in source order) and their contents. Keeping it the single traversal
+// means the slice Resolve concatenates and the membership Members reports never diverge.
+func walk(root, ref string, depth int) (order []string, contents map[string]string, err error) {
 	if strings.TrimSpace(ref) == "" {
-		return "", fmt.Errorf("spec: empty ref")
+		return nil, nil, fmt.Errorf("spec: empty ref")
 	}
 	if depth < 0 {
-		return "", fmt.Errorf("spec: negative depth %d", depth)
+		return nil, nil, fmt.Errorf("spec: negative depth %d", depth)
 	}
-	rootAbs, err := filepath.Abs(root)
-	if err != nil {
-		return "", fmt.Errorf("spec: resolve root %q: %w", root, err)
+	rootAbs, aerr := filepath.Abs(root)
+	if aerr != nil {
+		return nil, nil, fmt.Errorf("spec: resolve root %q: %w", root, aerr)
 	}
 
 	type node struct {
@@ -83,8 +126,7 @@ func Resolve(root, ref string, depth int) (string, error) {
 	refClean := filepath.Clean(filepath.FromSlash(ref))
 	queue := []node{{rel: refClean, d: 0}}
 	seen := map[string]bool{}
-	var order []string
-	contents := map[string]string{}
+	contents = map[string]string{}
 
 	for len(queue) > 0 {
 		cur := queue[0]
@@ -103,7 +145,7 @@ func Resolve(root, ref string, depth int) (string, error) {
 		data, rerr := os.ReadFile(abs)
 		if rerr != nil {
 			if cur.rel == refClean {
-				return "", fmt.Errorf("spec: read referenced file %q: %w", ref, rerr)
+				return nil, nil, fmt.Errorf("spec: read referenced file %q: %w", ref, rerr)
 			}
 			continue // a broken or forward neighbor link is skipped, not fatal
 		}
@@ -119,17 +161,7 @@ func Resolve(root, ref string, depth int) (string, error) {
 			}
 		}
 	}
-
-	var b strings.Builder
-	for _, rel := range order {
-		fmt.Fprintf(&b, "<!-- spec: %s -->\n", filepath.ToSlash(rel))
-		b.WriteString(contents[rel])
-		if !strings.HasSuffix(contents[rel], "\n") {
-			b.WriteByte('\n')
-		}
-		b.WriteByte('\n')
-	}
-	return b.String(), nil
+	return order, contents, nil
 }
 
 // Links returns the root-relative paths of the local markdown files that content — a spec at

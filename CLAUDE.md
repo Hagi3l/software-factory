@@ -11,11 +11,20 @@ A CI/CD pipeline whose build steps are hostile-by-assumption agents.
 - If the design needs to change, **update the spec** — don't just change code.
 
 ## Status
-**Phase 1 kernel complete — self-host point reached.** `cmd/harness` exposes
-`validate`/`seed`/`run`; the in-process orchestrator+runner do `spec → implement →
-gate → merge` end-to-end (a live run needs a Docker daemon + `ANTHROPIC_API_KEY`).
-Bootstrap config lives in `config/` (`harness validate --config config`). Next work
-is Phases 2–5, filed as beads issues. See `IMPLEMENTATION_PLAN.md`.
+**Phases 2–4 essentially built out (by hand, human-reviewed — not self-hosted).**
+The kernel does `spec → implement → gate → merge` end-to-end (a live run needs a
+Docker daemon + `ANTHROPIC_API_KEY`); on top of it Phase 2 (independent
+verification), Phase 3 (full DAG, decomposition, merge queue), and Phase 4 (control
+room + Create-Task wizard, incl. **T4.15 Resolve mode**) are complete bar **T2.13**
+(a non-fatal `harness validate` warning on producer/verifier model-family overlap —
+N-version diversity is otherwise resolved as configuration, T2.11), with **T2.12**
+and **T2.11** optional. **Phase
+5** (production isolation & distribution — Firecracker, distributed NATS, scoped
+secrets, signing) is the remaining engineering. `cmd/harness` exposes
+`validate`/`seed`/`run`/`approve`/`reject`/`serve`; bootstrap config lives in
+`config/` (`harness validate --config config`). The autonomous self-hosting loop is
+buildable/testable offline but has **not been switched on** (no hosted capable
+model). See `IMPLEMENTATION_PLAN.md` for the per-task detail.
 
 ## Invariants (don't break these in code)
 - **Single-writer beads** — only the orchestrator writes; agents *propose* via Result.

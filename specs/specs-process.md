@@ -46,7 +46,13 @@ When work dead-letters (budget/retries exhausted, or an unresolved escalation), 
 human reads the escalation and responds by **refining the spec** (resolving the
 ambiguity, adjusting criteria, descoping) and re-seeding — never by patching code.
 This keeps "humans never touch code" intact and makes the human's whole job
-intent-authoring.
+intent-authoring. Approving a Resolve in the wizard commits the refined spec and
+**returns the dead-lettered issue to the ready pool** so it is re-dispatched against
+the now-clarified spec: a blocked issue is neither in-flight nor merged, so the
+continuous recompile sweep (below) does not reach it — the wizard reopens it
+explicitly (clearing its stale spec pin), while the sweep re-pins and reissues the
+rest of the affected work. The wizard shows that **blast radius** before the human
+consents, so the consequence of the edit is visible at the moment of approval.
 
 Both authoring new intent and refining it in response to an escalation happen
 through the **same wizard** in the [control room](control-room.md) — "Create Task"

@@ -71,6 +71,13 @@ Specs: [models.md](specs/models.md) (deterministically-fakeable), [components/sa
 (non-isolating local backend), [bootstrap.md](specs/bootstrap.md) (testing the spine).
 
 - [x] **TE.1 Deterministic end-to-end spine test (fast, no Docker) + Docker variant** — *done.*
+- **Known flake (infra, not a code bug):** `internal/runner.TestTeardownRunsEvenWhenInvokeErrors` (and
+  occasionally its NATS-backed siblings) can stall under the *full-suite* `go test ./...` parallel load —
+  many packages each spin an embedded NATS server, and the redelivery-loop teardown becomes timing-sensitive
+  under contention — surfacing as a 10-minute package timeout. It passes deterministically in isolation
+  (`go test ./internal/runner/` ≈ 0.25s). If `make check` times out here, re-run; a real fix would cap test
+  parallelism (`go test -p`) or give the embedded-NATS runner tests a tighter per-test deadline. Not caused by
+  any feature work; flagged so a future loop does not chase it as a regression.
 
 ---
 
@@ -116,7 +123,31 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
   `AwaitApproval`/`RecordApproval` transitions; `core.Issue` gains `CandidateRef`/`ParkedProvenance`.
   Resolves the bootstrap.md TCB-boundary OPEN (the `tcb_paths` list is the operational definition).
   ([bootstrap.md](specs/bootstrap.md), [configuration.md](specs/configuration.md), [messaging.md](specs/messaging.md))
-- [ ] **T2.11** *(OPEN)* Second, different-model reviewer soul in `qa` (N-version diversity). ([verification.md](specs/verification.md))
+- [ ] **T2.11** *(optional)* **N-version model diversity — resolved as configuration, not a built-in mechanism.**
+  Soul independence (`producer ≠ verifier`) is already enforced; running the verifier on a *different model
+  family* than the producer is a **config capability** the harness already provides (a role maps to a set of
+  souls via `selector` (T3.3), each soul names its own model/tier (T3.4)), consistent with the config-is-the-
+  pipeline principle — the harness *enables and recommends* diversity but the model assignment is the user's.
+  No bespoke "second reviewer soul" mechanism is needed. The one piece of buildable work this leaves — a
+  non-fatal validation warning on producer/verifier model-family overlap — is tracked as **T2.13**. Decision
+  recorded in verification.md ("Model diversity is configured, not mandated").
+  ([verification.md](specs/verification.md), [configuration.md](specs/configuration.md))
+- [ ] **T2.13 Producer/verifier model-family diversity warning** — a *non-fatal* advisory at `harness validate`
+  when a **verifier** role (a role that runs a gate — `qa`/`security`) is configured with the same model
+  **family/provider** as the **producer** role (`implement`), since same-family producer+verifier share
+  correlated blind spots and weaken the N-version independence verification.md recommends. **The warning is
+  advisory, never fatal** — model assignment is the user's call (config-is-the-pipeline); validate still exits 0.
+  Two pieces: **(1)** introduce a **non-fatal warning channel** in config validation — today `Config.Validate()
+  returns only a fatal `error` (all problems aggregated), with no advisory class; add a sibling (e.g.
+  `Config.Warnings() []string`) that `cmdValidate` prints without failing. **(2)** the diversity check: derive the
+  producer role (the `implement`-stage role) and verifier role(s) (the gate/`qa`-stage role(s)) from the DAG,
+  resolve each role's soul(s) → `core.Soul.Model` → `config.ModelProvider.Provider`, and warn when a verifier's
+  provider matches the producer's. Key on **`Provider`** as the family proxy (known imperfection: two
+  `openai-compat` entries at *different endpoints* are distinct families but read as the same provider — note it
+  in the message, don't over-engineer). **Deferred / optional:** the complementary control-room **tooltip** needs
+  a souls/config view that does not exist yet (no such Phase 4 view was built) — file it as a follow-up, not part
+  of this task. Tests: warn on same-provider producer+verifier, no warn on differing providers, no warn when no
+  gate stage / no producer, and that the warning never turns `Validate()` fatal. ([verification.md](specs/verification.md), [configuration.md](specs/configuration.md))
 
 ## Phase 3 — Full DAG, decomposition & merge queue
 
@@ -559,7 +590,43 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   stored, seed issue created with role+spec+footer). `make check` green (lint 0, 624 pass / 2 skip).
   **Deferred:** the decomposition-preview dry-run (control-room.md OPEN, "leaning defer") stays deferred — seed
   issues are coarse and the autonomous planner decomposes. (needs T4.12) ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md))
-- [ ] **T4.15 Resolve mode** — Create and Resolve are one component; Resolve pre-loads the escalation + spec slice + the agent transcript that raised it and shows the spec diff + blast radius before commit. Unblocked by T4.14 (the draft + consent-gate + `wizard.Seeder` seam now exist); Resolve is a second entry mode that pre-seeds the conversation from a dead-lettered issue's escalation and shows the recompile-the-delta blast radius before APPROVE. (needs T4.14) ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
+- [x] **T4.15 Resolve mode** — *done.* The wizard's second entry mode (`GET /resolve/{id}`), pre-loaded from a
+  dead-lettered issue: the escalation, the governing spec slice, and the transcript that raised it, with the
+  spec edit's **blast radius** shown before the consent gate (control-room.md "Create and Resolve are the same
+  component"). **Reachability (the piece T4.11 deferred):** the orchestrator now stamps the most-recent
+  invocation transcript onto the **issue** (`core.Issue.Transcript`, `beads.StampTranscript`, new
+  `transcript` metadata key) in `handleResult` for **every** disposition — best-effort, idempotent, skipped on
+  an empty hash — so the decision trail is reachable for in-flight/dead-lettered work, not only from a merge
+  trailer; and the dead-letter **reason** is stamped in the same transition that blocks the issue
+  (`Block(ctx, id, reason)` → `core.Issue.DeadLetterReason`, new `dlq_reason` key), surfaced on the DLQ row and
+  the detail page (closes the long-standing "reason not on the issue" gap). **Blast radius:** new read-only
+  `spec.Members(root, ref, depth)` (shares `Resolve`'s traversal) answers "does this slice include the edited
+  path"; `query.Reader.BlastRadius(repo, depth, editedPaths)` runs the recompile-the-delta predicate as a
+  preview — in-flight issues whose slice includes an edit (would reissue) + closed `(epic, spec-path)` groups
+  (would re-derive), the same membership the sweep acts on. `query.ResolveContext` assembles the escalation +
+  current slice + transcript ref. **Wizard:** `Planner.NewResolve(ResolveSeed)` grounds a session in the
+  escalation (folded into the system prompt, not the visible transcript), records the issue id it commits
+  against (`Session.issueID` / `ResolveIssue()`), and auto-opens one turn; the conversation/ledger/transcript
+  reuse the per-session `/create/*` endpoints (a Resolve session is just a `Session`). New `wizard.Resolver`
+  seam (sibling of `Seeder`) + `ResolveRequest`/`ResolveResult`; the cmd-side `wizardSeeder` implements both
+  (shared `validateSpecFiles`/`commit`/`decisionsSidecar`), with `Resolve` writing the refined spec, storing
+  provenance, committing, and **reopening the dead-lettered issue** via `Reissue` (a blocked issue is neither
+  in_progress nor closed, so the recompile sweep does not touch it — Resolve reopens it explicitly, clearing
+  the stale pin so the next dispatch re-resolves the edited slice). Resolve creates **no** new seed issues (new
+  scope → Create). **Server:** `/resolve/{id}` (page), `/resolve/blast/{session}` (combined draft + blast +
+  approve panel, refreshed on `sse:draft`), `POST /resolve/approve` (commits the server-side draft against the
+  server-bound issue id — never browser content); `Options.{Resolver,Repo,SpecDepth}` threaded from the
+  composition root (repo/depth supplied by the caller, keeping the read model config-free). **Views:**
+  `resolve.templ` (ResolvePage, ResolvePanel, blastRadius, ResolveApproveResult, ResolveMessage); the
+  spec-files block extracted to `draftSpecFiles` (shared with Create); DLQ rows and the blocked issue-detail
+  header gained "Resolve →" launch links + the inline reason. **Deferred (filed, not blocking):** wiring
+  `Reader.Replay` to read `issue.Transcript` so non-merged invocations replay too — the data is now reachable,
+  only the read is merge-trailer-bound; a small follow-up. Tests: `spec.Members`; beads `StampTranscript` +
+  `Block`-with-reason round-trips; orchestrator stamps transcript + reason on a dead-letter; query
+  `BlastRadius` (in-flight membership, merged grouping, empty/error) + `ResolveContext` (+ degrade) + DLQ
+  reason; wizard `NewResolve` grounds+opens; cmd `Resolve` integration (commit + transcript + reopen) +
+  validation; server handlers (page render, blast panel, approve success + guards). `make check` green.
+  (needs T4.14) ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md), [observability.md](specs/observability.md))
 
 ## Phase 5 — Production isolation & distribution
 

@@ -62,6 +62,13 @@ The single scheduler + gatekeeper + sole beads writer. Watches ready work,
 dispatches, gates results, advances the graph, reconciles. Executes nothing itself.
 See [components/orchestrator.md](components/orchestrator.md).
 
+### Plan stage (decomposition planner)
+The autonomous, **sandboxed** workflow stage (`kind: plan`) whose soul decomposes a
+seed issue into a DAG of child work items. Untrusted like any agent; it *proposes*
+children the orchestrator validates. Distinct from the
+[requirements planner](#requirements-planner). See [workflow.md](workflow.md),
+[components/orchestrator.md](components/orchestrator.md).
+
 ### Producer ≠ verifier
 The principle that whoever produces an artifact never grades it. Applied to tests
 vs. code, results vs. producer, and mutations vs. proposer. See
@@ -78,6 +85,14 @@ Reconstructing an invocation's full decision trail (what the LLM saw and did, st
 by step) from broker-captured events and the [artifact store](#artifact-store). The
 differentiator for observability and the audit mechanism for no-human-review. See
 [observability.md](observability.md).
+
+### Requirements planner
+The **trusted, non-sandboxed** conversational planner behind the
+[wizard](#wizard)'s Create-Task / Resolve flow. It helps a human elicit intent and
+draft specs + seed issues, talking to the model layer directly (no broker, no
+sandbox — it runs no untrusted code). Distinct from the autonomous
+[plan stage](#plan-stage-decomposition-planner). See
+[control-room.md](control-room.md), [specs-process.md](specs-process.md).
 
 ### Result (envelope)
 What an agent returns *out of* the sandbox: status, candidate branch ref, evidence,
@@ -117,6 +132,14 @@ plus its linked neighbours to a depth, not the whole tree. See
 The observability model for one invocation: epic → issue → invocation → spans
 (boot, llm-turn, tool-call, gate-run). Maps to OpenTelemetry. See
 [observability.md](observability.md).
+
+### Trusted Computing Base (TCB)
+The components that *enforce* the harness's guarantees — orchestrator, runner/broker,
+sandbox config, the gate harness, the verification stack. An unverified harness
+cannot vouch for its own verifier, so **TCB-touching changes stay human-reviewed
+even after self-hosting** (arguably permanently). The boundary is operationally the
+`policy.tcb_paths` globs that force `human-approved` regardless of profile. See
+[bootstrap.md](bootstrap.md), [configuration.md](configuration.md).
 
 ### Verification sandbox
 A *fresh* sandbox, controlled by the orchestrator and distinct from the producing

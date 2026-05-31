@@ -68,6 +68,17 @@ type Options struct {
 	// the wizard touches the durable stores. nil disables APPROVE (a standalone `harness serve`
 	// has no repo to write); /create still elicits intent but cannot commit it.
 	Seeder wizard.Seeder
+	// Resolver commits an approved Resolve-mode draft (T4.15): it refines the spec and returns
+	// the dead-lettered issue to the ready pool. nil disables the Resolve consent gate (like a
+	// nil Seeder for Create). Resolve mode is the wizard pre-loaded from a dead-lettered issue.
+	Resolver wizard.Resolver
+	// Repo and SpecDepth are the repository root and the spec-slice link-traversal depth
+	// (config.Harness.SpecDepth). They are supplied by the composition root — not held by the
+	// Reader — so the read model stays free of a filesystem/config dependency, mirroring how
+	// StageOrder and BudgetCaps are threaded. Resolve mode needs them to resolve the spec slice
+	// it pre-loads (query.ResolveContext) and to compute the blast radius (query.BlastRadius).
+	Repo      string
+	SpecDepth int
 }
 
 // Server renders the control room. It is an http.Handler (via Handler) so its routes can
@@ -84,6 +95,9 @@ type Server struct {
 	budgetCaps query.BudgetCaps
 	planner    *wizard.Planner
 	seeder     wizard.Seeder
+	resolver   wizard.Resolver
+	repo       string
+	specDepth  int
 }
 
 // New builds the server and registers every route. Routes are registered eagerly so a
@@ -104,6 +118,9 @@ func New(opts Options) *Server {
 		budgetCaps: opts.BudgetCaps,
 		planner:    opts.Planner,
 		seeder:     opts.Seeder,
+		resolver:   opts.Resolver,
+		repo:       opts.Repo,
+		specDepth:  opts.SpecDepth,
 	}
 	s.routes()
 	return s
@@ -161,6 +178,15 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /create/ledger/select", s.handleCreateLedgerSelect)   // T4.13 — chip click funnels through the planner
 	s.mux.HandleFunc("GET /create/draft/{session}", s.handleCreateDraft)         // T4.14 — drafted spec + seed issues panel fragment
 	s.mux.HandleFunc("POST /create/approve", s.handleCreateApprove)              // T4.14 — the consent gate: commit the approved draft
+
+	// Resolve mode (T4.15) — the wizard pre-loaded from a dead-lettered issue. The page mints a
+	// session grounded in the escalation + spec slice + transcript; the conversation, ledger, and
+	// draft reuse the per-session /create/* endpoints (a Resolve session is just a Session), so
+	// the only Resolve-specific routes are the page, the blast-radius preview fragment, and the
+	// resolve consent gate (which refines the spec and reopens the issue).
+	s.mux.HandleFunc("GET /resolve/{id}", s.handleResolve)
+	s.mux.HandleFunc("GET /resolve/blast/{session}", s.handleResolveBlast)
+	s.mux.HandleFunc("POST /resolve/approve", s.handleResolveApprove)
 
 	// Every remaining navigation destination resolves to a placeholder until its
 	// data-backed view lands; registering them from views.NavItems keeps the navigation
@@ -681,6 +707,117 @@ func (s *Server) handleCreateApprove(w http.ResponseWriter, r *http.Request) {
 	}
 	s.log.Info("controlroom: wizard draft approved", "session", sess.ID, "commit", res.Commit, "issues", len(res.Issues))
 	s.render(w, r, views.CreateApproveResult(res, ""))
+}
+
+// handleResolve renders the Resolve-mode wizard page (T4.15, specs/control-room.md "Create and
+// Resolve are the same component"): the wizard pre-loaded from a dead-lettered issue — the
+// escalation, the governing spec slice, and the transcript that raised it. It mints a session
+// grounded in that context (NewResolve), so the planner opens already engaged with the
+// escalation. With no planner wired it shows the wizard-disabled notice; with no reader it shows
+// the not-attached notice (the context comes from the read model); an unknown id or read fault
+// renders the same chrome with the reason rather than a blank 500, mirroring handleIssue.
+func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
+	if s.planner == nil {
+		s.render(w, r, views.ResolveMessage("The requirements planner is not configured — Resolve is available when the control room runs with `harness run --serve-addr` and a requirements_planner is set in harness.yaml."))
+		return
+	}
+	if s.reader == nil {
+		s.render(w, r, views.ResolveMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to resolve dead-lettered work."))
+		return
+	}
+	id := r.PathValue("id")
+	rc, err := s.reader.ResolveContext(r.Context(), s.repo, s.specDepth, id)
+	if err != nil {
+		s.log.Error("controlroom: resolve context read failed", "id", id, "err", err)
+		s.render(w, r, views.ResolveMessage("Could not load issue "+id+" to resolve: "+err.Error()))
+		return
+	}
+	sess := s.planner.NewResolve(wizard.ResolveSeed{
+		IssueID:   rc.Issue.ID,
+		Title:     rc.Issue.Title,
+		Role:      rc.Issue.Role,
+		Spec:      rc.Spec,
+		Reason:    rc.Issue.DeadLetterReason,
+		SpecSlice: rc.SpecSlice,
+	})
+	s.render(w, r, views.ResolvePage(sess.ID, rc, sess.Messages(), s.resolver != nil))
+}
+
+// handleResolveBlast returns the blast-radius preview fragment (T4.15): the read-only consequence
+// of committing the session's drafted spec edits — the in-flight work the recompile sweep would
+// reissue and the merged work it would re-derive (specs/control-room.md "this change re-pins and
+// reissues these N in-flight items"). It is the htmx swap target the Resolve page re-fetches on a
+// `draft`/`turn` SSE nudge, so the consequence updates as the planner refines the draft. Data
+// endpoint: 503 with no planner/reader, 404 for an unknown session, 500 on a read fault.
+func (s *Server) handleResolveBlast(w http.ResponseWriter, r *http.Request) {
+	if s.planner == nil || s.reader == nil {
+		http.Error(w, "resolve unavailable: the control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+	sess := s.planner.Get(r.PathValue("session"))
+	if sess == nil {
+		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
+		return
+	}
+	draft := sess.Draft()
+	paths := make([]string, 0, len(draft.Specs))
+	for _, sp := range draft.Specs {
+		paths = append(paths, sp.Path)
+	}
+	br, err := s.reader.BlastRadius(r.Context(), s.repo, s.specDepth, paths)
+	if err != nil {
+		s.log.Error("controlroom: blast radius read failed", "session", sess.ID, "err", err)
+		http.Error(w, "could not compute the blast radius\n", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, views.ResolvePanel(sess.ID, draft, s.resolver != nil, br))
+}
+
+// handleResolveApprove is the Resolve consent gate (T4.15): the human approves the refined spec,
+// and only then is it committed — the spec edit lands, the conversation provenance is stored, and
+// the dead-lettered issue is returned to the ready pool to be re-dispatched against the clarified
+// spec (the orchestrator's recompile sweep handles the rest of the blast radius). Like the Create
+// gate it commits the SERVER-SIDE draft against the issue the server bound at mint
+// (sess.ResolveIssue) — never browser-supplied content or issue id. Data endpoint: 503 with no
+// planner; resolve-disabled notice with no resolver; 400 on a malformed form; 404 for an unknown
+// session; a "nothing to resolve" notice when the draft has no spec edit.
+func (s *Server) handleResolveApprove(w http.ResponseWriter, r *http.Request) {
+	if s.planner == nil {
+		http.Error(w, "wizard unavailable: the requirements planner is not configured\n", http.StatusServiceUnavailable)
+		return
+	}
+	if s.resolver == nil {
+		s.render(w, r, views.ResolveApproveResult(wizard.ResolveResult{}, "Resolve is unavailable: the control room is not attached to a repository. Run the wizard under `harness run --serve-addr` to refine specs and reopen work."))
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		http.Error(w, "could not parse the approval\n", http.StatusBadRequest)
+		return
+	}
+	sess := s.planner.Get(r.FormValue("session"))
+	if sess == nil {
+		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
+		return
+	}
+	draft := sess.Draft()
+	if len(draft.Specs) == 0 {
+		s.render(w, r, views.ResolveApproveResult(wizard.ResolveResult{}, "Nothing to resolve yet — keep the conversation going until the planner drafts a spec refinement."))
+		return
+	}
+	res, err := s.resolver.Resolve(r.Context(), wizard.ResolveRequest{
+		IssueID:    sess.ResolveIssue(),
+		Summary:    draft.Summary,
+		Specs:      draft.Specs,
+		Decisions:  wizard.FinalizedDecisions(sess.Ledger()),
+		Transcript: sess.Transcript(),
+	})
+	if err != nil {
+		s.log.Warn("controlroom: resolve approval failed", "session", sess.ID, "issue", sess.ResolveIssue(), "err", err)
+		s.render(w, r, views.ResolveApproveResult(wizard.ResolveResult{}, "Could not commit the resolution: "+err.Error()))
+		return
+	}
+	s.log.Info("controlroom: resolve draft approved", "session", sess.ID, "commit", res.Commit, "reopened", res.ReopenedIssue)
+	s.render(w, r, views.ResolveApproveResult(res, ""))
 }
 
 // Handler exposes the routed mux for embedding (e.g. behind middleware) and for httptest.

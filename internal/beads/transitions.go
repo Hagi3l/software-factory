@@ -108,6 +108,22 @@ const (
 // work groups by (see specs/workflow.md, the plan's T3.7b).
 const MetadataKeyEpicID = "epic_id"
 
+// MetadataKeyTranscript holds the artifact-store hash of the broker-captured conversation
+// from an issue's most recent invocation (core.Issue.Transcript). Unlike the merge trailer's
+// transcript (retained only for merged work), the orchestrator stamps this onto the issue via
+// StampTranscript when it processes the Result — whatever the disposition — so the decision
+// trail is reachable for in-flight and dead-lettered work, not only merged commits. It is NOT
+// set at creation and NOT threaded forward (each issue records its own latest run); absent
+// until the first invocation is processed (see specs/observability.md, the plan's T4.15).
+const MetadataKeyTranscript = "transcript"
+
+// MetadataKeyDLQReason holds the orchestrator's one-line classification of why an issue
+// dead-lettered (core.Issue.DeadLetterReason) — the same reason published on the DLQ alert.
+// It is written in the same transition that blocks the issue (Block) so the dead-letter queue
+// and the Resolve wizard can show *why* the work is stuck. Empty on any issue that is not
+// blocked (see specs/workflow.md, specs/control-room.md).
+const MetadataKeyDLQReason = "dlq_reason"
+
 // Approval-gate metadata (T2.10), written when an integrate is held for human approval and
 // read back to resume it. Unlike the keys above they are NOT set at issue creation — they
 // are written by status transitions (AwaitApproval / RecordApproval) on an already-existing
@@ -197,6 +213,28 @@ func (c *Client) StampClosingSpend(ctx context.Context, id string, tokens int, u
 	return nil
 }
 
+// StampTranscript records the artifact-store hash of an issue's most recent invocation
+// transcript, merged into its metadata without touching status or other keys (like
+// PinSpecHash / StampClosingSpend). The orchestrator calls it when it processes the issue's
+// Result — whatever the disposition — so the decision trail is reachable from the issue for
+// in-flight and dead-lettered work, not only from a merge trailer (which exists only for
+// merged work). It is a set, not an append, so re-stamping the same hash on an at-least-once
+// redelivery is idempotent. An empty hash is a no-op: the runner could not persist a
+// transcript, so there is nothing to cite.
+func (c *Client) StampTranscript(ctx context.Context, id, hash string) error {
+	if id == "" {
+		return fmt.Errorf("beads: empty issue id")
+	}
+	if hash == "" {
+		return nil
+	}
+	args := []string{"update", id, "--set-metadata", MetadataKeyTranscript + "=" + hash}
+	if _, err := c.run(ctx, args); err != nil {
+		return fmt.Errorf("beads: stamp transcript on %s: %w", id, err)
+	}
+	return nil
+}
+
 // Release returns an issue to the ready pool and clears its lease — used by the
 // reconcile sweep to reset work stranded by a dead runner so JetStream redelivery
 // can re-dispatch it.
@@ -227,9 +265,15 @@ func (c *Client) Close(ctx context.Context, id string) error {
 
 // Block dead-letters an issue: on a budget/retry breach or an unrecoverable
 // escalation it is marked blocked for human triage via spec refinement. Emitting the
-// DLQ alert event is the orchestrator's job (T1.19); this is the beads-side write.
-func (c *Client) Block(ctx context.Context, id string) error {
-	return c.setStatus(ctx, id, "blocked")
+// DLQ alert event is the orchestrator's job (T1.19); this is the beads-side write. The
+// reason — the orchestrator's one-line classification of why the work terminated — is
+// stamped in the same transition (MetadataKeyDLQReason) so the dead-letter queue and the
+// Resolve wizard can show *why* without re-deriving it; an empty reason stamps nothing.
+func (c *Client) Block(ctx context.Context, id, reason string) error {
+	if reason == "" {
+		return c.setStatus(ctx, id, "blocked")
+	}
+	return c.setStatus(ctx, id, "blocked", "--set-metadata", MetadataKeyDLQReason+"="+reason)
 }
 
 // AwaitApproval parks an issue awaiting human approval of its integrate candidate (T2.10):

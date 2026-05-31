@@ -153,10 +153,10 @@ func orderedStages(stageOrder []string, byStage map[string][]IssueCard) []string
 // human refines to resolve it (the human re-entry invariant: stuck work is fixed by
 // refining the spec, never by editing code — specs/specs-process.md). The full forensic
 // trail (transcript, gate evidence, provenance) lives on the issue-detail page (T4.7) each
-// entry links into. The dead-letter *reason* is deliberately not synthesized here: it is
-// not recorded as a first-class field on the issue (the orchestrator only flips the status
-// to blocked), so inferring it would mean guessing against policy caps — the honest move is
-// to show the evidence (spend, attempt, spec) and let the detail page carry the rest.
+// entry links into. Reason is the orchestrator's own one-line classification of why the work
+// terminated, stamped on the issue when it was blocked (core.Issue.DeadLetterReason, T4.15) —
+// so the queue now states the cause rather than leaving the human to infer it from spend and
+// attempt alone. It is empty for an older issue blocked before the reason was recorded.
 type DeadLetter struct {
 	ID          string
 	Title       string
@@ -165,6 +165,7 @@ type DeadLetter struct {
 	Attempt     int
 	SpentTokens int
 	SpentUSD    float64
+	Reason      string
 }
 
 // DeadLetters returns the blocked issues — the escalations awaiting a human, the control
@@ -187,6 +188,7 @@ func (r *Reader) DeadLetters(ctx context.Context) ([]DeadLetter, error) {
 			Attempt:     i.Attempt,
 			SpentTokens: i.SpentTokens,
 			SpentUSD:    i.SpentUSD,
+			Reason:      i.DeadLetterReason,
 		})
 	}
 	sort.Slice(dls, func(a, b int) bool { return dls[a].ID < dls[b].ID })

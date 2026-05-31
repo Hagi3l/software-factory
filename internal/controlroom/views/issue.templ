@@ -26,6 +26,16 @@ templ IssueDetailPage(d query.IssueDetail) {
 					}
 				</div>
 				<h1 class="text-2xl font-semibold tracking-tight">{ d.Issue.Title }</h1>
+				if d.Issue.Status == "blocked" {
+					// A blocked issue is dead-lettered and awaits a human. Per the human re-entry
+					// invariant the action is to refine the spec, so the detail page offers the
+					// Resolve wizard (T4.15) directly — the same launch point as the DLQ — alongside
+					// the orchestrator's reason it terminated.
+					<a href={ templ.URL("/resolve/" + d.Issue.ID) } class="inline-block rounded bg-emerald-600/90 px-2.5 py-1 text-sm font-medium text-white transition hover:bg-emerald-500">Resolve this escalation →</a>
+					if d.Issue.DeadLetterReason != "" {
+						<p class="text-sm text-rose-300">{ d.Issue.DeadLetterReason }</p>
+					}
+				}
 				if d.Provenance.Transcript != "" {
 					// The decision trail is reachable only once the transcript hash is retained on
 					// the merge trailer (T4.7b), so the replay drill-through surfaces only for merged

@@ -49,6 +49,24 @@ The `implement` agent *sees* the tests — that is intended (TDD: the tests are 
 spec made executable). The independence that matters is **author ≠ implementor**,
 so the tests aren't written to match a particular (possibly wrong) implementation.
 
+### Model diversity is configured, not mandated
+
+Soul independence (above) is enforced by the harness. *Model* independence —
+running the verifier on a different model **family** than the producer, so the two
+don't share correlated blind spots (N-version diversity) — is a **configuration
+capability**, not a built-in mechanism. The pieces already exist: a role maps to a
+set of souls (`selector`, see [configuration.md](configuration.md)) and each soul
+names its own model/tier (per-role model tiers), so a user who wants a
+different-family reviewer simply points the `qa` soul at one. This is consistent
+with the config-is-the-pipeline principle: the harness *enables and recommends*
+diversity but leaves the model assignment to the user who configures the pipeline.
+
+Because same-family producer/verifier is weaker independence, config validation
+**should warn** (non-fatal) when a verifier role shares a model family with the
+producer — keyed on family/provider, not just an identical model id. The warning's
+natural home is `harness validate` (so yaml-only users see it); a control-room
+tooltip is a complementary surface once a souls/config view exists.
+
 ---
 
 ## The trust mechanisms
@@ -201,5 +219,7 @@ a style issue.
   config, so it is tunable per role/project; which mutation operators the tool exercises is
   the tool's own configuration, kept out of the gate (which grades only the resulting
   number).
-- Whether `qa` should include a second, *different-model* reviewer soul as an
-  additional independent gate (N-version diversity) — candidate for defence in depth.
+- N-version diversity via a different-model reviewer soul is **resolved, not open**:
+  it is a configuration capability — see "Model diversity is configured, not mandated"
+  above — not a built-in mechanism. The only residual is the non-fatal config-validation
+  warning when a verifier shares a model family with the producer.
