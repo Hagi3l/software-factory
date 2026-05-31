@@ -2,6 +2,7 @@ package main
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Loxstomper/harness/internal/config"
@@ -52,6 +53,32 @@ func TestValidateShippedConfig(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("shipped config failed validation: %v", err)
+	}
+}
+
+// TestWarnShippedConfig pins the one accepted advisory on the bootstrap config (T2.13):
+// the implementor (producer) and the security reviewer (qa verifier) both resolve to the
+// anthropic provider, just different tiers, because anthropic is the only family wired in
+// dev. validate must surface this as a non-fatal N-version diversity advisory (so a
+// yaml-only operator sees the recommendation), and TestValidateShippedConfig above
+// asserts it stays non-fatal. If a future edit points the verifier at a different family,
+// this guard flags that the accepted tradeoff has changed and should be reconsidered.
+func TestWarnShippedConfig(t *testing.T) {
+	cfg, err := loadConfig(testConfigDir, "dev")
+	if err != nil {
+		t.Fatalf("load shipped config: %v", err)
+	}
+	ws := cfg.Warnings()
+	found := false
+	for _, w := range ws {
+		if strings.Contains(w, `producer role "implementor"`) &&
+			strings.Contains(w, `verifier role "security"`) &&
+			strings.Contains(w, `provider "anthropic"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("shipped config must advise the accepted same-family producer/verifier overlap; got %v", ws)
 	}
 }
 

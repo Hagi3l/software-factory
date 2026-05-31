@@ -221,5 +221,8 @@ a style issue.
   number).
 - N-version diversity via a different-model reviewer soul is **resolved, not open**:
   it is a configuration capability — see "Model diversity is configured, not mandated"
-  above — not a built-in mechanism. The only residual is the non-fatal config-validation
-  warning when a verifier shares a model family with the producer.
+  above — not a built-in mechanism. The non-fatal config-validation warning when a
+  verifier shares a model family with the producer is **implemented** (`harness validate`
+  surfaces it via `config.Warnings()`; the producer is the red→green-gated stage and its
+  verifiers are the gate stages it produces). The complementary control-room tooltip
+  remains a follow-up, pending a souls/config view.

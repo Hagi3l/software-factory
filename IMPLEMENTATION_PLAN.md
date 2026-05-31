@@ -132,22 +132,30 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
   non-fatal validation warning on producer/verifier model-family overlap — is tracked as **T2.13**. Decision
   recorded in verification.md ("Model diversity is configured, not mandated").
   ([verification.md](specs/verification.md), [configuration.md](specs/configuration.md))
-- [ ] **T2.13 Producer/verifier model-family diversity warning** — a *non-fatal* advisory at `harness validate`
-  when a **verifier** role (a role that runs a gate — `qa`/`security`) is configured with the same model
-  **family/provider** as the **producer** role (`implement`), since same-family producer+verifier share
-  correlated blind spots and weaken the N-version independence verification.md recommends. **The warning is
-  advisory, never fatal** — model assignment is the user's call (config-is-the-pipeline); validate still exits 0.
-  Two pieces: **(1)** introduce a **non-fatal warning channel** in config validation — today `Config.Validate()
-  returns only a fatal `error` (all problems aggregated), with no advisory class; add a sibling (e.g.
-  `Config.Warnings() []string`) that `cmdValidate` prints without failing. **(2)** the diversity check: derive the
-  producer role (the `implement`-stage role) and verifier role(s) (the gate/`qa`-stage role(s)) from the DAG,
-  resolve each role's soul(s) → `core.Soul.Model` → `config.ModelProvider.Provider`, and warn when a verifier's
-  provider matches the producer's. Key on **`Provider`** as the family proxy (known imperfection: two
-  `openai-compat` entries at *different endpoints* are distinct families but read as the same provider — note it
-  in the message, don't over-engineer). **Deferred / optional:** the complementary control-room **tooltip** needs
-  a souls/config view that does not exist yet (no such Phase 4 view was built) — file it as a follow-up, not part
-  of this task. Tests: warn on same-provider producer+verifier, no warn on differing providers, no warn when no
-  gate stage / no producer, and that the warning never turns `Validate()` fatal. ([verification.md](specs/verification.md), [configuration.md](specs/configuration.md))
+- [x] **T2.13 Producer/verifier model-family diversity warning** — *done.* Closes the last non-optional Phase 2
+  gap. **(1) Non-fatal warning channel:** new **`Config.Warnings() []string`** (sibling of `Validate`, in
+  `internal/config/warnings.go`) — same `add`-closure + sort pattern as `Validate`, plus de-dup; `cmdValidate`
+  prints each to **stderr** (`harness validate: warning: …`) after a clean `Validate` and still exits 0
+  (stdout keeps the OK line). The split is the point: `Validate` gates startup on run-time-breaking faults,
+  a warning is the operator's call (config-is-the-pipeline). **(2) Diversity check (`warnModelDiversity`):**
+  derives the **producer** stage as the one gated by the **red→green proof** (`core.PostconditionRedGreen` — the
+  principled signal for "implement", per verification.md), and its **verifiers** as the **gate stages downstream
+  of it via produces edges** (`isGateStage` = a postcondition that is a command check in the `checks` registry or
+  a metric comparison — excludes the reserved proofs and orchestrator-evaluated `human-approved`). Scoping
+  verifiers to produces-descendants (not "every gate stage") means (a) a non-gate stage inserted between
+  implement and qa can't hide the overlap and (b) the **conflict-spawned `resolve` stage — gated but not produced
+  by implement, and not an independent reviewer of the implementor — is correctly NOT treated as its verifier**
+  (regression-tested). Each role → soul(s) → `core.Soul.Model` → `config.ModelProvider.Provider`; a role resolves
+  to a **provider set** (selector-based multi-soul), and an intersection between producer and verifier sets warns
+  per shared provider. Keyed on **`Provider`** as the family proxy; when the shared provider is `openai-compat`
+  the message names the known imperfection (distinct endpoints read as one family). **The shipped config trips
+  exactly one advisory** (implementor + security both `anthropic`, different tiers — anthropic is the only family
+  wired in dev); documented as an accepted tradeoff in `config/souls/security.yaml` and pinned by
+  `TestWarnShippedConfig` (and `TestValidateShippedConfig` confirms it stays non-fatal). Tests (config +
+  cmd/harness): same-provider warn, differing-provider no-warn, no-gate-stage / no-producer no-warn, never-fatal,
+  openai-compat note, provider-set intersection, resolve-is-not-a-verifier, shipped-config advisory. `make check`
+  green (lint 0, 656 pass / 2 skip). **Deferred (filed, not blocking):** the complementary control-room tooltip
+  still needs a souls/config view that does not exist yet. ([verification.md](specs/verification.md), [configuration.md](specs/configuration.md))
 
 ## Phase 3 — Full DAG, decomposition & merge queue
 

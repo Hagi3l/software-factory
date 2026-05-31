@@ -13,6 +13,12 @@ import (
 // dispatch maps to exit 1. Validation being loud and up front is a safety feature —
 // a typo'd key or an unresolvable role must never surface mid-run (see
 // specs/configuration.md).
+//
+// On an otherwise-valid config it then prints any non-fatal advisories (config.Warnings)
+// to stderr without changing the exit code (T2.13). These flag weaker-than-recommended
+// choices that are still sound — chiefly a verifier role sharing a model family with the
+// producer it grades (N-version diversity, specs/verification.md) — so a yaml-only
+// operator sees the recommendation at the same gate, while model choice stays theirs.
 func cmdValidate(args []string) error {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	dir := fs.String("config", "config", "config directory (harness.yaml, souls/, infra.<env>.yaml)")
@@ -27,6 +33,9 @@ func cmdValidate(args []string) error {
 	}
 	if err := cfg.Validate(); err != nil {
 		return err
+	}
+	for _, w := range cfg.Warnings() {
+		fmt.Fprintf(os.Stderr, "harness validate: warning: %s\n", w)
 	}
 	fmt.Fprintf(os.Stdout, "config %q (env %q): OK — %d stage(s), %d soul(s), %d model(s)\n",
 		*dir, *env, len(cfg.Harness.DAG), len(cfg.Souls), len(cfg.Infra.Models))

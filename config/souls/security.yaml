@@ -23,6 +23,14 @@
 # red→green proof re-run), and a rejected candidate routes back to `implement`. Because
 # producer != verifier already catches its mistakes, a cheaper model here trades little
 # safety for real cost savings. Tune per deployment (see specs/models.md, configuration.md).
+#
+# N-version diversity (T2.13): this verifier still resolves to the same *provider*
+# (anthropic) as the implementor, just a cheaper tier — so `harness validate` emits a
+# non-fatal advisory that producer and verifier share a model family (correlated blind
+# spots). The bootstrap accepts this knowingly: anthropic is the only provider wired in
+# dev. Pointing this soul at a different-family model (e.g. an openai-compat local model)
+# is the recommended hardening once a second family is available; it is a config edit
+# here, never a code change (see specs/verification.md, "Model diversity is configured").
 name:    security-go
 role:    security
 model:   claude-sonnet-4-6

@@ -1,0 +1,199 @@
+package config
+
+import (
+	"fmt"
+	"sort"
+
+	"github.com/Loxstomper/harness/internal/core"
+)
+
+// Warnings returns non-fatal advisories about the configuration: properties that are
+// weaker than recommended but not invalid, so a config that trips one is still sound
+// (Validate returns nil) and harness validate surfaces the advisory without failing
+// (exit 0). The split from Validate is deliberate — Validate gates startup on faults
+// that would break at run time (an unreachable role, an undefined target), whereas a
+// warning is the operator's call to heed or ignore. Model assignment is exactly such a
+// call: config is the pipeline, so the harness *recommends* N-version producer/verifier
+// diversity but never forces it (see specs/verification.md, "Model diversity is
+// configured, not mandated"). The list is sorted and de-duplicated for deterministic
+// output; nil when there is nothing to advise.
+func (c *Config) Warnings() []string {
+	var warnings []string
+	warn := func(format string, args ...any) {
+		warnings = append(warnings, fmt.Sprintf(format, args...))
+	}
+
+	c.warnModelDiversity(warn)
+
+	if len(warnings) == 0 {
+		return nil
+	}
+	sort.Strings(warnings)
+	// De-duplicate: two producer stages reaching the same gate would otherwise emit the
+	// identical advisory twice. The slice is already sorted, so equal strings are adjacent.
+	uniq := warnings[:1]
+	for _, w := range warnings[1:] {
+		if w != uniq[len(uniq)-1] {
+			uniq = append(uniq, w)
+		}
+	}
+	return uniq
+}
+
+// warnModelDiversity advises when a verifier role shares a model provider — the family
+// proxy — with the producer whose work it grades. The producer is the stage gated by the
+// red→green proof (the implementor must turn the independently-authored acceptance tests
+// from red to green); its verifiers are the gate stages downstream of it in the produces
+// DAG (the qa gate re-runs the tests, mutation, and scanners independently). When the two
+// resolve to the same provider they share correlated blind spots, which weakens the
+// N-version independence verification.md recommends — but model choice is the operator's,
+// so this is advisory, never fatal (it is why the warning channel exists, T2.13).
+//
+// Family is keyed on the configured provider (anthropic / openai / openai-compat), a
+// deliberate approximation: it cannot tell two openai-compat endpoints (genuinely
+// distinct families behind one provider tag) apart, so the message says so when the
+// shared provider is openai-compat rather than over-engineering a per-endpoint identity.
+//
+// Verifiers are scoped to the producer's produces-descendants, not "every gate stage", so
+// (a) a non-gate stage inserted between implement and qa does not hide the overlap, and
+// (b) the conflict-spawned resolve stage — gated, but not produced by implement and not
+// an independent reviewer of the implementor — is correctly not treated as its verifier.
+func (c *Config) warnModelDiversity(warn func(string, ...any)) {
+	if c.Harness == nil || c.Infra == nil {
+		return
+	}
+	dag := c.Harness.DAG
+	for _, pname := range sortedKeys(dag) {
+		pst := dag[pname]
+		if !c.isProducerStage(pst) {
+			continue
+		}
+		producerProviders := c.roleProviders(pst.Role)
+		if len(producerProviders) == 0 {
+			continue
+		}
+		for _, vname := range sortedSet(c.downstreamStages(pname)) {
+			vst := dag[vname]
+			if !c.isGateStage(vst) || vst.Role == pst.Role {
+				continue
+			}
+			verifierProviders := c.roleProviders(vst.Role)
+			for _, prov := range sharedProviders(producerProviders, verifierProviders) {
+				note := ""
+				if prov == ProviderOpenAICompat {
+					note = " (family is keyed on provider, so two openai-compat endpoints read as the same family even when they are not)"
+				}
+				warn("producer role %q and verifier role %q both resolve to model provider %q; a same-family producer and verifier share correlated blind spots, weakening the N-version independent verification specs/verification.md recommends — point the verifier at a different model family%s",
+					pst.Role, vst.Role, prov, note)
+			}
+		}
+	}
+}
+
+// isProducerStage reports whether a stage is a producer in the N-version sense: an agent
+// stage gated by the red→green proof, i.e. the implementor that must turn the
+// independently-authored acceptance tests green. The proof postcondition is the stable,
+// principled signal for "the implement stage" (verification.md flips implement to it).
+func (c *Config) isProducerStage(st Stage) bool {
+	if st.Role == "" {
+		return false
+	}
+	for _, pc := range st.Postcondition {
+		if pc == core.PostconditionRedGreen {
+			return true
+		}
+	}
+	return false
+}
+
+// isGateStage reports whether a stage runs a verification gate: an agent stage with a
+// postcondition that grades the candidate in the clean sandbox via a command check or a
+// metric comparison (the qa/resolve stages). The reserved proofs (tests-red, red→green)
+// and the orchestrator-evaluated human-approved are not such gates.
+func (c *Config) isGateStage(st Stage) bool {
+	if st.Role == "" {
+		return false
+	}
+	for _, pc := range st.Postcondition {
+		if c.runsGateCheck(pc) {
+			return true
+		}
+	}
+	return false
+}
+
+// runsGateCheck reports whether a postcondition is a candidate-grading gate check — a
+// command check defined in the checks registry or a metric comparison — as opposed to a
+// reserved proof or the orchestrator-evaluated human-approved gate. It is the predicate
+// that separates the independent verifier gate (qa) from the proofs that grade the tests
+// themselves (tests-red, red→green).
+func (c *Config) runsGateCheck(pc string) bool {
+	if reservedPostconditions[pc] {
+		return false
+	}
+	if c.Harness != nil {
+		if _, ok := c.Harness.Checks[pc]; ok {
+			return true
+		}
+	}
+	return isMetricComparison(pc)
+}
+
+// roleProviders is the set of model providers the souls fulfilling a role resolve to, via
+// core.Soul.Model → the infra model registry → ModelProvider.Provider. A role may map to
+// several souls (selector-based), so it is a set; a soul whose model is unregistered
+// (already a Validate error) or whose registry entry has no provider is skipped.
+func (c *Config) roleProviders(role string) map[string]bool {
+	provs := map[string]bool{}
+	for _, s := range c.Souls {
+		if s.Role != role {
+			continue
+		}
+		if mp, ok := c.Infra.Models[s.Model]; ok && mp.Provider != "" {
+			provs[mp.Provider] = true
+		}
+	}
+	return provs
+}
+
+// downstreamStages returns the set of stage names reachable from start by following
+// produces edges (excluding start itself). Edges to undefined stages are ignored (Validate
+// reports those); the visited set makes it safe even if the produces graph has a cycle
+// (also a Validate error, but this must not hang on a not-yet-rejected config).
+func (c *Config) downstreamStages(start string) map[string]bool {
+	dag := c.Harness.DAG
+	seen := map[string]bool{}
+	queue := append([]string(nil), dag[start].Produces...)
+	for len(queue) > 0 {
+		n := queue[0]
+		queue = queue[1:]
+		if _, ok := dag[n]; !ok || seen[n] {
+			continue
+		}
+		seen[n] = true
+		queue = append(queue, dag[n].Produces...)
+	}
+	return seen
+}
+
+// sharedProviders returns the sorted intersection of two provider sets.
+func sharedProviders(a, b map[string]bool) []string {
+	var shared []string
+	for p := range a {
+		if b[p] {
+			shared = append(shared, p)
+		}
+	}
+	sort.Strings(shared)
+	return shared
+}
+
+// sortedSet returns the keys of a string set in sorted order.
+func sortedSet(m map[string]bool) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
