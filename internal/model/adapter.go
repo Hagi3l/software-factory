@@ -2,13 +2,19 @@ package model
 
 import "context"
 
-// StreamEvent is one incremental piece of model output, delivered as it is generated.
-// Today it carries assistant text deltas — enough for the live "watch an agent think"
-// view, where the runner fans these out to NATS → SSE (see specs/observability.md). It
-// is a struct rather than a bare string so tool-call or reasoning deltas can be added
-// later without changing the Adapter signature.
+// StreamEvent is one incremental piece of model output, delivered as it is generated,
+// to drive the live "watch an agent think" view where the runner fans these out to
+// NATS → SSE (see specs/observability.md). It carries exactly one of two channels: an
+// assistant TextDelta (the visible answer) or a ReasoningDelta (the model's chain of
+// thought, from Anthropic thinking blocks or an OpenAI-compatible reasoning field).
+// Keeping them distinct lets the feed label "thinking" separately from "saying," and —
+// crucially — makes a turn that is *all tool calls* still observable: such a turn emits
+// no text, but a reasoning model still narrates its plan on the reasoning channel. A
+// struct (not a bare string) so further channels can be added without changing the
+// Adapter signature.
 type StreamEvent struct {
-	TextDelta string // incremental assistant text; empty for non-text events
+	TextDelta      string // incremental assistant text; empty for non-text events
+	ReasoningDelta string // incremental reasoning/thinking text; empty for non-reasoning events
 }
 
 // StreamHandler receives StreamEvents in order as a model call streams. It is invoked

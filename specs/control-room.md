@@ -35,7 +35,7 @@ of the build (`go generate`), not the runtime.
 |------|---------|--------|
 | **Board** | kanban over beads issues by stage; live | beads + NATS (SSE) |
 | **DAG** | the [issue dependency graph](glossary.md#issue-dependency-graph); blockers, merge order | beads → server-side SVG |
-| **Activity feed** | what agents are doing right now | NATS events (SSE) |
+| **Activity feed** | what the agents *and the factory* are doing right now — agent `token`/`reasoning`/`tool` events plus system lifecycle events, filterable by source | NATS events (SSE) + factory log bridge |
 | **Issue / invocation detail** | Brief, transcript, candidate diff, gate evidence, budget, retries | beads + [artifact store](components/artifact-store.md) + [trace](observability.md) |
 | **Dead-letter queue** | escalations needing a human — *the action surface* | beads + artifact store |
 | **Budgets** | token/$/wall-clock burn vs. caps, per epic/issue | beads + OTel metrics |
@@ -164,4 +164,7 @@ fresh or unsticking dead-lettered work.
   backstop converge it, but a dedicated **orchestrator-emitted issue-state event**
   (from the single writer) would let the board/DAG/DLQ refresh crisply on the actual
   transition rather than polling around it. — *future refinement, not blocking.*
+  (The activity feed's **system** stream already surfaces those transitions
+  textually via the factory log bridge — *visibility* is solved; this open item is
+  about a *typed* transition event the board/DAG can refresh off precisely.)
 - Auth / who may operate the control room — TBD.

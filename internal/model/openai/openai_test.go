@@ -3,7 +3,11 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	sdk "github.com/openai/openai-go/v3"
@@ -300,6 +304,54 @@ func TestCompleteIntegration(t *testing.T) {
 	}
 	if deltas == 0 {
 		t.Error("expected at least one streamed text delta")
+	}
+}
+
+// TestCompleteStreamsReasoningAndText drives the adapter against a scripted SSE server
+// that emits the non-standard `reasoning` delta a "thinking" model (e.g. Ollama's qwen)
+// streams alongside `content`. It proves the adapter routes each to the right channel —
+// reasoning to ReasoningDelta, content to TextDelta — so a turn's chain of thought is
+// observable even though the SDK has no typed field for it. Deterministic: no network.
+func TestCompleteStreamsReasoningAndText(t *testing.T) {
+	frames := []string{
+		`{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","reasoning":"Let me"}}]}`,
+		`{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"reasoning":" think"}}]}`,
+		`{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"Hi"}}]}`,
+		`{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":5,"completion_tokens":2}}`,
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		for _, fr := range frames {
+			fmt.Fprintf(w, "data: %s\n\n", fr)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	a := New("qwen-test", option.WithAPIKey("test"), option.WithBaseURL(srv.URL))
+
+	var text, reasoning strings.Builder
+	resp, err := a.Complete(context.Background(),
+		model.Request{Messages: []model.Message{{Role: model.RoleUser, Text: "hi"}}},
+		func(e model.StreamEvent) {
+			text.WriteString(e.TextDelta)
+			reasoning.WriteString(e.ReasoningDelta)
+		})
+	if err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if reasoning.String() != "Let me think" {
+		t.Errorf("reasoning channel = %q, want %q", reasoning.String(), "Let me think")
+	}
+	if text.String() != "Hi" {
+		t.Errorf("text channel = %q, want %q", text.String(), "Hi")
+	}
+	if resp.Text != "Hi" {
+		t.Errorf("resp.Text = %q, want Hi", resp.Text)
 	}
 }
 

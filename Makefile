@@ -19,7 +19,9 @@ RESULTS := test/results
 TEMPL          ?= templ
 TAILWIND       := $(BIN_DIR)/tailwindcss
 TAILWIND_VER   := v4.3.0
-TAILWIND_OS    := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+# The standalone CLI names the macOS asset "macos", but `uname -s` is "Darwin" — map it
+# so the release URL resolves on a Mac (otherwise the fetch 404s to a "Not Found" file).
+TAILWIND_OS    := $(shell uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/macos/')
 TAILWIND_ARCH  := $(shell uname -m | sed 's/x86_64/x64/;s/aarch64/arm64/')
 TAILWIND_URL   := https://github.com/tailwindlabs/tailwindcss/releases/download/$(TAILWIND_VER)/tailwindcss-$(TAILWIND_OS)-$(TAILWIND_ARCH)
 

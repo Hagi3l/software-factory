@@ -23,10 +23,11 @@ import (
 // recordingAdapter streams the configured deltas, returns the configured response (or
 // error), and counts calls so usage-tally accumulation across calls is observable.
 type recordingAdapter struct {
-	deltas []string
-	resp   model.Response
-	err    error
-	calls  int
+	deltas    []string
+	reasoning []string
+	resp      model.Response
+	err       error
+	calls     int
 }
 
 func (a *recordingAdapter) Complete(_ context.Context, _ model.Request, onEvent model.StreamHandler) (model.Response, error) {
@@ -37,6 +38,11 @@ func (a *recordingAdapter) Complete(_ context.Context, _ model.Request, onEvent 
 	for _, d := range a.deltas {
 		if onEvent != nil {
 			onEvent(model.StreamEvent{TextDelta: d})
+		}
+	}
+	for _, d := range a.reasoning {
+		if onEvent != nil {
+			onEvent(model.StreamEvent{ReasoningDelta: d})
 		}
 	}
 	return a.resp, nil
@@ -131,6 +137,52 @@ func TestRelayCompleteStreamsDeltasAndTalliesUsage(t *testing.T) {
 	u := r.Usage()
 	if u.InputTokens != 20 || u.OutputTokens != 10 || u.CacheReadTokens != 4 {
 		t.Errorf("tallied usage = %+v, want input=20 output=10 cacheRead=4", u)
+	}
+}
+
+func TestRelayCompletePublishesReasoningAndToolEvents(t *testing.T) {
+	adapter := &recordingAdapter{
+		deltas:    []string{"sure"},
+		reasoning: []string{"let me ", "think"},
+		resp: model.Response{
+			Stop: model.StopToolUse,
+			ToolCalls: []model.ToolCall{
+				{ID: "1", Name: "write_file", Args: json.RawMessage(`{"path":"index.html","content":"<html>"}`)},
+				{ID: "2", Name: "run_tests"},
+			},
+		},
+	}
+	pub := &recordingPublisher{}
+	r := testRelay(adapter, pub, &bundleSandbox{})
+
+	if _, err := r.Complete(context.Background(), model.Request{}); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+
+	// Published in stream order: the text delta, then the two reasoning deltas, then one
+	// tool row per tool call (emitted from the assembled response after the turn).
+	var got []tokenEvent
+	for _, d := range pub.data {
+		var ev tokenEvent
+		if err := json.Unmarshal(d, &ev); err != nil {
+			t.Fatalf("unmarshal event: %v", err)
+		}
+		got = append(got, ev)
+	}
+	want := []tokenEvent{
+		{Type: "token", Delta: "sure"},
+		{Type: "reasoning", Delta: "let me "},
+		{Type: "reasoning", Delta: "think"},
+		{Type: "tool", Delta: "write_file index.html"},
+		{Type: "tool", Delta: "run_tests"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("published events = %d (%+v), want %d", len(got), got, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("event[%d] = %+v, want %+v", i, got[i], want[i])
+		}
 	}
 }
 

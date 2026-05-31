@@ -3,18 +3,28 @@ package views
 import "github.com/Loxstomper/harness/internal/controlroom/live"
 
 // ActivityPage renders the live activity feed inside the standard layout. The feed is
-// "what agents are doing right now" (specs/control-room.md, T4.5): each streamed model
-// turn coalesced into one rolling line, plus discrete progress/log events, newest
-// first. It refreshes over the T4.3 SSE substrate — an agent-event nudges an htmx
-// refetch of just the list (throttled, since this is the live view), with a slow
-// periodic backstop so a settled feed still converges when the event stream goes idle.
-// The initial rows render inline so the page shows data before htmx attaches.
+// "what the agents and the factory are doing right now" (specs/control-room.md, T4.5):
+// agent rows — each streamed model turn (token/reasoning) coalesced into one rolling
+// line, plus one row per tool call — and system rows teed from the factory's own log
+// (dispatch, gating, merge, …), newest first, filterable by source. It refreshes over
+// the T4.3 SSE substrate — an agent-event nudges an htmx refetch of just the list
+// (throttled, since this is the live view), with a slow periodic backstop so a settled
+// feed still converges when the event stream goes idle. The initial rows render inline
+// so the page shows data before htmx attaches.
 templ ActivityPage(entries []live.Entry) {
 	@Layout("Harness — Activity", "activity") {
-		<div class="space-y-4">
+		// x-data lives on this outer wrapper, *outside* the htmx swap target (#activity), so
+		// the chosen filter survives every live re-fetch. The rows inside carry x-show keyed
+		// to this scope; Alpine re-applies them to swapped-in DOM.
+		<div class="space-y-4" x-data="{ filter: 'all' }">
 			<div class="flex items-baseline justify-between">
 				<h1 class="text-xl font-semibold tracking-tight">Activity</h1>
 				<span class="text-sm text-slate-500">live</span>
+			</div>
+			<div class="flex gap-1 text-xs">
+				@activityFilterButton("all", "All")
+				@activityFilterButton(live.SourceAgent, "Agents")
+				@activityFilterButton(live.SourceSystem, "System")
 			</div>
 			<div hx-ext="sse" sse-connect="/events">
 				<div
@@ -28,6 +38,18 @@ templ ActivityPage(entries []live.Entry) {
 			</div>
 		</div>
 	}
+}
+
+// activityFilterButton is one All/Agents/System toggle. Clicking sets the shared filter;
+// the active button is highlighted. Both bindings are Alpine expressions over the
+// ActivityPage x-data scope.
+templ activityFilterButton(value, label string) {
+	<button
+		type="button"
+		class="rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+		x-on:click={ "filter = '" + value + "'" }
+		x-bind:class={ "filter === '" + value + "' ? 'bg-slate-700 text-white' : ''" }
+	>{ label }</button>
 }
 
 // ActivityList renders just the feed rows. It is both embedded in ActivityPage for the
@@ -45,9 +67,16 @@ templ ActivityList(entries []live.Entry) {
 	}
 }
 
-// activityRow renders one activity entry: time, kind badge, agent id, and detail.
+// activityRow renders one activity entry: time, kind badge, source id (agent invocation
+// or system component), and detail. x-show hides the row unless the active filter is
+// "all" or matches the row's source, so the toggle narrows agent vs system without a
+// server round-trip. A faint accent on system rows distinguishes the two streams at a
+// glance even when both are shown.
 templ activityRow(e live.Entry) {
-	<li class="flex items-start gap-3 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2">
+	<li
+		class={ "flex items-start gap-3 rounded-md border px-3 py-2", activityRowAccent(e.Source) }
+		x-show={ "filter === 'all' || filter === '" + e.Source + "'" }
+	>
 		<span class="shrink-0 font-mono text-xs tabular-nums text-slate-500">{ activityTime(e.At) }</span>
 		@activityBadge(e.Kind)
 		<span class="shrink-0 font-mono text-xs text-slate-400">{ e.AgentID }</span>
@@ -55,18 +84,36 @@ templ activityRow(e live.Entry) {
 	</li>
 }
 
-// activityBadge tints an event kind so the feed reads at a glance. The class literals
-// are kept inline (a templ switch, not a Go helper) so the Tailwind scanner — which
-// globs *.templ / *_templ.go — actually sees them, the same reason board.go's
-// statusBadge is a switch.
+// activityRowAccent tints the row container by source so the factory's system stream is
+// distinguishable from agent output even with the filter on "all".
+func activityRowAccent(source string) string {
+	if source == live.SourceSystem {
+		return "border-slate-700 bg-slate-800/40"
+	}
+	return "border-slate-800 bg-slate-900/40"
+}
+
+// activityBadge tints an event kind so the feed reads at a glance: agent channels
+// (token/reasoning/tool) and system log levels (info/warn/error) each get a color. The
+// class literals are kept inline (a templ switch, not a Go helper) so the Tailwind
+// scanner — which globs *.templ / *_templ.go — actually sees them, the same reason
+// board.go's statusBadge is a switch.
 templ activityBadge(kind string) {
 	switch kind {
 		case "token":
 			<span class="shrink-0 rounded-full bg-indigo-500/20 px-2 py-0.5 text-xs text-indigo-300">{ kind }</span>
+		case "reasoning":
+			<span class="shrink-0 rounded-full bg-violet-500/20 px-2 py-0.5 text-xs text-violet-300">{ kind }</span>
+		case "tool":
+			<span class="shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-300">{ kind }</span>
 		case "progress":
 			<span class="shrink-0 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300">{ kind }</span>
-		case "log":
+		case "log", "info":
 			<span class="shrink-0 rounded-full bg-sky-500/20 px-2 py-0.5 text-xs text-sky-300">{ kind }</span>
+		case "warn":
+			<span class="shrink-0 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300">{ kind }</span>
+		case "error":
+			<span class="shrink-0 rounded-full bg-red-500/20 px-2 py-0.5 text-xs text-red-300">{ kind }</span>
 		default:
 			<span class="shrink-0 rounded-full bg-slate-700/40 px-2 py-0.5 text-xs text-slate-300">{ kind }</span>
 	}

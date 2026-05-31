@@ -79,6 +79,16 @@ The control room must show both "everything going on" and the full past:
 
 - **Live** — NATS events → SSE → the board and activity feed update themselves (no
   polling). See [messaging.md](messaging.md), [control-room.md](control-room.md).
+  The activity feed carries two sources side by side: **agent** events brokered from
+  inside the sandbox (an assistant `token` stream, a `reasoning`/think stream, and one
+  `tool` row per tool call), and **system** events — *what the factory itself is doing*
+  (dispatch, sandbox provision, gate pass/fail, merge, dead-letter). The system stream
+  is the trusted side's own structured log teed into the feed (a `slog` bridge in the
+  co-located run), not a second instrumentation pass — the same single-source-of-truth
+  logic as "[the broker is already the collector](#the-broker-is-already-the-collector),"
+  applied to the orchestrator/runner. It means a turn that is all tool calls (no
+  narration) still reads as live activity, and an operator sees the machine think *and*
+  the machine act in one timeline.
 - **History** — server-rendered from beads + the artifact store, with the
   structured timeline from the OTel trace backend.
 

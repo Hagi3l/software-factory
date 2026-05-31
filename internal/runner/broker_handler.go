@@ -102,12 +102,40 @@ func (r *relay) spanParent(ctx context.Context) context.Context {
 	return trace.ContextWithSpan(ctx, trace.SpanFromContext(r.parentCtx))
 }
 
-// tokenEvent is the live-feed envelope for one streamed assistant text delta. It is
-// published best-effort to the agent's event subject so the control room can watch an
-// agent think in real time (see specs/observability.md); losing one is harmless.
+// tokenEvent is the live-feed envelope for one agent activity datum, published
+// best-effort to the agent's event subject so the control room can watch an agent work
+// in real time (see specs/observability.md); losing one is harmless. Type discriminates
+// the channel — "token" (assistant text delta), "reasoning" (chain-of-thought delta), or
+// "tool" (a tool call the turn requested) — and Delta carries the text the feed shows.
 type tokenEvent struct {
 	Type  string `json:"type"`
 	Delta string `json:"delta"`
+}
+
+// toolCallSummary renders a tool call as a compact one-line feed label: the tool name
+// and its most salient argument (a path/file/command/branch when present, else the
+// compacted args). It is display-only — best-effort, never parsed back — so an odd or
+// missing argument degrades to just the name rather than erroring.
+func toolCallSummary(tc model.ToolCall) string {
+	name := tc.Name
+	if name == "" {
+		name = "tool"
+	}
+	var args map[string]any
+	if len(tc.Args) == 0 || json.Unmarshal(tc.Args, &args) != nil || len(args) == 0 {
+		return name
+	}
+	for _, k := range []string{"path", "file", "filename", "command", "cmd", "branch", "query"} {
+		if v, ok := args[k]; ok {
+			if s, ok := v.(string); ok && s != "" {
+				return name + " " + s
+			}
+		}
+	}
+	if compact, err := json.Marshal(args); err == nil {
+		return name + " " + string(compact)
+	}
+	return name
 }
 
 // Complete relays a canonical model request to the resolved provider adapter, streams
@@ -117,10 +145,15 @@ type tokenEvent struct {
 // provider answered. Every call is logged — the broker is the audited chokepoint.
 func (r *relay) Complete(ctx context.Context, req model.Request) (model.Response, error) {
 	onEvent := func(ev model.StreamEvent) {
-		if ev.TextDelta == "" {
-			return
+		// The visible answer and the model's chain of thought stream on separate channels
+		// and are labeled distinctly for the feed; a turn may carry both, either, or — when
+		// it is all tool calls — neither (the tool rows are published from resp, below).
+		if ev.TextDelta != "" {
+			r.publishEvent(tokenEvent{Type: "token", Delta: ev.TextDelta})
 		}
-		r.publishEvent(tokenEvent{Type: "token", Delta: ev.TextDelta})
+		if ev.ReasoningDelta != "" {
+			r.publishEvent(tokenEvent{Type: "reasoning", Delta: ev.ReasoningDelta})
+		}
 	}
 
 	// One model turn = one llm-turn span, parented to the invocation and timed around the
@@ -155,6 +188,13 @@ func (r *relay) Complete(ctx context.Context, req model.Request) (model.Response
 
 	r.addUsage(resp.Usage)
 	r.record(req, resp)
+	// One feed row per tool call this turn requested. Tool calls don't stream as text, so
+	// without this an agent that works purely through tools (the common case) produces no
+	// live activity at all — the feed would look idle while the agent is busy. Published
+	// best-effort like the token stream; the durable record is the transcript.
+	for _, tc := range resp.ToolCalls {
+		r.publishEvent(tokenEvent{Type: "tool", Delta: toolCallSummary(tc)})
+	}
 	r.log.Info("broker: model completion",
 		"stop", resp.Stop,
 		"input_tokens", resp.Usage.InputTokens,

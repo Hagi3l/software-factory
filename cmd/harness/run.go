@@ -230,6 +230,12 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	if opts.serveAddr != "" {
 		hub := live.NewHub()
 		activity := live.NewActivity(200)
+		// Tee the factory's own structured log into the feed's "system" stream, so the
+		// activity view shows what the orchestrator/runner/gate are doing — not only
+		// per-agent token output. This is sound only here, in the co-located run, where the
+		// control room shares the process emitting these logs. Reassigned before the loops
+		// are built below so every one of them (and the control room itself) logs through it.
+		log = slog.New(live.NewLogBridge(log.Handler(), hub, activity))
 		pumpStop, perr := live.StartAgentEventPump(nc, hub, activity)
 		if perr != nil {
 			return nil, perr

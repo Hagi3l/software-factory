@@ -13,6 +13,14 @@ func token(delta string) []byte {
 	return []byte(fmt.Sprintf(`{"type":"token","delta":%q}`, delta))
 }
 
+func reasoning(delta string) []byte {
+	return []byte(fmt.Sprintf(`{"type":"reasoning","delta":%q}`, delta))
+}
+
+func toolEvent(label string) []byte {
+	return []byte(fmt.Sprintf(`{"type":"tool","delta":%q}`, label))
+}
+
 func TestActivity_CoalescesTokensFromSameAgent(t *testing.T) {
 	a := live.NewActivity(16)
 	a.Record("inv-1", token("Hel"))
@@ -31,6 +39,83 @@ func TestActivity_CoalescesTokensFromSameAgent(t *testing.T) {
 	}
 	if got[0].At.IsZero() {
 		t.Fatalf("entry timestamp not set")
+	}
+}
+
+func TestActivity_CoalescesReasoningFromSameAgent(t *testing.T) {
+	a := live.NewActivity(16)
+	a.Record("inv-1", reasoning("Let "))
+	a.Record("inv-1", reasoning("me "))
+	a.Record("inv-1", reasoning("think"))
+
+	got := a.Recent()
+	if len(got) != 1 {
+		t.Fatalf("entries = %d, want 1 (reasoning coalesced)", len(got))
+	}
+	if got[0].Kind != "reasoning" || got[0].Detail != "Let me think" {
+		t.Fatalf("entry = %+v, want reasoning 'Let me think'", got[0])
+	}
+	if got[0].Source != live.SourceAgent {
+		t.Fatalf("source = %q, want %q", got[0].Source, live.SourceAgent)
+	}
+}
+
+func TestActivity_TokenAndReasoningDoNotMerge(t *testing.T) {
+	a := live.NewActivity(16)
+	a.Record("inv-1", reasoning("planning"))
+	a.Record("inv-1", token("answer"))
+
+	got := a.Recent()
+	if len(got) != 2 {
+		t.Fatalf("entries = %d, want 2 (token and reasoning are separate channels)", len(got))
+	}
+	if got[0].Kind != "token" || got[1].Kind != "reasoning" {
+		t.Fatalf("kinds = [%q,%q], want [token,reasoning]", got[0].Kind, got[1].Kind)
+	}
+}
+
+func TestActivity_ToolEventRendersLabel(t *testing.T) {
+	a := live.NewActivity(16)
+	a.Record("inv-1", token("ok"))
+	a.Record("inv-1", toolEvent("write_file index.html"))
+
+	got := a.Recent()
+	if len(got) != 2 {
+		t.Fatalf("entries = %d, want 2 (tool is discrete, breaks the token run)", len(got))
+	}
+	if got[0].Kind != "tool" || got[0].Detail != "write_file index.html" {
+		t.Fatalf("newest = %+v, want tool 'write_file index.html'", got[0])
+	}
+	if got[0].Source != live.SourceAgent {
+		t.Fatalf("source = %q, want %q", got[0].Source, live.SourceAgent)
+	}
+}
+
+func TestActivity_RecordSystem(t *testing.T) {
+	a := live.NewActivity(16)
+	a.Record("inv-1", token("partial"))
+	a.RecordSystem("info", "orchestrator", "dispatched issue=harness-1")
+	// A system row between agent tokens must break the token run: the prior entry is a
+	// system row, so the next token cannot reopen the agent's coalesced line.
+	a.Record("inv-1", token("more"))
+
+	got := a.Recent()
+	if len(got) != 3 {
+		t.Fatalf("entries = %d, want 3", len(got))
+	}
+	sys := got[1]
+	if sys.Source != live.SourceSystem || sys.AgentID != "orchestrator" || sys.Kind != "info" {
+		t.Fatalf("system entry = %+v, want system/orchestrator/info", sys)
+	}
+	if sys.Detail != "dispatched issue=harness-1" {
+		t.Fatalf("system detail = %q", sys.Detail)
+	}
+	if got[0].Kind != "token" || got[0].Detail != "more" {
+		t.Fatalf("trailing token = %+v, want fresh token 'more'", got[0])
+	}
+	// Seq stays monotonic across the mixed agent/system stream (newest first).
+	if got[0].Seq <= got[1].Seq || got[1].Seq <= got[2].Seq {
+		t.Fatalf("seq not monotonic across sources: %d %d %d", got[2].Seq, got[1].Seq, got[0].Seq)
 	}
 }
 

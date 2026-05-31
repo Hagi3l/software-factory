@@ -94,7 +94,14 @@ why autonomous self-hosting still awaits a capable runtime model (see
   `Usage` normalizes it so the runner can enforce budgets uniformly.
 - **Streaming is first-class.** Needed for the live "watch an agent think" view and
   the [wizard](control-room.md); adapters stream, and the runner fans tokens out to
-  NATS → SSE. Build it into the interface from day one, not as a retrofit.
+  NATS → SSE. Build it into the interface from day one, not as a retrofit. A stream
+  event carries either an assistant **text** delta or a **reasoning** delta
+  (`StreamEvent.TextDelta` / `ReasoningDelta`) — a "thinking" model emits its chain
+  of thought on a separate channel (Anthropic `thinking` blocks; the OpenAI-compatible
+  `reasoning` / `reasoning_content` delta field local servers like Ollama use), so an
+  agent whose visible turn is *only tool calls* is still observable as it reasons. The
+  adapter normalizes both into the one canonical channel; the [broker](components/runner.md)
+  labels them (`token` vs `reasoning`) for the feed.
 - **Optional capabilities** — prompt caching (a large cost saver on long agent
   loops), extended thinking / reasoning effort — are exposed as optional request
   fields that capable adapters honor and others ignore.

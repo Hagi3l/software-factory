@@ -7,18 +7,31 @@ import (
 	"time"
 )
 
-// Entry is one row in the control room's activity feed: a single agent event, or a
-// coalesced run of streamed token deltas from one agent. Detail is a short
-// human-readable summary — the rolling generated text for a token run, or a compact
-// summary of the event payload otherwise. Ordering is by Seq (monotonic), not At, so
-// a coarse wall clock can't reorder the feed.
+// Entry is one row in the control room's activity feed: a single event, or a coalesced
+// run of streamed token/reasoning deltas from one agent. Detail is a short human-readable
+// summary — the rolling generated text for a token/reasoning run, the tool label for a
+// tool call, or a compact summary of the event payload otherwise. Ordering is by Seq
+// (monotonic), not At, so a coarse wall clock can't reorder the feed.
+//
+// Source separates the two streams the feed carries: "agent" rows are brokered from
+// inside a sandbox (AgentID is the invocation id; Kind is token/reasoning/tool/…), while
+// "system" rows are the factory's own log teed in by the bridge (AgentID is the emitting
+// component, e.g. "orchestrator"; Kind is the log level). The view filters on Source.
 type Entry struct {
 	Seq     uint64
+	Source  string
 	AgentID string
 	Kind    string
 	Detail  string
 	At      time.Time
 }
+
+const (
+	// SourceAgent marks a row brokered from an agent's sandbox; SourceSystem marks a row
+	// teed from the trusted side's own factory log.
+	SourceAgent  = "agent"
+	SourceSystem = "system"
+)
 
 const (
 	// activityRollingMax bounds the rolling token text retained on a coalesced entry
@@ -76,11 +89,13 @@ func (a *Activity) Record(agentID string, payload []byte) {
 	defer a.mu.Unlock()
 	now := time.Now()
 
-	// Coalesce a run of token deltas from the same agent into the newest entry, so a
-	// single model turn reads as one continuously-updating line rather than thousands.
-	if kind == "token" && len(a.entries) > 0 {
+	// Coalesce a run of token/reasoning deltas from the same agent into the newest entry,
+	// so a single model turn reads as one continuously-updating line rather than thousands.
+	// Token and reasoning never merge into each other (the kinds must match), so "thinking"
+	// and "saying" stay as separate rows.
+	if (kind == "token" || kind == "reasoning") && len(a.entries) > 0 {
 		last := &a.entries[len(a.entries)-1]
-		if last.Kind == "token" && last.AgentID == agentID {
+		if last.Kind == kind && last.AgentID == agentID && last.Source == SourceAgent {
 			last.Detail = tailRunes(last.Detail+ev.Delta, activityRollingMax)
 			last.At = now
 			a.seq++
@@ -89,13 +104,43 @@ func (a *Activity) Record(agentID string, payload []byte) {
 		}
 	}
 
-	a.seq++
-	e := Entry{Seq: a.seq, AgentID: agentID, Kind: kind, At: now}
-	if kind == "token" {
+	e := Entry{Source: SourceAgent, AgentID: agentID, Kind: kind, At: now}
+	switch kind {
+	case "token", "reasoning":
 		e.Detail = tailRunes(ev.Delta, activityRollingMax)
-	} else {
-		e.Detail = summarize(ev.Payload)
+	default:
+		// A tool call (and any future Delta-bearing kind) carries its label in Delta; a
+		// progress/log event from the agent carries an opaque Payload to summarize.
+		if ev.Delta != "" {
+			e.Detail = headRunes(ev.Delta)
+		} else {
+			e.Detail = summarize(ev.Payload)
+		}
 	}
+	a.appendEntry(e)
+}
+
+// RecordSystem ingests one factory log line as a system event: a non-agent row showing
+// what the orchestrator/runner/gate is doing (the log bridge feeds it). component labels
+// the emitter (the feed's id column), level becomes the Kind badge, and detail is the
+// already-rendered message. Caller holds no lock; this takes it.
+func (a *Activity) RecordSystem(level, component, detail string) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.appendEntry(Entry{
+		Source:  SourceSystem,
+		AgentID: component,
+		Kind:    level,
+		Detail:  headRunes(detail),
+		At:      time.Now(),
+	})
+}
+
+// appendEntry stamps a fresh monotonic Seq onto e, appends it, and trims the buffer to
+// max. Caller must hold a.mu.
+func (a *Activity) appendEntry(e Entry) {
+	a.seq++
+	e.Seq = a.seq
 	a.entries = append(a.entries, e)
 	if len(a.entries) > a.max {
 		// Copy the retained window into a fresh backing array so the trimmed prefix is
@@ -131,15 +176,15 @@ func summarize(payload json.RawMessage) string {
 			}
 			var s string
 			if json.Unmarshal(raw, &s) == nil && s != "" {
-				return headRunes(s, activityDetailMax)
+				return headRunes(s)
 			}
 		}
 	}
 	var buf bytes.Buffer
 	if err := json.Compact(&buf, payload); err != nil {
-		return headRunes(string(payload), activityDetailMax)
+		return headRunes(string(payload))
 	}
-	return headRunes(buf.String(), activityDetailMax)
+	return headRunes(buf.String())
 }
 
 // tailRunes keeps the last max runes of s (the latest output), prefixing an ellipsis
@@ -152,8 +197,11 @@ func tailRunes(s string, max int) string {
 	return "…" + string(r[len(r)-max:])
 }
 
-// headRunes keeps the first max runes of s, appending an ellipsis when truncated.
-func headRunes(s string, max int) string {
+// headRunes keeps the first activityDetailMax runes of s, appending an ellipsis when
+// truncated. Rune-aware so it never splits a multi-byte character. (tailRunes is the
+// rolling-token analog, keeping the tail; this keeps the head of a discrete summary.)
+func headRunes(s string) string {
+	const max = activityDetailMax
 	r := []rune(s)
 	if len(r) <= max {
 		return s

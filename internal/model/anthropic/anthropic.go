@@ -58,8 +58,18 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 			continue
 		}
 		if delta, ok := event.AsAny().(sdk.ContentBlockDeltaEvent); ok {
-			if td, ok := delta.Delta.AsAny().(sdk.TextDelta); ok && td.Text != "" {
-				onEvent(model.StreamEvent{TextDelta: td.Text})
+			switch d := delta.Delta.AsAny().(type) {
+			case sdk.TextDelta:
+				if d.Text != "" {
+					onEvent(model.StreamEvent{TextDelta: d.Text})
+				}
+			case sdk.ThinkingDelta:
+				// Extended-thinking blocks stream on their own delta type; surface them on
+				// the reasoning channel so the live feed labels "thinking" distinctly and a
+				// tool-only turn still shows the model reasoning (see specs/models.md).
+				if d.Thinking != "" {
+					onEvent(model.StreamEvent{ReasoningDelta: d.Thinking})
+				}
 			}
 		}
 	}

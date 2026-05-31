@@ -16,6 +16,7 @@ import (
 
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/packages/respjson"
 
 	"github.com/Loxstomper/harness/internal/model"
 )
@@ -52,19 +53,47 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 	for stream.Next() {
 		chunk := stream.Current()
 		acc.AddChunk(chunk)
-		if onEvent == nil {
+		if onEvent == nil || len(chunk.Choices) == 0 {
 			continue
 		}
-		if len(chunk.Choices) > 0 {
-			if d := chunk.Choices[0].Delta.Content; d != "" {
-				onEvent(model.StreamEvent{TextDelta: d})
-			}
+		delta := chunk.Choices[0].Delta
+		if delta.Content != "" {
+			onEvent(model.StreamEvent{TextDelta: delta.Content})
+		}
+		// "Thinking" models stream their chain of thought on a non-standard delta field
+		// the SDK has no typed accessor for, so it lands in JSON.ExtraFields: Ollama and
+		// most local servers use `reasoning`, DeepSeek/vLLM use `reasoning_content`. Either
+		// is surfaced on the reasoning channel so an all-tool-call turn is still observable.
+		if r := reasoningDelta(delta.JSON.ExtraFields); r != "" {
+			onEvent(model.StreamEvent{ReasoningDelta: r})
 		}
 	}
 	if err := stream.Err(); err != nil {
 		return model.Response{}, fmt.Errorf("openai: stream: %w", err)
 	}
 	return fromCompletion(acc.ChatCompletion), nil
+}
+
+// reasoningDelta pulls a streamed reasoning fragment out of a chunk delta's extra
+// (non-schema) fields. There is no agreed wire field for reasoning on Chat Completions,
+// so different OpenAI-compatible servers use different keys; we check the two in the
+// wild (`reasoning` — Ollama; `reasoning_content` — DeepSeek/vLLM) and return the first
+// that carries a non-empty JSON string. A field whose raw value is not a JSON string is
+// ignored rather than guessed at — matching the best-effort nature of the live stream.
+func reasoningDelta(extra map[string]respjson.Field) string {
+	for _, key := range []string{"reasoning", "reasoning_content"} {
+		// Extra (non-schema) fields report Valid()==false — the schema doesn't track them —
+		// so gate on the raw value instead: present and a non-null JSON string.
+		raw := extra[key].Raw()
+		if raw == "" || raw == "null" {
+			continue
+		}
+		var s string
+		if json.Unmarshal([]byte(raw), &s) == nil && s != "" {
+			return s
+		}
+	}
+	return ""
 }
 
 // toParams translates a canonical Request into SDK request params.
