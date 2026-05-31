@@ -98,10 +98,12 @@ jq -rs '
 ```
 
 **Control room** (`internal/controlroom`, `harness serve`): views are **templ**
-(`go install github.com/a-h/templ/cmd/templ` — already on PATH here) compiled to committed
+(`go install github.com/a-h/templ/cmd/templ`) compiled to committed
 `*_templ.go`; CSS is the **Tailwind v4 standalone CLI** (`make tailwind` fetches the pinned
 binary into gitignored `bin/`). Run `make generate` after editing any `*.templ` or
-`assets/app.tw.css` — it runs `templ generate` then Tailwind. A plain `make build` needs
+`assets/app.tw.css` — it runs `templ generate` then Tailwind. `templ` lives in
+`$(go env GOPATH)/bin`, so `make generate` needs the same `export PATH="$PATH:$(go env GOPATH)/bin"`
+the lint step does (tailwind is found via the Makefile's `bin/` path). A plain `make build` needs
 neither tool (generated Go + compiled `app.css` are committed). The Tailwind input
 (`assets/app.tw.css`) uses `@source` globs pointing at the views dir; vendored JS
 (htmx/Alpine) lives in `assets/static/` and is embedded via `//go:embed`.
