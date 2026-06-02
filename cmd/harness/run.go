@@ -317,13 +317,14 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	loop := agent.New(toolSource, agent.BudgetFromPolicy(cfg.Harness.Policy), log)
 
 	rnr, err := runner.New(runner.Options{
-		Roles:     agentRoles(cfg),
-		Repo:      repo,
-		SocketDir: sockDir,
-		Limits:    cfg.Infra.Sandbox.Limits,
-		Allowlist: cfg.Infra.Broker.Allowlist,
-		Logger:    log,
-		Telemetry: tel,
+		Roles:        agentRoles(cfg),
+		Repo:         repo,
+		SocketDir:    sockDir,
+		Limits:       cfg.Infra.Sandbox.Limits,
+		ResolveImage: cfg.Infra.Sandbox.ResolveImage,
+		Allowlist:    cfg.Infra.Broker.Allowlist,
+		Logger:       log,
+		Telemetry:    tel,
 	}, backend, reg, nc, loop, store, js)
 	if err != nil {
 		return nil, err

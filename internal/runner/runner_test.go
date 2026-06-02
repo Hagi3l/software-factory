@@ -170,6 +170,9 @@ func newRunner(t *testing.T, b *fakeBackend, inv Invoker) (*Runner, *nats.Conn) 
 		Limits:    config.SandboxLimits{CPU: 1, Mem: "1Gi", Wall: config.Duration(time.Minute)},
 		Allowlist: []string{"llm-api"},
 		AckWait:   2 * time.Second,
+		ResolveImage: func(profile string) string {
+			return "harness/" + profile + "@sha256:test"
+		},
 	}, b, fakeResolver{}, nc, inv, store, js)
 	if err != nil {
 		t.Fatalf("New runner: %v", err)
@@ -239,6 +242,11 @@ func TestRunProvisionsInvokesPublishesAndAcks(t *testing.T) {
 	spec := b.spec()
 	if spec.Profile != "go-toolchain" {
 		t.Errorf("spec profile = %q, want go-toolchain", spec.Profile)
+	}
+	// The logical profile was resolved to a concrete image via Options.ResolveImage and
+	// carried on the spec for the backend to boot (and for provenance).
+	if spec.Image != "harness/go-toolchain@sha256:test" {
+		t.Errorf("spec image = %q, want resolved concrete image", spec.Image)
 	}
 	if spec.Workspace.BaseRef != "main" || spec.Workspace.Repo != "/repo" {
 		t.Errorf("spec workspace = %+v, want repo=/repo base=main", spec.Workspace)

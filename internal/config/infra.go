@@ -24,9 +24,54 @@ type Infra struct {
 // "broker-only" in every supported profile — the zero-network invariant (see
 // specs/security.md, specs/components/sandbox.md).
 type SandboxConfig struct {
-	Backend string        `yaml:"backend"` // "firecracker" | "docker" | "gvisor"
-	Egress  string        `yaml:"egress"`  // "broker-only"
-	Limits  SandboxLimits `yaml:"limits"`
+	Backend  string                    `yaml:"backend"` // "firecracker" | "docker" | "gvisor"
+	Egress   string                    `yaml:"egress"`  // "broker-only"
+	Limits   SandboxLimits             `yaml:"limits"`
+	Profiles map[string]SandboxProfile `yaml:"profiles,omitempty"` // logical soul.sandbox name -> concrete artifact
+}
+
+// Backend identifiers for SandboxConfig.Backend. Docker and gVisor boot a container
+// image; Firecracker boots a rootfs — which is why ResolveImage picks a different
+// SandboxProfile field per backend. See specs/components/sandbox.md.
+const (
+	BackendDocker      = "docker"
+	BackendGVisor      = "gvisor"
+	BackendFirecracker = "firecracker"
+)
+
+// SandboxProfile resolves the logical profile a soul names (core.Soul.Sandbox, e.g.
+// "go-toolchain") to the concrete, backend-specific bootable artifact: a
+// (digest-pinned) container image for the docker/gvisor backends, a rootfs for
+// firecracker. An overlay is written for one backend, so exactly one field is
+// populated, matching SandboxConfig.Backend. This is the sandbox analog of the
+// ModelProvider registry — it keeps a soul backend- and environment-agnostic so the
+// same "go-toolchain" name resolves to a local docker tag in dev and a pinned rootfs
+// in prod with no soul edit. See specs/components/sandbox.md, specs/configuration.md.
+type SandboxProfile struct {
+	Image  string `yaml:"image,omitempty"`  // docker/gvisor: container image ref (ideally @sha256-pinned)
+	Rootfs string `yaml:"rootfs,omitempty"` // firecracker: rootfs image path
+}
+
+// ResolveImage maps a logical profile name to the concrete artifact the active backend
+// boots — the image (docker/gvisor) or rootfs (firecracker) of the matching profile
+// entry. It is total: a profile not in the registry, or one missing the active
+// backend's field, falls back to the profile name itself — the historical "name ==
+// image tag" behavior, and what keeps the test-only and unconfigured paths working.
+// Registry completeness (so production pins a real digest rather than degrading to the
+// bare name) is enforced loudly at startup by Validate, not here.
+func (sc SandboxConfig) ResolveImage(profile string) string {
+	p, ok := sc.Profiles[profile]
+	if !ok {
+		return profile
+	}
+	artifact := p.Image
+	if sc.Backend == BackendFirecracker {
+		artifact = p.Rootfs
+	}
+	if artifact == "" {
+		return profile
+	}
+	return artifact
 }
 
 // SandboxLimits is the per-sandbox resource ceiling enforced by the backend.

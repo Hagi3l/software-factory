@@ -77,6 +77,12 @@ type Options struct {
 	// Limits is the per-sandbox resource ceiling, passed straight through to every Spec
 	// (single source of truth — config.Infra.Sandbox.Limits).
 	Limits config.SandboxLimits
+	// ResolveImage maps a soul's logical sandbox profile to the concrete artifact the
+	// backend boots (config.Infra.Sandbox.ResolveImage). Nil leaves Spec.Image empty, so
+	// the backend falls back to the profile name — the test-only path; production always
+	// wires this so the resolved (ideally digest-pinned) image lands in the spec and the
+	// boot span's provenance.
+	ResolveImage func(profile string) string
 	// Allowlist is the broker egress allowlist (config.Infra.Broker.Allowlist). Empty
 	// means deny every destination — the secure default.
 	Allowlist []string
@@ -301,8 +307,13 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		return core.Result{}, fmt.Errorf("runner: listen broker socket: %w", err)
 	}
 
+	image := ""
+	if r.opts.ResolveImage != nil {
+		image = r.opts.ResolveImage(brief.Soul.Sandbox)
+	}
 	spec := sandbox.Spec{
 		Profile:   brief.Soul.Sandbox,
+		Image:     image,
 		Workspace: sandbox.Workspace{Repo: r.opts.Repo, BaseRef: brief.Base},
 		Limits:    r.opts.Limits,
 		Broker:    sandbox.Endpoint{Network: "unix", Address: sockPath},
@@ -310,6 +321,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	bootCtx, bootSpan := r.tel.Tracer().Start(ctx, telemetry.SpanBoot, trace.WithAttributes(
 		attribute.String(telemetry.AttrComponent, telemetry.ComponentRunner),
 		attribute.String(telemetry.AttrSandboxProfile, spec.Profile),
+		attribute.String(telemetry.AttrSandboxImage, image),
 	))
 	sb, err := r.backend.Provision(bootCtx, spec)
 	if err != nil {

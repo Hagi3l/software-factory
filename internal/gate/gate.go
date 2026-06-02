@@ -149,7 +149,8 @@ type Candidate struct {
 	// specs/verification.md): a Done result is graded against the postconditions of
 	// the very stage that produced it.
 	Postconditions []string
-	Profile        string               // sandbox profile to provision the verification sandbox with
+	Profile        string               // logical sandbox profile the candidate was produced under (carried for provenance)
+	Image          string               // concrete artifact the verification sandbox boots, resolved from Profile (empty -> backend falls back to Profile)
 	Limits         config.SandboxLimits // resource ceiling (wall-clock bounds the gate's runtime)
 }
 
@@ -514,6 +515,7 @@ func (r *Runner) provisionVerifier(ctx context.Context, c Candidate, ref string)
 	}
 	spec := sandbox.Spec{
 		Profile:   c.Profile,
+		Image:     c.Image,
 		Workspace: sandbox.Workspace{Repo: c.Repo, BaseRef: ref},
 		Limits:    c.Limits,
 		Broker:    sandbox.Endpoint{Network: "unix", Address: sockPath},

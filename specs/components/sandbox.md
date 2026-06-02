@@ -52,6 +52,53 @@ sandbox:
 
 ---
 
+## Profile → image resolution
+
+A soul names a **logical sandbox profile** (`soul.sandbox`, e.g. `go-toolchain`) —
+the *toolchain it needs*, not where that toolchain's bytes live. The infra overlay's
+`sandbox.profiles` registry resolves that name to a **concrete, backend-specific
+bootable artifact**: a (digest-pinned) image for Docker/gVisor, a rootfs for
+Firecracker. This is the same indirection the [`models` registry](../configuration.md)
+gives the soul's `model` name, and for the same reasons:
+
+- **Backends need different artifacts.** Docker boots an image reference; Firecracker
+  boots a rootfs. The *same* profile name resolves to different concrete things per
+  backend, so the soul stays backend- and environment-agnostic and swapping backends
+  stays config, not a rewrite.
+- **Provenance pins bytes, not a tag.** Under a hostile-toolchain threat model the image
+  is load-bearing — a poisoned toolchain poisons every build *and* every gate. Resolving
+  to a digest (`registry/img@sha256:…`) and recording that digest in provenance is what
+  makes *provenance by construction* real for the toolchain, not just the model.
+
+```yaml
+# infra.<env>.yaml
+sandbox:
+  backend: docker
+  profiles:
+    go-toolchain:
+      image: harness/go-toolchain@sha256:…       # docker / gvisor read `image`
+      # rootfs: /var/lib/harness/go-toolchain.ext4   # firecracker reads `rootfs`
+```
+
+Resolution happens where the orchestrator/runner **build the sandbox spec**, not inside
+the backend: the backend contract stays "boot this concrete artifact", which is what
+keeps the Docker→Firecracker move a swap rather than a rewrite. The logical profile name
+rides in provenance/telemetry; the resolved digest rides alongside it.
+[`harness validate`](../configuration.md) gates startup on every `soul.sandbox`
+resolving to a `profiles` entry that carries the field the active backend needs.
+
+**Producer and verifier resolve the same profile.** The gate grades a candidate in the
+*producer soul's* profile — the tests must compile and run on the same toolchain —
+resolved through the same registry to the same concrete image, still in a fresh,
+producer-distinct sandbox (see [below](#two-distinct-sandboxes-per-work-item)).
+
+The package data a zero-network gate needs (the `govulncheck` vulnerability DB, licence
+metadata) is **baked into the profile image**, never fetched — the same offline guarantee
+the build relies on. What stays open is caching *fresh* package downloads across
+invocations without weakening egress (below).
+
+---
+
 ## A non-isolating local backend (testing only)
 
 Exercising the full `spec → implement → gate → merge` spine in a test needs *faithful
@@ -97,6 +144,10 @@ Note the deliberate separation enforced by **producer ≠ verifier**:
 
 ## OPEN questions
 
-- **Rootfs / base image composition** (toolchains per role) — TBD.
+- **Image build & publish pipeline** — how each role image is built from its
+  `deploy/*.Dockerfile`, scanned, and published with the pinned digest the `profiles`
+  registry references (Phase 5 / T5.x). The *resolution* of a profile name to that
+  artifact is decided ([above](#profile--image-resolution)); what stays open is the
+  supply chain that produces the artifact.
 - **Caching** package downloads across invocations without weakening the egress
   control (e.g. a read-through vetted mirror) — TBD; see [runner.md](runner.md).

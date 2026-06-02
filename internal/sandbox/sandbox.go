@@ -59,9 +59,18 @@ type Sandbox interface {
 // The only inputs are the rootfs profile, the worktree to seed, the resource ceiling,
 // and the single broker channel.
 type Spec struct {
-	// Profile names the rootfs/toolchain image to boot (from soul.Sandbox, e.g.
-	// "go-toolchain"). Backends map it to a concrete base image / rootfs.
+	// Profile is the logical toolchain profile (from soul.Sandbox, e.g. "go-toolchain").
+	// It is the soul-facing identity, carried for telemetry/provenance; the concrete
+	// artifact a backend boots is Image, resolved from this name via the infra
+	// sandbox.profiles registry (see config.SandboxConfig.ResolveImage).
 	Profile string
+
+	// Image is the concrete, backend-specific bootable artifact: a (digest-pinned)
+	// container image for docker/gvisor, a rootfs for firecracker. It is resolved from
+	// Profile by the orchestrator/runner when they build the spec, so the backend only
+	// ever boots a concrete artifact. When empty, a backend falls back to Profile — the
+	// historical "name == image tag" behavior the test-only paths rely on.
+	Image string
 
 	// Workspace describes the git worktree seeded into the sandbox.
 	Workspace Workspace

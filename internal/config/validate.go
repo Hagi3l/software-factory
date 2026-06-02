@@ -93,6 +93,7 @@ func (c *Config) Validate() error {
 		add("infra configuration is missing")
 	} else {
 		c.validateModels(add)
+		c.validateSandbox(add)
 		c.validateOTel(add)
 	}
 
@@ -494,6 +495,49 @@ func (c *Config) validateModels(add func(string, ...any)) {
 		}
 		if _, ok := c.Infra.Models[s.Model]; !ok {
 			add("soul %q references model %q which the infra model registry does not define", s.Name, s.Model)
+		}
+	}
+}
+
+// validateSandbox checks the sandbox backend is known and that every soul's logical
+// sandbox profile resolves to a concrete artifact for that backend. The runner and gate
+// resolve soul.Sandbox to an image (docker/gvisor) or rootfs (firecracker) via
+// SandboxConfig.Profiles when they build the sandbox spec; an unregistered profile, or
+// one missing the active backend's field, would silently degrade to booting the bare
+// profile name as an image (see SandboxConfig.ResolveImage), so it is caught here at
+// startup the same way a missing model registry entry or check command is — config is
+// the single source of truth, and a typo must fail loud, not boot a surprise image.
+func (c *Config) validateSandbox(add func(string, ...any)) {
+	backend := c.Infra.Sandbox.Backend
+	switch backend {
+	case "", BackendDocker, BackendGVisor, BackendFirecracker:
+		// "" is tolerated (the field is informational for the test-injected backend); the
+		// three named backends are valid. ResolveImage treats anything non-firecracker as
+		// image-shaped, so the field check below uses the same rule.
+	default:
+		add("sandbox.backend %q is unknown (want %q, %q, or %q)", backend, BackendDocker, BackendGVisor, BackendFirecracker)
+	}
+
+	field, kind := "image", "container image"
+	if backend == BackendFirecracker {
+		field, kind = "rootfs", "rootfs"
+	}
+	for _, s := range c.Souls {
+		if s.Sandbox == "" {
+			add("soul %q has no sandbox profile", s.Name)
+			continue
+		}
+		p, ok := c.Infra.Sandbox.Profiles[s.Sandbox]
+		if !ok {
+			add("soul %q references sandbox profile %q which sandbox.profiles does not define", s.Name, s.Sandbox)
+			continue
+		}
+		artifact := p.Image
+		if backend == BackendFirecracker {
+			artifact = p.Rootfs
+		}
+		if strings.TrimSpace(artifact) == "" {
+			add("sandbox profile %q (used by soul %q) has no %q for the %q backend (%s)", s.Sandbox, s.Name, field, backend, kind)
 		}
 	}
 }

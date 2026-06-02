@@ -257,6 +257,14 @@ func (o *Orchestrator) gateCandidate(issue core.Issue, stage config.Stage, ref s
 	if soul, ok := o.selectSoul(issue); ok {
 		profile = soul.Sandbox
 	}
+	// Resolve the logical profile to the concrete artifact the verifier boots, so the gate
+	// grades on the *same* (ideally digest-pinned) toolchain image the producer used —
+	// producer != verifier, same toolchain (see specs/components/sandbox.md). Empty when
+	// no infra is wired (some tests); the backend then falls back to the profile name.
+	image := ""
+	if o.opts.Config != nil && o.opts.Config.Infra != nil {
+		image = o.opts.Config.Infra.Sandbox.ResolveImage(profile)
+	}
 	baseRef := o.base
 	if issue.Base != "" {
 		baseRef = issue.Base
@@ -267,6 +275,7 @@ func (o *Orchestrator) gateCandidate(issue core.Issue, stage config.Stage, ref s
 		BaseRef:        baseRef,
 		Postconditions: stage.Postcondition,
 		Profile:        profile,
+		Image:          image,
 		Limits:         o.opts.Limits,
 	}
 }

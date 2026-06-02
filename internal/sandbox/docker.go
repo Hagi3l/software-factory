@@ -128,6 +128,15 @@ func (b *DockerBackend) Provision(ctx context.Context, spec Spec) (Sandbox, erro
 		return nil, err
 	}
 
+	// The bootable image is the concrete artifact resolved from the soul's logical
+	// profile via the infra sandbox.profiles registry (see config.ResolveImage). When
+	// unset (test-only specs constructed directly), fall back to the profile name — the
+	// historical "name == image tag" behavior.
+	image := spec.Image
+	if image == "" {
+		image = spec.Profile
+	}
+
 	// --network none is the zero-network invariant enforced by construction: the
 	// container gets only loopback, so the bind-mounted broker socket is the sole way
 	// out. Disk is not enforced here — Docker disk quotas need a specific storage
@@ -141,7 +150,7 @@ func (b *DockerBackend) Provision(ctx context.Context, spec Spec) (Sandbox, erro
 		"--memory", strconv.FormatInt(memBytes, 10),
 		"-w", containerWorkdir,
 		"-v", spec.Broker.Address + ":" + containerBrokerSock,
-		spec.Profile,
+		image,
 		"sleep", keepAliveSeconds,
 	}
 	out, err := b.dockerOK(ctx, nil, runArgs...)

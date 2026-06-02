@@ -46,6 +46,7 @@ const (
 	AttrResultStatus   = "harness.result.status"
 	AttrSandboxBackend = "harness.sandbox.backend"
 	AttrSandboxProfile = "harness.sandbox.profile"
+	AttrSandboxImage   = "harness.sandbox.image" // resolved concrete artifact (image/rootfs) — pins toolchain bytes in provenance
 	AttrSandboxID      = "harness.sandbox.id"
 	AttrStopReason     = "harness.llm.stop"
 	AttrToolCalls      = "harness.llm.tool_calls"

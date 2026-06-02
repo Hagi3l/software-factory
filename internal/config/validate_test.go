@@ -49,6 +49,10 @@ func validConfig() *Config {
 			Models: map[string]ModelProvider{
 				"claude-opus-4-7": {Provider: "anthropic"},
 			},
+			Sandbox: SandboxConfig{
+				Backend:  BackendDocker,
+				Profiles: map[string]SandboxProfile{"go-toolchain": {Image: "harness/go-toolchain:dev"}},
+			},
 		},
 	}
 }
@@ -61,7 +65,7 @@ func soul(t *testing.T, name, role string) core.Soul {
 	if err := os.WriteFile(f, []byte("# persona\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	return core.Soul{Name: name, Role: role, Model: "claude-opus-4-7", Persona: f}
+	return core.Soul{Name: name, Role: role, Model: "claude-opus-4-7", Persona: f, Sandbox: "go-toolchain"}
 }
 
 // fullSouls returns one soul per agent role in validConfig's DAG.
@@ -465,7 +469,7 @@ func writeValidTree(t *testing.T) string {
 		write(filepath.Join("souls", "prompts", rs.name+".md"), "# persona\n")
 		write(filepath.Join("souls", rs.name+".yaml"),
 			"name: "+rs.name+"\nrole: "+rs.role+"\nmodel: claude-opus-4-7\n"+
-				"persona: souls/prompts/"+rs.name+".md\n")
+				"persona: souls/prompts/"+rs.name+".md\nsandbox: go-toolchain\n")
 	}
 	return dir
 }
@@ -482,4 +486,41 @@ func TestValidateFromLoad(t *testing.T) {
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("Validate on-disk config: %v", err)
 	}
+}
+
+// A soul whose sandbox profile has no entry in sandbox.profiles would silently boot the
+// bare profile name as an image at the runner/gate; validation must reject it at startup,
+// the same way a missing model registry entry is rejected.
+func TestValidateSoulSandboxProfileUnresolved(t *testing.T) {
+	c := validConfig()
+	souls := fullSouls(t)
+	souls[2].Sandbox = "rust-toolchain" // not defined in sandbox.profiles
+	c.Souls = souls
+	mustContain(t, problems(t, c), `sandbox profile "rust-toolchain" which sandbox.profiles does not define`)
+}
+
+// A soul with no sandbox profile at all cannot be provisioned; validation must catch it.
+func TestValidateSoulNoSandbox(t *testing.T) {
+	c := validConfig()
+	souls := fullSouls(t)
+	souls[1].Sandbox = ""
+	c.Souls = souls
+	mustContain(t, problems(t, c), `has no sandbox profile`)
+}
+
+// A profile entry that exists but carries no artifact for the active backend (here an
+// image for docker) is as unresolvable as a missing entry.
+func TestValidateSandboxProfileMissingBackendField(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Sandbox.Profiles = map[string]SandboxProfile{"go-toolchain": {Rootfs: "/x.ext4"}} // rootfs, but backend is docker
+	mustContain(t, problems(t, c), `has no "image" for the "docker" backend`)
+}
+
+// An unknown sandbox backend is a typo that would mis-resolve every profile.
+func TestValidateUnknownSandboxBackend(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Sandbox.Backend = "qemu"
+	mustContain(t, problems(t, c), `sandbox.backend "qemu" is unknown`)
 }

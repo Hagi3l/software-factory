@@ -58,6 +58,9 @@ sandbox:
   backend: docker
   egress:  broker-only
   limits:  { cpu: 2, mem: 2Gi, wall: 30m }
+  profiles:
+    go-toolchain:
+      image: harness/go-toolchain:dev
 nats:
   url: nats://localhost:4222
   jetstream: { replicas: 1, max_age: 168h }

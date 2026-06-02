@@ -130,7 +130,7 @@ role:     implementor          # the DAG role it binds to
 model:    claude-opus-4-8      # resolved through infra.<env>.yaml's models registry
 persona:  souls/prompts/implementor-go.md
 tools:    [fs, shell, git]
-sandbox:  go-toolchain         # the sandbox profile / image
+sandbox:  go-toolchain         # logical profile; resolved to a concrete image via infra
 selector: { lang: go }         # which work this soul claims for its role
 ```
 
@@ -155,6 +155,9 @@ sandbox:
   backend: docker            # bootstrap stand-in for Firecracker (Phase 5)
   egress:  broker-only       # zero direct network; all I/O via the broker
   limits:  { cpu: 2, mem: 2Gi, wall: 30m }   # per-invocation ceiling
+  profiles:                  # soul.sandbox name -> concrete artifact for this backend
+    go-toolchain:
+      image: harness/go-toolchain@sha256:…   # docker/gvisor: `image`; firecracker: `rootfs`
 nats:
   url: nats://localhost:4222 # in-process embedded in dev; external cluster later
   jetstream: { replicas: 1, max_age: 168h }
@@ -182,6 +185,12 @@ models:
 - **`sandbox.backend`** is `docker` in the bootstrap (a stand-in for Firecracker) and
   the sandbox is `broker-only`: zero direct network, every call mediated by the broker
   against the `allowlist`.
+- **`sandbox.profiles`** resolves the logical profile a soul names (`sandbox: go-toolchain`)
+  to the concrete artifact this backend boots — an `image` for docker/gvisor, a `rootfs`
+  for firecracker. The soul stays env-agnostic; dev points the name at a local tag, prod
+  at a digest-pinned image/rootfs. Pin by digest (`@sha256:…`) so provenance records the
+  exact toolchain bytes. `harness validate` fails if any `soul.sandbox` has no entry here
+  for the active backend.
 - **`otel.endpoint`** defaults to off; `stdout` is for offline dev, a `host:port` is
   OTLP/gRPC to an external collector (a Phase 5 deployment step).
 

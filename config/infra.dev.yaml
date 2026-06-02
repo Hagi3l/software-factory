@@ -10,6 +10,16 @@ sandbox:
   backend: docker
   egress:  broker-only
   limits:  { cpu: 2, mem: 2Gi, wall: 30m }
+  # profiles resolves the logical profile a soul names (soul.sandbox: go-toolchain) to the
+  # concrete artifact this backend boots — an `image` for docker/gvisor, a `rootfs` for
+  # firecracker. The producer and its independent verifier resolve the *same* profile, so
+  # the gate grades on the producer's toolchain (producer != verifier, same toolchain). Pin
+  # by digest in production so provenance records the exact toolchain bytes; the dev tag here
+  # is built by `deploy/go-toolchain.Dockerfile` (T5.3/T5.6). harness validate fails if any
+  # soul.sandbox has no entry here for the active backend. See specs/components/sandbox.md.
+  profiles:
+    go-toolchain:
+      image: harness/go-toolchain:dev
 nats:
   url: nats://localhost:4222
   jetstream: { replicas: 1, max_age: 168h }

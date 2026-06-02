@@ -214,6 +214,10 @@ sandbox:
   backend: firecracker     # docker for dev overlay
   egress:  broker-only
   limits:  { cpu: 2, mem: 2Gi, wall: 30m }
+  profiles:                # logical soul.sandbox name -> concrete backend artifact
+    go-toolchain:
+      image: harness/go-toolchain@sha256:…    # docker/gvisor read `image`
+      # rootfs: /var/lib/harness/go-toolchain.ext4   # firecracker reads `rootfs`
 nats:
   url: nats://...
   jetstream: { ... }
@@ -254,6 +258,20 @@ The bootstrap runs the `security`/`qa` soul on a mid-tier model and the rest on 
 frontier model — the qa candidate is re-graded by the independent gate, so a cheaper
 model there is the lowest-risk economy (see [models.md](models.md)).
 
+The `profiles` registry resolves the **logical sandbox profile** a soul names
+(`soul.sandbox`, e.g. `go-toolchain`) to a **concrete, backend-specific bootable
+artifact** — a (digest-pinned) `image` for Docker/gVisor, a `rootfs` for Firecracker —
+exactly as `models` resolves a soul's `model` to a provider. The soul therefore stays
+backend- and environment-agnostic: the same `go-toolchain` name resolves to a local
+docker tag in dev and a pinned rootfs in prod, no soul edit. Resolution runs where the
+orchestrator/runner build the sandbox spec, so the backend only ever boots a concrete
+artifact (the Docker→Firecracker swap stays config). The producer and its verifier
+resolve the **same** profile — the gate must grade on the producer's toolchain — to the
+same concrete image. The resolved digest is recorded in provenance, pinning the bytes
+the code was built and graded in (*provenance by construction*); see
+[components/sandbox.md](components/sandbox.md). Limits stay global at `sandbox.limits`
+(the single per-invocation ceiling), not per-profile.
+
 Dev overlays (e.g. `infra.dev.yaml`) swap Firecracker for Docker without touching
 the workflow or souls.
 
@@ -265,6 +283,10 @@ In an autonomous pipeline a config typo fails silently and badly. A `harness
 validate` step must run before anything executes and check:
 
 - every DAG `role` resolves to ≥1 soul, and every soul's `role` exists;
+- every soul's `sandbox` profile resolves to a `sandbox.profiles` entry that carries
+  the field the active `sandbox.backend` needs (`image` for docker/gvisor, `rootfs`
+  for firecracker) — an unresolvable profile is the same silent config fault as a
+  missing model or check command;
 - every `produces:` / `on_failure:` target is a defined stage;
 - every `precondition`/`postcondition` reference is known — a command-check
   postcondition must have a `checks:` entry; a metric/reserved one must be recognized;

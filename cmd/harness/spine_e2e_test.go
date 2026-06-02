@@ -198,11 +198,16 @@ policy:
   budget: { tokens: 2000000, usd: 20, wall: 2h }
   dead_letter: harness.dlq
 `)
+	// The host-exec backend injected by this test ignores the resolved image, but
+	// config.Validate still requires every soul.sandbox to resolve to a profile entry for
+	// the configured backend (docker), so register the test profile here.
 	writeFileE2E(t, filepath.Join(dir, "infra.dev.yaml"), fmt.Sprintf(`
 sandbox:
   backend: docker
   egress: broker-only
   limits: { cpu: 2, mem: 2Gi, wall: 5m }
+  profiles:
+    %s: { image: %s }
 broker:
   allowlist: [llm-api, nats, git]
 artifacts:
@@ -210,7 +215,7 @@ artifacts:
   path: ./.harness/artifacts
 models:
   fake: { provider: openai-compat, endpoint: %q }
-`, modelURL))
+`, profile, profile, modelURL))
 	writeFileE2E(t, filepath.Join(dir, "souls", "impl-fake.yaml"), fmt.Sprintf(`
 name: impl-fake
 role: implementor
