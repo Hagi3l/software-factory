@@ -5,12 +5,18 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Loxstomper/harness/internal/controlroom/query"
 	"github.com/Loxstomper/harness/internal/core"
 )
+
+// cardEntered is harness-1's fixed state-entry anchor; the timer test asserts it renders as a
+// Unix-epoch data attribute the client-side ticker advances.
+var cardEntered = time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)
 
 // fakeIssues is a query.IssueReader backed by a fixed slice — enough to drive the board
 // (which only reads ListAll) without a bd binary.
@@ -53,7 +59,7 @@ func (fakeProv) Recent(context.Context, int) ([]query.MergedCommit, error) { ret
 
 func boardReader() *query.Reader {
 	return query.NewReader(&fakeIssues{all: []core.Issue{
-		{ID: "harness-1", Title: "Build the thing", Status: "in_progress", Role: "implementor", Attempt: 1, Spec: "specs/x.md"},
+		{ID: "harness-1", Title: "Build the thing", Status: "in_progress", Role: "implementor", Attempt: 1, Spec: "specs/x.md", StateEnteredAt: cardEntered, CreatedAt: cardEntered.Add(-24 * time.Hour)},
 		{ID: "harness-2", Title: "Write the tests", Status: "blocked", Role: "test-author", Attempt: 2},
 		{ID: "harness-3", Title: "Plan the epic", Status: "closed", Role: "planner"},
 	}}, fakeArts{}, fakeProv{})
@@ -158,6 +164,53 @@ func TestBoardCardsLinkToDetail(t *testing.T) {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("board card missing detail link %q", want)
 		}
+	}
+}
+
+// TestBoardInMotion is T4.18's contract: the board refreshes off the typed issue-state event
+// (not the coarse agent-event), opts the swap into View Transitions, gives every card a stable
+// id + view-transition-name so a moved card animates, and emits the two epoch anchors + the
+// Alpine ticker the per-card timers tick from client-side. The activity feed (a separate view)
+// keeps agent-event — not asserted here.
+func TestBoardInMotion(t *testing.T) {
+	ts := boardServer(t)
+	r := get(t, ts, "/board")
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	since := strconv.FormatInt(cardEntered.Unix(), 10)
+	created := strconv.FormatInt(cardEntered.Add(-24*time.Hour).Unix(), 10)
+	for _, want := range []string{
+		`hx-trigger="sse:issue-state throttle:2s, every 15s"`, // crisp refresh off the typed event
+		"transition:true",                       // View Transitions opt-in for animated moves
+		`id="card-harness-1"`,                    // stable identity per card
+		"view-transition-name: card-harness-1",  // the pairing key the browser tweens on
+		`x-data="cardTicker()"`,                  // the client-ticked timer
+		`data-state-since="` + since + `"`,       // time-in-state anchor (StateEnteredAt)
+		`data-created="` + created + `"`,         // total-time anchor (CreatedAt)
+		"working",                                // status→label for the in_progress card
+		`<script src="/static/ticker.js"`,        // the ticker is loaded
+	} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("board page missing %q", want)
+		}
+	}
+	// The board must NOT still refresh off the coarse agent-event trigger.
+	if strings.Contains(r.body, "sse:agent-event") {
+		t.Errorf("board still wired to the coarse agent-event trigger")
+	}
+}
+
+// TestTickerAssetServed proves the ticker script the board references is actually embedded and
+// served from /static — a dangling script tag would silently break the live timers.
+func TestTickerAssetServed(t *testing.T) {
+	ts := boardServer(t)
+	r := get(t, ts, "/static/ticker.js")
+	if r.status != http.StatusOK {
+		t.Fatalf("/static/ticker.js status = %d, want 200", r.status)
+	}
+	if !strings.Contains(r.body, "cardTicker") {
+		t.Errorf("/static/ticker.js missing the cardTicker factory: %q", r.body)
 	}
 }
 

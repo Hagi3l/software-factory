@@ -9,12 +9,16 @@ import (
 // BoardPage is the kanban view (specs/control-room.md, T4.4): every beads issue grouped
 // into a column by the role/stage it is dispatched to, columns left-to-right in pipeline
 // order. It is server-rendered (templ) and made live without a client graph lib: the SSE
-// substrate (T4.3) wraps the columns, and an `sse:agent-event` trigger re-fetches the
-// columns fragment (throttled), with a slow periodic backstop so a settled board still
-// converges even when the event stream is idle. The initial columns are rendered inline
-// so the page shows data immediately, before htmx attaches.
+// substrate (T4.3) wraps the columns, and the typed `sse:issue-state` trigger (T4.16/T4.17)
+// re-fetches the columns fragment (throttled) exactly when the orchestrator advances work,
+// with a slow periodic backstop so a settled board still converges when the event stream is
+// idle. The swap opts into the browser's View Transitions API (`transition:true`) so a card
+// that lands in a new column *animates* its move (each card carries a stable
+// view-transition-name; T4.18); the initial columns are rendered inline so the page shows
+// data immediately, before htmx attaches. The ticker.js script powers the per-card timers.
 templ BoardPage(board query.Board) {
 	@Layout("Harness — Board", "board") {
+		<script src="/static/ticker.js" defer></script>
 		<div class="space-y-4">
 			<div class="flex items-baseline justify-between">
 				<h1 class="text-xl font-semibold tracking-tight">Board</h1>
@@ -24,8 +28,8 @@ templ BoardPage(board query.Board) {
 				<div
 					id="board"
 					hx-get="/board/cards"
-					hx-trigger="sse:agent-event throttle:2s, every 15s"
-					hx-swap="innerHTML"
+					hx-trigger="sse:issue-state throttle:2s, every 15s"
+					hx-swap="innerHTML transition:true"
 				>
 					@BoardColumns(board)
 				</div>
@@ -67,10 +71,14 @@ templ boardColumn(col query.BoardColumn) {
 
 // boardCard is the compact issue projection. The whole card is the click-through into the
 // issue/invocation detail view (T4.7) — the board's role is triage, the detail page is
-// where a human reads the brief, evidence, and provenance.
+// where a human reads the brief, evidence, and provenance. It carries a stable id +
+// view-transition-name keyed on the issue id (T4.18) so the View Transitions API can tween
+// the card to a new column on a live refresh, and a per-card timer line ticked client-side.
 templ boardCard(card query.IssueCard) {
 	<a
+		id={ "card-" + card.ID }
 		href={ templ.URL("/issue/" + card.ID) }
+		style={ cardVTName(card.ID) }
 		class="block rounded-md border border-slate-800 bg-slate-900/60 p-3 transition hover:border-slate-600 hover:bg-slate-900"
 	>
 		<div class="flex items-center justify-between gap-2">
@@ -84,7 +92,27 @@ templ boardCard(card query.IssueCard) {
 		if card.Attempt > 1 {
 			<p class="mt-1 text-xs text-amber-400">attempt { strconv.Itoa(card.Attempt) }</p>
 		}
+		@cardTimer(card)
 	</a>
+}
+
+// cardTimer is the card's live clock line (T4.18, control-room.md "The board, in motion"):
+// time in the current state (label keyed off status server-side) and total time since the
+// issue was created. The server emits two epoch anchors — data-state-since (StateEnteredAt)
+// and data-created (CreatedAt) — and never re-renders to tick; the Alpine ticker
+// (x-data="cardTicker()", ticker.js) rewrites the two x-ref spans every second in the
+// browser. An empty anchor (unstamped/absent) renders a dash. The current-state timer resets
+// naturally on the next transition, since the refetched card carries a fresh anchor.
+templ cardTimer(card query.IssueCard) {
+	<div
+		class="mt-2 flex items-center justify-between text-xs text-slate-500"
+		data-state-since={ epochAttr(card.StateEnteredAt) }
+		data-created={ epochAttr(card.CreatedAt) }
+		x-data="cardTicker()"
+	>
+		<span>{ stateLabel(card.Status) } <span x-ref="state" class="tabular-nums text-slate-400">—</span></span>
+		<span class="tabular-nums" x-ref="total">—</span>
+	</div>
 }
 
 // statusBadge tints the beads status so the board reads at a glance — blocked work (the

@@ -202,7 +202,7 @@ func TestDAGRendersGraph(t *testing.T) {
 	if r.status != http.StatusOK {
 		t.Fatalf("/dag status = %d, want 200", r.status)
 	}
-	for _, want := range []string{"<svg", "h-1", "h-2", `data-node="h-2"`, `href="/issue/h-1"`} {
+	for _, want := range []string{"<svg", "h-1", "h-2", `data-node="h-2"`, `href="/issue/h-1"`, `sse:issue-state`} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("/dag missing %q", want)
 		}

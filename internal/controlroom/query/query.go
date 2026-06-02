@@ -59,18 +59,33 @@ func NewReader(issues IssueReader, arts ArtifactReader, prov ProvenanceReader) *
 }
 
 // IssueCard is the compact projection of an issue for the board and dead-letter lists —
-// just what a card renders, not the full issue.
+// just what a card renders, not the full issue. StateEnteredAt/CreatedAt are the two anchors
+// the board's client-ticked per-card timers advance from (T4.18, control-room.md "The board,
+// in motion"): time-in-current-state and total-time-since-creation, respectively. They are
+// raw time.Time values — the view emits them as epoch data-* attributes and the Alpine ticker
+// does the per-second arithmetic, so the server never re-renders to tick.
 type IssueCard struct {
-	ID      string
-	Title   string
-	Status  string
-	Role    string
-	Attempt int
-	Spec    string
+	ID             string
+	Title          string
+	Status         string
+	Role           string
+	Attempt        int
+	Spec           string
+	StateEnteredAt time.Time
+	CreatedAt      time.Time
 }
 
 func cardOf(i core.Issue) IssueCard {
-	return IssueCard{ID: i.ID, Title: i.Title, Status: i.Status, Role: i.Role, Attempt: i.Attempt, Spec: i.Spec}
+	return IssueCard{
+		ID:             i.ID,
+		Title:          i.Title,
+		Status:         i.Status,
+		Role:           i.Role,
+		Attempt:        i.Attempt,
+		Spec:           i.Spec,
+		StateEnteredAt: i.StateEnteredAt,
+		CreatedAt:      i.CreatedAt,
+	}
 }
 
 // BoardColumn is one stage's cards on the kanban board.

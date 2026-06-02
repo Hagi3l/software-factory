@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Loxstomper/harness/internal/core"
 )
@@ -120,6 +121,29 @@ func TestBoardGroupsByStageInOrder(t *testing.T) {
 	impl := board.Columns[0]
 	if len(impl.Cards) != 2 || impl.Cards[0].ID != "h-1" || impl.Cards[1].ID != "h-3" {
 		t.Errorf("implement cards = %+v, want [h-1 h-3] in order", impl.Cards)
+	}
+}
+
+// TestBoardCardCarriesTimerAnchors proves the board projection threads the two timer anchors
+// (StateEnteredAt, CreatedAt) onto the card verbatim — the view emits them as epoch data-*
+// attributes for the client-ticked per-card timers (T4.18).
+func TestBoardCardCarriesTimerAnchors(t *testing.T) {
+	entered := time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)
+	created := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	issues := &fakeIssues{all: []core.Issue{
+		{ID: "h-1", Role: "implement", Status: "in_progress", StateEnteredAt: entered, CreatedAt: created},
+	}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+	board, err := r.Board(context.Background(), []string{"implement"})
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	card := board.Columns[0].Cards[0]
+	if !card.StateEnteredAt.Equal(entered) {
+		t.Errorf("card.StateEnteredAt = %v, want %v", card.StateEnteredAt, entered)
+	}
+	if !card.CreatedAt.Equal(created) {
+		t.Errorf("card.CreatedAt = %v, want %v", card.CreatedAt, created)
 	}
 }
 

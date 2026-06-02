@@ -29,7 +29,7 @@ Top navigation:
 
 | View | Path | What it shows |
 |------|------|---------------|
-| **Board** | `/board` | Kanban over all issues, grouped into columns by pipeline stage. Cards show id/title/status/spec/retry generation; click through to the detail page. Live-refreshes on agent activity. |
+| **Board** | `/board` | Kanban over all issues, grouped into columns by pipeline stage. Cards show id/title/status/spec/retry generation and two **client-ticked timers** — time in the current state (`working`/`queued`/`blocked`) and total time since creation; click through to the detail page. It refreshes on the orchestrator's typed [issue-state event](../specs/messaging.md), so a card moves *exactly* when the work advances, and the move is **animated** via the browser's View Transitions API (instant where unsupported). |
 | **DAG** | `/dag` | The issue dependency graph — what blocks what — rendered server-side to SVG (pure Go, no graphviz, no client graph lib). Hover highlights a node and its neighbours; click drills into the issue. |
 | **Activity** | `/activity` | "What the agents *and the factory* are doing right now" — a live feed with two sources, filterable by an **All / Agents / System** toggle. *Agent* rows are brokered from inside the sandbox: streamed model output coalesced into readable rows — `token` (the answer) and `reasoning` (the model's thinking, shown even when a turn is all tool calls) — plus one `tool` row per tool call (e.g. `write_file index.html`). *System* rows are the factory's own log teed in (`info`/`warn`/`error` from the orchestrator/runner/gate — dispatch, sandbox provision, gating, merge, dead-letter), tinted distinctly. So an agent that works purely through tool calls — and the machine driving it — both stay visible. |
 | **Dead-letter** | `/dlq` | The escalations awaiting a human — the primary *action* surface. Each row shows the triage signals (cumulative spend, retry generation, spec) and the dead-letter reason, and links to the detail page and Resolve mode. An empty queue reads as reassurance, not an error. |
@@ -92,9 +92,14 @@ through Create.
 
 ## A note on liveness
 
-Live views (Board, DAG, Activity, DLQ, Budgets, Provenance, the wizard) refresh over
-SSE on agent activity, with a slow periodic backstop so a settled board still
-converges. Forensic pages (issue detail, Replay) are deliberately *not* live — they're
+Live views refresh over SSE, each with a slow periodic backstop so a settled board
+still converges. The **Board, DAG, and DLQ** refetch on the orchestrator's typed
+[issue-state event](../specs/messaging.md) — they care about *transitions*, so they
+update precisely when work moves between stages (and the board animates the move). The
+**Activity** feed instead refreshes on the finer-grained agent-event stream, since its
+job is to show per-turn agent progress as it happens. Budgets, Provenance, and the
+wizard refresh on the same substrate. Forensic pages (issue detail, Replay) are
+deliberately *not* live — they're
 snapshots, not feeds. Authentication is not yet implemented (an open item); session ids
 in the wizard are crypto-random but there's no login gate.
 </content>

@@ -15,11 +15,11 @@ import (
 // "Resolve →" link launches the Resolve wizard (T4.15) — the action — pre-loaded from the
 // escalation. The orchestrator's dead-letter reason is now shown inline too (T4.15).
 //
-// Like the board and the feed it is live over the T4.3 SSE substrate: an agent-event nudges
-// an htmx refetch of just the list (throttled), with a slow periodic backstop so the queue
-// still converges when the event stream is idle — a settled run that just dead-lettered an
-// issue must surface it without a manual refresh. The initial list renders inline so the
-// page shows data before htmx attaches.
+// Like the board and the feed it is live over the T4.3 SSE substrate: the typed issue-state
+// event (T4.16/T4.17) nudges an htmx refetch of just the list (throttled) — a dead-letter is
+// itself a transition, so the queue surfaces a newly-blocked issue the moment it lands — with
+// a slow periodic backstop so the queue still converges when the event stream is idle. The
+// initial list renders inline so the page shows data before htmx attaches.
 templ DeadLetterPage(items []query.DeadLetter) {
 	@Layout("Harness — Dead-letter", "dlq") {
 		<div class="space-y-4">
@@ -34,7 +34,7 @@ templ DeadLetterPage(items []query.DeadLetter) {
 				<div
 					id="dlq"
 					hx-get="/dlq/items"
-					hx-trigger="sse:agent-event throttle:2s, every 15s"
+					hx-trigger="sse:issue-state throttle:2s, every 15s"
 					hx-swap="innerHTML"
 				>
 					@DeadLetterList(items)

@@ -8,9 +8,10 @@ import (
 // blocked-by graph over beads issues, rendered server-side to SVG by a pure-Go layered
 // layout — no client graph library, preserving the self-contained-binary property. Like the
 // board it is made live without a graph lib on the client: the SSE substrate (T4.3) wraps
-// the graph, and an `sse:agent-event` trigger re-fetches the bare /dag/svg fragment
-// (throttled), with a slow periodic backstop so a settled graph still converges when the
-// stream is idle. The hover-to-highlight interaction is small Alpine state (dag.js); drill
+// the graph, and the typed `sse:issue-state` trigger (T4.16/T4.17) re-fetches the bare
+// /dag/svg fragment (throttled) when the orchestrator advances work, with a slow periodic
+// backstop so a settled graph still converges when the stream is idle. The hover-to-highlight
+// interaction is small Alpine state (dag.js); drill
 // is the per-node anchor into the issue-detail view. The dim/active CSS is an inline <style>
 // so the SVG classes need no Tailwind toolchain pass.
 templ DAGPage(g dag.Graph) {
@@ -33,7 +34,7 @@ templ DAGPage(g dag.Graph) {
 				<div
 					id="dag"
 					hx-get="/dag/svg"
-					hx-trigger="sse:agent-event throttle:2s, every 15s"
+					hx-trigger="sse:issue-state throttle:2s, every 15s"
 					hx-swap="innerHTML"
 				>
 					@DAGGraph(g)

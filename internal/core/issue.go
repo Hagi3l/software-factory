@@ -198,6 +198,16 @@ type Issue struct {
 	// specs/components/orchestrator.md §9, specs/control-room.md "The board, in motion").
 	StateEnteredAt time.Time
 
+	// CreatedAt is when beads first created the issue — the anchor the control-room board's
+	// per-card "total time" timer ticks from (client-side, like StateEnteredAt). Unlike the
+	// other facets it is not harness-written metadata: it is beads' own top-level `created_at`
+	// timestamp, decoded straight off the read (every issue bd returns carries one), so it is
+	// always populated for a real issue and zero only for a not-yet-created proposal. It is the
+	// fallback the board uses for "time in current state" when StateEnteredAt is unstamped (an
+	// issue that has not transitioned since that field landed). See specs/control-room.md
+	// ("The board, in motion").
+	CreatedAt time.Time
+
 	// DependsOn carries the blocked-by edge targets beads emits inline on a read: the ids
 	// of the issues this one is blocked by (its blockers). Like Status it is populated when
 	// an issue is read back — beads owns these edges (the orchestrator writes them via

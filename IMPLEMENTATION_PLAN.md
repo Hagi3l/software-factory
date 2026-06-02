@@ -709,23 +709,38 @@ control-room.md, observability.md).
   teardown. `make check`-adjacent green: `go build ./...`, `go vet`, `golangci-lint` (0 issues),
   and `go test -race ./internal/controlroom/live/` all pass. **Unblocks T4.18** (board crisp
   refresh, animated moves, per-card timers). (needs T4.16) ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
-- [ ] **T4.18 Board in motion — crisp refresh, animated moves, per-card timers** — non-TCB
-  (controlroom views + query). **(a) Crisp refresh:** swap the board / DAG / DLQ
-  `hx-trigger` from `sse:agent-event` to **`sse:issue-state`** (keep the `every 15s`
-  backstop); the activity feed stays on `agent-event`. **(b) Animated moves:** give each
-  `boardCard` a stable `id`/`view-transition-name` keyed on the issue id and opt the columns
-  swap into the **View Transitions API** (htmx `transition:true` / global config) — browser
-  tweens the column change, instant-swap fallback where unsupported; no client graph/animation
-  lib. **(c) Timers:** decode beads **`created_at`** into `core.Issue.CreatedAt`
-  (`issueJSON` decoder, like `DependsOn`); the card emits `data-state-since`
-  (`StateEnteredAt`, T4.16) + `data-created` epochs; a small `assets/static/` Alpine ticker
-  (`x-data`) renders **time-in-state** (label keyed off status: `working`/`queued`/`blocked`)
-  + **total** every second client-side — server never re-renders to tick. **(d) Optional**
-  `budget.wall` tint on the in-progress timer (amber→rose approaching the cap), reusing the
-  caps already threaded for T4.10 Budgets. Run `make generate` (templ + Tailwind; tint
-  classes are templ switches per the `@source` rule). Tests: query carries `CreatedAt`,
-  beads `created_at` decode, card renders the two data attrs + stable id + transition opt-in,
-  trigger swapped on board/DAG/DLQ, ticker JS present. (needs T4.16, T4.17) ([control-room.md](specs/control-room.md))
+- [x] **T4.18 Board in motion — crisp refresh, animated moves, per-card timers** — *done.* Non-TCB
+  (controlroom views + query + beads read path). The frontend-consume half of the live-transition
+  refinement (T4.16 emit, T4.17 transport). **(a) Crisp refresh:** the board / DAG / DLQ `hx-trigger`
+  is swapped from `sse:agent-event` to **`sse:issue-state`** (the `every 15s` backstop kept), so each
+  refetches precisely when the orchestrator advances work, not on every per-token agent nudge. **The
+  activity feed deliberately stays on `agent-event`** — its job is per-turn progress, not transitions.
+  **(b) Animated moves:** each `boardCard` gains a stable **`id="card-<id>"`** + **`view-transition-name:
+  card-<id>`** keyed on the issue id, and the board swap opts into the **View Transitions API** via
+  htmx **`hx-swap="innerHTML transition:true"`** (per-swap modifier — no global config needed), so a card
+  landing in a new column tweens its move; instant-swap fallback where unsupported, no animation lib. The
+  view-transition-name is emitted through **`templ.SafeCSS`** (templ's style sanitizer drops the unknown
+  `view-transition-name` property otherwise) via a new `views.cardVTName`; because SafeCSS is verbatim, the
+  id is reduced to the CSS custom-ident charset by `cssIdent` (defense in depth — beads ids already are).
+  **(c) Timers:** beads' own top-level **`created_at`** (RFC3339, not harness metadata) is decoded into a
+  new **`core.Issue.CreatedAt`** (`issueJSON.CreatedAt` + shared `parseRFC3339`, extracted from `metaTime`),
+  the total-time anchor; `core.Issue.StateEnteredAt` (T4.16) is the time-in-state anchor. Both ride onto
+  **`query.IssueCard`** and the card emits them as **Unix-epoch `data-state-since` / `data-created`**
+  attributes (`views.epochAttr`, empty for the zero time → ticker shows a dash). A new
+  **`assets/static/ticker.js`** (Alpine `x-data="cardTicker()"`) rewrites two `x-ref` spans every second
+  client-side (`fmtDuration` → `45s`/`3m12s`/`2h05m`/`1d04h`); the **status→label** mapping
+  (`working`/`queued`/`blocked`/`closed`) lives server-side in `views.stateLabel` (one home) so the JS only
+  advances durations. The server **never re-renders to tick**; Alpine's lifecycle clears the interval on
+  htmx swap (destroy) and re-inits new cards. **(d) `budget.wall` tint — deferred** (filed): the board cards
+  don't currently receive the threaded caps (T4.10 passed them only to the Budgets view), and the spec marks
+  this optional; a follow-up can thread `BudgetCaps` to the board. Ran `make generate` (templ + Tailwind).
+  Tests: beads `created_at` decode (valid/absent/malformed → zero), query card carries both anchors,
+  board renders the two epoch data attrs + stable id + `view-transition-name` + `transition:true` +
+  `sse:issue-state` (and no longer `sse:agent-event`) + the `working` label + the ticker `<script>`,
+  ticker.js served from `/static`, and the `sse:issue-state` trigger swap asserted on the DAG and DLQ
+  pages too. `make check` green (lint 0, **692 pass / 2 skip**). Docs: `docs/control-room.md` Board row +
+  liveness note updated (typed event, animated moves, client-ticked timers; board/DAG/DLQ on issue-state,
+  activity on agent-event). (needs T4.16, T4.17) ([control-room.md](specs/control-room.md))
 
 ## Phase 5 — Production isolation & distribution
 

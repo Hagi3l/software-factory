@@ -151,6 +151,7 @@ type issueJSON struct {
 	Labels       []string                   `json:"labels"`
 	Metadata     map[string]json.RawMessage `json:"metadata"`
 	Dependencies []depJSON                  `json:"dependencies"`
+	CreatedAt    string                     `json:"created_at"`
 }
 
 // depJSON is one dependency edge bd emits inline on `bd list --json` (the `dependencies`
@@ -202,7 +203,11 @@ func (r issueJSON) toCore() core.Issue {
 		// status-changing write (setStatus/Claim); the board's time-in-state anchor. Zero
 		// (absent/unparsable) on an issue that has not transitioned since the field landed.
 		StateEnteredAt: metaTime(r.Metadata, MetadataKeyStateEntered),
-		Tags:           parseLabels(r.Labels),
+		// Beads' own top-level created_at (not harness metadata) — the board's per-card
+		// "total time" anchor (T4.18). Lenient like the metadata decoders: an absent or
+		// malformed timestamp reads as the zero time, never failing the read.
+		CreatedAt: parseRFC3339(r.CreatedAt),
+		Tags:      parseLabels(r.Labels),
 		// Blocked-by edge targets bd emits inline on the read (the `dependencies` array),
 		// distinct from the write-side Proposal.DependsOn. Empty/absent decodes to nil.
 		DependsOn: dependsOn(r.Dependencies),
@@ -325,8 +330,8 @@ func metaDuration(m map[string]json.RawMessage, key string) time.Duration {
 // foreign or malformed metadata must never fail a read, it just reads as "not stamped".
 //
 //nolint:unparam // kept uniform with the meta<Type>(m, key) decoder family (metaString/Int/
-// Float/Duration); state_entered_at is its only key today but the timer work (T4.18) adds
-// created_at, so collapsing the signature would only have to be reverted.
+// Float/Duration); state_entered_at is its only key today, but collapsing the signature would
+// only have to be reverted the next time a time-valued metadata key is added.
 func metaTime(m map[string]json.RawMessage, key string) time.Time {
 	raw, ok := m[key]
 	if !ok {
@@ -334,6 +339,17 @@ func metaTime(m map[string]json.RawMessage, key string) time.Time {
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err != nil {
+		return time.Time{}
+	}
+	return parseRFC3339(s)
+}
+
+// parseRFC3339 parses an RFC3339 timestamp string to a UTC time.Time, or the zero Time when
+// empty or unparsable. It backs beads' top-level created_at (decoded as a plain JSON string,
+// not metadata), and is shared with metaTime; lenient for the same reason — a malformed or
+// foreign timestamp must never fail the read, it just reads as "not stamped".
+func parseRFC3339(s string) time.Time {
+	if s == "" {
 		return time.Time{}
 	}
 	t, err := time.Parse(time.RFC3339, s)

@@ -47,6 +47,7 @@ func TestDLQRendersEscalations(t *testing.T) {
 		`href="/issue/harness-7"`, // drill-through into the detail view
 		`sse-connect="/events"`,   // wired to the T4.3 substrate
 		`hx-get="/dlq/items"`,     // live fragment refresh target
+		`sse:issue-state`,         // crisp refresh off the typed event (T4.18)
 		`href="/static/app.css"`,  // inside the base layout chrome
 	} {
 		if !strings.Contains(r.body, want) {

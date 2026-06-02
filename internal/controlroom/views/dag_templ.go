@@ -16,9 +16,10 @@ import (
 // blocked-by graph over beads issues, rendered server-side to SVG by a pure-Go layered
 // layout — no client graph library, preserving the self-contained-binary property. Like the
 // board it is made live without a graph lib on the client: the SSE substrate (T4.3) wraps
-// the graph, and an `sse:agent-event` trigger re-fetches the bare /dag/svg fragment
-// (throttled), with a slow periodic backstop so a settled graph still converges when the
-// stream is idle. The hover-to-highlight interaction is small Alpine state (dag.js); drill
+// the graph, and the typed `sse:issue-state` trigger (T4.16/T4.17) re-fetches the bare
+// /dag/svg fragment (throttled) when the orchestrator advances work, with a slow periodic
+// backstop so a settled graph still converges when the stream is idle. The hover-to-highlight
+// interaction is small Alpine state (dag.js); drill
 // is the per-node anchor into the issue-detail view. The dim/active CSS is an inline <style>
 // so the SVG classes need no Tailwind toolchain pass.
 func DAGPage(g dag.Graph) templ.Component {
@@ -54,7 +55,7 @@ func DAGPage(g dag.Graph) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n\t\t\t.dag-edge { transition: opacity .15s; }\n\t\t\t.dag-node { cursor: pointer; transition: opacity .15s; }\n\t\t\t.dag-dimmed .dag-node { opacity: .25; }\n\t\t\t.dag-dimmed .dag-edge { opacity: .12; }\n\t\t\t.dag-node.dag-active { opacity: 1; }\n\t\t\t.dag-edge.dag-active { opacity: 1; stroke: #38bdf8; }\n\t\t</style> <script src=\"/static/dag.js\" defer></script> <div class=\"space-y-4\"><div class=\"flex items-baseline justify-between\"><h1 class=\"text-xl font-semibold tracking-tight\">DAG</h1><span class=\"text-sm text-slate-500\">issue dependency graph</span></div><div hx-ext=\"sse\" sse-connect=\"/events\"><div id=\"dag\" hx-get=\"/dag/svg\" hx-trigger=\"sse:agent-event throttle:2s, every 15s\" hx-swap=\"innerHTML\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<style>\n\t\t\t.dag-edge { transition: opacity .15s; }\n\t\t\t.dag-node { cursor: pointer; transition: opacity .15s; }\n\t\t\t.dag-dimmed .dag-node { opacity: .25; }\n\t\t\t.dag-dimmed .dag-edge { opacity: .12; }\n\t\t\t.dag-node.dag-active { opacity: 1; }\n\t\t\t.dag-edge.dag-active { opacity: 1; stroke: #38bdf8; }\n\t\t</style> <script src=\"/static/dag.js\" defer></script> <div class=\"space-y-4\"><div class=\"flex items-baseline justify-between\"><h1 class=\"text-xl font-semibold tracking-tight\">DAG</h1><span class=\"text-sm text-slate-500\">issue dependency graph</span></div><div hx-ext=\"sse\" sse-connect=\"/events\"><div id=\"dag\" hx-get=\"/dag/svg\" hx-trigger=\"sse:issue-state throttle:2s, every 15s\" hx-swap=\"innerHTML\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -168,7 +169,7 @@ func DAGMessage(msg string) templ.Component {
 			var templ_7745c5c3_Var6 string
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(msg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/dag.templ`, Line: 68, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/dag.templ`, Line: 69, Col: 39}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {

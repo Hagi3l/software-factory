@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Loxstomper/harness/internal/core"
 )
@@ -113,6 +114,36 @@ func TestDecodesDependencies(t *testing.T) {
 	}
 	if issues[1].DependsOn != nil {
 		t.Errorf("issue[1].DependsOn = %v, want nil (no blockers)", issues[1].DependsOn)
+	}
+}
+
+// TestDecodesCreatedAt proves the read path decodes beads' top-level created_at timestamp
+// into core.Issue.CreatedAt — the board's per-card "total time" anchor (T4.18). It is beads'
+// own field (not harness metadata), parsed RFC3339→UTC; an absent or malformed value reads as
+// the zero time rather than failing the read (lenient, like the metadata decoders).
+func TestDecodesCreatedAt(t *testing.T) {
+	const listJSON = `[
+	  {"id": "harness-1", "title": "with ts", "status": "open", "created_at": "2026-06-02T07:41:23Z"},
+	  {"id": "harness-2", "title": "no ts", "status": "open"},
+	  {"id": "harness-3", "title": "bad ts", "status": "open", "created_at": "not-a-time"}
+	]`
+	c, _ := fakeClient(listJSON, nil)
+	issues, err := c.List(context.Background(), "open")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(issues) != 3 {
+		t.Fatalf("got %d issues, want 3", len(issues))
+	}
+	want := time.Date(2026, 6, 2, 7, 41, 23, 0, time.UTC)
+	if !issues[0].CreatedAt.Equal(want) {
+		t.Errorf("issue[0].CreatedAt = %v, want %v", issues[0].CreatedAt, want)
+	}
+	if !issues[1].CreatedAt.IsZero() {
+		t.Errorf("issue[1].CreatedAt = %v, want zero (absent created_at)", issues[1].CreatedAt)
+	}
+	if !issues[2].CreatedAt.IsZero() {
+		t.Errorf("issue[2].CreatedAt = %v, want zero (malformed created_at)", issues[2].CreatedAt)
 	}
 }
 
