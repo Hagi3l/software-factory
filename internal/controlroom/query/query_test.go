@@ -387,3 +387,67 @@ func TestBudgetsListAllError(t *testing.T) {
 		t.Fatal("Budgets swallowed a ListAll error")
 	}
 }
+
+// --- Invocation (T4.21) ---
+
+// An in-flight invocation: not terminal, no replay handoff, and a budget meter that matches the
+// per-issue burn the Budgets view computes (same shared row builder).
+func TestInvocationInFlight(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{
+		{ID: "h-1", Title: "build it", Role: "implement", Status: "in_progress", Spec: "specs/x.md",
+			SpentUSD: 8, ClosingUSD: 5, SpentTokens: 800, ClosingTokens: 500, Attempt: 2},
+	}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+	inv, err := r.Invocation(context.Background(), "h-1", BudgetCaps{IssueUSD: 10, IssueTokens: 2000, MaxRetries: 3})
+	if err != nil {
+		t.Fatalf("Invocation: %v", err)
+	}
+	if inv.Terminal || inv.ReplayAvailable {
+		t.Errorf("in-flight invocation Terminal=%v ReplayAvailable=%v, want both false", inv.Terminal, inv.ReplayAvailable)
+	}
+	if inv.Role != "implement" || inv.Spec != "specs/x.md" || inv.Title != "build it" {
+		t.Errorf("header = %+v, want role/spec/title threaded", inv)
+	}
+	// Budget meter mirrors the Budgets view's per-issue burn ($13/1300 over the $10 cap → breach).
+	if inv.Budget.USD != 13 || inv.Budget.Tokens != 1300 || !inv.Budget.USDOver {
+		t.Errorf("budget = %+v, want $13/1300tok breached", inv.Budget)
+	}
+}
+
+// A merged invocation with a retained transcript is terminal and offers the Replay handoff.
+func TestInvocationTerminalMergedOffersReplay(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{{ID: "h-9", Status: "closed", Role: "implement"}}}
+	prov := &fakeProv{byIssue: map[string]core.Provenance{"h-9": {Transcript: "sha256:abc"}}}
+	r := NewReader(issues, &fakeArts{}, prov)
+	inv, err := r.Invocation(context.Background(), "h-9", BudgetCaps{})
+	if err != nil {
+		t.Fatalf("Invocation: %v", err)
+	}
+	if !inv.Terminal {
+		t.Error("closed invocation Terminal=false, want true")
+	}
+	if !inv.ReplayAvailable {
+		t.Error("merged-with-transcript ReplayAvailable=false, want true")
+	}
+}
+
+// A blocked (dead-lettered) invocation is terminal but, lacking a merge transcript, offers no
+// Replay handoff — the page points at issue detail instead.
+func TestInvocationBlockedNoReplay(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{{ID: "h-3", Status: "blocked", Role: "qa"}}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+	inv, err := r.Invocation(context.Background(), "h-3", BudgetCaps{})
+	if err != nil {
+		t.Fatalf("Invocation: %v", err)
+	}
+	if !inv.Terminal || inv.ReplayAvailable {
+		t.Errorf("blocked invocation Terminal=%v ReplayAvailable=%v, want true/false", inv.Terminal, inv.ReplayAvailable)
+	}
+}
+
+func TestInvocationGetError(t *testing.T) {
+	r := NewReader(&fakeIssues{getErr: errors.New("bd down")}, &fakeArts{}, &fakeProv{})
+	if _, err := r.Invocation(context.Background(), "h-1", BudgetCaps{}); err == nil {
+		t.Fatal("Invocation swallowed a Get error")
+	}
+}

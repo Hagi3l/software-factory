@@ -70,14 +70,16 @@ templ boardColumn(col query.BoardColumn) {
 }
 
 // boardCard is the compact issue projection. The whole card is the click-through into the
-// issue/invocation detail view (T4.7) — the board's role is triage, the detail page is
-// where a human reads the brief, evidence, and provenance. It carries a stable id +
-// view-transition-name keyed on the issue id (T4.18) so the View Transitions API can tween
-// the card to a new column on a live refresh, and a per-card timer line ticked client-side.
+// live invocation view (T4.21) — "drill from a board card (the agent currently working it)"
+// (control-room.md): the board's role is triage, the invocation view is where a human watches
+// that worker think (and, once it terminates, hands off to the forensic issue/Replay drill it
+// links onward to). It carries a stable id + view-transition-name keyed on the issue id (T4.18)
+// so the View Transitions API can tween the card to a new column on a live refresh, and a
+// per-card timer line ticked client-side.
 templ boardCard(card query.IssueCard) {
 	<a
 		id={ "card-" + card.ID }
-		href={ templ.URL("/issue/" + card.ID) }
+		href={ templ.URL("/invocation/" + card.ID) }
 		style={ cardVTName(card.ID) }
 		class="block rounded-md border border-slate-800 bg-slate-900/60 p-3 transition hover:border-slate-600 hover:bg-slate-900"
 	>

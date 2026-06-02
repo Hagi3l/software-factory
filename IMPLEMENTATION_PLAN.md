@@ -822,14 +822,35 @@ components/artifact-store.md, glossary.md).
   body, inner payload unwrapped) into both hub + buffer; new `TestActivity_CarriesIssueBinding` proves the
   binding lands on both a coalesced token run and a discrete row. `make check` green (lint 0). (unblocks T4.21)
   ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
-- [ ] **T4.21 Live invocation view** — Non-TCB (controlroom). `GET /invocation/{id}` — a scoped
-  activity feed filtered **server-side** to one invocation (via T4.20's issue id on the buffer),
-  with a header (role/stage) and a live budget meter ticking toward the wall/token ceiling. Same
-  fragment-refetch-on-SSE-nudge pattern as the feed (nudge on `agent-event`, periodic backstop),
-  not `sse-swap`. **Live only while the agent runs:** the single deliberate live-detail exception
-  (control-room.md "Rendering"), bounded — on termination it hands off to the forensic
-  [Replay](specs/glossary.md#replay) of the *same* invocation. Drill-in from board cards + activity
-  rows. (needs T4.20) ([control-room.md](specs/control-room.md))
+- [x] **T4.21 Live invocation view** — *done.* Non-TCB (controlroom). `GET /invocation/{id}` — a scoped
+  activity feed filtered **server-side** to one invocation plus a live budget meter, the one deliberate
+  live-*detail* surface. **Query:** new **`query.Reader.Invocation(ctx, id, caps)`** → `query.Invocation`
+  (header id/title/role/status/spec/body + `Terminal` + `ReplayAvailable` + an `IssueBudgetRow`). The
+  per-issue budget meter is built by a new **`buildIssueBudgetRow`** extracted from `Budgets` and shared by
+  both — so the invocation meter and the Budgets table can never disagree on an issue's burn. `Terminal` =
+  closed|blocked; `ReplayAvailable` is gated **merged-with-transcript** exactly like the issue-detail Replay
+  link (T4.7b), best-effort (a git fault leaves it false). **Scoped feed:** new
+  **`live.Activity.RecentForIssue(issueID)`** filters the buffer on the issue id the runner stamps on every
+  event (T4.20) — newest-first, system rows excluded — so the server scopes the feed to one invocation with
+  no beads read. **Server:** `handleInvocation` (page) + `handleInvocationItems` (the live body fragment) +
+  an `invocation` helper that degrades to a bare-id projection when no Reader is attached; with no Activity
+  buffer (standalone `harness serve`) the page shows the not-attached notice (200) and the fragment 503s.
+  **Views (`invocation.templ`):** static header (id/role/status/spec + drill-back to issue detail + Replay
+  when available) outside the SSE region; `InvocationBody` (budget meter via the reused `budgetPct` tints +
+  terminal handoff banner + scoped feed) is the htmx swap target, re-fetched on **`sse:agent-event throttle:1s,
+  sse:issue-state, every 10s`** — issue-state so the terminal handoff appears the instant the orchestrator
+  advances the issue, agent-event for per-turn progress, server-render-a-fragment (not `sse-swap`, the token
+  stream is a firehose). **Drill-in:** board cards now link to `/invocation/{id}` (control-room.md "drill from
+  a board card") and agent activity rows link their invocation id to `/invocation/{issueID}`; issue detail
+  stays reachable from the invocation header / DLQ / provenance / budgets. Ran `make generate` (templ +
+  Tailwind). Docs: `docs/control-room.md` drill-through list + Board row updated. Tests: query
+  (in-flight/terminal-merged-offers-replay/blocked-no-replay/get-error), `live.RecentForIssue` (scopes +
+  excludes system + unknown-issue empty + newest-first), server (page header+meter+scoped-feed+SSE wiring +
+  no-leak, bare fragment, terminal handoff, no-activity notice/503), and the board-card link flipped to
+  `/invocation/`. `make check` green (lint 0). **Deferred (filed, not blocking):** sub-result *live* wall/token
+  ticking — the meter reflects spend stamped at result boundaries (re-fetched on nudge), since mid-invocation
+  spend isn't persisted to beads; a client-side wall ticker (like the board's T4.18 timer) could smooth it.
+  (needs T4.20) ([control-room.md](specs/control-room.md))
 - [ ] **T4.22 Gate-verdict record + producing-soul attribution** — **TCB-touching** (gate +
   orchestrator advance + provenance trailer), human-reviewed. The backend that makes the
   verification view possible, two coupled pieces: **(1)** the gate harvests its `Report` to the

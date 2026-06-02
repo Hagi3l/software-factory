@@ -444,33 +444,90 @@ func (r *Reader) Budgets(ctx context.Context, caps BudgetCaps) (Budgets, error) 
 	sort.Slice(out.Epics, func(x, y int) bool { return epicLess(out.Epics[x], out.Epics[y]) })
 
 	for _, i := range issues {
-		tokens := i.SpentTokens + i.ClosingTokens
-		usd := i.SpentUSD + i.ClosingUSD
-		out.Issues = append(out.Issues, IssueBudgetRow{
-			ID:         i.ID,
-			Role:       i.Role,
-			Spec:       i.Spec,
-			Status:     i.Status,
-			Attempt:    i.Attempt,
-			MaxRetries: caps.MaxRetries,
-			RetryPct:   meterPct(float64(i.Attempt), float64(caps.MaxRetries)),
-			RetryOver:  caps.MaxRetries > 0 && i.Attempt >= caps.MaxRetries,
-			Tokens:     tokens,
-			TokenCap:   caps.IssueTokens,
-			TokenPct:   meterPct(float64(tokens), float64(caps.IssueTokens)),
-			TokenOver:  meterOver(float64(tokens), float64(caps.IssueTokens)),
-			USD:        usd,
-			USDCap:     caps.IssueUSD,
-			USDPct:     meterPct(usd, caps.IssueUSD),
-			USDOver:    meterOver(usd, caps.IssueUSD),
-			Wall:       i.SpentWall,
-			WallCap:    caps.IssueWall,
-			WallPct:    meterPct(float64(i.SpentWall), float64(caps.IssueWall)),
-			WallOver:   meterOver(float64(i.SpentWall), float64(caps.IssueWall)),
-		})
+		out.Issues = append(out.Issues, buildIssueBudgetRow(i, caps))
 	}
 	sort.Slice(out.Issues, func(x, y int) bool { return issueBudgetLess(out.Issues[x], out.Issues[y]) })
 	return out, nil
+}
+
+// buildIssueBudgetRow projects one issue's cumulative burn against the per-issue caps. It is the
+// single source for an issue's budget meter — the Budgets table maps it over every issue and the
+// live-invocation view (T4.21) calls it for one — so the two surfaces can never disagree on what
+// an issue has spent. Token/USD burn is the chain-cumulative Spent* plus this issue's own marginal
+// Closing* (the quantity the per-issue budget bounds, T3.8); a breach is flagged per dimension.
+func buildIssueBudgetRow(i core.Issue, caps BudgetCaps) IssueBudgetRow {
+	tokens := i.SpentTokens + i.ClosingTokens
+	usd := i.SpentUSD + i.ClosingUSD
+	return IssueBudgetRow{
+		ID:         i.ID,
+		Role:       i.Role,
+		Spec:       i.Spec,
+		Status:     i.Status,
+		Attempt:    i.Attempt,
+		MaxRetries: caps.MaxRetries,
+		RetryPct:   meterPct(float64(i.Attempt), float64(caps.MaxRetries)),
+		RetryOver:  caps.MaxRetries > 0 && i.Attempt >= caps.MaxRetries,
+		Tokens:     tokens,
+		TokenCap:   caps.IssueTokens,
+		TokenPct:   meterPct(float64(tokens), float64(caps.IssueTokens)),
+		TokenOver:  meterOver(float64(tokens), float64(caps.IssueTokens)),
+		USD:        usd,
+		USDCap:     caps.IssueUSD,
+		USDPct:     meterPct(usd, caps.IssueUSD),
+		USDOver:    meterOver(usd, caps.IssueUSD),
+		Wall:       i.SpentWall,
+		WallCap:    caps.IssueWall,
+		WallPct:    meterPct(float64(i.SpentWall), float64(caps.IssueWall)),
+		WallOver:   meterOver(float64(i.SpentWall), float64(caps.IssueWall)),
+	}
+}
+
+// Invocation is the live-invocation view's projection (T4.21): the header identity of one issue's
+// current invocation (id/title/role/stage/status) plus its cumulative budget burn against the
+// per-issue caps, so the page shows a meter advancing toward the wall/token ceiling. Terminal is
+// true once the issue is no longer in flight (closed or blocked) — the page then stops presenting
+// itself as live and hands off to the forensic Replay (ReplayAvailable) of the same invocation.
+// The scoped activity feed is NOT here: it is read from the live in-memory buffer (which the query
+// layer has no access to) and supplied to the view by the server, filtered on the issue id the
+// runner stamps on every agent event (T4.20).
+type Invocation struct {
+	ID              string
+	Title           string
+	Role            string
+	Status          string
+	Spec            string
+	Body            string
+	Terminal        bool
+	ReplayAvailable bool // merged with a retained transcript — the /replay drill resolves
+	Budget          IssueBudgetRow
+}
+
+// Invocation assembles the live-invocation view for one issue: its header identity and the
+// budget meter (the same per-issue burn the Budgets view shows, via the shared row builder), plus
+// whether it is terminal and whether Replay can reconstruct its decision trail. The replay handoff
+// is gated on merged-with-transcript exactly like the issue-detail page (T4.7b) — Replay resolves
+// the transcript off the merge trailer, so the link surfaces only where it will land somewhere.
+func (r *Reader) Invocation(ctx context.Context, id string, caps BudgetCaps) (Invocation, error) {
+	issue, err := r.issues.Get(ctx, id)
+	if err != nil {
+		return Invocation{}, fmt.Errorf("query: invocation %s: %w", id, err)
+	}
+	inv := Invocation{
+		ID:       issue.ID,
+		Title:    issue.Title,
+		Role:     issue.Role,
+		Status:   issue.Status,
+		Spec:     issue.Spec,
+		Body:     issue.Body,
+		Terminal: issue.Status == statusClosed || issue.Status == statusBlocked,
+		Budget:   buildIssueBudgetRow(issue, caps),
+	}
+	// Best-effort, like IssueDetail's provenance read: a git fault leaves ReplayAvailable false
+	// rather than failing the page. ByIssue returns merged=false cheaply for in-flight work.
+	if prov, merged, perr := r.prov.ByIssue(ctx, id); perr == nil && merged && prov.Transcript != "" {
+		inv.ReplayAvailable = true
+	}
+	return inv, nil
 }
 
 // Status is the layout status-bar projection — the "is the factory healthy?" glance that rides

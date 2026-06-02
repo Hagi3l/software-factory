@@ -169,6 +169,23 @@ func (a *Activity) Recent() []Entry {
 	return out
 }
 
+// RecentForIssue returns the retained entries for one issue's invocation, newest first — the
+// live-invocation view's scoped feed (plan T4.21). It filters on IssueID, the binding the runner
+// stamps on every agent event (plan T4.20), so the server can scope a feed to one invocation
+// without a beads read and without reaching into the buffer's internals. Empty when no event for
+// the issue is still retained (the buffer is bounded and best-effort, like Recent).
+func (a *Activity) RecentForIssue(issueID string) []Entry {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	var out []Entry
+	for i := len(a.entries) - 1; i >= 0; i-- {
+		if a.entries[i].IssueID == issueID {
+			out = append(out, a.entries[i])
+		}
+	}
+	return out
+}
+
 // ActiveAgents reports how many distinct agents have emitted an event within the trailing
 // window — the status bar's "active agents" figure (specs/control-room.md, "Active agents is
 // derived from the distinct agent ids seen on the live event buffer within a recent window —

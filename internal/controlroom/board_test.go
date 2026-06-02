@@ -57,13 +57,32 @@ func (fakeProv) DiffByIssue(context.Context, string) (string, bool, error) {
 }
 func (fakeProv) Recent(context.Context, int) ([]query.MergedCommit, error) { return nil, nil }
 
-func boardReader() *query.Reader {
-	return query.NewReader(&fakeIssues{all: []core.Issue{
+// boardIssues is the shared board fixture: one in-flight, one blocked, one closed issue —
+// reused by the board and live-invocation (T4.21) server tests.
+func boardIssues() []core.Issue {
+	return []core.Issue{
 		{ID: "harness-1", Title: "Build the thing", Status: "in_progress", Role: "implementor", Attempt: 1, Spec: "specs/x.md", StateEnteredAt: cardEntered, CreatedAt: cardEntered.Add(-24 * time.Hour)},
 		{ID: "harness-2", Title: "Write the tests", Status: "blocked", Role: "test-author", Attempt: 2},
 		{ID: "harness-3", Title: "Plan the epic", Status: "closed", Role: "planner"},
-	}}, fakeArts{}, fakeProv{})
+	}
 }
+
+func boardReader() *query.Reader {
+	return query.NewReader(&fakeIssues{all: boardIssues()}, fakeArts{}, fakeProv{})
+}
+
+// mergedProv is a ProvenanceReader fake that reports an issue as merged with a transcript hash —
+// the precondition the invocation view's Replay handoff is gated on (T4.21).
+type mergedProv struct{ transcripts map[string]string }
+
+func (m mergedProv) ByIssue(_ context.Context, id string) (core.Provenance, bool, error) {
+	if h, ok := m.transcripts[id]; ok {
+		return core.Provenance{Transcript: h}, true, nil
+	}
+	return core.Provenance{}, false, nil
+}
+func (mergedProv) DiffByIssue(context.Context, string) (string, bool, error) { return "", false, nil }
+func (mergedProv) Recent(context.Context, int) ([]query.MergedCommit, error) { return nil, nil }
 
 func boardServer(t *testing.T) *httptest.Server {
 	t.Helper()
@@ -147,22 +166,23 @@ func TestBoardWithoutReader(t *testing.T) {
 	}
 }
 
-// TestBoardCardsLinkToDetail proves every card is a drill-through into the issue/invocation
-// detail view (T4.7) — the board is triage, the detail page is where the brief and evidence
-// are read.
-func TestBoardCardsLinkToDetail(t *testing.T) {
+// TestBoardCardsLinkToInvocation proves every card is a drill-through into the live invocation
+// view (T4.21, control-room.md "drill from a board card (the agent currently working it)") — the
+// board is triage, the invocation view is where a human watches that worker think (and it hands
+// off to the forensic issue/Replay drill on termination).
+func TestBoardCardsLinkToInvocation(t *testing.T) {
 	ts := boardServer(t)
 	r := get(t, ts, "/board")
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		`href="/issue/harness-1"`,
-		`href="/issue/harness-2"`,
-		`href="/issue/harness-3"`,
+		`href="/invocation/harness-1"`,
+		`href="/invocation/harness-2"`,
+		`href="/invocation/harness-3"`,
 	} {
 		if !strings.Contains(r.body, want) {
-			t.Errorf("board card missing detail link %q", want)
+			t.Errorf("board card missing invocation link %q", want)
 		}
 	}
 }

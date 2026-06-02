@@ -158,6 +158,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /activity", s.handleActivity)      // T4.5 — live agent feed
 	s.mux.HandleFunc("GET /activity/items", s.handleActivityItems)
 	s.mux.HandleFunc("GET /issue/{id}", s.handleIssue)         // T4.7 — issue / invocation detail
+	s.mux.HandleFunc("GET /invocation/{id}", s.handleInvocation)            // T4.21 — live scoped feed + budget meter
+	s.mux.HandleFunc("GET /invocation/{id}/items", s.handleInvocationItems) // the htmx/SSE live body fragment
 	s.mux.HandleFunc("GET /replay/{id}", s.handleReplay)       // T4.11 — reconstructed decision trail
 	s.mux.HandleFunc("GET /artifact/{hash}", s.handleArtifact) // raw evidence content (untrusted)
 	s.mux.HandleFunc("GET /dlq", s.handleDLQ)                  // T4.8 — dead-letter queue (action surface)
@@ -334,6 +336,57 @@ func (s *Server) handleActivityItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, views.ActivityList(s.activity.Recent()))
+}
+
+// handleInvocation renders the live-invocation view (T4.21) — a scoped activity feed for one
+// invocation plus its budget meter, drilled into from board cards and activity rows. It is the
+// one deliberate live-detail exception (control-room.md "Rendering"): live only while the agent
+// runs, handing off to the forensic Replay of the same invocation on termination. The feed is
+// scoped server-side via the issue id the runner stamps on every agent event (T4.20), so the
+// buffer is the only requirement; with no read model wired the header/meter degrade to the bare
+// id and the feed still renders. With no activity buffer (standalone `harness serve`) it shows
+// the not-attached notice.
+func (s *Server) handleInvocation(w http.ResponseWriter, r *http.Request) {
+	if s.activity == nil {
+		s.render(w, r, views.InvocationMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to watch a live invocation."))
+		return
+	}
+	id := r.PathValue("id")
+	inv, err := s.invocation(r.Context(), id)
+	if err != nil {
+		s.log.Error("controlroom: invocation read failed", "id", id, "err", err)
+		s.render(w, r, views.InvocationMessage("Could not load invocation "+id+": "+err.Error()))
+		return
+	}
+	s.render(w, r, views.InvocationPage(inv, s.activity.RecentForIssue(id)))
+}
+
+// handleInvocationItems renders just the live body fragment — the budget meter, the
+// terminal/Replay handoff, and the scoped feed — for the htmx/SSE refresh, so the meter and the
+// terminal handoff update in place as spend accrues and the orchestrator advances the issue.
+func (s *Server) handleInvocationItems(w http.ResponseWriter, r *http.Request) {
+	if s.activity == nil {
+		http.Error(w, "invocation unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+	id := r.PathValue("id")
+	inv, err := s.invocation(r.Context(), id)
+	if err != nil {
+		s.log.Error("controlroom: invocation read failed", "id", id, "err", err)
+		http.Error(w, "invocation read failed\n", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, views.InvocationBody(inv, s.activity.RecentForIssue(id)))
+}
+
+// invocation reads the issue projection (header + budget meter + terminal/replay state) when a
+// read model is attached; with no reader (no beads to read) it returns a minimal projection
+// carrying just the id so the scoped live feed still renders off the buffer.
+func (s *Server) invocation(ctx context.Context, id string) (query.Invocation, error) {
+	if s.reader == nil {
+		return query.Invocation{ID: id}, nil
+	}
+	return s.reader.Invocation(ctx, id, s.budgetCaps)
 }
 
 // handleIssue renders the issue / invocation detail page (T4.7) — the drill-target the

@@ -29,7 +29,7 @@ Top navigation:
 
 | View | Path | What it shows |
 |------|------|---------------|
-| **Board** | `/board` | Kanban over all issues, grouped into columns by pipeline stage. Cards show id/title/status/spec/retry generation and two **client-ticked timers** — time in the current state (`working`/`queued`/`blocked`) and total time since creation; click through to the detail page. It refreshes on the orchestrator's typed [issue-state event](../specs/messaging.md), so a card moves *exactly* when the work advances, and the move is **animated** via the browser's View Transitions API (instant where unsupported). |
+| **Board** | `/board` | Kanban over all issues, grouped into columns by pipeline stage. Cards show id/title/status/spec/retry generation and two **client-ticked timers** — time in the current state (`working`/`queued`/`blocked`) and total time since creation; click through to the **live invocation view** (which hands off to the forensic detail/Replay on termination). It refreshes on the orchestrator's typed [issue-state event](../specs/messaging.md), so a card moves *exactly* when the work advances, and the move is **animated** via the browser's View Transitions API (instant where unsupported). |
 | **DAG** | `/dag` | The issue dependency graph — what blocks what — rendered server-side to SVG (pure Go, no graphviz, no client graph lib). Hover highlights a node and its neighbours; click drills into the issue. |
 | **Activity** | `/activity` | "What the agents *and the factory* are doing right now" — a live feed with two sources, filterable by an **All / Agents / System** toggle. *Agent* rows are brokered from inside the sandbox: streamed model output coalesced into readable rows — `token` (the answer) and `reasoning` (the model's thinking, shown even when a turn is all tool calls) — plus one `tool` row per tool call (e.g. `write_file index.html`). *System* rows are the factory's own log teed in (`info`/`warn`/`error` from the orchestrator/runner/gate — dispatch, sandbox provision, gating, merge, dead-letter), tinted distinctly. So an agent that works purely through tool calls — and the machine driving it — both stay visible. |
 | **Dead-letter** | `/dlq` | The escalations awaiting a human — the primary *action* surface. Each row shows the triage signals (cumulative spend, retry generation, spec) and the dead-letter reason, and links to the detail page and Resolve mode. An empty queue reads as reassurance, not an error. |
@@ -43,6 +43,14 @@ Drill-through pages (not in the nav):
   the brief, cumulative spend, merge provenance, an evidence list (prompt, traceability
   map, each passing gate check, transcript) linking to raw artifacts, and the candidate
   diff. Blocked issues show the dead-letter reason and a "Resolve →" link.
+- **Live invocation** (`/invocation/{id}`) — watch *one* worker think: the agent's
+  `reasoning`/`tool`/`token` stream scoped to a single invocation (filtered server-side
+  by the issue id the runner stamps on each event — no second beads read), with a header
+  carrying its role/stage and a budget meter advancing toward the wall/token ceiling. It
+  is the one deliberate live *detail* surface, and it is bounded: **live only while the
+  agent runs** — on termination it stops refreshing and hands off to the forensic Replay
+  (when merged) or issue detail of the same invocation. Reached by drilling from a board
+  card or an activity-feed row.
 - **Replay** (`/replay/{id}`) — the reconstructed decision trail of an invocation, turn
   by turn: exactly what the model saw (inbound messages), what it said, its tool calls,
   stop reason, and per-turn token usage. Reconstructed from the broker-captured

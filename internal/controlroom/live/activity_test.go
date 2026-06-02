@@ -41,6 +41,32 @@ func TestActivity_CarriesIssueBinding(t *testing.T) {
 	}
 }
 
+func TestActivity_RecentForIssueScopesToOneInvocation(t *testing.T) {
+	a := live.NewActivity(16)
+	a.Record("inv-1", "harness-7", "implementor", token("a"))
+	a.Record("inv-2", "harness-8", "qa", token("b"))
+	a.Record("inv-1", "harness-7", "implementor", toolEvent("run_tests"))
+	a.RecordSystem("info", "orchestrator", "scheduled") // system row — no issue binding, excluded
+
+	got := a.RecentForIssue("harness-7")
+	if len(got) != 2 {
+		t.Fatalf("scoped entries = %d, want 2 (only harness-7's agent rows)", len(got))
+	}
+	// Newest first, and every row belongs to the scoped issue.
+	for _, e := range got {
+		if e.IssueID != "harness-7" {
+			t.Fatalf("entry %+v leaked from another invocation", e)
+		}
+	}
+	if got[0].Kind != "tool" {
+		t.Errorf("first (newest) entry kind = %q, want tool", got[0].Kind)
+	}
+	// An unknown issue scopes to nothing.
+	if n := len(a.RecentForIssue("nope")); n != 0 {
+		t.Errorf("RecentForIssue(unknown) = %d entries, want 0", n)
+	}
+}
+
 func TestActivity_CoalescesTokensFromSameAgent(t *testing.T) {
 	a := live.NewActivity(16)
 	a.Record("inv-1", "", "", token("Hel"))

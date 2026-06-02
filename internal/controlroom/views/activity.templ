@@ -79,7 +79,14 @@ templ activityRow(e live.Entry) {
 	>
 		<span class="shrink-0 font-mono text-xs tabular-nums text-slate-500">{ activityTime(e.At) }</span>
 		@activityBadge(e.Kind)
-		<span class="shrink-0 font-mono text-xs text-slate-400">{ e.AgentID }</span>
+		if e.IssueID != "" {
+			// An agent row drills into the live invocation view scoped to this issue (T4.21,
+			// control-room.md "drill from … an activity-feed row"). The issue id rides on the
+			// event envelope (T4.20), so no beads read is needed to build the link.
+			<a href={ templ.URL("/invocation/" + e.IssueID) } class="shrink-0 font-mono text-xs text-sky-400 hover:text-sky-300 hover:underline">{ e.AgentID }</a>
+		} else {
+			<span class="shrink-0 font-mono text-xs text-slate-400">{ e.AgentID }</span>
+		}
 		<span class="whitespace-pre-wrap break-all text-sm text-slate-200">{ e.Detail }</span>
 	</li>
 }

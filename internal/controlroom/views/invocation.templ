@@ -1,0 +1,159 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/Loxstomper/harness/internal/controlroom/live"
+	"github.com/Loxstomper/harness/internal/controlroom/query"
+)
+
+// InvocationPage is the live-invocation view (T4.21): a scoped activity feed for one
+// invocation plus a budget meter advancing toward the wall/token ceiling, drilled into from
+// board cards and activity rows. It is the one deliberate live-detail exception
+// (specs/control-room.md "Rendering") — live only while the agent runs; on termination it stops
+// presenting itself as live and hands off to the forensic Replay of the *same* invocation.
+//
+// The static header (identity) sits outside the SSE-refreshing region; the live body (budget
+// meter + terminal handoff + feed) is the htmx swap target, re-fetched on an agent-event nudge
+// (per-turn progress) AND on an issue-state nudge (so the terminal handoff appears the moment the
+// orchestrator advances the issue), with a slow periodic backstop so a settled invocation still
+// converges. Mirrors the activity feed: server-render a fragment on the nudge, not sse-swap (the
+// raw payloads are a token firehose, not swappable rows).
+templ InvocationPage(inv query.Invocation, entries []live.Entry) {
+	@Layout("Harness — Invocation "+inv.ID, "") {
+		<div class="space-y-4">
+			@invocationHeader(inv)
+			<div hx-ext="sse" sse-connect="/events">
+				<div
+					id="invocation"
+					hx-get={ "/invocation/" + inv.ID + "/items" }
+					hx-trigger="sse:agent-event throttle:1s, sse:issue-state, every 10s"
+					hx-swap="innerHTML"
+				>
+					@InvocationBody(inv, entries)
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// invocationHeader is the static identity block: id, title, status, role/stage, spec, and the
+// drill-back to the full issue-detail page. It does not live-refresh — identity does not change
+// over an invocation's life; only the body (spend, terminal state, feed) does.
+templ invocationHeader(inv query.Invocation) {
+	<div class="space-y-1">
+		<div class="flex items-center gap-3">
+			<span class="font-mono text-xs text-slate-500">{ inv.ID }</span>
+			@statusBadge(inv.Status)
+			<span class="text-xs text-slate-400">{ orDash(inv.Role) }</span>
+		</div>
+		<h1 class="text-xl font-semibold tracking-tight text-slate-100">{ orDash(inv.Title) }</h1>
+		if inv.Spec != "" {
+			<p class="font-mono text-xs text-slate-500">{ inv.Spec }</p>
+		}
+		<div class="flex gap-3 pt-1 text-sm">
+			<a href={ templ.URL("/issue/" + inv.ID) } class="text-sky-400 hover:text-sky-300 hover:underline">▸ Issue detail</a>
+			if inv.ReplayAvailable {
+				<a href={ templ.URL("/replay/" + inv.ID) } class="text-sky-400 hover:text-sky-300 hover:underline">▸ Replay decision trail</a>
+			}
+		</div>
+	</div>
+}
+
+// InvocationBody is the live fragment returned bare from GET /invocation/{id}/items and embedded
+// in the page for the initial paint: the budget meter, the terminal/Replay handoff banner, and the
+// scoped feed. Replacing only this on the nudge keeps the chrome + header steady while the meter
+// ticks and the feed grows.
+templ InvocationBody(inv query.Invocation, entries []live.Entry) {
+	<div class="space-y-4">
+		@invocationBudget(inv.Budget)
+		if inv.Terminal {
+			@invocationTerminal(inv)
+		}
+		@invocationFeed(entries)
+	</div>
+}
+
+// invocationBudget is the per-invocation budget meter — the same per-issue burn the Budgets view
+// shows (built from the shared query row builder), so the two never disagree. Each dimension shows
+// burn / cap and the tinted percent badge (rose breach / amber ≥80% / emerald), reusing budgetPct.
+templ invocationBudget(b query.IssueBudgetRow) {
+	<section class="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
+		<h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Budget</h2>
+		<dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+			@invocationMeter("Tokens", formatTokens(b.Tokens), capTokens(b.TokenCap), b.TokenPct, b.TokenOver, b.TokenCap > 0)
+			@invocationMeter("Spend", formatUSD(b.USD), capUSD(b.USDCap), b.USDPct, b.USDOver, b.USDCap > 0)
+			@invocationMeter("Wall", formatDuration(b.Wall), capDur(b.WallCap), b.WallPct, b.WallOver, b.WallCap > 0)
+			@invocationMeter("Retries", strconv.Itoa(b.Attempt), capRetries(b.MaxRetries), b.RetryPct, b.RetryOver, b.MaxRetries > 0)
+		</dl>
+	</section>
+}
+
+// invocationMeter renders one budget dimension as a labeled "used / cap" with the tinted percent
+// badge. Reuses budgetPct so the breach/near-cap/healthy tinting matches the Budgets view exactly.
+templ invocationMeter(label, used, cap string, pct int, over, capped bool) {
+	<div>
+		<dt class="text-xs uppercase tracking-wide text-slate-500">{ label }</dt>
+		<dd class="mt-0.5 whitespace-nowrap">
+			<span class="text-slate-200">{ used }</span>
+			<span class="text-slate-600">/ { cap }</span>
+			@budgetPct(pct, over, capped)
+		</dd>
+	</div>
+}
+
+// invocationTerminal is the handoff banner shown once the issue is no longer in flight: the live
+// view stops claiming to be live and points the human at the forensic Replay (when merged) and the
+// issue detail. The feed below still shows whatever recent activity is retained in the buffer.
+templ invocationTerminal(inv query.Invocation) {
+	<div class="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 text-sm text-slate-300">
+		<span>This invocation has finished ({ inv.Status }). Live updates have stopped — see the forensic record:</span>
+		if inv.ReplayAvailable {
+			<a href={ templ.URL("/replay/" + inv.ID) } class="ml-1 text-sky-400 hover:underline">Replay decision trail →</a>
+		} else {
+			<a href={ templ.URL("/issue/" + inv.ID) } class="ml-1 text-sky-400 hover:underline">Issue detail →</a>
+		}
+	</div>
+}
+
+// invocationFeed renders the scoped activity rows (newest first), already filtered to this
+// invocation server-side. It carries no source filter (every row is this invocation's agent
+// activity) — the simpler sibling of the activity feed's filtered list.
+templ invocationFeed(entries []live.Entry) {
+	<section class="space-y-2">
+		<div class="flex items-baseline justify-between">
+			<h2 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Activity</h2>
+			<span class="text-xs text-slate-500">live</span>
+		</div>
+		if len(entries) == 0 {
+			<p class="text-sm text-slate-400">No activity retained for this invocation.</p>
+		} else {
+			<ul class="flex flex-col gap-1">
+				for _, e := range entries {
+					@invocationRow(e)
+				}
+			</ul>
+		}
+	</section>
+}
+
+templ invocationRow(e live.Entry) {
+	<li class="flex items-start gap-3 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2">
+		<span class="shrink-0 font-mono text-xs tabular-nums text-slate-500">{ activityTime(e.At) }</span>
+		@activityBadge(e.Kind)
+		<span class="shrink-0 font-mono text-xs text-slate-400">{ e.AgentID }</span>
+		<span class="whitespace-pre-wrap break-all text-sm text-slate-200">{ e.Detail }</span>
+	</li>
+}
+
+// InvocationMessage renders the invocation chrome with a single notice instead of the body —
+// used when the control room is not attached to a running factory (standalone `harness serve` has
+// no live buffer) or when the issue read fails.
+templ InvocationMessage(msg string) {
+	@Layout("Harness — Invocation", "") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">Invocation</h1>
+			<p class="mt-2 text-slate-400">{ msg }</p>
+		</div>
+	}
+}
