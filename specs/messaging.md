@@ -27,6 +27,7 @@ harness.work.<role>          JetStream work queue — assignments (pull consumer
 harness.result.<role>        JetStream — agent Result envelopes
 harness.agent.<id>.events    core NATS — progress/log events (fire-and-forget)
 harness.issue.<id>.state     core NATS — issue state transitions (fire-and-forget)
+harness.merge.<id>.state     core NATS — merge-queue lifecycle transitions (fire-and-forget)
 harness.dlq                  JetStream — dead-lettered work for human triage
 harness.approvals            JetStream — human approve/reject of parked integrates
 harness.control.*            core NATS — orchestrator control/health
@@ -49,7 +50,11 @@ harness.control.*            core NATS — orchestrator control/health
 - **Agent events** (`agent.<id>.events`) are best-effort observability: the
   [control room](control-room.md) tails them and pushes to browsers over SSE, and
   they are also emitted as [OpenTelemetry](observability.md) spans. Losing one is
-  harmless.
+  harmless. The envelope carries the originating **issue id and role** alongside the
+  agent id, so a consumer can scope a feed to a *single live invocation*
+  (the [control room](control-room.md)'s invocation view) without a second beads
+  read — the orchestrator already knows the binding when it dispatches, so it stamps
+  it on the event rather than making every viewer reconstruct it.
 - **Issue-state events** (`issue.<id>.state`) are the single-writer orchestrator's
   typed announcement of an issue *state transition* — it publishes one whenever it
   changes an issue's status (and the stamped `state_entered_at`; see
@@ -61,6 +66,20 @@ harness.control.*            core NATS — orchestrator control/health
   views keep a slow periodic backstop that reconverges them. They are an *additive
   observability emit* (publish-only, no behaviour change) — beads stays the
   authoritative state, never reconstructed from these events.
+- **Merge-state events** (`merge.<id>.state`) are the same pattern applied to the
+  [serialized merge queue](integration.md): the orchestrator publishes one whenever
+  an `integrate` candidate changes its position in the train — `queued → rebasing →
+  re-gating → landed`, or the terminal `conflicted` / `regate-failed`. They make the
+  integration pipeline observable in flight (the [merge-queue view](control-room.md))
+  rather than only after a commit lands on `main`. Like issue-state they are an
+  *additive observability emit* — publish-only, best-effort core NATS, with the same
+  periodic backstop reconverging a dropped one; the queue's authoritative state stays
+  the git refs and beads, never these events.
+- **Dead-letter** (`dlq`) is JetStream-durable (a human must not miss an escalation),
+  but the [control room](control-room.md) also *tails* it to push an immediate
+  **escalation alert** to the operator's browser — the dead-letter queue is the human's
+  [only action surface](control-room.md), so a new arrival is the one event worth a
+  push, not a poll. Durability is the queue; the SSE tail is just the nudge.
 
 ---
 

@@ -37,6 +37,9 @@ of the build (`go generate`), not the runtime.
 | **DAG** | the [issue dependency graph](glossary.md#issue-dependency-graph); blockers, merge order | beads → server-side SVG |
 | **Activity feed** | what the agents *and the factory* are doing right now — agent `token`/`reasoning`/`tool` events plus system lifecycle events, filterable by source | NATS events (SSE) + factory log bridge |
 | **Issue / invocation detail** | Brief, transcript, candidate diff, gate evidence, budget, retries | beads + [artifact store](components/artifact-store.md) + [trace](observability.md) |
+| **Live invocation** | watch *one* running agent: its `reasoning`/`tool`/`token` stream scoped to a single invocation, with its live budget — until it terminates, then hands off to Replay | NATS events (SSE), scoped by issue/agent |
+| **Verification** | the trust argument for one issue, forensically: producer≠verifier soul split, red→green proof, mutation score, scanners, the test↔spec map | [artifact store](components/artifact-store.md) (`gate-verdict`) + git |
+| **Merge queue** | the [serialized merge train](integration.md) in flight: each `integrate` candidate's step (`queued`/`rebasing`/`re-gating`/`conflicted`) | NATS [`merge-state`](messaging.md) (SSE) + beads |
 | **Dead-letter queue** | escalations needing a human — *the action surface* | beads + artifact store |
 | **Budgets** | token/$/wall-clock burn vs. caps, per epic/issue | beads + OTel metrics |
 | **Provenance** | trace any merged commit back to issue→soul→model→prompt→evidence | git + artifact store |
@@ -58,7 +61,12 @@ of the build (`go generate`), not the runtime.
 - **Historical/forensic:** plain server-rendered pages from the stores, with the
   structured timeline from the OTel trace backend. Supports **replay** of an
   invocation's decision trail (see [observability.md](observability.md)). A detail
-  page is a forensic snapshot, not a feed — it is deliberately *not* live.
+  page is a forensic snapshot, not a feed — it is deliberately *not* live. The one
+  deliberate exception is the [live invocation view](#the-live-invocation-view),
+  which *is* a feed — but only while its agent runs; the moment the invocation
+  terminates it hands off to the forensic [Replay](glossary.md#replay) of the very
+  same invocation. Live and forensic are two phases of one invocation, not a live
+  detail tier: nothing that has *finished* is ever shown as a feed.
 - **Graph viz:** render the DAG **server-side to SVG** (Go → DOT/Graphviz or d2)
   and embed it; hover/click-to-drill via Alpine + htmx on the SVG nodes. No
   client-side graph library.
@@ -93,6 +101,91 @@ Note what stays absent **by design**: there is no drag-to-move. Humans never mov
 work — the orchestrator is the single writer and the human's only levers are the
 spec (the wizard) and escalations (the dead-letter queue). The board is read-only;
 cards move because the *factory* advanced them, never because a human dragged one.
+
+---
+
+## The live invocation view
+
+The [activity feed](#the-views) shows *everything at once*; the board shows where work
+*is*. Neither lets you **watch one worker think**. The live invocation view does: given
+a single running agent, it streams that invocation's `reasoning` / `tool` / `token`
+events — the same firehose, filtered to one issue — with a header carrying its role and
+stage and a live budget meter ticking toward the wall/token ceiling the orchestrator
+enforces. You reach it by drilling from a board card (the agent currently working it) or
+an activity-feed row.
+
+Scoping is cheap by construction: the [`agent-event` envelope carries the issue id and
+role](messaging.md), so the server filters the live buffer to one invocation without a
+second beads read. It renders with the same **fragment-refetch-on-SSE-nudge** pattern as
+the feed (nudge on `agent-event`, periodic backstop), not `sse-swap` — the per-token
+stream is a JSON firehose, and rendering stays server-side where the templ components are.
+
+**It is live only while the invocation runs.** This is the one deliberate exception to
+"a detail page is not a feed" (see [Rendering](#rendering)), and it is bounded: when the
+agent terminates, the view hands off to the forensic [Replay](glossary.md#replay) of the
+*same* invocation — the turn-by-turn decision trail reconstructed from the
+[artifact store](components/artifact-store.md). Live is the in-flight phase; Replay is the
+settled one. Nothing finished is ever a feed, so the forensic guarantee holds.
+
+---
+
+## The verification view
+
+This is the factory's **trust argument, made legible**. [Verification](verification.md)
+is how the factory merges with no human reading code — yet its proof was historically
+computed by the gate and thrown away, leaving only a green checkmark. This view renders
+the whole argument for one issue, forensically, from the persisted
+[`gate-verdict` record](components/artifact-store.md):
+
+- **Producer ≠ verifier** — the `author-tests` soul and the `implement` soul shown side
+  by side (from the souls [recorded on advance](verification.md), also on the merge
+  trailer), with the `qa` gate marked as running independently in a clean
+  [verification sandbox](glossary.md#verification-sandbox) — there is no verifier *soul*
+  to show, and that is the point.
+- **Red→green proof** — tests fail on the base, pass on the candidate, per check.
+- **Mutation score** vs. its threshold; **scanners** with their pass/fail.
+- **The [test↔spec traceability map](verification.md)** — each test against the spec
+  heading and sentence it claims to encode: the only window into how the author read the
+  prose.
+
+It is a **forensic snapshot**, not a feed (a settled proof, like Replay), and it is
+rendered for *rejected* candidates too — a failed verdict is exactly what a human triaging
+the dead-letter queue needs to see. Artifact bytes it links (raw gate output) are served
+untrusted per [security.md](security.md) Control 7.
+
+---
+
+## The merge-queue view
+
+[Integration](integration.md) is serialized and otherwise invisible: between "a branch's
+gate passed" and "a commit appeared on `main`" lies the rebase-and-re-gate interval where
+combinations actually break, and nothing showed it. This view makes the merge train
+observable, fed by the typed [`merge-state` events](messaging.md): an ordered list of
+`integrate` candidates with each one's current step — `queued → rebasing → re-gating →
+landed`, or the terminal `conflicted` / `regate-failed`. The interesting rows are the
+terminal failures, which correlate with the [dead-letter](#the-views) entry or fix issue
+the same transition routes; a landed row links onward to [Provenance](#the-views). It
+refetches on the `merge-state` nudge with the usual periodic backstop. Like the board it
+is **read-only** — the human never reorders the queue; the orchestrator is the single
+writer and integration is its function, not a lever.
+
+---
+
+## The status bar and escalation alerts
+
+A thin **status bar** rides every page (part of the layout chrome, not a destination):
+queue depth · active agents · open escalations · budget-health dot · last merge. It is
+the "is the factory healthy?" glance, assembled from the same reads that back the board,
+dead-letter, and budget views, and nudged live off the existing `issue-state` /
+`agent-event` streams rather than a new one. *Active agents* is derived from the distinct
+agent ids seen on the live event buffer within a recent window — no new registry.
+
+The escalation count is also a **push**: the control room tails the durable
+[`harness.dlq`](messaging.md) subject and fires a browser notification when a new
+dead-letter arrives. The [dead-letter queue is the human's only action surface](#create-and-resolve-are-the-same-component),
+so an arrival is the one factory event that should reach an operator who isn't looking —
+everything else is pull. The durable queue remains the source of truth; the alert is only
+the nudge to come look.
 
 ---
 

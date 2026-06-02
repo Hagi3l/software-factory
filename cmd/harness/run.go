@@ -249,6 +249,14 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			return nil, sperr
 		}
 		releases = append(releases, statePumpStop)
+		// The DLQ pump (T4.19) shares the same hub: it tails the durable harness.dlq subject so a
+		// dead-letter arrival reaches the operator as a browser notification (the queue is the
+		// human's only action surface) and bumps the status bar's escalation count.
+		dlqPumpStop, dlqErr := live.StartDLQPump(nc, hub)
+		if dlqErr != nil {
+			return nil, dlqErr
+		}
+		releases = append(releases, dlqPumpStop)
 		reader := query.NewReader(
 			beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)),
 			store,

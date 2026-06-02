@@ -51,6 +51,27 @@ Drill-through pages (not in the nav):
   `nosniff` (artifact bytes are untrusted agent output and must never be interpreted as
   HTML/script).
 
+## The status bar
+
+A thin status bar rides every page (it's part of the layout chrome, not a destination) —
+the "is the factory healthy?" glance: **queue depth** (work still in flight) · **active
+agents** · **open escalations** (the dead-letter count, tinted when non-zero) · a
+**budget-health dot** (emerald healthy / amber ≥80% of a cap / rose breach, matching the
+Budgets view) · **last merge**. It's assembled from the same beads/provenance reads that
+back the board, dead-letter, and budget views — so it agrees with them by construction —
+and refreshes live off the existing `issue-state` and `agent-event` streams (no new
+stream), with a periodic backstop. *Active agents* is derived from the distinct agent ids
+seen on the live activity buffer within a recent window — no new registry. With no read
+model wired (standalone `harness serve`) it degrades to a neutral static bar.
+
+The open-escalation count is also a **push**: the control room tails the durable
+[`harness.dlq`](../specs/messaging.md) subject and fires a **browser notification** when a
+new dead-letter arrives. The dead-letter queue is the human's only action surface, so an
+arrival is the one factory event that should reach an operator who isn't looking —
+everything else is pull. The durable queue stays the source of truth; the alert is only
+the nudge to come look (browser notifications require granting permission; if denied, the
+bar's count still updates live).
+
 ## The Create-Task wizard
 
 The wizard is how a human authors intent — the consent boundary past which everything

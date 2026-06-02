@@ -122,12 +122,17 @@ Every merged change carries a chain: **beads issue → commit → signed evidenc
 recorded as a commit trailer:
 
 ```
-Soul: implementor-go | Model: claude-opus-4-7
+Soul: implementor-go | Model: claude-opus-4-7 | Tests-Soul: test-author-go
 Issue: bd-1234 | Prompt-SHA: 9af… | Verified: build@sha256:1c2…,test@sha256:8be…,gosec@sha256:0a4… | Traceability: sha256:7c1… | Transcript: sha256:3d2…
 ```
 
 This is a SLSA-style provenance record: every autonomous change is attributable to
-the soul, model, prompt, and the evidence that gated it. Each entry in `Verified`
+the soul, model, prompt, and the evidence that gated it. `Soul` is the
+**implementor**; `Tests-Soul` is the independent **test author** — recording both on
+the commit makes [producer ≠ verifier](verification.md) auditable from the trailer
+alone, not merely enforced at runtime. A change with no `author-tests` stage in its
+lineage carries `Tests-Soul: (none)`, the same self-describing degradation as a missing
+`Traceability`. Each entry in `Verified`
 cites a passed check as `<name>@<evidence-hash>`, the hash pointing into the
 content-addressed [artifact store](components/artifact-store.md) at that check's
 captured output — so verification is auditable down to the exact bytes, not merely a

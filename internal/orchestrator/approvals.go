@@ -67,7 +67,7 @@ func (o *Orchestrator) parkAwaitingApproval(ctx context.Context, issue core.Issu
 	}
 	// Publish the escalation before blocking so a publish failure (transient) leaves the
 	// issue in_progress to be retried rather than parked with no alert — mirroring deadLetter.
-	alert := dlqAlert{IssueID: issue.ID, Role: issue.Role, Attempt: issue.Attempt,
+	alert := core.DLQAlert{IssueID: issue.ID, Role: issue.Role, Attempt: issue.Attempt,
 		Reason: "awaiting human approval of integrate candidate; run: harness approve " + issue.ID}
 	data, err := json.Marshal(alert)
 	if err != nil {

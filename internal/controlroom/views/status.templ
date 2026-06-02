@@ -1,0 +1,84 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/Loxstomper/harness/internal/controlroom/query"
+)
+
+// StatusBarShell is the always-present status-bar chrome Layout renders on every page (the
+// "is the factory healthy?" glance — specs/control-room.md, "A thin status bar rides every
+// page"). It is an SSE-connected element that lazy-loads its content from GET /status/bar on
+// page load and refreshes it live: crisply on the orchestrator's issue-state transitions and on
+// a dead-letter arrival, plus a throttled agent-event (which only moves the "active agents"
+// figure), with a slow periodic backstop so a settled factory still reconverges. Its initial
+// content is the neutral StatusBarLoading placeholder — which is also what survives when the
+// control room is not attached to a running factory (the fragment 503s and htmx leaves the
+// placeholder in place), giving the spec's "degrades to a static bar".
+templ StatusBarShell() {
+	<div hx-ext="sse" sse-connect="/events">
+		<div
+			id="status-bar"
+			class="flex flex-wrap items-center gap-x-4 gap-y-1 border-b border-slate-800 bg-slate-900/40 px-6 py-1.5 text-xs text-slate-400"
+			hx-get="/status/bar"
+			hx-trigger="load, sse:issue-state, sse:dlq-arrival, sse:agent-event throttle:5s, every 30s"
+			hx-swap="innerHTML"
+		>
+			@StatusBarLoading()
+		</div>
+	</div>
+}
+
+// StatusBarLoading is the neutral pre-load / not-attached placeholder.
+templ StatusBarLoading() {
+	<span class="text-slate-500">factory status —</span>
+}
+
+// StatusBar is the live fragment returned by GET /status/bar. activeAgents comes from the live
+// activity buffer (the server fills it in from live.Activity); the rest is the query.Status read.
+templ StatusBar(st query.Status, activeAgents int) {
+	<span><span class="text-slate-500">queue</span> <span class="font-medium text-slate-200">{ strconv.Itoa(st.QueueDepth) }</span></span>
+	<span class="text-slate-700">·</span>
+	<span><span class="text-slate-500">agents</span> <span class="font-medium text-slate-200">{ strconv.Itoa(activeAgents) }</span></span>
+	<span class="text-slate-700">·</span>
+	<a href="/dlq" class="inline-flex items-center gap-1 hover:text-slate-100">
+		<span class="text-slate-500">escalations</span>
+		@escalationCount(st.OpenEscalations)
+	</a>
+	<span class="text-slate-700">·</span>
+	<span class="inline-flex items-center gap-1" title={ healthTitle(st.BudgetHealth) }>
+		<span class="text-slate-500">budget</span>
+		@healthDot(st.BudgetHealth)
+	</span>
+	<span class="text-slate-700">·</span>
+	<span class="inline-flex items-center gap-1">
+		<span class="text-slate-500">last merge</span>
+		if st.LastMergeIssue != "" {
+			<a href={ templ.SafeURL("/issue/" + st.LastMergeIssue) } class="font-medium text-slate-200 hover:text-slate-100">{ st.LastMergeIssue }</a>
+		} else {
+			<span class="text-slate-600">—</span>
+		}
+	</span>
+}
+
+// escalationCount tints the open-escalation figure rose when there is work awaiting a human.
+templ escalationCount(n int) {
+	if n > 0 {
+		<span class="font-medium text-rose-300">{ strconv.Itoa(n) }</span>
+	} else {
+		<span class="font-medium text-slate-200">0</span>
+	}
+}
+
+// healthDot is the budget-health glance: rose breach / amber warning / emerald healthy, mirroring
+// the Budgets view's tinting so the dot and the meters agree.
+templ healthDot(h string) {
+	switch h {
+		case query.StatusHealthBreach:
+			<span class="inline-block h-2 w-2 rounded-full bg-rose-500"></span>
+		case query.StatusHealthWarn:
+			<span class="inline-block h-2 w-2 rounded-full bg-amber-400"></span>
+		default:
+			<span class="inline-block h-2 w-2 rounded-full bg-emerald-400"></span>
+	}
+}

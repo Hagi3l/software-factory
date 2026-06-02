@@ -166,6 +166,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /budgets/items", s.handleBudgetsItems)
 	s.mux.HandleFunc("GET /provenance", s.handleProvenance) // T4.10 — merged-commit provenance chain
 	s.mux.HandleFunc("GET /provenance/items", s.handleProvenanceItems)
+	s.mux.HandleFunc("GET /status/bar", s.handleStatusBar) // T4.19 — layout status-bar live fragment
 
 	// Create-Task wizard (T4.12) — the human's action surface. GET /create mints a fresh
 	// conversation session and renders the page; the per-session SSE stream carries the live
@@ -402,6 +403,36 @@ func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, rc); err != nil {
 		s.log.Debug("controlroom: artifact stream interrupted", "hash", hash, "err", err)
 	}
+}
+
+// activeAgentWindow bounds how recently an agent must have emitted an event to still count as
+// "active" on the status bar. The bar is a health glance, not a precise gauge, so a generous
+// trailing window keeps a momentarily-quiet agent (between model turns) counted.
+const activeAgentWindow = 90 * time.Second
+
+// handleStatusBar returns the layout status-bar fragment (T4.19) — the "is the factory healthy?"
+// glance lazy-loaded on every page and refreshed live (see views.StatusBarShell). It is a data
+// endpoint, so with no read model wired (standalone `harness serve`) it answers 503 and htmx
+// leaves the neutral placeholder in place — the spec's "degrades to a static bar"; a read error
+// is a 500 so htmx keeps the last good bar rather than swapping in an error. The active-agent
+// count comes from the in-memory activity buffer (0 when none is wired — a hub-less serve still
+// renders the rest); everything else is the query.Status read against the configured budget caps.
+func (s *Server) handleStatusBar(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		http.Error(w, "status unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+	st, err := s.reader.Status(r.Context(), s.budgetCaps)
+	if err != nil {
+		s.log.Error("controlroom: status read failed", "err", err)
+		http.Error(w, "could not refresh the status bar\n", http.StatusInternalServerError)
+		return
+	}
+	active := 0
+	if s.activity != nil {
+		active = s.activity.ActiveAgents(activeAgentWindow)
+	}
+	s.render(w, r, views.StatusBar(st, active))
 }
 
 // handleDLQ renders the full dead-letter queue page (T4.8) — the escalations awaiting a

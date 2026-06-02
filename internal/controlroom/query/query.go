@@ -473,6 +473,123 @@ func (r *Reader) Budgets(ctx context.Context, caps BudgetCaps) (Budgets, error) 
 	return out, nil
 }
 
+// Status is the layout status-bar projection — the "is the factory healthy?" glance that rides
+// every page (specs/control-room.md, "A thin status bar rides every page … queue depth · active
+// agents · open escalations · budget-health dot · last merge"). It is assembled from the same
+// beads/provenance reads that back the board, dead-letter, and budget views — no new beads query —
+// so the bar agrees with those views by construction. ActiveAgents is deliberately NOT here: it
+// derives from the in-memory live.Activity buffer (distinct agent ids seen in a recent window),
+// which the read model has no access to, so the server handler fills it in alongside this read.
+type Status struct {
+	// QueueDepth is the work still in flight: issues that are neither terminal (closed) nor
+	// escalated (blocked) — i.e. open/ready or in_progress — the depth the factory has yet to drain.
+	QueueDepth int
+	// OpenEscalations is the dead-letter queue depth (blocked issues), the human's action surface.
+	OpenEscalations int
+	// BudgetHealth is the worst per-dimension burn state across all issues and epics:
+	// StatusHealthOK / StatusHealthWarn (any dimension ≥ the warn threshold) / StatusHealthBreach
+	// (any dimension over a configured cap) — the same thresholds the Budgets view tints by.
+	BudgetHealth string
+	// LastMergeIssue is the issue id of the most recent integration commit, "" if none merged yet.
+	LastMergeIssue string
+}
+
+// Budget-health levels for Status.BudgetHealth, worst-wins. They mirror the Budgets view's
+// tinting (rose breach / amber ≥80% / emerald) so the status dot and the budget meters agree.
+const (
+	StatusHealthOK     = "ok"
+	StatusHealthWarn   = "warn"
+	StatusHealthBreach = "breach"
+	// statusWarnPct is the burn percentage (of any configured cap) at which the health dot turns
+	// amber, matching the Budgets view's ≥80% amber band.
+	statusWarnPct = 80
+)
+
+// statusBlocked is the beads status of a dead-lettered (escalated) issue. statusClosed (the
+// terminal status) is declared alongside the other status literals in resolve.go.
+const statusBlocked = "blocked"
+
+// Status assembles the layout status bar from a single Budgets read (one beads ListAll, reusing
+// the exact burn/breach math the budget view enforces on) plus the newest provenance commit. It
+// derives queue depth and escalations from the per-issue rows' status, and budget health from the
+// rows' breach/percentage flags — so a status that drifts from the board or budget view is
+// impossible. The last-merge lookup is best-effort: a git fault leaves LastMergeIssue empty rather
+// than failing the whole bar (the bar is a glance, not a gate).
+func (r *Reader) Status(ctx context.Context, caps BudgetCaps) (Status, error) {
+	b, err := r.Budgets(ctx, caps)
+	if err != nil {
+		return Status{}, fmt.Errorf("query: status: %w", err)
+	}
+	st := Status{BudgetHealth: StatusHealthOK}
+	for _, row := range b.Issues {
+		switch row.Status {
+		case statusBlocked:
+			st.OpenEscalations++
+		case statusClosed:
+			// Terminal: merged or otherwise closed, no longer in flight.
+		default:
+			// open/ready, in_progress, or any non-terminal status is work the factory still owes.
+			st.QueueDepth++
+		}
+		st.BudgetHealth = worseHealth(st.BudgetHealth, issueRowHealth(row))
+	}
+	for _, e := range b.Epics {
+		st.BudgetHealth = worseHealth(st.BudgetHealth, epicRowHealth(e))
+	}
+	// Last merge is best-effort: a git fault — or no provenance port at all — leaves it empty
+	// rather than failing the whole bar (the bar is a glance, not a gate).
+	if r.prov != nil {
+		if recent, rerr := r.prov.Recent(ctx, 1); rerr == nil && len(recent) > 0 {
+			st.LastMergeIssue = recent[0].Provenance.Issue
+		}
+	}
+	return st, nil
+}
+
+// issueRowHealth reduces a per-issue budget row to a health level: a breach on any dimension
+// (token/USD/wall burn over cap, or the retry cap reached) is StatusHealthBreach; otherwise any
+// dimension at/above the warn band is StatusHealthWarn; else OK.
+func issueRowHealth(row IssueBudgetRow) string {
+	if row.TokenOver || row.USDOver || row.WallOver || row.RetryOver {
+		return StatusHealthBreach
+	}
+	if row.TokenPct >= statusWarnPct || row.USDPct >= statusWarnPct ||
+		row.WallPct >= statusWarnPct || row.RetryPct >= statusWarnPct {
+		return StatusHealthWarn
+	}
+	return StatusHealthOK
+}
+
+// epicRowHealth is issueRowHealth's epic-aggregate analog (token/USD only — epics have no wall or
+// retry cap).
+func epicRowHealth(row EpicBudgetRow) string {
+	if row.TokenOver || row.USDOver {
+		return StatusHealthBreach
+	}
+	if row.TokenPct >= statusWarnPct || row.USDPct >= statusWarnPct {
+		return StatusHealthWarn
+	}
+	return StatusHealthOK
+}
+
+// worseHealth returns the more severe of two health levels (breach > warn > ok).
+func worseHealth(a, b string) string {
+	rank := func(h string) int {
+		switch h {
+		case StatusHealthBreach:
+			return 2
+		case StatusHealthWarn:
+			return 1
+		default:
+			return 0
+		}
+	}
+	if rank(b) > rank(a) {
+		return b
+	}
+	return a
+}
+
 // meterPct is burn as a whole-number percent of cap, clamped to [0,100] for the meter fill.
 // An uncapped dimension (cap <= 0) has no meaningful fill, so it reports 0.
 func meterPct(used, cap float64) int {

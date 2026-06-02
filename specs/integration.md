@@ -48,6 +48,19 @@ as originally authored. That is what catches the two-green-branches problem, and
 it reuses the [producer ≠ verifier](verification.md) machinery against the
 *combination* rather than a single branch.
 
+**The queue announces itself.** Serialized integration is otherwise a black box —
+nothing is observable between "the branch's gate passed" and "a commit appeared on
+`main`," yet that interval is where rebases conflict and combinations break. So the
+orchestrator publishes a typed [`merge-state` event](messaging.md) at each step a
+candidate passes through — `queued → rebasing → re-gating → landed`, or the terminal
+`conflicted` (step 2) / `regate-failed` (step 3). These are exactly the states the
+queue already moves through as control flow; naming and emitting them makes the train
+visible in flight via the [merge-queue view](control-room.md). Like
+[issue-state](messaging.md) they are an additive, best-effort observability emit — the
+authoritative queue state stays the git refs and beads, never reconstructed from the
+events — and a `conflicted` / `regate-failed` event correlates with the
+[dead-letter](control-room.md) or fix issue the same transition already routes.
+
 **A clean rebase is a deterministic git computation, not an agent task.** It runs
 on objects the orchestrator already holds in the integration repo (runners pushed
 the candidate branches there), and applying a diff with `git rebase` executes no
@@ -96,7 +109,7 @@ Every merge to `main` carries a trailer linking the commit back through the whol
 chain (see [security.md](security.md)):
 
 ```
-Soul: implementor-go | Model: claude-opus-4-7
+Soul: implementor-go | Model: claude-opus-4-7 | Tests-Soul: test-author-go
 Issue: bd-1234 | Prompt-SHA: 9af… | Verified: build@sha256:1c2…,test@sha256:8be…,gosec@sha256:0a4… | Traceability: sha256:7c1… | Transcript: sha256:3d2…
 ```
 

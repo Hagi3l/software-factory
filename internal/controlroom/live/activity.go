@@ -161,6 +161,27 @@ func (a *Activity) Recent() []Entry {
 	return out
 }
 
+// ActiveAgents reports how many distinct agents have emitted an event within the trailing
+// window — the status bar's "active agents" figure (specs/control-room.md, "Active agents is
+// derived from the distinct agent ids seen on the live event buffer within a recent window —
+// no new registry"). It reads purely from this in-memory buffer: an invocation counts as
+// active when the substrate has seen one of its events recently. Only agent-sourced rows count
+// — teed system-log rows are the factory's own trusted components (orchestrator/runner/gate),
+// not sandboxed agents. Best-effort like the buffer itself: it undercounts an agent whose only
+// events have already aged out of the (bounded) buffer, which is acceptable for a health glance.
+func (a *Activity) ActiveAgents(window time.Duration) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	cutoff := time.Now().Add(-window)
+	seen := make(map[string]struct{})
+	for _, e := range a.entries {
+		if e.Source == SourceAgent && e.AgentID != "" && !e.At.Before(cutoff) {
+			seen[e.AgentID] = struct{}{}
+		}
+	}
+	return len(seen)
+}
+
 // summarize renders an opaque event payload as a short human line: a top-level
 // "msg"/"message"/"text" string if present, else compact JSON, truncated.
 func summarize(payload json.RawMessage) string {

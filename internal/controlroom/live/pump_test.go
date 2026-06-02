@@ -265,3 +265,153 @@ func TestIssueStatePumpStopUnsubscribes(t *testing.T) {
 	default:
 	}
 }
+
+// TestDLQPump proves the dead-letter -> hub bridge end to end over a real in-process server: a
+// marshaled core.DLQAlert published on the durable harness.dlq subject arrives at a hub subscriber
+// as a "dlq-arrival" SSE event carrying the original payload intact. Like the other pumps it is
+// exercised against the actual transport. (The orchestrator publishes via JetStream; a plain core
+// publish on the same subject is sufficient to drive the pump, which tails it with a core sub.)
+func TestDLQPump(t *testing.T) {
+	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewEmbeddedServer: %v", err)
+	}
+	t.Cleanup(srv.Shutdown)
+	nc, err := srv.Connect()
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(nc.Close)
+
+	hub := NewHub()
+	stop, err := StartDLQPump(nc, hub)
+	if err != nil {
+		t.Fatalf("StartDLQPump: %v", err)
+	}
+	defer stop()
+
+	ch, cancel := hub.Subscribe()
+	defer cancel()
+
+	want := core.DLQAlert{IssueID: "harness-7", Role: "implementor", Attempt: 3, Reason: "budget exhausted"}
+	payload, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal DLQAlert: %v", err)
+	}
+	if err := nc.Publish(messaging.SubjectDLQ, payload); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := nc.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	ev := recv(t, ch)
+	if ev.Name != "dlq-arrival" {
+		t.Fatalf("event name = %q, want dlq-arrival", ev.Name)
+	}
+	var got core.DLQAlert
+	if err := json.Unmarshal([]byte(ev.Data), &got); err != nil {
+		t.Fatalf("unmarshal DLQAlert: %v (data=%q)", err, ev.Data)
+	}
+	if got != want {
+		t.Fatalf("alert = %+v, want %+v", got, want)
+	}
+}
+
+// TestDLQPumpDropsMalformed confirms the pump's best-effort guards: a body that is not a
+// well-formed alert (and an alert missing its issue id) is dropped rather than broadcast. The
+// proof is ordering, exactly as for the issue-state pump: receiving the trailing valid alert first
+// proves the bad ones never reached the hub.
+func TestDLQPumpDropsMalformed(t *testing.T) {
+	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewEmbeddedServer: %v", err)
+	}
+	t.Cleanup(srv.Shutdown)
+	nc, err := srv.Connect()
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(nc.Close)
+
+	hub := NewHub()
+	stop, err := StartDLQPump(nc, hub)
+	if err != nil {
+		t.Fatalf("StartDLQPump: %v", err)
+	}
+	defer stop()
+
+	ch, cancel := hub.Subscribe()
+	defer cancel()
+
+	// Not JSON at all — dropped.
+	if err := nc.Publish(messaging.SubjectDLQ, []byte("not json")); err != nil {
+		t.Fatalf("Publish malformed: %v", err)
+	}
+	// Well-formed JSON but no issue id — dropped (the id is what the operator acts on).
+	if err := nc.Publish(messaging.SubjectDLQ, []byte(`{"reason":"orphan"}`)); err != nil {
+		t.Fatalf("Publish id-less: %v", err)
+	}
+	// The valid trailer — the only alert that should reach the hub.
+	valid, err := json.Marshal(core.DLQAlert{IssueID: "harness-3", Reason: "retries exhausted"})
+	if err != nil {
+		t.Fatalf("marshal valid: %v", err)
+	}
+	if err := nc.Publish(messaging.SubjectDLQ, valid); err != nil {
+		t.Fatalf("Publish valid: %v", err)
+	}
+	if err := nc.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	ev := recv(t, ch)
+	var got core.DLQAlert
+	if err := json.Unmarshal([]byte(ev.Data), &got); err != nil {
+		t.Fatalf("unmarshal: %v (data=%q)", err, ev.Data)
+	}
+	if got.IssueID != "harness-3" {
+		t.Fatalf("first alert id = %q, want harness-3 (malformed alerts should have been dropped)", got.IssueID)
+	}
+}
+
+// TestDLQPumpStopUnsubscribes confirms the stop func detaches the subscription: after stop, a
+// published escalation no longer reaches the hub.
+func TestDLQPumpStopUnsubscribes(t *testing.T) {
+	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewEmbeddedServer: %v", err)
+	}
+	t.Cleanup(srv.Shutdown)
+	nc, err := srv.Connect()
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(nc.Close)
+
+	hub := NewHub()
+	stop, err := StartDLQPump(nc, hub)
+	if err != nil {
+		t.Fatalf("StartDLQPump: %v", err)
+	}
+	stop()
+
+	ch, cancel := hub.Subscribe()
+	defer cancel()
+
+	payload, err := json.Marshal(core.DLQAlert{IssueID: "harness-9", Reason: "x"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := nc.Publish(messaging.SubjectDLQ, payload); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := nc.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	select {
+	case ev := <-ch:
+		t.Fatalf("received event after stop: %+v", ev)
+	default:
+	}
+}

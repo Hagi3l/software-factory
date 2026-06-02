@@ -49,6 +49,24 @@ The `implement` agent *sees* the tests — that is intended (TDD: the tests are 
 spec made executable). The independence that matters is **author ≠ implementor**,
 so the tests aren't written to match a particular (possibly wrong) implementation.
 
+### The separation is recorded, not just enforced
+
+Soul selection is per-stage and otherwise transient — the orchestrator picks a soul
+when it dispatches and the choice is gone once the [Brief](glossary.md#brief) is sent.
+But "author ≠ implementor" is only *demonstrable* after the fact if both identities
+survive, so the orchestrator **stamps the producing soul onto the issue as each stage
+advances**: the `author-tests` soul and the `implement` soul are recorded (threaded
+forward exactly like the [traceability map](#traceability-map) hash and preserved
+across `on_failure` retries) and cited together on the merge trailer
+(`Tests-Soul:` alongside `Soul:`, see [security.md](security.md)). This turns
+producer ≠ verifier from an invariant the harness merely *upholds* into one a human
+can *see* — both at the merge commit and, live, in the
+[verification view](control-room.md). There is no separate "verifier soul" to record:
+the `qa` [gate](glossary.md#gate) is orchestrator-controlled and runs in a clean
+[verification sandbox](glossary.md#verification-sandbox), not as an agent with a soul —
+so the meaningful, recordable comparison is the two *producing* souls, with the gate's
+independence carried structurally by the sandbox boundary.
+
 ### Model diversity is configured, not mandated
 
 Soul independence (above) is enforced by the harness. *Model* independence —
@@ -185,6 +203,29 @@ so a re-implemented candidate still traces back to the same author's interpretat
 merge the trailer cites it as `Traceability: <hash>` (see [security.md](security.md)). A
 change merged without an `author-tests` stage in its lineage simply carries `Traceability:
 (none)` — self-describing, like a missing `Prompt-SHA`, never silently blank.
+
+### The gate verdict is recorded, not just acted on
+
+A gate run already produces a structured verdict internally — per-check pass/fail, the
+red→green base-vs-candidate pair, the mutation score against its threshold, each
+scanner's exit — but historically the orchestrator *acted* on it (accept / re-route)
+and discarded everything but the final disposition. That is enough to advance the
+graph and nothing more: the proof that justified the decision evaporated. Because the
+gate carries 100% of the assurance a human reviewer would, the verdict that justified
+a merge is exactly the thing worth keeping.
+
+So the gate **harvests its verdict to the [artifact store](components/artifact-store.md)
+as a single content-addressed record** (kind `gate-verdict`), the same discipline every
+large artifact follows. The record holds, per check: its kind (command / red→green /
+tests-red / metric), pass/fail, the measured score and comparison for a metric check,
+and the base-and-candidate outcomes for a red→green proof — each still pointing at its
+own captured-output evidence by hash. Individual check evidence is still cited in the
+provenance trailer as before; the `gate-verdict` record is the *assembled* view of one
+gate run, so the [verification view](control-room.md) can render the whole trust
+argument — red→green, mutation score, scanners, and the producing-soul split — as a
+**forensic snapshot** without the gate being live. It is recorded for every gate run,
+pass or fail: a *rejected* candidate's verdict is as worth auditing as an accepted
+one (it is what a human triaging the [dead-letter queue](control-room.md) needs).
 
 ---
 

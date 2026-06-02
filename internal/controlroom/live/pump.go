@@ -87,3 +87,33 @@ func StartIssueStatePump(nc *nats.Conn, h *Hub) (func(), error) {
 	}
 	return func() { _ = sub.Unsubscribe() }, nil
 }
+
+// StartDLQPump bridges the durable dead-letter queue to the browser: it subscribes once to the
+// fixed harness.dlq subject (messaging.SubjectDLQ) and broadcasts each escalation into the hub as
+// a "dlq-arrival" SSE event. The dead-letter queue is the human's only action surface, so an
+// arrival is the one factory event worth a *push* — the layout's alerts.js fires a browser
+// Notification on it, and the status bar bumps its escalation count — while everything else stays
+// pull (specs/control-room.md, specs/messaging.md). It returns a stop func that unsubscribes
+// (wire it into the run loop's teardown), the same shape as the other pumps.
+//
+// Two differences from StartIssueStatePump, both deliberate: (1) the subject is a *fixed* subject,
+// not a wildcard, so there is no id-from-subject guard — the id rides in the body; (2) it tails a
+// JetStream-backed subject with a plain core subscription, which is sound because a JetStream
+// publish is an ordinary publish on the subject that core subscribers also receive — the durable
+// stream remains the source of truth and this tail is only the live nudge, so a dropped message is
+// harmless (matching the best-effort posture of the other pumps). A body that is not a well-formed
+// core.DLQAlert (or is missing its issue id) is dropped — a guard, not a path, since the
+// orchestrator only ever publishes a marshaled alert; a stalled browser is dropped by the hub.
+func StartDLQPump(nc *nats.Conn, h *Hub) (func(), error) {
+	sub, err := nc.Subscribe(messaging.SubjectDLQ, func(msg *nats.Msg) {
+		var alert core.DLQAlert
+		if err := json.Unmarshal(msg.Data, &alert); err != nil || alert.IssueID == "" {
+			return
+		}
+		h.Broadcast(Event{Name: "dlq-arrival", Data: string(msg.Data)})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return func() { _ = sub.Unsubscribe() }, nil
+}

@@ -742,6 +742,115 @@ control-room.md, observability.md).
   liveness note updated (typed event, animated moves, client-ticked timers; board/DAG/DLQ on issue-state,
   activity on agent-event). (needs T4.16, T4.17) ([control-room.md](specs/control-room.md))
 
+### Observability surfaces (T4.19–T4.25)
+
+Four new control-room surfaces decided in the post-T4.18 spec pass — the
+[live invocation view](specs/control-room.md), the [verification view](specs/control-room.md),
+the [merge-queue view](specs/control-room.md), and the [status bar + escalation
+alerts](specs/control-room.md). Each is backed by a **named, persisted or emitted**
+thing (an enriched event envelope, a `gate-verdict` artifact + recorded souls,
+`merge-state` events) rather than a live scrape — so every surface stays inside the
+existing invariants (single-writer, producer≠verifier, forensic-unless-running). The
+tasks follow the same **emit / transport / consume** split as T4.16–T4.18 and are
+listed in dependency order: the cheap status/DLQ surface first, then live invocation
+(after the event envelope carries issue/role), then verification (after its gate-verdict
++ soul plumbing), then the merge queue (after merge-state events). Specs already updated
+(control-room.md, messaging.md, verification.md, integration.md, security.md,
+components/artifact-store.md, glossary.md).
+
+- [x] **T4.19 Status bar + DLQ escalation alerts** — *done.* Non-TCB (controlroom). The cheap
+  status/DLQ surface, the first of the T4.19–T4.25 batch. **(1) Status bar in the layout chrome:**
+  a thin bar rides every page (queue depth · active agents · open escalations · budget-health dot ·
+  last merge). It is a **self-loading live fragment**, not threaded data — `views.StatusBarShell`
+  (added to `Layout`, after `</header>`) is an SSE-connected element that lazy-loads `GET /status/bar`
+  on `hx-trigger="load, sse:issue-state, sse:dlq-arrival, sse:agent-event throttle:5s, every 30s"`,
+  so the chrome stays data-free (`Layout(title, active)` unchanged) and every page picks up the bar for
+  free. New **`query.Reader.Status(ctx, caps)`** assembles it from a **single `Budgets` read** (one
+  `ListAll`, reusing the exact burn/breach math the budget view enforces on) plus the newest provenance
+  commit — so the bar agrees with the board/DLQ/budget views by construction and adds no new beads
+  query. Queue depth = non-terminal, non-blocked issues; escalations = blocked count; budget-health =
+  worst per-dimension level across issues+epics (`ok`/`warn ≥80%`/`breach`, mirroring the Budgets
+  tints); last merge = newest integration commit's issue id (best-effort, nil/faulting prov ⇒ empty).
+  **Active agents** is NOT in `query.Status` (the read model has no buffer access): new
+  **`live.Activity.ActiveAgents(window)`** counts distinct agent-sourced ids seen in a trailing window
+  (90s), filled in by the handler — "no new registry" per spec. **(2) DLQ escalation alerts:** new
+  **`live.StartDLQPump(nc, hub)`** (sibling of `StartIssueStatePump`) tails the durable
+  `messaging.SubjectDLQ` (`harness.dlq`) with a plain core sub (a JetStream publish is an ordinary
+  publish core subscribers also receive — the stream stays the source of truth, the tail is only the
+  nudge) and broadcasts a **`dlq-arrival`** SSE event; a new **`assets/static/alerts.js`** opens its own
+  `EventSource('/events')` purely to fire a **browser `Notification`** on it (the DLQ is the human's only
+  action surface, so an arrival is the one push-worthy event; everything else is pull). The status bar's
+  own SSE connection bumps the escalation count on the same event. **Single-source type:** the
+  orchestrator's private `dlqAlert` was promoted to **`core.DLQAlert`** (the discipline
+  `core.IssueStateEvent`/`ApprovalRequest` use) so the write side (`deadLetter`/`parkAwaitingApproval`)
+  and the read side (the pump) share one schema. **Server:** `GET /status/bar` handler (503 no reader ⇒
+  htmx leaves the neutral `StatusBarLoading` placeholder = the spec's "degrades to a static bar"; 500 on
+  read error ⇒ keeps last good bar). **Wiring:** `StartDLQPump` joins the pump teardown stack in
+  `buildRunComponents` behind `--serve-addr`, sharing the hub. Docs: `docs/control-room.md` "The status
+  bar" section added. Tests: `live.ActiveAgents` (distinct/system-excluded/windowed/empty), `StartDLQPump`
+  (round-trip + malformed-drop-by-ordering + stop-unsubscribe over real embedded NATS), `query.Status`
+  (counts/health ok-warn-breach/epic-breach/no-merge/ListAll-error), server (`/status/bar` fragment +
+  active-agents fill + 503 no-reader + layout-includes-bar). Also fixed `TestBoardInMotion`'s now-overbroad
+  whole-page `sse:agent-event` negative assertion — scoped it to the `#board` element, since the status bar
+  legitimately uses `agent-event` for the active-agents count. `make check` green (lint 0, 685 pass / 2
+  skip in `make test-unit`). **Deferred (filed, not blocking):** the bar opens 2–3 HTTP/1.1 SSE
+  connections per page (page content + status bar + alerts.js notification listener) — fine for a
+  single-operator control room, but a future consolidation onto one connection (or h2c) would tidy it.
+  (unblocks T4.20+) ([control-room.md](specs/control-room.md), [messaging.md](specs/messaging.md))
+- [ ] **T4.20 Agent-event envelope: issue id + role** — TCB-adjacent (runner/broker emit),
+  human-reviewed. Stamp the originating **issue id and role** onto the `agent.<id>.events`
+  envelope so a consumer can scope a feed to one *live invocation* without a second beads read
+  (messaging.md updated). The runner already holds the binding (it's in the [Brief](specs/glossary.md#brief)),
+  so it stamps it at publish time; `live.AgentEvent` gains the fields and the pump carries them
+  through, and the `live.Activity` entry (already keyed by agent id) gains the issue id. Also
+  sharpens the board-card → running-agent mapping. Publish-only, additive. (unblocks T4.21)
+  ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
+- [ ] **T4.21 Live invocation view** — Non-TCB (controlroom). `GET /invocation/{id}` — a scoped
+  activity feed filtered **server-side** to one invocation (via T4.20's issue id on the buffer),
+  with a header (role/stage) and a live budget meter ticking toward the wall/token ceiling. Same
+  fragment-refetch-on-SSE-nudge pattern as the feed (nudge on `agent-event`, periodic backstop),
+  not `sse-swap`. **Live only while the agent runs:** the single deliberate live-detail exception
+  (control-room.md "Rendering"), bounded — on termination it hands off to the forensic
+  [Replay](specs/glossary.md#replay) of the *same* invocation. Drill-in from board cards + activity
+  rows. (needs T4.20) ([control-room.md](specs/control-room.md))
+- [ ] **T4.22 Gate-verdict record + producing-soul attribution** — **TCB-touching** (gate +
+  orchestrator advance + provenance trailer), human-reviewed. The backend that makes the
+  verification view possible, two coupled pieces: **(1)** the gate harvests its `Report` to the
+  artifact store as a content-addressed **`gate-verdict`** record (per-check kind/pass-fail,
+  red→green base+candidate, mutation score+comparison+threshold, scanner exits), for **every**
+  run — pass or fail (verification.md "The gate verdict is recorded"; artifact-store.md kind added);
+  **(2)** the orchestrator **stamps the `author-tests` and `implement` souls onto the issue** as
+  each stage advances (threaded forward like `TraceMap`, preserved across `on_failure` retries) and
+  cites them on the merge trailer (**`Tests-Soul:`** alongside `Soul:`; security.md + integration.md
+  trailer updated). New `query.Reader.GateVerdict(issue)` reads the record + the two souls back.
+  (needs T2.8, T2.9) ([verification.md](specs/verification.md), [components/artifact-store.md](specs/components/artifact-store.md), [security.md](specs/security.md))
+- [ ] **T4.23 Verification view** — Non-TCB (controlroom). `GET /verification/{id}` — forensic,
+  rendering T4.22's `gate-verdict` record + souls: the **producer≠verifier** soul split (author-tests
+  vs implement, the `qa` gate marked as the orchestrator-controlled clean
+  [verification sandbox](specs/glossary.md#verification-sandbox), no verifier soul), **red→green**
+  proof, **mutation score** vs threshold, **scanners**, and the
+  [test↔spec traceability map](specs/verification.md) (already persisted). Rendered for **rejected**
+  candidates too (what a DLQ triager needs). Raw gate output links via `/artifact/{hash}` (nosniff,
+  security.md Control 7). Drill-in from issue detail + DLQ. (needs T4.22)
+  ([control-room.md](specs/control-room.md), [verification.md](specs/verification.md))
+- [ ] **T4.24 Merge-state transition events** — **TCB-touching** (merge path / orchestrator),
+  human-reviewed. The emit half of the merge-queue surface: the orchestrator publishes a typed
+  `core.MergeStateEvent` on **`harness.merge.<id>.state`** at each step the
+  [serialized queue](specs/integration.md) passes through — `queued → rebasing → re-gating → landed`,
+  or terminal `conflicted` / `regate-failed` — additive, best-effort core NATS exactly like
+  `issue-state` (integration.md + messaging.md updated). New `messaging.MergeStateSubject`/`Wildcard`/
+  `IssueIDFromMergeSubject` mirroring the issue-state trio; emitted from the existing `merge.go` steps
+  (the states already exist as control flow, this names and announces them). beads/git stay
+  authoritative. (needs T3.9, T3.10, T3.11) ([integration.md](specs/integration.md), [messaging.md](specs/messaging.md), [components/orchestrator.md](specs/components/orchestrator.md))
+- [ ] **T4.25 Merge-state SSE pump + merge-queue view** — Non-TCB (controlroom). The
+  transport+consume half: `live.StartMergeStatePump` (sibling of `StartIssueStatePump`) tails
+  `harness.merge.*.state` and broadcasts a `merge-state` SSE event; `GET /merge` renders the
+  in-flight train — ordered `integrate` candidates with each one's current step, terminal failures
+  correlated to the [dead-letter](specs/control-room.md) / fix issue the same transition routes —
+  refetching on the `merge-state` nudge + periodic backstop. **Read-only** (the human never reorders
+  the queue; integration is the orchestrator's function, not a lever). Landed rows link onward to
+  Provenance. (needs T4.24) ([control-room.md](specs/control-room.md), [messaging.md](specs/messaging.md))
+
 ## Phase 5 — Production isolation & distribution
 
 Replaces the bootstrap stand-ins (Docker, in-process NATS, local-repo push, files

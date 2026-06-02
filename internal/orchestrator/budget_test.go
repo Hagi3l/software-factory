@@ -100,7 +100,7 @@ func TestRouteDeadLettersOnTokenBudgetBreach(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no dlq alert: %v", err)
 	}
-	var alert dlqAlert
+	var alert core.DLQAlert
 	if err := json.Unmarshal(msg.Data, &alert); err != nil {
 		t.Fatalf("decode alert: %v", err)
 	}
@@ -142,7 +142,7 @@ func TestRouteDeadLettersOnUSDBudgetBreach(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no dlq alert: %v", err)
 	}
-	var alert dlqAlert
+	var alert core.DLQAlert
 	if err := json.Unmarshal(msg.Data, &alert); err != nil {
 		t.Fatalf("decode alert: %v", err)
 	}
@@ -241,7 +241,7 @@ func TestRouteDeadLettersOnWallBudgetBreach(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no dlq alert: %v", err)
 	}
-	var alert dlqAlert
+	var alert core.DLQAlert
 	if err := json.Unmarshal(msg.Data, &alert); err != nil {
 		t.Fatalf("decode alert: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestRouteDeadLettersOnEpicBudgetBreach(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no dlq alert: %v", err)
 	}
-	var alert dlqAlert
+	var alert core.DLQAlert
 	if err := json.Unmarshal(msg.Data, &alert); err != nil {
 		t.Fatalf("decode alert: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestAdvanceDeadLettersOnEpicBudgetBreach(t *testing.T) {
 	if err != nil {
 		t.Fatalf("no dlq alert: %v", err)
 	}
-	var alert dlqAlert
+	var alert core.DLQAlert
 	if err := json.Unmarshal(msg.Data, &alert); err != nil {
 		t.Fatalf("decode alert: %v", err)
 	}

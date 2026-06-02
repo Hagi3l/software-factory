@@ -27,6 +27,12 @@ in a commit trailer are pointers *into* this store.
 
 - Full agent transcripts (the replayable decision trail).
 - Gate evidence: test output, red→green proof, mutation reports, scanner findings.
+- The **gate verdict** (kind `gate-verdict`): the assembled, per-check result of one
+  gate run — pass/fail, red→green base/candidate, mutation score vs. threshold,
+  scanner exits — recorded for every run, pass or fail, so the
+  [verification view](../control-room.md) can render the trust argument forensically.
+  The bulky per-check *output* it references stays the separate gate-evidence entries
+  above; this record is the index over them. See [verification.md](../verification.md).
 - Candidate diffs and rejected attempts.
 - The [test↔spec traceability map](../verification.md).
 - Requirements-[wizard](../control-room.md) conversation transcripts (the "why"

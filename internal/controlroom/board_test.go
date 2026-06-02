@@ -195,9 +195,23 @@ func TestBoardInMotion(t *testing.T) {
 			t.Errorf("board page missing %q", want)
 		}
 	}
-	// The board must NOT still refresh off the coarse agent-event trigger.
-	if strings.Contains(r.body, "sse:agent-event") {
+	// The board's own live trigger must be the crisp issue-state event, not the coarse
+	// agent-event firehose. Scope the check to the #board element: the layout's status bar
+	// (T4.19) legitimately uses agent-event for its active-agents count, so a whole-page
+	// substring check would now false-positive on the chrome.
+	i := strings.Index(r.body, `id="board"`)
+	if i < 0 {
+		t.Fatalf("board page missing the #board element")
+	}
+	boardTag := r.body[i:]
+	if j := strings.Index(boardTag, ">"); j >= 0 {
+		boardTag = boardTag[:j]
+	}
+	if strings.Contains(boardTag, "sse:agent-event") {
 		t.Errorf("board still wired to the coarse agent-event trigger")
+	}
+	if !strings.Contains(boardTag, "sse:issue-state") {
+		t.Errorf("board not wired to the issue-state trigger")
 	}
 }
 

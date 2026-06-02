@@ -53,6 +53,21 @@ A postcondition check (build, test, mutation score, security scan) the orchestra
 runs in a clean [verification sandbox](#verification-sandbox) to decide whether a
 candidate is accepted. See [verification.md](verification.md).
 
+### Gate verdict
+The assembled, persisted result of one [gate](#gate) run — per-check pass/fail,
+red→green base/candidate, mutation score vs. threshold, scanner exits — harvested to
+the [artifact store](#artifact-store) (kind `gate-verdict`) for every run, pass or
+fail, so the [verification view](control-room.md) can render the trust argument after
+the fact. Distinct from the per-check *evidence* it indexes. See
+[verification.md](verification.md).
+
+### Invocation
+A single run of one [agent](#agent) against one work item: boot → agentic loop →
+terminate, inside one ephemeral [sandbox](#sandbox). The unit a [trace](#trace) and a
+[Replay](#replay) are scoped to, and what the [control room](#control-room)'s live
+invocation view watches while it runs. A retried stage is a *new* invocation of the
+same issue.
+
 ### Issue dependency graph
 The acyclic, append-only DAG of beads issues and their `blocked-by` edges. Distinct
 from the [role flow](#role-flow). See [architecture.md](architecture.md).

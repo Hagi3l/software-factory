@@ -769,7 +769,7 @@ func (o *Orchestrator) authorizeEpic(ctx context.Context, issue core.Issue, reas
 // specs/workflow.md). Publishing precedes the block so a publish failure (transient)
 // leaves the issue in_progress to be retried rather than silently blocked with no alert.
 func (o *Orchestrator) deadLetter(ctx context.Context, issue core.Issue, reason string) (bool, error) {
-	alert := dlqAlert{IssueID: issue.ID, Role: issue.Role, Attempt: issue.Attempt, Reason: reason}
+	alert := core.DLQAlert{IssueID: issue.ID, Role: issue.Role, Attempt: issue.Attempt, Reason: reason}
 	data, err := json.Marshal(alert)
 	if err != nil {
 		return false, fmt.Errorf("marshal dlq alert for %s: %w", issue.ID, err)
@@ -786,12 +786,5 @@ func (o *Orchestrator) deadLetter(ctx context.Context, issue core.Issue, reason 
 	return false, nil
 }
 
-// dlqAlert is the payload published to the dead-letter subject. It carries enough for a
-// human to find the issue and understand why it terminated; the full transcript/evidence
-// lives in the artifact store keyed by the issue (see specs/observability.md).
-type dlqAlert struct {
-	IssueID string `json:"issue_id"`
-	Role    string `json:"role"`
-	Attempt int    `json:"attempt"`
-	Reason  string `json:"reason"`
-}
+// The dead-letter payload is core.DLQAlert — a single source shared by this write side and
+// the control-room DLQ pump that tails harness.dlq to fire the browser escalation alert (T4.19).
