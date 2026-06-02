@@ -180,6 +180,16 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 		return o.deadLetter(ctx, issue, "issue role has no agent stage")
 	}
 
+	// Stamp this issue's own producing soul as its stage runs, keyed off the stage's reserved
+	// proof: the author-tests stage's soul lands as TestsSoul, the implement stage's as
+	// ImplementSoul. Recording it here — for every disposition, before the switch — is what
+	// makes producer ≠ verifier *demonstrable* after the fact (the choice is otherwise transient),
+	// and threads it forward from this issue (advance/route below propagate issue.TestsSoul /
+	// issue.ImplementSoul). It mutates the in-memory issue too, so the just-stamped soul rides
+	// into the produced child / fix issue. Non-fatal like the transcript stamp: it is audit
+	// metadata, not a correctness gate, so a failed write is logged and the disposition proceeds.
+	o.stampProducingSoul(ctx, &issue, stage)
+
 	// Validate emergent breadth before trusting it: a proposal naming an unknown role is
 	// an illegal proposal, which the failure taxonomy classes as an Escalation —
 	// dead-letter rather than write a malformed graph (see specs/workflow.md).
@@ -216,6 +226,16 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 		if gerr != nil {
 			// The gate could not reach a verdict (infrastructure) — transient, retry.
 			return true, fmt.Errorf("gate issue %s: %w", issue.ID, gerr)
+		}
+		// Stamp the assembled gate-verdict record's hash onto the issue for every disposition
+		// (accept or route below), so the verification view can render this gate run's trust
+		// argument — including for a *rejected* candidate, which has no merge trailer to carry it
+		// (T4.22). Non-fatal like the transcript/soul stamps: an empty hash (no store / failed
+		// harvest) is a no-op, and a failed write is logged rather than looping the Result.
+		if hash := report.Verdict.Hash; hash != "" {
+			if err := o.bd.StampGateVerdict(ctx, issue.ID, hash); err != nil {
+				o.log.Warn("orchestrator: stamp gate verdict failed (non-fatal)", "issue", issue.ID, "err", err)
+			}
 		}
 		if report.Passed {
 			return o.accept(ctx, issue, stage, res, report)
@@ -466,8 +486,12 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage c
 		traceMap = issue.TraceMap
 	}
 
+	// The producing souls thread forward like TraceMap (issue.TestsSoul / issue.ImplementSoul
+	// below): stampProducingSoul recorded this issue's own soul onto the in-memory issue earlier
+	// in handleResult, so the produced child inherits the author-tests / implement identities and
+	// the producer≠verifier split survives to integrate and the verification view (T4.22).
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: tstage.Role, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: traceMap, Tags: issue.Tags, EpicID: epicOf(issue)},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: tstage.Role, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: traceMap, Tags: issue.Tags, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create produced %q issue from %s: %w", target, issue.ID, err)
@@ -561,7 +585,7 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	}
 
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, EpicID: epicOf(issue)},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create on_failure fix issue from %s: %w", issue.ID, err)
@@ -670,7 +694,7 @@ func (o *Orchestrator) resolveConflict(ctx context.Context, issue core.Issue, re
 	// along so the resolution stays on the epic's souls, keeps the traceability chain intact,
 	// and stays attributed to the same epic.
 	created, err := o.bd.Apply(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: rstage.Role, Attempt: issue.Attempt + 1, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, EpicID: epicOf(issue)},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: rstage.Role, Attempt: issue.Attempt + 1, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create conflict-resolution issue from %s: %w", issue.ID, err)
@@ -703,6 +727,57 @@ func (o *Orchestrator) priceUsage(issue core.Issue, u core.Usage) float64 {
 		return 0
 	}
 	return mp.Cost.USD(u)
+}
+
+// stampProducingSoul records the issue's own producing soul onto it, keyed off which
+// reserved proof the issue's stage carries: the author-tests stage (tests-red) stamps
+// TestsSoul, the implement stage (red→green) stamps ImplementSoul. It is the orchestrator
+// turning a transient dispatch-time choice (selectSoul) into a durable, after-the-fact
+// record of producer ≠ verifier (specs/verification.md "The separation is recorded"). It
+// mutates the in-memory issue so the freshly stamped soul threads forward onto the produced
+// child / fix issue in this same handleResult pass. A stage carrying neither proof (plan,
+// qa, resolve) records no soul — only the two producing stages have a recordable identity.
+// Non-fatal: a failed write is logged and the in-memory issue is left unstamped (audit
+// metadata, not a correctness gate); a re-stamp under redelivery is idempotent (a set).
+func (o *Orchestrator) stampProducingSoul(ctx context.Context, issue *core.Issue, stage config.Stage) {
+	soul, ok := o.selectSoul(*issue)
+	if !ok {
+		return
+	}
+	switch {
+	case stageProves(stage, core.PostconditionTestsRed):
+		if issue.TestsSoul == soul.Name {
+			return
+		}
+		if err := o.bd.StampSouls(ctx, issue.ID, soul.Name, ""); err != nil {
+			o.log.Warn("orchestrator: stamp tests-soul failed (non-fatal)", "issue", issue.ID, "err", err)
+			return
+		}
+		issue.TestsSoul = soul.Name
+	case stageProves(stage, core.PostconditionRedGreen):
+		if issue.ImplementSoul == soul.Name {
+			return
+		}
+		if err := o.bd.StampSouls(ctx, issue.ID, "", soul.Name); err != nil {
+			o.log.Warn("orchestrator: stamp implement-soul failed (non-fatal)", "issue", issue.ID, "err", err)
+			return
+		}
+		issue.ImplementSoul = soul.Name
+	}
+}
+
+// stageProves reports whether a stage declares the given reserved proof as a postcondition.
+// It is how the orchestrator identifies the author-tests stage (PostconditionTestsRed) and
+// the implement stage (PostconditionRedGreen) without a hardcoded role name — the same
+// principled signal config validation and the diversity warning key off (see
+// specs/verification.md, internal/config/warnings.go).
+func stageProves(stage config.Stage, proof string) bool {
+	for _, pc := range stage.Postcondition {
+		if pc == proof {
+			return true
+		}
+	}
+	return false
 }
 
 // epicOf returns the id of an issue's epic: its threaded EpicID when set, else its own id.

@@ -117,6 +117,27 @@ const MetadataKeyEpicID = "epic_id"
 // until the first invocation is processed (see specs/observability.md, the plan's T4.15).
 const MetadataKeyTranscript = "transcript"
 
+// MetadataKeyTestsSoul and MetadataKeyImplementSoul hold the producing souls of the
+// author-tests and implement stages (core.Issue.TestsSoul / ImplementSoul). Like
+// MetadataKeyTraceMap they are threaded forward onto every produced child and on_failure
+// fix so the producer≠verifier identities survive to the integrate stage (where TestsSoul
+// rides into the merge trailer) and stay readable on in-flight / dead-lettered work for the
+// verification view. The orchestrator also stamps the issue's OWN producing soul post-hoc
+// (via StampSouls) when it processes the issue's Result, keyed off the stage's reserved
+// proof — so each is set as its stage runs, then threaded. Empty until the relevant stage
+// has run in the lineage (see specs/verification.md, the plan's T4.22).
+const (
+	MetadataKeyTestsSoul     = "tests_soul"
+	MetadataKeyImplementSoul = "implement_soul"
+)
+
+// MetadataKeyGateVerdict holds the artifact-store hash of the assembled gate-verdict record
+// for an issue's gate run (core.Issue.GateVerdict). Like MetadataKeyTranscript it is stamped
+// post-hoc (via StampGateVerdict) for every disposition and NOT threaded forward — each issue
+// records the verdict of its own gate run — so a rejected candidate's verdict is reachable for
+// the verification view, not only a merged one (see specs/verification.md, the plan's T4.22).
+const MetadataKeyGateVerdict = "gate_verdict"
+
 // MetadataKeyDLQReason holds the orchestrator's one-line classification of why an issue
 // dead-lettered (core.Issue.DeadLetterReason) — the same reason published on the DLQ alert.
 // It is written in the same transition that blocks the issue (Block) so the dead-letter queue
@@ -253,6 +274,56 @@ func (c *Client) StampTranscript(ctx context.Context, id, hash string) error {
 	args := []string{"update", id, "--set-metadata", MetadataKeyTranscript + "=" + hash}
 	if _, err := c.run(ctx, args); err != nil {
 		return fmt.Errorf("beads: stamp transcript on %s: %w", id, err)
+	}
+	return nil
+}
+
+// StampSouls records the producing soul(s) of an issue's stage, merged into its metadata
+// without touching status or other keys (like StampTranscript). The orchestrator calls it
+// when it processes the issue's Result, stamping whichever of TestsSoul/ImplementSoul the
+// stage's reserved proof identifies — so the producer≠verifier identities are recorded as
+// each stage runs, then threaded forward like the traceability map. Only a non-empty value
+// is written, so a caller stamping just the tests soul (the common case) leaves the other
+// key untouched, and a call with both empty is a no-op. It is a set, not an append, so
+// re-stamping under at-least-once redelivery is idempotent (see core.Issue.TestsSoul,
+// specs/verification.md).
+func (c *Client) StampSouls(ctx context.Context, id, testsSoul, implementSoul string) error {
+	if id == "" {
+		return fmt.Errorf("beads: empty issue id")
+	}
+	args := []string{"update", id}
+	if testsSoul != "" {
+		args = append(args, "--set-metadata", MetadataKeyTestsSoul+"="+testsSoul)
+	}
+	if implementSoul != "" {
+		args = append(args, "--set-metadata", MetadataKeyImplementSoul+"="+implementSoul)
+	}
+	if len(args) == 2 {
+		return nil // nothing to stamp
+	}
+	if _, err := c.run(ctx, args); err != nil {
+		return fmt.Errorf("beads: stamp souls on %s: %w", id, err)
+	}
+	return nil
+}
+
+// StampGateVerdict records the artifact-store hash of an issue's gate-verdict record, merged
+// into its metadata without touching status or other keys (like StampTranscript). The
+// orchestrator calls it when it gates the issue's candidate — for every disposition — so the
+// assembled verdict is reachable from the issue for the verification view, including for
+// dead-lettered work. It is a set, not an append, so re-stamping the same hash under
+// at-least-once redelivery is idempotent. An empty hash is a no-op: the gate could not
+// persist a verdict, so there is nothing to cite (see core.Issue.GateVerdict).
+func (c *Client) StampGateVerdict(ctx context.Context, id, hash string) error {
+	if id == "" {
+		return fmt.Errorf("beads: empty issue id")
+	}
+	if hash == "" {
+		return nil
+	}
+	args := []string{"update", id, "--set-metadata", MetadataKeyGateVerdict + "=" + hash}
+	if _, err := c.run(ctx, args); err != nil {
+		return fmt.Errorf("beads: stamp gate verdict on %s: %w", id, err)
 	}
 	return nil
 }
@@ -505,7 +576,8 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 		args = append(args, "--description", issue.Body)
 	}
 	if issue.Role != "" || issue.Attempt > 0 || issue.Base != "" || issue.TraceMap != "" || issue.Spec != "" ||
-		issue.SpentTokens > 0 || issue.SpentUSD > 0 || issue.SpentWall > 0 || issue.EpicID != "" {
+		issue.SpentTokens > 0 || issue.SpentUSD > 0 || issue.SpentWall > 0 || issue.EpicID != "" ||
+		issue.TestsSoul != "" || issue.ImplementSoul != "" {
 		meta := map[string]any{}
 		if issue.Role != "" {
 			meta[MetadataKeyRole] = issue.Role
@@ -549,6 +621,15 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 		// metadata stays minimal.
 		if issue.EpicID != "" {
 			meta[MetadataKeyEpicID] = issue.EpicID
+		}
+		// The producing souls thread forward like TraceMap so the producer≠verifier identities
+		// survive across the stages of an epic and across on_failure retries; stamped when set so
+		// a freshly seeded issue (no stage has run yet) carries neither.
+		if issue.TestsSoul != "" {
+			meta[MetadataKeyTestsSoul] = issue.TestsSoul
+		}
+		if issue.ImplementSoul != "" {
+			meta[MetadataKeyImplementSoul] = issue.ImplementSoul
 		}
 		b, err := json.Marshal(meta)
 		if err != nil {

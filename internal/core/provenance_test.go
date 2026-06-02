@@ -13,12 +13,20 @@ func TestProvenanceRoundTrip(t *testing.T) {
 	cases := map[string]Provenance{
 		"full": {
 			Soul:         "implementor-go",
+			TestsSoul:    "test-author-go",
 			Model:        "claude-opus-4-7",
 			Issue:        "harness-1",
 			PromptSHA:    "sha256:9af",
 			Verified:     []string{"build@sha256:aa", "test@sha256:bb"},
 			Traceability: "sha256:cc",
 			Transcript:   "sha256:dd",
+		},
+		"no tests-soul (no author-tests stage in lineage)": {
+			Soul:     "implementor-go",
+			Model:    "claude-opus-4-7",
+			Issue:    "harness-3",
+			Verified: []string{"build"},
+			// TestsSoul empty → renders Tests-Soul: (none), parses back to "".
 		},
 		"no traceability or prompt": {
 			Soul:     "implementor-go",
@@ -39,6 +47,27 @@ func TestProvenanceRoundTrip(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTrailerCitesTestsSoul pins the spec's exact first-line layout (security.md /
+// integration.md): the implementor and the independent test author are recorded side by
+// side, so producer ≠ verifier is auditable from the commit alone.
+func TestTrailerCitesTestsSoul(t *testing.T) {
+	p := Provenance{Soul: "implementor-go", TestsSoul: "test-author-go", Model: "m", Issue: "i"}
+	want := "Soul: implementor-go | Model: m | Tests-Soul: test-author-go"
+	first, _, _ := splitFirstLine(p.Trailer())
+	if first != want {
+		t.Errorf("trailer first line = %q, want %q", first, want)
+	}
+}
+
+func splitFirstLine(s string) (first, rest string, ok bool) {
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\n' {
+			return s[:i], s[i+1:], true
+		}
+	}
+	return s, "", false
 }
 
 // TestParseCommitMessageRejectsNonProvenance guards the read path's leniency: an ordinary

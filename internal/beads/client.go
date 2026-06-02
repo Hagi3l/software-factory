@@ -199,6 +199,13 @@ func (r issueJSON) toCore() core.Issue {
 		// the escalation reachable from the issue for the Resolve wizard (T4.15).
 		Transcript:       metaString(r.Metadata, MetadataKeyTranscript),
 		DeadLetterReason: metaString(r.Metadata, MetadataKeyDLQReason),
+		// The producing souls of the author-tests/implement stages (threaded forward like
+		// TraceMap) and the hash of this issue's gate-verdict record (stamped post-hoc per gate
+		// run). Both empty until the relevant stage has run; they make the producer≠verifier
+		// split and the gate verdict renderable for in-flight and dead-lettered work (T4.22).
+		TestsSoul:     metaString(r.Metadata, MetadataKeyTestsSoul),
+		ImplementSoul: metaString(r.Metadata, MetadataKeyImplementSoul),
+		GateVerdict:   metaString(r.Metadata, MetadataKeyGateVerdict),
 		// When the issue last entered its current status, stamped atomically by every
 		// status-changing write (setStatus/Claim); the board's time-in-state anchor. Zero
 		// (absent/unparsable) on an issue that has not transitioned since the field landed.

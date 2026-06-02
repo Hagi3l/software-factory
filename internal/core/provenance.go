@@ -12,6 +12,12 @@ import (
 // specs/integration.md). Prompt-SHA is a content address into the artifact store, so the
 // cited prompt cannot be silently altered after the fact.
 //
+// Soul is the implementor; TestsSoul is the independent author of the acceptance tests.
+// Recording both on the commit makes producer ≠ verifier (see specs/verification.md)
+// auditable from the trailer alone, not merely enforced at runtime — a change with no
+// author-tests stage in its lineage carries Tests-Soul: (none), the same self-describing
+// degradation as a missing Traceability.
+//
 // It lives in core because both sides of the trailer must agree on one format: the
 // orchestrator renders it onto the integration commit (the write side), and the control
 // room reads it back off git to drive the provenance and issue-detail views (the read
@@ -19,7 +25,8 @@ import (
 // CommitMessage) and parse (ParseCommitMessage) adjacent in a single type is what keeps
 // the two sides from drifting — there is no second copy of the format to maintain.
 type Provenance struct {
-	Soul         string   // the soul that produced the candidate
+	Soul         string   // the soul that produced the candidate (the implementor)
+	TestsSoul    string   // the soul that authored the acceptance tests (the independent test author)
 	Model        string   // the model that drove it
 	Issue        string   // the beads issue this change answers
 	PromptSHA    string   // artifact-store hash of the exact prompt the invocation ran with
@@ -35,8 +42,8 @@ type Provenance struct {
 // invocation whose transcript could not be harvested) stays self-describing instead of
 // looking truncated.
 func (p Provenance) Trailer() string {
-	return fmt.Sprintf("Soul: %s | Model: %s\nIssue: %s | Prompt-SHA: %s | Verified: %s | Traceability: %s | Transcript: %s",
-		orNone(p.Soul), orNone(p.Model), orNone(p.Issue), orNone(p.PromptSHA),
+	return fmt.Sprintf("Soul: %s | Model: %s | Tests-Soul: %s\nIssue: %s | Prompt-SHA: %s | Verified: %s | Traceability: %s | Transcript: %s",
+		orNone(p.Soul), orNone(p.Model), orNone(p.TestsSoul), orNone(p.Issue), orNone(p.PromptSHA),
 		orNone(strings.Join(p.Verified, ",")), orNone(p.Traceability), orNone(p.Transcript))
 }
 
@@ -69,6 +76,8 @@ func ParseCommitMessage(msg string) (Provenance, bool) {
 			switch k {
 			case "Soul":
 				prov.Soul = v
+			case "Tests-Soul":
+				prov.TestsSoul = v
 			case "Model":
 				prov.Model = v
 			case "Issue":
@@ -109,7 +118,7 @@ func parseTrailerLine(line string) (map[string]string, bool) {
 		val = noneToEmpty(strings.TrimSpace(val))
 		fields[key] = val
 		switch key {
-		case "Soul", "Model", "Issue", "Prompt-SHA", "Verified", "Traceability", "Transcript":
+		case "Soul", "Tests-Soul", "Model", "Issue", "Prompt-SHA", "Verified", "Traceability", "Transcript":
 			recognized = true
 		}
 	}

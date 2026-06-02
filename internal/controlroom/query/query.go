@@ -702,6 +702,83 @@ func (r *Reader) Artifact(ctx context.Context, hash string) (io.ReadCloser, erro
 	return rc, nil
 }
 
+// GateVerdictView is the verification view's projection (T4.23): the assembled gate-verdict
+// record of one gate run plus the producer≠verifier soul split, the trust argument rendered
+// as a forensic snapshot (specs/verification.md "The gate verdict is recorded"). TestsSoul is
+// the independent test author and ImplementSoul the implementor — the two producing souls
+// whose independence the design hinges on; the qa gate has no verifier soul (it runs in the
+// orchestrator-controlled clean verification sandbox, its independence carried structurally).
+//
+// Available is false when no verdict record could be reconstructed: Hash == "" means none was
+// stamped (the issue's candidate has not been gated, or the gate could not persist one), while
+// a set Hash with Available == false means the cited record could not be fetched or decoded.
+// Either way the view degrades to a notice (offering the raw-bytes link when a hash is known)
+// rather than failing the page — the same best-effort posture as Replay.
+type GateVerdictView struct {
+	Issue         core.Issue
+	Merged        bool
+	TestsSoul     string // the author-tests producing soul (the independent test author)
+	ImplementSoul string // the implement producing soul (the implementor)
+	Hash          string // the gate-verdict artifact's content address, when one is stamped
+	Available     bool   // the record resolved + parsed from the store
+	Verdict       core.GateVerdict
+}
+
+// GateVerdict reconstructs one issue's verification verdict: the assembled gate-verdict record
+// the gate harvested and the two producing souls, read back for the verification view. The
+// souls come from the issue's own stamps (TestsSoul / ImplementSoul) — the principled,
+// stage-keyed source the orchestrator threads forward like TraceMap. The merge trailer is NOT
+// preferred for them: its Soul is whichever stage produced the *landed* candidate (qa, or a
+// merge-resolver), not necessarily the implementor, and it carries no implement-specific field —
+// the issue stamps are the single source the trailer's Tests-Soul itself is derived from. The
+// verdict record is resolved from the hash the orchestrator stamps onto the issue for *every*
+// disposition — so a rejected candidate's verdict renders too, not only a merged one (T4.22).
+//
+// Only an unreadable issue or provenance is fatal; a missing/unfetchable/corrupt verdict record
+// yields a view with Available=false and a notice, mirroring the detail and replay pages'
+// best-effort posture (a flaky store never blanks the page).
+func (r *Reader) GateVerdict(ctx context.Context, id string) (GateVerdictView, error) {
+	issue, err := r.issues.Get(ctx, id)
+	if err != nil {
+		return GateVerdictView{}, fmt.Errorf("query: gate verdict %s: %w", id, err)
+	}
+	view := GateVerdictView{
+		Issue:         issue,
+		TestsSoul:     issue.TestsSoul,
+		ImplementSoul: issue.ImplementSoul,
+		Hash:          issue.GateVerdict,
+	}
+
+	// Merged is a presentation flag (has this landed?); the souls come from the issue stamps
+	// above, not the trailer. A provenance read fault leaves Merged false rather than failing
+	// the page — best-effort, like the detail page.
+	if _, merged, perr := r.prov.ByIssue(ctx, id); perr == nil {
+		view.Merged = merged
+	}
+
+	if issue.GateVerdict == "" || r.arts == nil {
+		return view, nil // nothing to resolve — the view renders the no-verdict notice
+	}
+	// Best-effort from here: a store fault or a corrupt record degrades to "couldn't load"
+	// (with the raw-bytes link still offered via Hash) rather than blanking the header.
+	rc, err := r.arts.Get(ctx, issue.GateVerdict)
+	if err != nil {
+		return view, nil
+	}
+	defer func() { _ = rc.Close() }()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return view, nil
+	}
+	var rec core.GateVerdict
+	if err := json.Unmarshal(data, &rec); err != nil {
+		return view, nil
+	}
+	view.Available = true
+	view.Verdict = rec
+	return view, nil
+}
+
 // ReplayToolCall is one tool the model asked to invoke on a turn: the tool name and its
 // arguments, pretty-printed for legibility (the wire form is compact JSON). ID ties it to
 // the matching tool result fed back on the next turn.

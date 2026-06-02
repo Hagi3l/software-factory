@@ -30,6 +30,12 @@ func (o *Orchestrator) provenanceFor(issue core.Issue, res core.Result, report g
 		Verified:     verifiedChecks(report),
 		Traceability: issue.TraceMap,
 		Transcript:   transcriptHash(res),
+		// The independent test author, threaded onto this issue from the author-tests stage
+		// (like TraceMap). Soul below is the implementor (this issue's own producing soul);
+		// recording both makes producer ≠ verifier auditable from the trailer (T4.22,
+		// specs/verification.md). An issue with no author-tests stage in its lineage carries
+		// none, rendering as Tests-Soul: (none).
+		TestsSoul: issue.TestsSoul,
 	}
 	if soul, ok := o.selectSoul(issue); ok {
 		prov.Soul = soul.Name

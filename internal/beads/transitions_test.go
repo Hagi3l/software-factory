@@ -942,6 +942,81 @@ func TestStampTranscriptRoundTripIntegration(t *testing.T) {
 	}
 }
 
+// TestSoulsRoundTripIntegration proves the producing souls (TestsSoul / ImplementSoul) thread
+// through Apply into beads metadata and decode back on Get — the threading half of T4.22, which
+// keeps producer ≠ verifier readable across an epic's stages. They must survive alongside the
+// other threaded facets (TraceMap/Base).
+func TestSoulsRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+
+	created, err := c.Apply(context.Background(), []core.Proposal{
+		{Issue: core.Issue{Title: "implement against traced tests", Role: "implement",
+			TraceMap: "sha256:tm", TestsSoul: "test-author-go", ImplementSoul: "implementor-go"}},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	got := mustGetIssue(t, c, created[0].ID)
+	if got.TestsSoul != "test-author-go" || got.ImplementSoul != "implementor-go" {
+		t.Errorf("TestsSoul/ImplementSoul = %q/%q, want test-author-go/implementor-go (round-tripped)", got.TestsSoul, got.ImplementSoul)
+	}
+	if got.TraceMap != "sha256:tm" {
+		t.Errorf("TraceMap = %q, want sha256:tm (must survive alongside the souls)", got.TraceMap)
+	}
+}
+
+// TestStampSoulsRoundTripIntegration proves StampSouls records a stage's producing soul post-hoc
+// without disturbing other keys, writes only non-empty values, and is a no-op when both are empty.
+func TestStampSoulsRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+	ctx := context.Background()
+
+	id := quickCreate(t, dir, "author-tests stage")
+	// Both empty is a no-op.
+	if err := c.StampSouls(ctx, id, "", ""); err != nil {
+		t.Fatalf("StampSouls(empty): %v", err)
+	}
+	if got := mustGetIssue(t, c, id); got.TestsSoul != "" || got.ImplementSoul != "" {
+		t.Errorf("souls = %q/%q, want both empty after the no-op", got.TestsSoul, got.ImplementSoul)
+	}
+	// Stamping only the tests soul leaves ImplementSoul untouched.
+	if err := c.StampSouls(ctx, id, "test-author-go", ""); err != nil {
+		t.Fatalf("StampSouls(tests): %v", err)
+	}
+	got := mustGetIssue(t, c, id)
+	if got.TestsSoul != "test-author-go" || got.ImplementSoul != "" {
+		t.Errorf("souls = %q/%q, want test-author-go/empty (only the tests soul written)", got.TestsSoul, got.ImplementSoul)
+	}
+}
+
+// TestStampGateVerdictRoundTripIntegration proves the gate-verdict record hash survives
+// StampGateVerdict into beads metadata and decodes back on Get — so a rejected candidate's
+// verdict is reachable from the issue for the verification view (T4.22). An empty hash is a no-op.
+func TestStampGateVerdictRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+	ctx := context.Background()
+
+	id := quickCreate(t, dir, "gated candidate")
+	if err := c.StampGateVerdict(ctx, id, ""); err != nil {
+		t.Fatalf("StampGateVerdict(empty): %v", err)
+	}
+	if got := mustGetIssue(t, c, id); got.GateVerdict != "" {
+		t.Errorf("GateVerdict = %q, want empty after the empty-hash no-op", got.GateVerdict)
+	}
+	if err := c.StampGateVerdict(ctx, id, "sha256:verdict"); err != nil {
+		t.Fatalf("StampGateVerdict: %v", err)
+	}
+	if got := mustGetIssue(t, c, id); got.GateVerdict != "sha256:verdict" {
+		t.Errorf("GateVerdict = %q, want sha256:verdict (round-tripped via metadata)", got.GateVerdict)
+	}
+}
+
 // mustGetIssue is a small Get helper for the round-trip assertions.
 func mustGetIssue(t *testing.T, c *Client, id string) core.Issue {
 	t.Helper()

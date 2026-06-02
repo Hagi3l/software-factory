@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -209,9 +210,17 @@ type RunResult struct {
 // Report is the gate's verdict. Passed is true iff every check passed. The gate stops
 // at the first failing check — a failed build makes a subsequent test run meaningless
 // — so Checks holds the results up to and including any failure, not the full set.
+//
+// Verdict is the artifact-store reference to the assembled gate-verdict record (a
+// core.GateVerdict) the gate harvests after grading — the index over the per-check
+// evidence, kept so the verification view can render one gate run forensically. It is the
+// zero value when no store is configured or the harvest failed (a degraded record, never a
+// dropped verdict); the orchestrator stamps Verdict.Hash onto the issue for every
+// disposition so a rejected candidate's verdict stays reachable (see specs/verification.md).
 type Report struct {
-	Passed bool
-	Checks []CheckResult
+	Passed  bool
+	Checks  []CheckResult
+	Verdict core.ArtifactRef
 }
 
 // Runner runs the ordered checks against a candidate in a fresh, orchestrator-controlled
@@ -337,6 +346,13 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 	// passing and failing checks are persisted — a rejected gate's output is precisely
 	// what a human triages from the dead-letter queue.
 	r.persistEvidence(ctx, c.Ref, &report)
+
+	// Harvest the assembled verdict record AFTER per-check evidence is persisted, so each
+	// check's outcome in the record cites its own evidence hash (the record is the index over
+	// them). Best-effort like persistEvidence — a missing store or failed write degrades the
+	// record but never the verdict — and recorded for pass and fail alike (a rejected gate's
+	// verdict is exactly what a human triages from the dead-letter queue).
+	r.persistVerdict(ctx, c.Ref, &report)
 
 	// A verdict was reached: record it. The early returns above are infra errors (no verdict)
 	// — deliberately not recorded, so the throughput counter and pass/fail split count only
@@ -561,6 +577,76 @@ func (r *Runner) persistEvidence(ctx context.Context, ref string, report *Report
 			continue
 		}
 		cr.Evidence = a
+	}
+}
+
+// persistVerdict assembles the gate run's verdict into a single content-addressed
+// gate-verdict record and writes it to the artifact store, stamping the returned ref onto
+// the Report. It runs after persistEvidence so each per-check outcome can cite its own
+// evidence hash — the record is the *index* over the bulky per-check output, not a copy of
+// it (see specs/components/artifact-store.md). Best-effort, mirroring persistEvidence: a
+// nil store skips it, and a marshal or write failure is logged and leaves Verdict the zero
+// value (a degraded record, never a changed verdict).
+func (r *Runner) persistVerdict(ctx context.Context, ref string, report *Report) {
+	if r.store == nil {
+		return
+	}
+	data, err := json.Marshal(verdictRecord(*report))
+	if err != nil {
+		r.log.Error("gate: marshal verdict record", "ref", ref, "err", err)
+		return
+	}
+	a, err := r.store.Put(ctx, core.ArtifactKindGateVerdict, bytes.NewReader(data))
+	if err != nil {
+		r.log.Error("gate: persist verdict record", "ref", ref, "err", err)
+		return
+	}
+	report.Verdict = a
+}
+
+// verdictRecord maps the gate's internal Report onto the serializable core.GateVerdict the
+// verification view reads back. It translates each check's unexported kind to the stable
+// core.GateCheck* spelling and carries the kind-specific detail (a red→green proof's base
+// exit, a metric check's score/comparison) plus the per-check evidence hash, so the record
+// holds everything the view needs without re-reading each evidence blob.
+func verdictRecord(report Report) core.GateVerdict {
+	v := core.GateVerdict{Passed: report.Passed, Checks: make([]core.GateCheckOutcome, 0, len(report.Checks))}
+	for _, cr := range report.Checks {
+		out := core.GateCheckOutcome{
+			Name:     cr.Name,
+			Kind:     verdictKind(cr.kind),
+			Passed:   cr.Passed,
+			ExitCode: cr.ExitCode,
+			Evidence: cr.Evidence.Hash,
+		}
+		if cr.Base != nil {
+			out.Base = &core.GateRunOutcome{ExitCode: cr.Base.ExitCode}
+		}
+		if cr.Metric != nil {
+			out.Metric = &core.GateMetricOutcome{
+				Score:     cr.Metric.Score,
+				Parsed:    cr.Metric.Parsed,
+				Op:        cr.Metric.Op,
+				Threshold: cr.Metric.Threshold,
+			}
+		}
+		v.Checks = append(v.Checks, out)
+	}
+	return v
+}
+
+// verdictKind translates the gate's internal checkKind to the stable, serialized
+// core.GateCheck* spelling the verification view reads.
+func verdictKind(k checkKind) string {
+	switch k {
+	case redGreenProof:
+		return core.GateCheckRedGreen
+	case redProof:
+		return core.GateCheckTestsRed
+	case metricCheck:
+		return core.GateCheckMetric
+	default:
+		return core.GateCheckCommand
 	}
 }
 

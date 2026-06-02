@@ -236,6 +236,36 @@ func (f *fakeBeads) StampTranscript(_ context.Context, id, hash string) error {
 	return nil
 }
 
+func (f *fakeBeads) StampSouls(_ context.Context, id, testsSoul, implementSoul string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Mirror the real client: only non-empty values are written, and the stamp is durable on
+	// the issue so a later Get/ListAll sees the producing soul (the verification view's read).
+	if is, ok := f.issues[id]; ok {
+		if testsSoul != "" {
+			is.TestsSoul = testsSoul
+		}
+		if implementSoul != "" {
+			is.ImplementSoul = implementSoul
+		}
+		f.issues[id] = is
+	}
+	return nil
+}
+
+func (f *fakeBeads) StampGateVerdict(_ context.Context, id, hash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if hash == "" {
+		return nil
+	}
+	if is, ok := f.issues[id]; ok {
+		is.GateVerdict = hash
+		f.issues[id] = is
+	}
+	return nil
+}
+
 // snapshot accessors (copy under lock).
 func (f *fakeBeads) snap() (claimed, released, closed, blocked []string, applied []core.Proposal) {
 	f.mu.Lock()
@@ -755,9 +785,10 @@ func TestHandleResultAcceptBuildsProvenance(t *testing.T) {
 		t.Errorf("provenance Transcript = %q, want sha256:tx (the harvested conversation)", p.Transcript)
 	}
 	// The rendered trailer matches the spec's exact two-line format. This issue carried no
-	// threaded author-tests map (seeded directly at implement), so Traceability is (none);
-	// the harvested transcript hash is cited.
-	want := "Soul: implementor-go | Model: claude-opus-4-7\nIssue: iss-1 | Prompt-SHA: sha256:9af | Verified: build,test | Traceability: (none) | Transcript: sha256:tx"
+	// threaded author-tests map (seeded directly at implement), so Traceability is (none) and —
+	// with no author-tests stage in its lineage — Tests-Soul is (none) too; the harvested
+	// transcript hash is cited.
+	want := "Soul: implementor-go | Model: claude-opus-4-7 | Tests-Soul: (none)\nIssue: iss-1 | Prompt-SHA: sha256:9af | Verified: build,test | Traceability: (none) | Transcript: sha256:tx"
 	if got := p.Trailer(); got != want {
 		t.Errorf("trailer =\n%q\nwant\n%q", got, want)
 	}

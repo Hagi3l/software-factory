@@ -62,6 +62,14 @@ type Beads interface {
 	// so the decision trail is reachable from the issue for in-flight/dead-lettered work, not
 	// only from a merge trailer (see core.Issue.Transcript, the plan's T4.15).
 	StampTranscript(ctx context.Context, id, hash string) error
+	// StampSouls records an issue's producing soul(s) — TestsSoul (author-tests) / ImplementSoul
+	// (implement) — keyed off its stage's reserved proof, so producer ≠ verifier is demonstrable
+	// after the fact and threaded forward (see core.Issue.TestsSoul, the plan's T4.22).
+	StampSouls(ctx context.Context, id, testsSoul, implementSoul string) error
+	// StampGateVerdict records the artifact hash of the assembled gate-verdict record for an
+	// issue's gate run, for every disposition, so a rejected candidate's verdict is reachable
+	// for the verification view (see core.Issue.GateVerdict, the plan's T4.22).
+	StampGateVerdict(ctx context.Context, id, hash string) error
 }
 
 // Gate verifies a candidate in a fresh, orchestrator-controlled sandbox and returns a

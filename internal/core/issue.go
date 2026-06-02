@@ -175,6 +175,35 @@ type Issue struct {
 	// and is empty until the issue's first invocation is processed (see specs/observability.md).
 	Transcript string
 
+	// TestsSoul and ImplementSoul record the producing souls of the two stages whose
+	// independence is the keystone of the design: the soul that authored the acceptance
+	// tests and the soul that implemented against them. Soul selection is otherwise
+	// transient — the orchestrator picks a soul at dispatch and the choice is gone once the
+	// Brief is sent — so "author ≠ implementor" is only *demonstrable* after the fact if both
+	// identities survive. The orchestrator stamps each onto the issue as its stage advances
+	// (TestsSoul on the author-tests issue, ImplementSoul on the implement issue, keyed off
+	// the stage's reserved proof) and threads them forward onto every produced child and
+	// on_failure fix exactly like TraceMap, so a re-implemented candidate still names the same
+	// test author. At integrate the threaded TestsSoul rides into the merge trailer
+	// (`Tests-Soul:` alongside `Soul:`), and for in-flight or dead-lettered work the stamps
+	// make the producer≠verifier split renderable in the verification view without a merge
+	// commit (see specs/verification.md "The separation is recorded", the plan's T4.22). Like
+	// TraceMap they ride in beads metadata; empty until the relevant stage has run in the
+	// issue's lineage.
+	TestsSoul     string
+	ImplementSoul string
+
+	// GateVerdict is the artifact-store hash of the assembled per-check record of the gate
+	// run that graded this issue's candidate (core.GateVerdict, ArtifactKindGateVerdict).
+	// Unlike the per-check evidence cited on the merge trailer, this is the *index* over one
+	// gate run — pass/fail, red→green, mutation score, scanner exits — and the orchestrator
+	// stamps it onto the issue for **every** disposition (accepted, routed, dead-lettered),
+	// like Transcript, so the verification view can render a *rejected* candidate's trust
+	// argument forensically, not only a merged one. It rides in beads metadata, is NOT
+	// threaded forward (each issue records the verdict of its own gate run), and is empty
+	// until the issue's candidate has been gated (see specs/verification.md, the plan's T4.22).
+	GateVerdict string
+
 	// DeadLetterReason is the orchestrator's one-line classification of *why* an issue
 	// dead-lettered — the same reason published on the DLQ alert (an escalation it cannot
 	// resolve, an exhausted retry cap, a budget breach). It is empty for every issue that is

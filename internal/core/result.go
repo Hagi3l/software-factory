@@ -163,6 +163,12 @@ const (
 	ArtifactKindTraceabilityMap = "traceability-map"
 	// ArtifactKindGateEvidence is a gate check's captured stdout/stderr, cited as name@<hash>.
 	ArtifactKindGateEvidence = "gate-evidence"
+	// ArtifactKindGateVerdict is the assembled, per-check record of one gate run (a
+	// core.GateVerdict): pass/fail, red→green base/candidate, mutation score vs threshold,
+	// scanner exits — the index over the per-check gate-evidence entries it cites by hash.
+	// Recorded for every run, pass or fail, so the verification view can render the trust
+	// argument forensically (see core.GateVerdict, specs/verification.md).
+	ArtifactKindGateVerdict = "gate-verdict"
 )
 
 // Proposal is a child issue an agent proposes (emergent breadth). The
