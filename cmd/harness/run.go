@@ -241,6 +241,14 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			return nil, perr
 		}
 		releases = append(releases, pumpStop)
+		// The issue-state pump (T4.17) shares the same hub: it tails the single-writer
+		// orchestrator's transition events so the board/DAG/DLQ views refresh crisply on the
+		// actual state change rather than around agent activity (T4.18 swaps their triggers).
+		statePumpStop, sperr := live.StartIssueStatePump(nc, hub)
+		if sperr != nil {
+			return nil, sperr
+		}
+		releases = append(releases, statePumpStop)
 		reader := query.NewReader(
 			beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)),
 			store,

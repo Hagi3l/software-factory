@@ -682,14 +682,33 @@ control-room.md, observability.md).
   EpicOf fallback, write-failure-no-announce, and settled-issue no-reannounce (via `handleResult`).
   **Unblocks T4.17** (the SSE pump tailing `harness.issue.*.state`) **→ T4.18** (crisp board refresh,
   animated moves, per-card timers off `StateEnteredAt`). ([components/orchestrator.md](specs/components/orchestrator.md), [messaging.md](specs/messaging.md))
-- [ ] **T4.17 Issue-state SSE pump** — non-TCB (controlroom). A pump sibling to
-  `StartAgentEventPump` in `internal/controlroom/live`: one wildcard subscribe to
-  `harness.issue.*.state`, each message broadcast to the `Hub` as an **`issue-state`** SSE
-  event (the views consume it as an `hx-trigger` nudge — server-render-a-fragment, not
-  `sse-swap`). Wire it into `buildRunComponents` behind `--serve-addr` alongside the existing
-  agent-event pump (shares the hub; standalone `harness serve` has no NATS, unchanged). Tests:
-  pump over real embedded NATS (event lands on the hub as `issue-state`), subject-parse
-  rejection, ctx-cancel teardown. (needs T4.16) ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
+- [x] **T4.17 Issue-state SSE pump** — *done.* Non-TCB (controlroom). New
+  **`StartIssueStatePump(nc, hub)`** in `internal/controlroom/live/pump.go`, a sibling of
+  `StartAgentEventPump`: one wildcard subscribe to **`messaging.IssueStateWildcard`**
+  (`harness.issue.*.state`), each message broadcast into the `Hub` as an **`issue-state`** SSE
+  event the board/DAG/DLQ views will consume as an `hx-trigger` nudge (server-render-a-fragment,
+  not `sse-swap` — T4.18 swaps their triggers from `agent-event` over to this). **Two differences
+  from the agent-event pump, both deliberate:** (1) **no `Activity` buffer** — issue-state is a
+  view-refresh nudge, not feed content, so the pump only broadcasts; (2) **no envelope** — the
+  payload is already a complete `core.IssueStateEvent` (the id rides in the body, not only the
+  subject), so the pump **relays the original bytes** after validating them, rather than wrapping
+  like `AgentEvent`. **Best-effort guards** matching the fire-and-forget core-NATS transitions it
+  tails: a subject that doesn't parse to an id (`IssueIDFromStateSubject == ""`, defensive — NATS
+  only delivers concrete subjects matching the wildcard) and a body that isn't a well-formed event
+  (or is missing its `ID`) are dropped; a stalled browser is dropped by the hub. Losing a
+  transition is harmless — beads stays authoritative and the views keep a periodic backstop. The
+  pump unmarshals into `core.IssueStateEvent` as the core-struct comment prescribes (the read side
+  of the single-source schema the orchestrator writes). **Wiring:** `buildRunComponents` starts it
+  behind `--serve-addr` alongside the agent-event pump, **sharing the same hub**; its unsubscribe
+  joins the teardown stack (`releases`). Standalone `harness serve` has no NATS, unchanged. No new
+  route/flag/view → no doc change (the `/events` endpoint already multiplexes hub events by name).
+  Tests (`pump_test.go`, real embedded NATS): happy-path round-trip (marshaled `IssueStateEvent` →
+  `issue-state` SSE event, full struct equality), malformed-drop proven by **ordering** (non-JSON
+  and id-less events published ahead of a valid one; receiving the valid one first proves the bad
+  ones never reached the hub — NATS preserves single-subscription publish order), and stop-func
+  teardown. `make check`-adjacent green: `go build ./...`, `go vet`, `golangci-lint` (0 issues),
+  and `go test -race ./internal/controlroom/live/` all pass. **Unblocks T4.18** (board crisp
+  refresh, animated moves, per-card timers). (needs T4.16) ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
 - [ ] **T4.18 Board in motion — crisp refresh, animated moves, per-card timers** — non-TCB
   (controlroom views + query). **(a) Crisp refresh:** swap the board / DAG / DLQ
   `hx-trigger` from `sse:agent-event` to **`sse:issue-state`** (keep the `every 15s`
