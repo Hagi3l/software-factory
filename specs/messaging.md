@@ -53,8 +53,9 @@ harness.control.*            core NATS — orchestrator control/health
   harmless. The envelope carries the originating **issue id and role** alongside the
   agent id, so a consumer can scope a feed to a *single live invocation*
   (the [control room](control-room.md)'s invocation view) without a second beads
-  read — the orchestrator already knows the binding when it dispatches, so it stamps
-  it on the event rather than making every viewer reconstruct it.
+  read — the runner already holds the binding (it is in the Brief the orchestrator
+  dispatched), so it stamps it on the event at publish time rather than making every
+  viewer reconstruct it.
 - **Issue-state events** (`issue.<id>.state`) are the single-writer orchestrator's
   typed announcement of an issue *state transition* — it publishes one whenever it
   changes an issue's status (and the stamped `state_entered_at`; see

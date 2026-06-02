@@ -131,8 +131,8 @@ func TestActivityNotAttached(t *testing.T) {
 // id, and the fragment endpoint returns just the rows (no page chrome) for the htmx swap.
 func TestActivityRendersFeed(t *testing.T) {
 	act := live.NewActivity(16)
-	act.Record("inv-7", []byte(`{"type":"progress","payload":{"msg":"author-tests started"}}`))
-	act.Record("inv-7", []byte(`{"type":"token","delta":"writing a test"}`))
+	act.Record("inv-7", "", "", []byte(`{"type":"progress","payload":{"msg":"author-tests started"}}`))
+	act.Record("inv-7", "", "", []byte(`{"type":"token","delta":"writing a test"}`))
 
 	s := New(Options{Activity: act})
 	ts := httptest.NewServer(s.Handler())

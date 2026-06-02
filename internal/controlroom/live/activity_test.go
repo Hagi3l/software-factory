@@ -21,11 +21,31 @@ func toolEvent(label string) []byte {
 	return []byte(fmt.Sprintf(`{"type":"tool","delta":%q}`, label))
 }
 
+func TestActivity_CarriesIssueBinding(t *testing.T) {
+	a := live.NewActivity(16)
+	// The pump tags each event with the invocation id (from the subject) and the issue id +
+	// role (from the wire envelope, plan T4.20). Both a discrete event and a coalesced token
+	// run must carry the binding so a view can scope a feed to one invocation (plan T4.21).
+	a.Record("inv-1", "harness-7", "implementor", token("par"))
+	a.Record("inv-1", "harness-7", "implementor", token("tial"))
+	a.Record("inv-1", "harness-7", "implementor", toolEvent("run_tests"))
+
+	got := a.Recent()
+	if len(got) != 2 {
+		t.Fatalf("entries = %d, want 2 (coalesced token run + tool row)", len(got))
+	}
+	for _, e := range got {
+		if e.IssueID != "harness-7" || e.Role != "implementor" {
+			t.Fatalf("entry %+v missing issue binding, want harness-7 / implementor", e)
+		}
+	}
+}
+
 func TestActivity_CoalescesTokensFromSameAgent(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", token("Hel"))
-	a.Record("inv-1", token("lo "))
-	a.Record("inv-1", token("world"))
+	a.Record("inv-1", "", "", token("Hel"))
+	a.Record("inv-1", "", "", token("lo "))
+	a.Record("inv-1", "", "", token("world"))
 
 	got := a.Recent()
 	if len(got) != 1 {
@@ -44,9 +64,9 @@ func TestActivity_CoalescesTokensFromSameAgent(t *testing.T) {
 
 func TestActivity_CoalescesReasoningFromSameAgent(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", reasoning("Let "))
-	a.Record("inv-1", reasoning("me "))
-	a.Record("inv-1", reasoning("think"))
+	a.Record("inv-1", "", "", reasoning("Let "))
+	a.Record("inv-1", "", "", reasoning("me "))
+	a.Record("inv-1", "", "", reasoning("think"))
 
 	got := a.Recent()
 	if len(got) != 1 {
@@ -62,8 +82,8 @@ func TestActivity_CoalescesReasoningFromSameAgent(t *testing.T) {
 
 func TestActivity_TokenAndReasoningDoNotMerge(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", reasoning("planning"))
-	a.Record("inv-1", token("answer"))
+	a.Record("inv-1", "", "", reasoning("planning"))
+	a.Record("inv-1", "", "", token("answer"))
 
 	got := a.Recent()
 	if len(got) != 2 {
@@ -76,8 +96,8 @@ func TestActivity_TokenAndReasoningDoNotMerge(t *testing.T) {
 
 func TestActivity_ToolEventRendersLabel(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", token("ok"))
-	a.Record("inv-1", toolEvent("write_file index.html"))
+	a.Record("inv-1", "", "", token("ok"))
+	a.Record("inv-1", "", "", toolEvent("write_file index.html"))
 
 	got := a.Recent()
 	if len(got) != 2 {
@@ -93,11 +113,11 @@ func TestActivity_ToolEventRendersLabel(t *testing.T) {
 
 func TestActivity_RecordSystem(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", token("partial"))
+	a.Record("inv-1", "", "", token("partial"))
 	a.RecordSystem("info", "orchestrator", "dispatched issue=harness-1")
 	// A system row between agent tokens must break the token run: the prior entry is a
 	// system row, so the next token cannot reopen the agent's coalesced line.
-	a.Record("inv-1", token("more"))
+	a.Record("inv-1", "", "", token("more"))
 
 	got := a.Recent()
 	if len(got) != 3 {
@@ -121,9 +141,9 @@ func TestActivity_RecordSystem(t *testing.T) {
 
 func TestActivity_DifferentAgentsDoNotCoalesce(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", token("a"))
-	a.Record("inv-2", token("b"))
-	a.Record("inv-1", token("c"))
+	a.Record("inv-1", "", "", token("a"))
+	a.Record("inv-2", "", "", token("b"))
+	a.Record("inv-1", "", "", token("c"))
 
 	got := a.Recent()
 	if len(got) != 3 {
@@ -137,9 +157,9 @@ func TestActivity_DifferentAgentsDoNotCoalesce(t *testing.T) {
 
 func TestActivity_DiscreteEventBreaksTokenRun(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", token("partial"))
-	a.Record("inv-1", []byte(`{"type":"progress","payload":{"msg":"gate passed"}}`))
-	a.Record("inv-1", token("more"))
+	a.Record("inv-1", "", "", token("partial"))
+	a.Record("inv-1", "", "", []byte(`{"type":"progress","payload":{"msg":"gate passed"}}`))
+	a.Record("inv-1", "", "", token("more"))
 
 	got := a.Recent()
 	if len(got) != 3 {
@@ -156,7 +176,7 @@ func TestActivity_DiscreteEventBreaksTokenRun(t *testing.T) {
 
 func TestActivity_SummarizesOpaquePayload(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", []byte(`{"type":"progress","payload":{"step":2,"of":5}}`))
+	a.Record("inv-1", "", "", []byte(`{"type":"progress","payload":{"step":2,"of":5}}`))
 	got := a.Recent()
 	if len(got) != 1 {
 		t.Fatalf("entries = %d, want 1", len(got))
@@ -169,8 +189,8 @@ func TestActivity_SummarizesOpaquePayload(t *testing.T) {
 
 func TestActivity_RecentIsNewestFirst(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", []byte(`{"type":"log","payload":{"msg":"first"}}`))
-	a.Record("inv-2", []byte(`{"type":"log","payload":{"msg":"second"}}`))
+	a.Record("inv-1", "", "", []byte(`{"type":"log","payload":{"msg":"first"}}`))
+	a.Record("inv-2", "", "", []byte(`{"type":"log","payload":{"msg":"second"}}`))
 
 	got := a.Recent()
 	if len(got) != 2 {
@@ -188,7 +208,7 @@ func TestActivity_BoundedToMax(t *testing.T) {
 	a := live.NewActivity(3)
 	for i := 0; i < 10; i++ {
 		// Distinct agents so each event is its own entry (no coalescing).
-		a.Record(fmt.Sprintf("inv-%d", i), token("x"))
+		a.Record(fmt.Sprintf("inv-%d", i), "", "", token("x"))
 	}
 	got := a.Recent()
 	if len(got) != 3 {
@@ -201,8 +221,8 @@ func TestActivity_BoundedToMax(t *testing.T) {
 
 func TestActivity_DropsMalformedPayload(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", []byte(`not json`))
-	a.Record("inv-1", []byte(``))
+	a.Record("inv-1", "", "", []byte(`not json`))
+	a.Record("inv-1", "", "", []byte(``))
 	if got := a.Recent(); len(got) != 0 {
 		t.Fatalf("entries = %d, want 0 (malformed dropped)", len(got))
 	}
@@ -211,7 +231,7 @@ func TestActivity_DropsMalformedPayload(t *testing.T) {
 func TestActivity_RollingTokenTextIsBounded(t *testing.T) {
 	a := live.NewActivity(16)
 	for i := 0; i < 1000; i++ {
-		a.Record("inv-1", token("0123456789"))
+		a.Record("inv-1", "", "", token("0123456789"))
 	}
 	got := a.Recent()
 	if len(got) != 1 {
@@ -230,7 +250,7 @@ func TestActivity_ConcurrentRecord(t *testing.T) {
 		wg.Add(1)
 		go func(i int) {
 			defer wg.Done()
-			a.Record(fmt.Sprintf("inv-%d", i), token("x"))
+			a.Record(fmt.Sprintf("inv-%d", i), "", "", token("x"))
 			_ = a.Recent()
 		}(i)
 	}

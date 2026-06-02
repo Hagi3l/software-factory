@@ -345,6 +345,8 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	// events to this invocation's subject, git push only onto this task's branch.
 	rel := newRelay(adapter, r.pub, sb, relayConfig{
 		eventSubject:  messaging.AgentEventsSubject(invID),
+		issueID:       brief.Issue.ID,
+		role:          brief.Issue.Role,
 		repo:          r.opts.Repo,
 		allowedBranch: core.CandidateBranch(brief.Issue.ID),
 		log:           r.log.With("invocation", invID, "issue", brief.Issue.ID),

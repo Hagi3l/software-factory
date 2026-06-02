@@ -797,13 +797,30 @@ components/artifact-store.md, glossary.md).
   connections per page (page content + status bar + alerts.js notification listener) — fine for a
   single-operator control room, but a future consolidation onto one connection (or h2c) would tidy it.
   (unblocks T4.20+) ([control-room.md](specs/control-room.md), [messaging.md](specs/messaging.md))
-- [ ] **T4.20 Agent-event envelope: issue id + role** — TCB-adjacent (runner/broker emit),
-  human-reviewed. Stamp the originating **issue id and role** onto the `agent.<id>.events`
-  envelope so a consumer can scope a feed to one *live invocation* without a second beads read
-  (messaging.md updated). The runner already holds the binding (it's in the [Brief](specs/glossary.md#brief)),
-  so it stamps it at publish time; `live.AgentEvent` gains the fields and the pump carries them
-  through, and the `live.Activity` entry (already keyed by agent id) gains the issue id. Also
-  sharpens the board-card → running-agent mapping. Publish-only, additive. (unblocks T4.21)
+- [x] **T4.20 Agent-event envelope: issue id + role** — *done.* TCB-adjacent (runner/broker emit),
+  human-reviewed. The originating **issue id + role** now ride on every `agent.<id>.events` payload so a
+  consumer scopes a feed to one *live invocation* without a second beads read. **Single-source wire
+  envelope:** new **`core.AgentEventEnvelope{IssueID, Role, Payload}`** (`internal/core/agent_event.go`,
+  the discipline `core.IssueStateEvent`/`core.DLQAlert` use) wraps the opaque inner event (the existing
+  `runner.tokenEvent` or `broker.PublishRequest`) — the runner is the write side, the control-room pump the
+  read side. **The agent (invocation) id is deliberately NOT in the envelope** — it is the subject's final
+  token (`AgentEventsSubject`), recovered by the consumer, so the payload only adds what the subject does not
+  already say. **Runner:** the `relay` gains `issueID`/`role` (threaded via `relayConfig` from
+  `brief.Issue.{ID,Role}` in `runner.go`); **both** publish paths funnel through one new
+  **`relay.publishEnveloped(payload)`** helper (`publishEvent` for token/reasoning/tool deltas;
+  `PublishEvent` for agent progress/log) so stamping happens in exactly one place. **Pump:**
+  `StartAgentEventPump` now unmarshals the envelope, drops a subject that doesn't parse to an id or a body
+  that isn't a well-formed envelope (best-effort guards matching the other pumps), labels the broadcast with
+  the subject-derived agent id + the envelope's issue/role, and broadcasts the **unwrapped inner event** as the
+  `agent-event` payload. `live.AgentEvent` gained `IssueID`/`Role` (the SSE-broadcast struct; agent id added by
+  the pump). **Buffer:** `live.Activity.Entry` gained `IssueID`/`Role` and `Record(agentID, issueID, role,
+  payload)` records them — so a downstream view (T4.21) filters the feed to one invocation server-side with no
+  beads read. Spec wording corrected: messaging.md now says the **runner** (not orchestrator) stamps the
+  binding at publish time. Publish-only, additive, no new route/flag/config/view → no `docs/` change. Tests:
+  runner `decodeEvent` helper asserts the issue/role stamping on every published event (Complete token + the
+  reasoning/tool batch + PublishEvent); pump round-trips the envelope (agent id from subject, issue/role from
+  body, inner payload unwrapped) into both hub + buffer; new `TestActivity_CarriesIssueBinding` proves the
+  binding lands on both a coalesced token run and a discrete row. `make check` green (lint 0). (unblocks T4.21)
   ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
 - [ ] **T4.21 Live invocation view** — Non-TCB (controlroom). `GET /invocation/{id}` — a scoped
   activity feed filtered **server-side** to one invocation (via T4.20's issue id on the buffer),

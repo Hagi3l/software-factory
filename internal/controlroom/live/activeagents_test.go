@@ -12,9 +12,9 @@ import (
 // events they emitted.
 func TestActiveAgents_CountsDistinctRecentAgents(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", token("he"))
-	a.Record("inv-1", token("llo")) // same agent, coalesced — still one agent
-	a.Record("inv-2", token("hi"))
+	a.Record("inv-1", "", "", token("he"))
+	a.Record("inv-1", "", "", token("llo")) // same agent, coalesced — still one agent
+	a.Record("inv-2", "", "", token("hi"))
 
 	if got := a.ActiveAgents(time.Minute); got != 2 {
 		t.Fatalf("ActiveAgents = %d, want 2 (inv-1, inv-2)", got)
@@ -25,7 +25,7 @@ func TestActiveAgents_CountsDistinctRecentAgents(t *testing.T) {
 // teed log rows (orchestrator/runner/gate) are not agents and must not inflate the figure.
 func TestActiveAgents_ExcludesSystemRows(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", token("x"))
+	a.Record("inv-1", "", "", token("x"))
 	a.RecordSystem("info", "orchestrator", "dispatching")
 	a.RecordSystem("warn", "runner", "provisioning")
 
@@ -39,8 +39,8 @@ func TestActiveAgents_ExcludesSystemRows(t *testing.T) {
 // same path that drops an agent whose only events have aged past the window.
 func TestActiveAgents_WindowExcludesStale(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", token("x"))
-	a.Record("inv-2", token("y"))
+	a.Record("inv-1", "", "", token("x"))
+	a.Record("inv-2", "", "", token("y"))
 
 	if got := a.ActiveAgents(-time.Hour); got != 0 {
 		t.Fatalf("ActiveAgents(-1h) = %d, want 0 (all events older than the cutoff)", got)

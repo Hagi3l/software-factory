@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/Loxstomper/harness/internal/broker"
+	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/sandbox"
 )
@@ -91,10 +92,28 @@ func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Disca
 func testRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox) *relay {
 	return newRelay(adapter, pub, sb, relayConfig{
 		eventSubject:  "harness.agent.inv-1.events",
+		issueID:       "iss-1",
+		role:          "implementor",
 		repo:          "/repo",
 		allowedBranch: "candidate/iss-1",
 		log:           discardLogger(),
 	})
+}
+
+// decodeEvent unwraps one published agent-event wire payload: the issue/role-stamped
+// envelope (core.AgentEventEnvelope) the relay publishes, returning the envelope and the
+// opaque inner event bytes. Every published event funnels through the same envelope, so
+// the tests assert the stamping here and decode the inner event from the returned payload.
+func decodeEvent(t *testing.T, data []byte) (core.AgentEventEnvelope, []byte) {
+	t.Helper()
+	var env core.AgentEventEnvelope
+	if err := json.Unmarshal(data, &env); err != nil {
+		t.Fatalf("unmarshal event envelope: %v", err)
+	}
+	if env.IssueID != "iss-1" || env.Role != "implementor" {
+		t.Errorf("envelope binding = {issue:%q role:%q}, want {iss-1 implementor}", env.IssueID, env.Role)
+	}
+	return env, env.Payload
 }
 
 // --- Complete ----------------------------------------------------------------
@@ -122,8 +141,9 @@ func TestRelayCompleteStreamsDeltasAndTalliesUsage(t *testing.T) {
 	if pub.subj[0] != "harness.agent.inv-1.events" {
 		t.Errorf("event subject = %q, want harness.agent.inv-1.events", pub.subj[0])
 	}
+	_, payload := decodeEvent(t, pub.data[0])
 	var ev tokenEvent
-	if err := json.Unmarshal(pub.data[0], &ev); err != nil {
+	if err := json.Unmarshal(payload, &ev); err != nil {
 		t.Fatalf("unmarshal event: %v", err)
 	}
 	if ev.Type != "token" || ev.Delta != "hel" {
@@ -163,8 +183,9 @@ func TestRelayCompletePublishesReasoningAndToolEvents(t *testing.T) {
 	// tool row per tool call (emitted from the assembled response after the turn).
 	var got []tokenEvent
 	for _, d := range pub.data {
+		_, payload := decodeEvent(t, d)
 		var ev tokenEvent
-		if err := json.Unmarshal(d, &ev); err != nil {
+		if err := json.Unmarshal(payload, &ev); err != nil {
 			t.Fatalf("unmarshal event: %v", err)
 		}
 		got = append(got, ev)
@@ -325,8 +346,9 @@ func TestRelayPublishEvent(t *testing.T) {
 	if pub.count() != 1 || pub.subj[0] != "harness.agent.inv-1.events" {
 		t.Fatalf("published %d events on %v, want 1 on the agent event subject", pub.count(), pub.subj)
 	}
+	_, payload := decodeEvent(t, pub.data[0])
 	var got broker.PublishRequest
-	if err := json.Unmarshal(pub.data[0], &got); err != nil {
+	if err := json.Unmarshal(payload, &got); err != nil {
 		t.Fatalf("unmarshal event: %v", err)
 	}
 	if got.Type != "progress" {

@@ -10,12 +10,16 @@ import (
 )
 
 // AgentEvent is the activity-feed datum a tailed agent event becomes: which invocation
-// emitted it (recovered from the subject) and the raw best-effort payload the broker
-// published on the agent's behalf — a token delta, or a progress/log message. The
-// payload is left as opaque JSON; the feed view (T4.5) decides how to render it, the
-// substrate only labels and delivers it.
+// emitted it (recovered from the subject), the issue id + role it is working (stamped on
+// the wire envelope by the runner, so a consumer can scope a feed to one live invocation
+// without a beads read — plan T4.20), and the raw best-effort payload the broker published
+// on the agent's behalf — a token delta, or a progress/log message. The payload is left as
+// opaque JSON; the feed view (T4.5) decides how to render it, the substrate only labels and
+// delivers it.
 type AgentEvent struct {
 	AgentID string          `json:"agentId"`
+	IssueID string          `json:"issueId,omitempty"`
+	Role    string          `json:"role,omitempty"`
 	Payload json.RawMessage `json:"payload"`
 }
 
@@ -29,21 +33,35 @@ type AgentEvent struct {
 // teardown).
 //
 // Everything here is best-effort, matching the fire-and-forget agent events it tails: a
-// payload that is not valid JSON is dropped (the broker only ever publishes JSON, so
-// this is a guard, not a path), and a stalled browser is dropped by the hub. Losing a
-// live event is harmless (specs/messaging.md); the durable record is the artifact-store
-// transcript, not this stream.
+// subject that does not parse to an invocation id, or a body that is not a well-formed
+// core.AgentEventEnvelope, is dropped (the runner only ever publishes a marshaled envelope on
+// a concrete subject, so these are guards, not paths), and a stalled browser is dropped by the
+// hub. Losing a live event is harmless (specs/messaging.md); the durable record is the
+// artifact-store transcript, not this stream.
+//
+// The wire payload is the runner's issue/role-stamped envelope (core.AgentEventEnvelope); the
+// pump unwraps it, labels the broadcast + buffer entry with the agent id recovered from the
+// subject (the one field the envelope leaves to the subject), and carries the issue id + role
+// through so a downstream view can scope a feed to one invocation (plan T4.20/T4.21).
 func StartAgentEventPump(nc *nats.Conn, h *Hub, act *Activity) (func(), error) {
 	sub, err := nc.Subscribe(messaging.AgentEventsWildcard, func(msg *nats.Msg) {
 		agentID := messaging.AgentIDFromEventSubject(msg.Subject)
-		if act != nil && agentID != "" {
-			act.Record(agentID, msg.Data)
+		if agentID == "" {
+			return
 		}
-		env := AgentEvent{
+		var env core.AgentEventEnvelope
+		if err := json.Unmarshal(msg.Data, &env); err != nil {
+			return
+		}
+		if act != nil {
+			act.Record(agentID, env.IssueID, env.Role, env.Payload)
+		}
+		data, err := json.Marshal(AgentEvent{
 			AgentID: agentID,
-			Payload: json.RawMessage(msg.Data),
-		}
-		data, err := json.Marshal(env)
+			IssueID: env.IssueID,
+			Role:    env.Role,
+			Payload: env.Payload,
+		})
 		if err != nil {
 			return
 		}

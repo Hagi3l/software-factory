@@ -37,8 +37,18 @@ func TestAgentEventPump(t *testing.T) {
 	ch, cancel := hub.Subscribe()
 	defer cancel()
 
-	payload := `{"type":"token","delta":"hi"}`
-	if err := nc.Publish(messaging.AgentEventsSubject("inv-1"), []byte(payload)); err != nil {
+	// The runner publishes the issue/role-stamped envelope (core.AgentEventEnvelope), the
+	// inner event being the opaque token payload.
+	inner := `{"type":"token","delta":"hi"}`
+	env, err := json.Marshal(core.AgentEventEnvelope{
+		IssueID: "harness-7",
+		Role:    "implementor",
+		Payload: json.RawMessage(inner),
+	})
+	if err != nil {
+		t.Fatalf("marshal envelope: %v", err)
+	}
+	if err := nc.Publish(messaging.AgentEventsSubject("inv-1"), env); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if err := nc.Flush(); err != nil {
@@ -53,22 +63,26 @@ func TestAgentEventPump(t *testing.T) {
 	if err := json.Unmarshal([]byte(ev.Data), &got); err != nil {
 		t.Fatalf("unmarshal AgentEvent: %v (data=%q)", err, ev.Data)
 	}
-	if got.AgentID != "inv-1" {
-		t.Fatalf("AgentID = %q, want inv-1", got.AgentID)
+	// AgentID is recovered from the subject; IssueID + Role are carried through from the
+	// envelope so a view can scope a feed to one live invocation (plan T4.20). The broadcast
+	// payload is the unwrapped inner event, not the envelope.
+	if got.AgentID != "inv-1" || got.IssueID != "harness-7" || got.Role != "implementor" {
+		t.Fatalf("AgentEvent = %+v, want inv-1 / harness-7 / implementor", got)
 	}
-	if string(got.Payload) != payload {
-		t.Fatalf("Payload = %q, want %q", string(got.Payload), payload)
+	if string(got.Payload) != inner {
+		t.Fatalf("Payload = %q, want %q", string(got.Payload), inner)
 	}
 
 	// The same event is recorded into the activity buffer, labeled with the agent id
-	// recovered from the subject — so the pump feeds both the live nudge (hub) and the
-	// rendered feed (buffer) from one subscription.
+	// recovered from the subject and the issue id + role from the envelope — so the pump feeds
+	// both the live nudge (hub) and the rendered feed (buffer) from one subscription.
 	rec := act.Recent()
 	if len(rec) != 1 {
 		t.Fatalf("activity entries = %d, want 1", len(rec))
 	}
-	if rec[0].AgentID != "inv-1" || rec[0].Kind != "token" || rec[0].Detail != "hi" {
-		t.Fatalf("activity entry = %+v, want inv-1 token 'hi'", rec[0])
+	if rec[0].AgentID != "inv-1" || rec[0].IssueID != "harness-7" || rec[0].Role != "implementor" ||
+		rec[0].Kind != "token" || rec[0].Detail != "hi" {
+		t.Fatalf("activity entry = %+v, want inv-1 / harness-7 / implementor token 'hi'", rec[0])
 	}
 }
 

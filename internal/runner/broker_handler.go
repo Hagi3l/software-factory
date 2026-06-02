@@ -15,6 +15,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/Loxstomper/harness/internal/broker"
+	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/sandbox"
 	"github.com/Loxstomper/harness/internal/telemetry"
@@ -42,6 +43,8 @@ type relay struct {
 	parentCtx context.Context     // carries the invocation span so brokered spans parent off it
 
 	eventSubject  string // harness.agent.<id>.events — where token/progress events fan out
+	issueID       string // the issue this invocation is working — stamped on every published event
+	role          string // the issue's role/stage — stamped alongside issueID (specs/messaging.md)
 	repo          string // source repository the candidate branch is pushed into
 	allowedBranch string // the ONLY branch this invocation may push (task branch only)
 
@@ -63,6 +66,8 @@ var _ broker.Handler = (*relay)(nil)
 // collaborators, grouped so the constructor call stays legible.
 type relayConfig struct {
 	eventSubject  string
+	issueID       string
+	role          string
 	repo          string
 	allowedBranch string
 	log           *slog.Logger
@@ -85,6 +90,8 @@ func newRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox, cfg rela
 		model:         cfg.model,
 		parentCtx:     cfg.parentCtx,
 		eventSubject:  cfg.eventSubject,
+		issueID:       cfg.issueID,
+		role:          cfg.role,
 		repo:          cfg.repo,
 		allowedBranch: cfg.allowedBranch,
 		pushBundle:    pushBundleToRepo,
@@ -259,7 +266,7 @@ func (r *relay) PublishEvent(_ context.Context, ev broker.PublishRequest) error 
 		return fmt.Errorf("broker: marshal event: %w", err)
 	}
 	r.log.Info("broker: publish event", "type", ev.Type)
-	if err := r.pub.Publish(r.eventSubject, data); err != nil {
+	if err := r.publishEnveloped(data); err != nil {
 		return fmt.Errorf("broker: publish event: %w", err)
 	}
 	return nil
@@ -357,9 +364,27 @@ func (r *relay) publishEvent(ev tokenEvent) {
 	if err != nil {
 		return
 	}
-	if err := r.pub.Publish(r.eventSubject, data); err != nil {
+	if err := r.publishEnveloped(data); err != nil {
 		r.log.Debug("broker: drop live event", "err", err)
 	}
+}
+
+// publishEnveloped wraps one inner event payload in the issue/role-stamped envelope and
+// publishes it to this invocation's event subject. Stamping issue id + role here — the runner
+// holds the binding via the Brief, every event path funnels through this one helper — lets the
+// control room scope a live feed to one invocation without a second beads read (specs/messaging.md,
+// plan T4.20). The agent (invocation) id is not stamped: it is the subject's final token, recovered
+// by the consumer, so the payload only adds what the subject does not already carry.
+func (r *relay) publishEnveloped(payload []byte) error {
+	data, err := json.Marshal(core.AgentEventEnvelope{
+		IssueID: r.issueID,
+		Role:    r.role,
+		Payload: payload,
+	})
+	if err != nil {
+		return fmt.Errorf("broker: marshal event envelope: %w", err)
+	}
+	return r.pub.Publish(r.eventSubject, data)
 }
 
 // pushBundleToRepo applies a git bundle (the candidate branch extracted from the

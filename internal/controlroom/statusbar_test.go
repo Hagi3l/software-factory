@@ -49,8 +49,8 @@ func TestStatusBarFragment(t *testing.T) {
 // activity buffer (not beads): two distinct agents seen recently render as 2.
 func TestStatusBarActiveAgents(t *testing.T) {
 	act := live.NewActivity(16)
-	act.Record("inv-1", []byte(`{"type":"token","delta":"a"}`))
-	act.Record("inv-2", []byte(`{"type":"token","delta":"b"}`))
+	act.Record("inv-1", "", "", []byte(`{"type":"token","delta":"a"}`))
+	act.Record("inv-2", "", "", []byte(`{"type":"token","delta":"b"}`))
 
 	// No open/blocked issues, so the only "2" in the bar is the agent count.
 	s := New(Options{Reader: query.NewReader(&fakeIssues{}, nil, nil), Activity: act})

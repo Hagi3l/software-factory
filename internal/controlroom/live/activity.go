@@ -17,10 +17,16 @@ import (
 // inside a sandbox (AgentID is the invocation id; Kind is token/reasoning/tool/…), while
 // "system" rows are the factory's own log teed in by the bridge (AgentID is the emitting
 // component, e.g. "orchestrator"; Kind is the log level). The view filters on Source.
+//
+// IssueID and Role (agent rows only) are the invocation's binding, carried on the wire
+// envelope (plan T4.20); a view scopes a feed to one live invocation by filtering on IssueID
+// without a second beads read (plan T4.21). They are empty on system rows.
 type Entry struct {
 	Seq     uint64
 	Source  string
 	AgentID string
+	IssueID string
+	Role    string
 	Kind    string
 	Detail  string
 	At      time.Time
@@ -73,9 +79,11 @@ type wireEvent struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-// Record ingests one raw agent-event payload for agentID. A payload that does not
-// parse as a wire event is dropped — matching the best-effort nature of the feed.
-func (a *Activity) Record(agentID string, payload []byte) {
+// Record ingests one agent-event for agentID (the invocation id), tagged with the issue id +
+// role the runner stamped on the wire envelope (plan T4.20) so a view can scope the feed to one
+// invocation. payload is the unwrapped inner event; one that does not parse as a wire event is
+// dropped — matching the best-effort nature of the feed.
+func (a *Activity) Record(agentID, issueID, role string, payload []byte) {
 	var ev wireEvent
 	if err := json.Unmarshal(payload, &ev); err != nil {
 		return
@@ -104,7 +112,7 @@ func (a *Activity) Record(agentID string, payload []byte) {
 		}
 	}
 
-	e := Entry{Source: SourceAgent, AgentID: agentID, Kind: kind, At: now}
+	e := Entry{Source: SourceAgent, AgentID: agentID, IssueID: issueID, Role: role, Kind: kind, At: now}
 	switch kind {
 	case "token", "reasoning":
 		e.Detail = tailRunes(ev.Delta, activityRollingMax)
