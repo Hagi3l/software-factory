@@ -198,7 +198,11 @@ func (r issueJSON) toCore() core.Issue {
 		// the escalation reachable from the issue for the Resolve wizard (T4.15).
 		Transcript:       metaString(r.Metadata, MetadataKeyTranscript),
 		DeadLetterReason: metaString(r.Metadata, MetadataKeyDLQReason),
-		Tags:             parseLabels(r.Labels),
+		// When the issue last entered its current status, stamped atomically by every
+		// status-changing write (setStatus/Claim); the board's time-in-state anchor. Zero
+		// (absent/unparsable) on an issue that has not transitioned since the field landed.
+		StateEnteredAt: metaTime(r.Metadata, MetadataKeyStateEntered),
+		Tags:           parseLabels(r.Labels),
 		// Blocked-by edge targets bd emits inline on the read (the `dependencies` array),
 		// distinct from the write-side Proposal.DependsOn. Empty/absent decodes to nil.
 		DependsOn: dependsOn(r.Dependencies),
@@ -313,6 +317,30 @@ func metaDuration(m map[string]json.RawMessage, key string) time.Duration {
 		return 0
 	}
 	return d
+}
+
+// metaTime returns the time.Time parsed from a metadata key's RFC3339 string value, or the
+// zero Time if absent, not a string, or unparsable. It backs state_entered_at (written by the
+// status-changing writes via stateEnteredNow); lenient for the same reason as metaString —
+// foreign or malformed metadata must never fail a read, it just reads as "not stamped".
+//
+//nolint:unparam // kept uniform with the meta<Type>(m, key) decoder family (metaString/Int/
+// Float/Duration); state_entered_at is its only key today but the timer work (T4.18) adds
+// created_at, so collapsing the signature would only have to be reverted.
+func metaTime(m map[string]json.RawMessage, key string) time.Time {
+	raw, ok := m[key]
+	if !ok {
+		return time.Time{}
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return time.Time{}
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return time.Time{}
+	}
+	return t.UTC()
 }
 
 // decodeIssues parses bd's JSON array of issues. bd emits a JSON array for ready,

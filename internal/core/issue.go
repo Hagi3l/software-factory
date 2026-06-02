@@ -186,6 +186,18 @@ type Issue struct {
 	// specs/control-room.md).
 	DeadLetterReason string
 
+	// StateEnteredAt is when the issue last entered its current beads status — the single
+	// writer stamps it (state_entered_at metadata) in the same transition that changes the
+	// status, so it is the durable anchor the control-room board ticks its "time in current
+	// state" counter from (client-side; the orchestrator never re-renders to tick). Like
+	// Status it is populated when an issue is read back, and it is set (not incremented) on
+	// each transition, so a redelivered result that lands on an already-settled issue — which
+	// the orchestrator ignores without re-writing status — neither moves nor resets it. Zero
+	// for an issue that has not transitioned since this field was introduced (the view then
+	// falls back to the issue's creation time). It rides in beads metadata (see
+	// specs/components/orchestrator.md §9, specs/control-room.md "The board, in motion").
+	StateEnteredAt time.Time
+
 	// DependsOn carries the blocked-by edge targets beads emits inline on a read: the ids
 	// of the issues this one is blocked by (its blockers). Like Status it is populated when
 	// an issue is read back — beads owns these edges (the orchestrator writes them via

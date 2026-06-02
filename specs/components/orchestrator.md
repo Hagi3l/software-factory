@@ -30,6 +30,14 @@ See also: [../architecture.md](../architecture.md), [../workflow.md](../workflow
    [../integration.md](../integration.md).
 8. **Emit telemetry.** Spans for scheduling, gating, and graph transitions. See
    [../observability.md](../observability.md).
+9. **Announce state transitions.** As the single writer, every status change is one
+   place — so on each transition the orchestrator stamps `state_entered_at` on the
+   issue and publishes a typed [issue-state event](../messaging.md). The stamp is the
+   anchor the [board](../control-room.md) ticks its "time in current state" counter
+   from (client-side); the event lets the live views refresh crisply on the actual
+   transition. Both are produced at the *same* single-writer choke point, so they are
+   one addition, not two — and an additive observability emit, never a second source
+   of truth (beads remains authoritative).
 
 ---
 
@@ -62,6 +70,13 @@ loop:
 **Idempotency is mandatory.** Every step must be safe to repeat, because a
 restart re-runs it. "Already dispatched" is derived from beads state + JetStream
 delivery, never from orchestrator memory.
+
+Every status write above (`in_progress`, `advance`, `on_failure`, `dead_letter`,
+`reset`) routes through the single transition choke point that stamps
+`state_entered_at` and publishes the [issue-state event](../messaging.md) — so the
+counter anchor and the live nudge are emitted exactly once per real transition, and
+a redelivered result that lands on an already-settled issue neither re-stamps nor
+re-announces (idempotent, like every other step).
 
 ---
 

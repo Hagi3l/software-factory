@@ -19,10 +19,32 @@ func TestSubjectHelpers(t *testing.T) {
 		{ResultStreamSubjects, "harness.result.>"},
 		{ControlSubjects, "harness.control.*"},
 		{AgentEventsWildcard, "harness.agent.*.events"},
+		{IssueStateSubject("abc123"), "harness.issue.abc123.state"},
+		{IssueStateWildcard, "harness.issue.*.state"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
 			t.Errorf("subject = %q, want %q", c.got, c.want)
+		}
+	}
+}
+
+// TestIssueIDFromStateSubject proves the inverse of IssueStateSubject round-trips and that
+// malformed subjects (the wrong shape, the wildcard itself, an embedded separator, an empty
+// id) yield "" — the T4.17 pump relies on this to label each tailed transition.
+func TestIssueIDFromStateSubject(t *testing.T) {
+	cases := []struct{ subj, want string }{
+		{IssueStateSubject("abc123"), "abc123"},
+		{"harness.issue.harness-7.state", "harness-7"},
+		{"harness.agent.abc.events", ""},
+		{"harness.issue..state", ""},
+		{IssueStateWildcard, ""}, // the literal "*" carries no id
+		{"harness.issue.a.b.state", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := IssueIDFromStateSubject(c.subj); got != c.want {
+			t.Errorf("IssueIDFromStateSubject(%q) = %q, want %q", c.subj, got, c.want)
 		}
 	}
 }

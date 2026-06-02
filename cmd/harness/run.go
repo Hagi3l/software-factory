@@ -345,7 +345,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		Limits:    cfg.Infra.Sandbox.Limits,
 		Logger:    log,
 		Telemetry: tel,
-	}, beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)), gateRunner, orchestrator.NewGitMerger(""), js)
+	}, beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)), gateRunner, orchestrator.NewGitMerger(""), nc, js)
 	if err != nil {
 		return nil, err
 	}

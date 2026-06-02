@@ -76,7 +76,9 @@ func (o *Orchestrator) parkAwaitingApproval(ctx context.Context, issue core.Issu
 	if _, err := o.js.Publish(ctx, o.dlq, data); err != nil {
 		return true, fmt.Errorf("publish approval escalation for %s: %w", issue.ID, err)
 	}
-	if err := o.bd.AwaitApproval(ctx, issue.ID, res.Branch.Ref, string(provJSON)); err != nil {
+	if err := o.transition(ctx, issue, statusBlocked, func(ctx context.Context) error {
+		return o.bd.AwaitApproval(ctx, issue.ID, res.Branch.Ref, string(provJSON))
+	}); err != nil {
 		return true, fmt.Errorf("park issue %s awaiting approval: %w", issue.ID, err)
 	}
 	o.log.Warn("orchestrator: parked integrate candidate awaiting human approval",
@@ -195,7 +197,12 @@ func (o *Orchestrator) resumeApproved(ctx context.Context, issue core.Issue, sta
 		}
 		return transient, err
 	}
-	if err := o.bd.Close(ctx, issue.ID); err != nil {
+	// RecordApproval above is metadata-only (no status change), so it deliberately does NOT
+	// announce — the issue is still blocked. The blocked→closed transition is this Close,
+	// funneled through the choke point so the merge is what announces the closed event.
+	if err := o.transition(ctx, issue, statusClosed, func(ctx context.Context) error {
+		return o.bd.Close(ctx, issue.ID)
+	}); err != nil {
 		return true, fmt.Errorf("close integrated issue %s: %w", issue.ID, err)
 	}
 	o.log.Info("orchestrator: integrated approved candidate", "issue", issue.ID, "approver", req.Approver, "ref", issue.CandidateRef)

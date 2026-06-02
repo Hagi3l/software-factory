@@ -636,6 +636,78 @@ The human's read-only window + the wizard (their only action surface). Stack: te
   validation; server handlers (page render, blast panel, approve success + guards). `make check` green.
   (needs T4.14) ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md), [observability.md](specs/observability.md))
 
+### Live transition events + board-in-motion (T4.16–T4.18)
+
+Implements the now-**decided** control-room refinement (was the "coarse live trigger →
+precise issue-state event" OPEN): the single-writer orchestrator emits a typed
+transition event the board/DAG/DLQ refresh off, giving crisp **animated card moves**
+and the anchor for **per-card timers** (time-in-state + total). The three tasks split
+backend-emit / transport / frontend-consume, the same way T4.3 (SSE plumbing) and T4.4
+(board) were split. Resolves [control-room.md](specs/control-room.md) "The board, in
+motion"; specs already updated (orchestrator.md §9, messaging.md `issue.<id>.state`,
+control-room.md, observability.md).
+
+- [x] **T4.16 Issue-state transition events + `state_entered_at` stamp** — *done.* The
+  single-writer choke point. **TCB-touching (orchestrator), human-reviewed.** **(1) Durable stamp:**
+  `core.Issue.StateEnteredAt time.Time` (beads `state_entered_at`, new `MetadataKeyStateEntered`)
+  is stamped **atomically inside every status-changing bd write** — `setStatus` (Close/Block/
+  AwaitApproval/Release/Reissue) and `Claim` both append a `stateEnteredNow()` `--set-metadata`
+  pair, mirroring how `Claim` already stamps `lease_until` — so the anchor is set exactly once
+  per real transition in a single write (no second write that could fail independently). Decoded
+  back via a new **`metaTime`** sibling of `metaString`/`metaInt`/`metaFloat`/`metaDuration`
+  (RFC3339→UTC, lenient: absent/malformed reads as zero). A **metadata-only** write
+  (PinSpecHash/StampClosingSpend/StampTranscript/**RecordApproval**) deliberately does **not**
+  stamp it — it records the *entry* into a status, not a later annotation. **(2) Live nudge:** new
+  `core.IssueStateEvent{ID,Status,Role,Epic,TS}` (in `core`, single-source like `ApprovalRequest`)
+  published on **`harness.issue.<id>.state`** (new `messaging.IssueStateSubject`/`IssueStateWildcard`/
+  `IssueIDFromStateSubject`, mirroring `AgentEventsSubject` exactly — embedded-separator/wildcard/
+  empty rejected). **One transition helper (`internal/orchestrator/transition.go`):**
+  `o.transition(ctx, issue, to, write)` runs the beads write (which stamps), then on success
+  `announceState` publishes the event best-effort over **core NATS** (`o.nc`, the conn under `js` —
+  issue-state has no stream); a marshal/publish failure is logged, never propagated (callers keep
+  Nak-on-error). **`Epic` = `core.EpicOf`** (root falls back to own id). Every status write now
+  funnels through it: `scheduleReady` Claim (+the failed-publish Release reversal), `accept`/
+  `acceptPlan`/`route`/`resolveConflict` Close, `deadLetter` Block, `parkAwaitingApproval`
+  AwaitApproval, `resumeApproved` Close, `recompileSpecDelta` Reissue, `sweepLeases` Release (best-effort
+  `Get` to populate role/epic, minimal id-only event on a read miss). **Idempotency is provided
+  upstream, not by a stale-status guard:** `handleResult`/`handleApproval` act only while the issue
+  is in its expected transient status, so a redelivery onto an already-settled issue returns before
+  any write — no re-stamp, no re-announce — which is also why `transition` announces unconditionally
+  after a successful write (a guard would wrongly suppress the claim→release reversal). **Constructor
+  change:** `orchestrator.New(...)` gains an `nc *nats.Conn` param (validated, before `js`); wired in
+  `run.go` (`nc` already in scope) and `newOrch` test helper. Core NATS, publish-only, additive — beads
+  stays authoritative. `make check` green (lint 0, **685 pass / 2 skip**). Tests: beads stamp on each
+  transition kind + `metaTime` round-trip/degrade (transitions_test); messaging subject round-trip +
+  malformed-reject; orchestrator transition announces each kind with full payload + non-zero TS,
+  EpicOf fallback, write-failure-no-announce, and settled-issue no-reannounce (via `handleResult`).
+  **Unblocks T4.17** (the SSE pump tailing `harness.issue.*.state`) **→ T4.18** (crisp board refresh,
+  animated moves, per-card timers off `StateEnteredAt`). ([components/orchestrator.md](specs/components/orchestrator.md), [messaging.md](specs/messaging.md))
+- [ ] **T4.17 Issue-state SSE pump** — non-TCB (controlroom). A pump sibling to
+  `StartAgentEventPump` in `internal/controlroom/live`: one wildcard subscribe to
+  `harness.issue.*.state`, each message broadcast to the `Hub` as an **`issue-state`** SSE
+  event (the views consume it as an `hx-trigger` nudge — server-render-a-fragment, not
+  `sse-swap`). Wire it into `buildRunComponents` behind `--serve-addr` alongside the existing
+  agent-event pump (shares the hub; standalone `harness serve` has no NATS, unchanged). Tests:
+  pump over real embedded NATS (event lands on the hub as `issue-state`), subject-parse
+  rejection, ctx-cancel teardown. (needs T4.16) ([messaging.md](specs/messaging.md), [control-room.md](specs/control-room.md))
+- [ ] **T4.18 Board in motion — crisp refresh, animated moves, per-card timers** — non-TCB
+  (controlroom views + query). **(a) Crisp refresh:** swap the board / DAG / DLQ
+  `hx-trigger` from `sse:agent-event` to **`sse:issue-state`** (keep the `every 15s`
+  backstop); the activity feed stays on `agent-event`. **(b) Animated moves:** give each
+  `boardCard` a stable `id`/`view-transition-name` keyed on the issue id and opt the columns
+  swap into the **View Transitions API** (htmx `transition:true` / global config) — browser
+  tweens the column change, instant-swap fallback where unsupported; no client graph/animation
+  lib. **(c) Timers:** decode beads **`created_at`** into `core.Issue.CreatedAt`
+  (`issueJSON` decoder, like `DependsOn`); the card emits `data-state-since`
+  (`StateEnteredAt`, T4.16) + `data-created` epochs; a small `assets/static/` Alpine ticker
+  (`x-data`) renders **time-in-state** (label keyed off status: `working`/`queued`/`blocked`)
+  + **total** every second client-side — server never re-renders to tick. **(d) Optional**
+  `budget.wall` tint on the in-progress timer (amber→rose approaching the cap), reusing the
+  caps already threaded for T4.10 Budgets. Run `make generate` (templ + Tailwind; tint
+  classes are templ switches per the `@source` rule). Tests: query carries `CreatedAt`,
+  beads `created_at` decode, card renders the two data attrs + stable id + transition opt-in,
+  trigger swapped on board/DAG/DLQ, ticker JS present. (needs T4.16, T4.17) ([control-room.md](specs/control-room.md))
+
 ## Phase 5 — Production isolation & distribution
 
 Replaces the bootstrap stand-ins (Docker, in-process NATS, local-repo push, files

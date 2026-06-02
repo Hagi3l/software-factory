@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/Loxstomper/harness/internal/config"
@@ -119,8 +120,13 @@ type Orchestrator struct {
 	gate   Gate
 	merger Merger
 	js     jetstream.JetStream
-	log    *slog.Logger
-	tel    *telemetry.Provider
+	// nc is the core-NATS connection the orchestrator publishes fire-and-forget issue-state
+	// events on (harness.issue.<id>.state). It is the core conn under js — distinct because
+	// issue-state events are core NATS with no stream, not JetStream (see announceState,
+	// specs/messaging.md "Issue-state events").
+	nc  *nats.Conn
+	log *slog.Logger
+	tel *telemetry.Provider
 
 	leaseTTL time.Duration
 	tick     time.Duration
@@ -137,7 +143,7 @@ type Orchestrator struct {
 // store (T1.3/T1.4), the gate runner (T1.17), the git merger, and the JetStream
 // handle used to dispatch work and consume Results. It validates options up front —
 // fail loud, consistent with config validation being a startup gate.
-func New(opts Options, bd Beads, g Gate, merger Merger, js jetstream.JetStream) (*Orchestrator, error) {
+func New(opts Options, bd Beads, g Gate, merger Merger, nc *nats.Conn, js jetstream.JetStream) (*Orchestrator, error) {
 	var problems []string
 	add := func(format string, args ...any) { problems = append(problems, fmt.Sprintf(format, args...)) }
 
@@ -157,6 +163,9 @@ func New(opts Options, bd Beads, g Gate, merger Merger, js jetstream.JetStream) 
 	}
 	if merger == nil {
 		add("merger is required")
+	}
+	if nc == nil {
+		add("nats connection is required (issue-state events)")
 	}
 	if js == nil {
 		add("jetstream handle is required")
@@ -179,6 +188,7 @@ func New(opts Options, bd Beads, g Gate, merger Merger, js jetstream.JetStream) 
 		gate:     g,
 		merger:   merger,
 		js:       js,
+		nc:       nc,
 		log:      log,
 		tel:      tel,
 		leaseTTL: opts.LeaseTTL,

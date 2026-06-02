@@ -388,7 +388,7 @@ func newOrch(t *testing.T, cfg *config.Config, bd Beads, g Gate, m Merger) (*Orc
 	if err := messaging.SetupStreams(context.Background(), js); err != nil {
 		t.Fatalf("setup streams: %v", err)
 	}
-	o, err := New(Options{Config: cfg, Repo: "/repo", Limits: config.SandboxLimits{CPU: 1, Mem: "1Gi", Wall: config.Duration(time.Minute)}}, bd, g, m, js)
+	o, err := New(Options{Config: cfg, Repo: "/repo", Limits: config.SandboxLimits{CPU: 1, Mem: "1Gi", Wall: config.Duration(time.Minute)}}, bd, g, m, nc, js)
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -402,7 +402,7 @@ func inProgress(id, role string, attempt int) core.Issue {
 // --- New validation ----------------------------------------------------------
 
 func TestNewValidatesOptions(t *testing.T) {
-	_, err := New(Options{}, nil, nil, nil, nil)
+	_, err := New(Options{}, nil, nil, nil, nil, nil)
 	if err == nil {
 		t.Fatal("New accepted empty options")
 	}

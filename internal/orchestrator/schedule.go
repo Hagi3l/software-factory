@@ -43,7 +43,12 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 			continue
 		}
 
-		if _, err := o.bd.Claim(ctx, issue.ID, o.leaseTTL); err != nil {
+		// Claim (ready → in_progress) is the dispatch transition, funneled through the single
+		// choke point so it stamps state_entered_at and announces the in_progress event.
+		if err := o.transition(ctx, issue, statusInProgress, func(ctx context.Context) error {
+			_, e := o.bd.Claim(ctx, issue.ID, o.leaseTTL)
+			return e
+		}); err != nil {
 			o.log.Error("orchestrator: claim issue", "issue", issue.ID, "err", err)
 			continue
 		}
@@ -60,8 +65,11 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 		if err := o.publishWork(ctx, issue.Role, brief); err != nil {
 			o.log.Error("orchestrator: publish work, releasing claim", "issue", issue.ID, "err", err)
 			// Undo the claim so the issue returns to ready and is redispatched promptly
-			// rather than waiting for the lease to expire.
-			if rerr := o.bd.Release(ctx, issue.ID); rerr != nil {
+			// rather than waiting for the lease to expire. Through the choke point so the
+			// in_progress→open reversal is announced too (the card returns to the queue).
+			if rerr := o.transition(ctx, issue, statusOpen, func(ctx context.Context) error {
+				return o.bd.Release(ctx, issue.ID)
+			}); rerr != nil {
 				o.log.Error("orchestrator: release after failed publish", "issue", issue.ID, "err", rerr)
 			}
 			continue

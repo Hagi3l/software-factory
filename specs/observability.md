@@ -79,7 +79,11 @@ The control room must show both "everything going on" and the full past:
 
 - **Live** — NATS events → SSE → the board and activity feed update themselves (no
   polling). See [messaging.md](messaging.md), [control-room.md](control-room.md).
-  The activity feed carries two sources side by side: **agent** events brokered from
+  Two event families feed this: the single-writer orchestrator's typed
+  **`issue-state`** transitions (which the board / DAG / dead-letter views refresh off,
+  for crisp animated card moves) and the broker's **`agent-event`** stream (which the
+  activity feed shows). The activity feed carries two sources side by side: **agent**
+  events brokered from
   inside the sandbox (an assistant `token` stream, a `reasoning`/think stream, and one
   `tool` row per tool call), and **system** events — *what the factory itself is doing*
   (dispatch, sandbox provision, gate pass/fail, merge, dead-letter). The system stream

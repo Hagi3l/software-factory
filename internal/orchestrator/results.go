@@ -340,7 +340,9 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 		}
 	}
 
-	if err := o.bd.Close(ctx, issue.ID); err != nil {
+	if err := o.transition(ctx, issue, statusClosed, func(ctx context.Context) error {
+		return o.bd.Close(ctx, issue.ID)
+	}); err != nil {
 		return true, fmt.Errorf("close accepted issue %s: %w", issue.ID, err)
 	}
 	o.log.Info("orchestrator: accepted", "issue", issue.ID, "produces", stage.Produces)
@@ -397,7 +399,9 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage c
 	if _, err := o.bd.Apply(ctx, proposes); err != nil {
 		return true, fmt.Errorf("apply planner proposals for issue %s: %w", issue.ID, err)
 	}
-	if err := o.bd.Close(ctx, issue.ID); err != nil {
+	if err := o.transition(ctx, issue, statusClosed, func(ctx context.Context) error {
+		return o.bd.Close(ctx, issue.ID)
+	}); err != nil {
 		return true, fmt.Errorf("close plan issue %s: %w", issue.ID, err)
 	}
 	o.log.Info("orchestrator: accepted decomposition", "issue", issue.ID, "children", len(res.Proposes))
@@ -562,7 +566,9 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	if err != nil {
 		return true, fmt.Errorf("create on_failure fix issue from %s: %w", issue.ID, err)
 	}
-	if err := o.bd.Close(ctx, issue.ID); err != nil {
+	if err := o.transition(ctx, issue, statusClosed, func(ctx context.Context) error {
+		return o.bd.Close(ctx, issue.ID)
+	}); err != nil {
 		return true, fmt.Errorf("close routed issue %s: %w", issue.ID, err)
 	}
 	for _, c := range created {
@@ -669,7 +675,9 @@ func (o *Orchestrator) resolveConflict(ctx context.Context, issue core.Issue, re
 	if err != nil {
 		return true, fmt.Errorf("create conflict-resolution issue from %s: %w", issue.ID, err)
 	}
-	if err := o.bd.Close(ctx, issue.ID); err != nil {
+	if err := o.transition(ctx, issue, statusClosed, func(ctx context.Context) error {
+		return o.bd.Close(ctx, issue.ID)
+	}); err != nil {
 		return true, fmt.Errorf("close conflicted issue %s: %w", issue.ID, err)
 	}
 	for _, c := range created {
@@ -769,7 +777,9 @@ func (o *Orchestrator) deadLetter(ctx context.Context, issue core.Issue, reason 
 	if _, err := o.js.Publish(ctx, o.dlq, data); err != nil {
 		return true, fmt.Errorf("publish dlq alert for %s: %w", issue.ID, err)
 	}
-	if err := o.bd.Block(ctx, issue.ID, reason); err != nil {
+	if err := o.transition(ctx, issue, statusBlocked, func(ctx context.Context) error {
+		return o.bd.Block(ctx, issue.ID, reason)
+	}); err != nil {
 		return true, fmt.Errorf("block dead-lettered issue %s: %w", issue.ID, err)
 	}
 	o.log.Warn("orchestrator: dead-lettered", "issue", issue.ID, "role", issue.Role, "attempt", issue.Attempt, "reason", reason)

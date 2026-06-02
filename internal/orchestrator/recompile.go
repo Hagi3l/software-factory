@@ -58,7 +58,11 @@ func (o *Orchestrator) recompileSpecDelta(ctx context.Context) {
 		if current == issue.SpecHash {
 			continue
 		}
-		if err := o.bd.Reissue(ctx, issue.ID); err != nil {
+		// Reissue (in_progress → open, clearing the stale pin) is a reset transition, funneled
+		// through the choke point so it stamps state_entered_at and announces the open event.
+		if err := o.transition(ctx, issue, statusOpen, func(ctx context.Context) error {
+			return o.bd.Reissue(ctx, issue.ID)
+		}); err != nil {
 			o.log.Error("orchestrator: reissue spec-drifted issue", "issue", issue.ID, "err", err)
 			continue
 		}

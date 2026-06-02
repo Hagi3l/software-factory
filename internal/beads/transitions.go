@@ -144,6 +144,27 @@ const (
 	MetadataKeyApprovedRef  = "approved_ref"
 )
 
+// MetadataKeyStateEntered holds the time an issue last entered its current beads status
+// (core.Issue.StateEnteredAt), as an RFC3339 UTC timestamp. Every status-changing write
+// stamps it in the SAME bd update that changes the status — setStatus (Close/Block/
+// AwaitApproval/Release/Reissue) and Claim — so it is atomic with the transition and stamped
+// exactly once per real transition, mirroring how Claim stamps lease_until. A metadata-only
+// write (PinSpecHash/StampClosingSpend/StampTranscript/RecordApproval) does NOT touch it: it
+// records the *entry* into a status, not any later annotation. It is the durable anchor the
+// control-room board ticks its time-in-state counter from and the close companion of the
+// fire-and-forget issue-state event the orchestrator publishes on the same transition (see
+// core.IssueStateEvent, specs/components/orchestrator.md §9). Absent (zero) on an issue that
+// has not transitioned since the field was introduced.
+const MetadataKeyStateEntered = "state_entered_at"
+
+// stateEnteredNow returns the --set-metadata argument pair stamping state_entered_at at the
+// current instant (UTC, RFC3339). It is appended to every status-changing write so the stamp
+// is atomic with the status change (a single bd update), never a second write that could fail
+// independently and leave the anchor stale.
+func stateEnteredNow() []string {
+	return []string{"--set-metadata", MetadataKeyStateEntered + "=" + time.Now().UTC().Format(time.RFC3339)}
+}
+
 // The transitions below are the orchestrator's single-writer interface to beads:
 // only the orchestrator mutates the work graph, so funneling every status change
 // and proposal application through these methods is what enforces the single-writer
@@ -165,6 +186,7 @@ func (c *Client) Claim(ctx context.Context, id string, ttl time.Duration) (time.
 	until := time.Now().UTC().Add(ttl)
 	args := []string{"update", id, "--status", "in_progress",
 		"--set-metadata", MetadataKeyLease + "=" + until.Format(time.RFC3339)}
+	args = append(args, stateEnteredNow()...)
 	if _, err := c.run(ctx, args); err != nil {
 		return time.Time{}, fmt.Errorf("beads: claim issue %s: %w", id, err)
 	}
@@ -352,7 +374,10 @@ func (c *Client) setStatus(ctx context.Context, id, status string, extra ...stri
 	if id == "" {
 		return fmt.Errorf("beads: empty issue id")
 	}
+	// Every status change stamps state_entered_at atomically (a single bd update), so the
+	// time-in-state anchor is set exactly once per transition for free — see MetadataKeyStateEntered.
 	args := append([]string{"update", id, "--status", status}, extra...)
+	args = append(args, stateEnteredNow()...)
 	if _, err := c.run(ctx, args); err != nil {
 		return fmt.Errorf("beads: set issue %s status=%s: %w", id, status, err)
 	}

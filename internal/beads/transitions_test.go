@@ -2,6 +2,7 @@ package beads
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -41,12 +42,28 @@ func TestClaimWritesStatusAndLease(t *testing.T) {
 	if !strings.Contains(got, "--set-metadata lease_until=") {
 		t.Errorf("claim args = %q, want lease_until set-metadata", got)
 	}
-	// The lease value must be RFC3339 so the sweep can parse it.
-	leaseArg := (*calls)[0][len((*calls)[0])-1]
-	ts := strings.TrimPrefix(leaseArg, "lease_until=")
+	// Claim also stamps state_entered_at atomically (the time-in-state anchor, T4.16), like
+	// every status-changing write — see MetadataKeyStateEntered.
+	if !strings.Contains(got, "--set-metadata "+MetadataKeyStateEntered+"=") {
+		t.Errorf("claim args = %q, want state_entered_at set-metadata", got)
+	}
+	// The lease value must be RFC3339 so the sweep can parse it. Find it by key rather than
+	// position (state_entered_at now follows it in the arg list).
+	ts := metadataArg((*calls)[0], MetadataKeyLease)
 	if _, perr := time.Parse(time.RFC3339, ts); perr != nil {
 		t.Errorf("lease value %q is not RFC3339: %v", ts, perr)
 	}
+}
+
+// metadataArg returns the value of the first `--set-metadata key=value` pair in a recorded bd
+// call, or "" if absent — a position-independent helper now that several keys ride on one write.
+func metadataArg(args []string, key string) string {
+	for _, a := range args {
+		if v, ok := strings.CutPrefix(a, key+"="); ok {
+			return v
+		}
+	}
+	return ""
 }
 
 func TestClaimRejectsBadInput(t *testing.T) {
@@ -78,10 +95,55 @@ func TestStatusTransitions(t *testing.T) {
 			if err := tc.call(c); err != nil {
 				t.Fatalf("%s: %v", tc.name, err)
 			}
-			if got := strings.Join((*calls)[0], " "); got != tc.wantSub {
-				t.Errorf("args = %q, want %q", got, tc.wantSub)
+			// Every status-changing write now also stamps state_entered_at (T4.16, the
+			// time-in-state anchor), appended after the status/extra args — so assert the
+			// status prefix is intact and the stamp is present, rather than exact equality.
+			got := strings.Join((*calls)[0], " ")
+			if !strings.HasPrefix(got, tc.wantSub) {
+				t.Errorf("args = %q, want prefix %q", got, tc.wantSub)
+			}
+			stamp := metadataArg((*calls)[0], MetadataKeyStateEntered)
+			if stamp == "" {
+				t.Errorf("args = %q, want a state_entered_at stamp", got)
+			} else if _, perr := time.Parse(time.RFC3339, stamp); perr != nil {
+				t.Errorf("state_entered_at %q is not RFC3339: %v", stamp, perr)
 			}
 		})
+	}
+}
+
+// TestStateEnteredRoundTrip pins the read side of the time-in-state anchor (T4.16): a status
+// write stamps state_entered_at as RFC3339, and a subsequent read decodes it back into
+// core.Issue.StateEnteredAt via metaTime (UTC, second-resolution). It uses a recording client
+// to capture what Close stamped, then feeds that metadata through the issue decoder. A real bd
+// round-trip is covered by the broader beads integration test; here the point is the
+// decode-from-metadata contract the control-room board reads.
+func TestStateEnteredRoundTrip(t *testing.T) {
+	c, calls := recordingClient(func([]string) ([]byte, error) { return nil, nil })
+	if err := c.Close(context.Background(), "i"); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	stamp := metadataArg((*calls)[0], MetadataKeyStateEntered)
+	if stamp == "" {
+		t.Fatal("Close did not stamp state_entered_at")
+	}
+	meta := map[string]json.RawMessage{
+		MetadataKeyStateEntered: json.RawMessage(`"` + stamp + `"`),
+	}
+	got := metaTime(meta, MetadataKeyStateEntered)
+	if got.IsZero() {
+		t.Fatalf("metaTime decoded %q to zero", stamp)
+	}
+	want, _ := time.Parse(time.RFC3339, stamp)
+	if !got.Equal(want) {
+		t.Errorf("decoded state_entered_at = %v, want %v", got, want)
+	}
+	// Absent / malformed metadata must decode to the zero time, never fail the read.
+	if !metaTime(map[string]json.RawMessage{}, MetadataKeyStateEntered).IsZero() {
+		t.Error("metaTime on absent key should be zero")
+	}
+	if !metaTime(map[string]json.RawMessage{MetadataKeyStateEntered: json.RawMessage(`"not-a-time"`)}, MetadataKeyStateEntered).IsZero() {
+		t.Error("metaTime on malformed value should be zero")
 	}
 }
 

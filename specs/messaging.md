@@ -26,6 +26,7 @@ host) with zero code change. Location transparency is a first principle.
 harness.work.<role>          JetStream work queue — assignments (pull consumers)
 harness.result.<role>        JetStream — agent Result envelopes
 harness.agent.<id>.events    core NATS — progress/log events (fire-and-forget)
+harness.issue.<id>.state     core NATS — issue state transitions (fire-and-forget)
 harness.dlq                  JetStream — dead-lettered work for human triage
 harness.approvals            JetStream — human approve/reject of parked integrates
 harness.control.*            core NATS — orchestrator control/health
@@ -45,9 +46,21 @@ harness.control.*            core NATS — orchestrator control/health
   embedded NATS is in-process only; to let a separate `harness approve` process reach it,
   `harness run --nats-addr <host:port>` opens an opt-in local TCP listener (a single-host
   convenience, not the distributed cluster — that is T5.8).
-- **Events** are best-effort observability: the [control room](control-room.md)
-  tails them and pushes to browsers over SSE, and they are also emitted as
-  [OpenTelemetry](observability.md) spans. Losing one is harmless.
+- **Agent events** (`agent.<id>.events`) are best-effort observability: the
+  [control room](control-room.md) tails them and pushes to browsers over SSE, and
+  they are also emitted as [OpenTelemetry](observability.md) spans. Losing one is
+  harmless.
+- **Issue-state events** (`issue.<id>.state`) are the single-writer orchestrator's
+  typed announcement of an issue *state transition* — it publishes one whenever it
+  changes an issue's status (and the stamped `state_entered_at`; see
+  [orchestrator.md](components/orchestrator.md)), carrying `{id, status, role, epic,
+  ts}`. They let the [board / DAG / dead-letter views](control-room.md) refresh
+  *crisply on the actual transition* — a card moves columns the moment the
+  orchestrator advances it — rather than polling around agent activity. They are
+  best-effort core NATS like agent events: a dropped one is harmless because the
+  views keep a slow periodic backstop that reconverges them. They are an *additive
+  observability emit* (publish-only, no behaviour change) — beads stays the
+  authoritative state, never reconstructed from these events.
 
 ---
 

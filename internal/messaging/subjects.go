@@ -72,6 +72,39 @@ func AgentIDFromEventSubject(subj string) string {
 	return id
 }
 
+// IssueStateSubject is the core-NATS subject the single-writer orchestrator publishes an
+// issue's state transitions to (the inverse decode is IssueIDFromStateSubject). The control
+// room tails it (T4.17 pump) to refresh the board/DAG/DLQ views crisply on the actual
+// transition — a card moves the moment the orchestrator advances the issue — rather than
+// polling around agent activity. Best-effort core NATS like agent events: losing one is
+// harmless because the views keep a slow periodic backstop that reconverges them (see
+// specs/messaging.md "Issue-state events").
+func IssueStateSubject(issueID string) string { return "harness.issue." + issueID + ".state" }
+
+// IssueStateWildcard matches the state subject of every issue. The control room subscribes
+// to it once to tail all issue-state transitions, mirroring AgentEventsWildcard, rather than
+// per-issue subscriptions it would have to add and drop as work comes and goes.
+const IssueStateWildcard = "harness.issue.*.state"
+
+// IssueIDFromStateSubject recovers the issue id from an issue-state subject (the inverse of
+// IssueStateSubject), returning "" if subj is not a well-formed issue-state subject. The
+// T4.17 pump uses it to label each tailed event with the issue it concerns. It mirrors
+// AgentIDFromEventSubject exactly: a concrete delivered subject has exactly one non-wildcard
+// token in the id position, so an empty id, an embedded separator, or a wildcard token is
+// rejected.
+func IssueIDFromStateSubject(subj string) string {
+	const prefix = "harness.issue."
+	const suffix = ".state"
+	if !strings.HasPrefix(subj, prefix) || !strings.HasSuffix(subj, suffix) {
+		return ""
+	}
+	id := subj[len(prefix) : len(subj)-len(suffix)]
+	if id == "" || strings.ContainsAny(id, ".*>") {
+		return ""
+	}
+	return id
+}
+
 // ControlSubject is a specific orchestrator control/health subject under
 // harness.control.*.
 func ControlSubject(name string) string { return "harness.control." + name }

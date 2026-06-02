@@ -33,7 +33,7 @@ of the build (`go generate`), not the runtime.
 
 | View | Purpose | Source |
 |------|---------|--------|
-| **Board** | kanban over beads issues by stage; live | beads + NATS (SSE) |
+| **Board** | kanban over beads issues by stage; live, with animated card moves and per-card timers | beads + NATS (SSE) |
 | **DAG** | the [issue dependency graph](glossary.md#issue-dependency-graph); blockers, merge order | beads → server-side SVG |
 | **Activity feed** | what the agents *and the factory* are doing right now — agent `token`/`reasoning`/`tool` events plus system lifecycle events, filterable by source | NATS events (SSE) + factory log bridge |
 | **Issue / invocation detail** | Brief, transcript, candidate diff, gate evidence, budget, retries | beads + [artifact store](components/artifact-store.md) + [trace](observability.md) |
@@ -45,12 +45,16 @@ of the build (`go generate`), not the runtime.
 - **Live:** NATS → SSE → htmx swaps; the board and feed update without refresh.
   The live pattern is **server-render-a-fragment + htmx re-fetch**, *not* DOM
   `sse-swap`: a live view wraps its content in an SSE-connected element and
-  re-fetches a bare server-rendered fragment on `hx-trigger="sse:agent-event
+  re-fetches a bare server-rendered fragment on `hx-trigger="sse:<event>
   throttle:Ns, every Ns"` — the SSE event is a *nudge* to refetch, with a slow
   periodic `every Ns` backstop so a settled view still converges when the event
   stream goes idle. `sse-swap` is deliberately avoided because the raw
   `agent-event` payload is JSON (and the runner's per-token stream is a firehose),
   not DOM-ready HTML; rendering stays on the server where the templ components live.
+  Views key their nudge to the **most precise event they can:** the board / DAG /
+  dead-letter views refetch on the typed [`issue-state` event](messaging.md) (so a
+  refresh fires on the actual transition), the activity feed on `agent-event` (the
+  thing it *is* showing); the periodic backstop stays on all of them.
 - **Historical/forensic:** plain server-rendered pages from the stores, with the
   structured timeline from the OTel trace backend. Supports **replay** of an
   invocation's decision trail (see [observability.md](observability.md)). A detail
@@ -61,6 +65,34 @@ of the build (`go generate`), not the runtime.
 - **Serving artifacts:** artifact bytes are untrusted agent output, served
   `text/plain` + `nosniff` and never interpreted as markup — see
   [security.md](security.md) Control 7.
+
+### The board, in motion
+
+The board is a *live* kanban, so two things make a card legible at a glance:
+
+- **Animated moves.** Each card carries a stable identity (the issue id). When the
+  [`issue-state` event](messaging.md) nudges a refetch and the new fragment places a
+  card in a different column, the move is **animated** via the browser's View
+  Transitions API (htmx opts the swap in) — no client-side graph/animation library,
+  no manual DOM diffing; the server still renders the whole fragment and the browser
+  tweens between the two states. Where View Transitions are unsupported the swap is
+  instant (graceful degradation). The animation fires off the typed transition, so a
+  card slides exactly when the orchestrator advances the work.
+- **Per-card timers (client-ticked).** A card shows **time in current state**
+  (`working 2m12s`, `queued 30s`, `blocked 1h` — the label keyed off status) and
+  **total time** since the issue was created. Both are *anchors* the server emits
+  once on the card (the orchestrator-stamped `state_entered_at` for the former,
+  beads' `created_at` for the latter); a small Alpine ticker advances them in the
+  browser every second, so the clock is live **without** the server re-rendering to
+  tick it. The current-state timer resets naturally on the next transition (the
+  refetched card carries a fresh `state_entered_at`). Optionally the in-progress
+  timer tints toward its `budget.wall` ceiling — a live "about to breach" signal off
+  data the orchestrator already enforces.
+
+Note what stays absent **by design**: there is no drag-to-move. Humans never move
+work — the orchestrator is the single writer and the human's only levers are the
+spec (the wizard) and escalations (the dead-letter queue). The board is read-only;
+cards move because the *factory* advanced them, never because a human dragged one.
 
 ---
 
@@ -158,13 +190,12 @@ fresh or unsticking dead-lettered work.
 - **In-session ledger shape:** plain agreed/open checklist vs. the lightly-structured
   items described above (just enough to bind chips/confirm). Currently specified as
   the latter. — *minor, under discussion.*
-- **Coarse live trigger → precise issue-state event:** the live views key their
-  refresh off `agent-event` (per-invocation progress), so a refresh fires on agent
-  *activity*, not precisely on an issue/stage transition. The throttle + periodic
-  backstop converge it, but a dedicated **orchestrator-emitted issue-state event**
-  (from the single writer) would let the board/DAG/DLQ refresh crisply on the actual
-  transition rather than polling around it. — *future refinement, not blocking.*
-  (The activity feed's **system** stream already surfaces those transitions
-  textually via the factory log bridge — *visibility* is solved; this open item is
-  about a *typed* transition event the board/DAG can refresh off precisely.)
+- ~~**Coarse live trigger → precise issue-state event.**~~ **Decided:** the
+  single-writer orchestrator emits a typed [`issue-state` event](messaging.md) on
+  every status transition, and the board / DAG / dead-letter views refresh off it
+  (the activity feed stays on `agent-event` — the thing it shows). This makes card
+  moves crisp and animated and gives the per-card timers their `state_entered_at`
+  anchor (see [The board, in motion](#the-board-in-motion),
+  [orchestrator.md](components/orchestrator.md)). The periodic backstop is retained
+  as the convergence safety net for a dropped best-effort event.
 - Auth / who may operate the control room — TBD.
