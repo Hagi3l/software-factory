@@ -78,7 +78,7 @@ func TestGitMergerWritesProvenanceCommit(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil)
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, nil)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -157,12 +157,19 @@ func TestGitMergerRebasesWhenBaseMoved(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil)
+	var states []string
+	progress := func(s string) { states = append(states, s) }
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, progress)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 	if commit != "prov-rebased" {
 		t.Errorf("commit = %q, want prov-rebased", commit)
+	}
+	// A rebase announces the rebasing step; with a nil regate there is no re-gating emit (the
+	// merger only re-gates a rebased result when a regate callback is supplied) — T4.24.
+	if len(states) != 1 || states[0] != core.MergeStateRebasing {
+		t.Errorf("progress = %v, want exactly one %q emit", states, core.MergeStateRebasing)
 	}
 
 	var addedWorktree, rebased, commitTree []string
@@ -227,16 +234,22 @@ func TestGitMergerReGatesRebasedResult(t *testing.T) {
 	regateProv := testProvenance()
 	regateProv.Verified = []string{"regate-build", "regate-test"} // distinct from the branch gate
 	var gotRef string
+	var states []string
 	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(),
 		func(_ context.Context, landedRef string) (core.Provenance, bool, error) {
 			gotRef = landedRef
 			return regateProv, true, nil
-		})
+		},
+		func(s string) { states = append(states, s) })
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
 	if commit != "prov-rebased" {
 		t.Errorf("commit = %q, want prov-rebased", commit)
+	}
+	// A rebase followed by a re-gate announces both steps, in order — T4.24.
+	if len(states) != 2 || states[0] != core.MergeStateRebasing || states[1] != core.MergeStateReGating {
+		t.Errorf("progress = %v, want [%q %q]", states, core.MergeStateRebasing, core.MergeStateReGating)
 	}
 	// The re-gate graded the PUBLISHED ref (a clonable refs/heads/ branch a verification
 	// sandbox clone can fetch), not the original candidate.
@@ -303,7 +316,7 @@ func TestGitMergerReGateRejectionAbortsMerge(t *testing.T) {
 	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(),
 		func(_ context.Context, _ string) (core.Provenance, bool, error) {
 			return core.Provenance{}, false, nil // the combination failed the re-gate
-		})
+		}, nil)
 	if !errors.Is(err, errReGateFailed) {
 		t.Fatalf("Merge err = %v, want errReGateFailed", err)
 	}
@@ -349,7 +362,7 @@ func TestGitMergerRebaseConflictReported(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil)
+	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, nil)
 	if !errors.Is(err, errRebaseConflict) {
 		t.Fatalf("Merge err = %v, want errRebaseConflict", err)
 	}
@@ -381,7 +394,7 @@ func TestGitMergerIdempotentReMerge(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil)
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, nil)
 	if err != nil {
 		t.Fatalf("Merge (idempotent): %v", err)
 	}

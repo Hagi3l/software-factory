@@ -86,9 +86,11 @@ type Gate interface {
 // re-gated against what will actually land, and a trusted provenance commit is written on
 // top. A rebase conflict is reported, not retried. The regate callback re-verifies the
 // rebased result (see ReGate); a fast-forward, or a nil callback, skips it. gitMerger is
-// the default implementation (see specs/integration.md, specs/bootstrap.md).
+// the default implementation (see specs/integration.md, specs/bootstrap.md). The progress
+// callback announces the merge train's internal steps (rebasing, re-gating) as they happen
+// (T4.24, see MergeProgress); a nil callback skips it.
 type Merger interface {
-	Merge(ctx context.Context, repo, ref string, prov core.Provenance, regate ReGate) (commit string, err error)
+	Merge(ctx context.Context, repo, ref string, prov core.Provenance, regate ReGate, progress MergeProgress) (commit string, err error)
 }
 
 // Options configures an Orchestrator. They are the instance knobs (which config it

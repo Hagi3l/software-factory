@@ -315,12 +315,18 @@ type fakeMerger struct {
 	regateRef string
 }
 
-func (m *fakeMerger) Merge(ctx context.Context, _, ref string, prov core.Provenance, regate ReGate) (string, error) {
+func (m *fakeMerger) Merge(ctx context.Context, _, ref string, prov core.Provenance, regate ReGate, progress MergeProgress) (string, error) {
 	m.mu.Lock()
 	m.refs = append(m.refs, ref)
 	m.mu.Unlock()
 	if m.err != nil {
 		return "", m.err
+	}
+	// Mirror the real merger's step announcements when a re-gate is simulated: a configured
+	// regateRef means main moved, so the candidate is rebased then re-gated before landing.
+	if m.regateRef != "" && regate != nil && progress != nil {
+		progress(core.MergeStateRebasing)
+		progress(core.MergeStateReGating)
 	}
 	if m.regateRef != "" && regate != nil {
 		regated, accepted, err := regate(ctx, m.regateRef)

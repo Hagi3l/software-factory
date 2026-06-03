@@ -512,9 +512,17 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage c
 // (errMergeConflictHandled / errMergeRegateRouted) when resolveConflict/route already disposed
 // of the issue, so callers stop without closing it again.
 func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, srcStage config.Stage, res core.Result, candidateRef string, prov core.Provenance) (bool, error) {
-	commit, err := o.merger.Merge(ctx, o.opts.Repo, candidateRef, prov, o.reGate(issue, srcStage, res))
+	// Announce the merge-queue lifecycle (T4.24). queued on entry (the candidate has reached the
+	// serialized integrate step); the merger announces its internal rebasing/re-gating steps via
+	// the progress closure (which just publishes — the merger stays NATS-unaware); and the
+	// orchestrator announces the terminal step from the Merge return below (landed / conflicted /
+	// regate-failed), so every step a candidate passes through is visible in the merge-queue view.
+	o.announceMergeState(issue, core.MergeStateQueued, "")
+	progress := func(state string) { o.announceMergeState(issue, state, "") }
+	commit, err := o.merger.Merge(ctx, o.opts.Repo, candidateRef, prov, o.reGate(issue, srcStage, res), progress)
 	if err != nil {
 		if errors.Is(err, errRebaseConflict) {
+			o.announceMergeState(issue, core.MergeStateConflicted, "")
 			// The verified candidate cannot be cleanly rebased onto the current main tip:
 			// another branch landed first and they textually collide. Retrying the same
 			// candidate cannot help (the conflict is deterministic), so spawn a sandboxed
@@ -530,6 +538,7 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 			return false, errMergeConflictHandled
 		}
 		if errors.Is(err, errReGateFailed) {
+			o.announceMergeState(issue, core.MergeStateRegateFailed, "")
 			// The candidate rebased cleanly but the re-gate found the combined tree broken:
 			// two branches each green in isolation, broken together (specs/integration.md).
 			// Unlike a conflict this may pass against a different main, so route a fix issue
@@ -543,6 +552,7 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 		}
 		return true, fmt.Errorf("merge candidate %s for issue %s: %w", candidateRef, issue.ID, err)
 	}
+	o.announceMergeState(issue, core.MergeStateLanded, commit)
 	o.log.Info("orchestrator: merged to main", "issue", issue.ID, "ref", candidateRef, "commit", commit,
 		"soul", prov.Soul, "model", prov.Model, "prompt_sha", prov.PromptSHA, "verified", prov.Verified)
 	return false, nil

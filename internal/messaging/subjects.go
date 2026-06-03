@@ -105,6 +105,37 @@ func IssueIDFromStateSubject(subj string) string {
 	return id
 }
 
+// MergeStateSubject is the core-NATS subject the single-writer orchestrator publishes a
+// candidate's merge-queue step transitions to (the inverse decode is IssueIDFromMergeSubject),
+// keyed by the integrating issue's id. The control room tails it (T4.25 pump) to render the
+// merge train in flight — queued → rebasing → re-gating → landed, or the terminal
+// conflicted / regate-failed. It is a distinct subject tree from issue-state because the merge
+// queue is a separate lifecycle layered over the integrate stage (specs/integration.md "The
+// queue announces itself"). Best-effort core NATS like issue-state: losing one is harmless
+// because the view keeps a periodic backstop that reconverges it.
+func MergeStateSubject(issueID string) string { return "harness.merge." + issueID + ".state" }
+
+// MergeStateWildcard matches the merge-state subject of every candidate. The control room
+// subscribes to it once to tail all merge-queue transitions, mirroring IssueStateWildcard.
+const MergeStateWildcard = "harness.merge.*.state"
+
+// IssueIDFromMergeSubject recovers the issue id from a merge-state subject (the inverse of
+// MergeStateSubject), returning "" if subj is not a well-formed merge-state subject. It mirrors
+// IssueIDFromStateSubject exactly: a concrete delivered subject has one non-wildcard token in
+// the id position, so an empty id, an embedded separator, or a wildcard token is rejected.
+func IssueIDFromMergeSubject(subj string) string {
+	const prefix = "harness.merge."
+	const suffix = ".state"
+	if !strings.HasPrefix(subj, prefix) || !strings.HasSuffix(subj, suffix) {
+		return ""
+	}
+	id := subj[len(prefix) : len(subj)-len(suffix)]
+	if id == "" || strings.ContainsAny(id, ".*>") {
+		return ""
+	}
+	return id
+}
+
 // ControlSubject is a specific orchestrator control/health subject under
 // harness.control.*.
 func ControlSubject(name string) string { return "harness.control." + name }

@@ -86,7 +86,7 @@ func TestGitMergerIntegration(t *testing.T) {
 	}
 
 	// --- A: base unmoved → fast-forward-able; a trusted provenance commit on the candidate.
-	cA, err := m.Merge(context.Background(), repo, "candidate/iss-1", provFor("iss-1"), nil)
+	cA, err := m.Merge(context.Background(), repo, "candidate/iss-1", provFor("iss-1"), nil, nil)
 	if err != nil {
 		t.Fatalf("merge A: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestGitMergerIntegration(t *testing.T) {
 			regatedRef = git("rev-parse", "--verify", landedRef) // must resolve: the rebased result is published
 			regatedBase = git("show", landedRef+":base.txt")     // must be the combined tree
 			return regateProvB, true, nil
-		})
+		}, nil)
 	if err != nil {
 		t.Fatalf("merge B (should rebase cleanly over A): %v", err)
 	}
@@ -153,7 +153,7 @@ func TestGitMergerIntegration(t *testing.T) {
 
 	// --- C: edits base.txt where B already did → rebase conflict, reported not retried, and
 	// main is left untouched.
-	if _, err := m.Merge(context.Background(), repo, "candidate/iss-3", provFor("iss-3"), nil); !errors.Is(err, errRebaseConflict) {
+	if _, err := m.Merge(context.Background(), repo, "candidate/iss-3", provFor("iss-3"), nil, nil); !errors.Is(err, errRebaseConflict) {
 		t.Fatalf("merge C err = %v, want errRebaseConflict", err)
 	}
 	if got := git("rev-parse", "refs/heads/main"); got != cB {
@@ -166,7 +166,7 @@ func TestGitMergerIntegration(t *testing.T) {
 	if _, err := m.Merge(context.Background(), repo, "candidate/iss-4", provFor("iss-4"),
 		func(_ context.Context, _ string) (core.Provenance, bool, error) {
 			return core.Provenance{}, false, nil // the combination broke something
-		}); !errors.Is(err, errReGateFailed) {
+		}, nil); !errors.Is(err, errReGateFailed) {
 		t.Fatalf("merge D err = %v, want errReGateFailed", err)
 	}
 	if got := git("rev-parse", "refs/heads/main"); got != cB {
@@ -179,7 +179,7 @@ func TestGitMergerIntegration(t *testing.T) {
 	// --- Idempotent: re-merging A (whose provenance commit is still in main's history below
 	// B) is a no-op that returns the current main, even though A's tip is no longer an
 	// ancestor of main via a simple chain.
-	again, err := m.Merge(context.Background(), repo, "candidate/iss-1", provFor("iss-1"), nil)
+	again, err := m.Merge(context.Background(), repo, "candidate/iss-1", provFor("iss-1"), nil, nil)
 	if err != nil {
 		t.Errorf("re-merge of an already-merged candidate failed: %v", err)
 	}

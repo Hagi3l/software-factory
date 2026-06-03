@@ -887,15 +887,38 @@ components/artifact-store.md, glossary.md).
   unavailable). `make check` green (lint 0, **744 pass / 2 skip**). **Unblocks T4.24/T4.25** (merge-queue
   surface, the last of the T4.19–T4.25 batch). (needs T4.22)
   ([control-room.md](specs/control-room.md), [verification.md](specs/verification.md))
-- [ ] **T4.24 Merge-state transition events** — **TCB-touching** (merge path / orchestrator),
+- [x] **T4.24 Merge-state transition events** — *done.* **TCB-touching** (merge path / orchestrator),
   human-reviewed. The emit half of the merge-queue surface: the orchestrator publishes a typed
-  `core.MergeStateEvent` on **`harness.merge.<id>.state`** at each step the
-  [serialized queue](specs/integration.md) passes through — `queued → rebasing → re-gating → landed`,
-  or terminal `conflicted` / `regate-failed` — additive, best-effort core NATS exactly like
-  `issue-state` (integration.md + messaging.md updated). New `messaging.MergeStateSubject`/`Wildcard`/
-  `IssueIDFromMergeSubject` mirroring the issue-state trio; emitted from the existing `merge.go` steps
-  (the states already exist as control flow, this names and announces them). beads/git stay
-  authoritative. (needs T3.9, T3.10, T3.11) ([integration.md](specs/integration.md), [messaging.md](specs/messaging.md), [components/orchestrator.md](specs/components/orchestrator.md))
+  **`core.MergeStateEvent`** on **`harness.merge.<id>.state`** at each step the
+  [serialized queue](specs/integration.md) passes through — `queued → (rebasing → re-gating →)? landed`,
+  or terminal `conflicted` / `regate-failed` — additive, best-effort core NATS exactly like `issue-state`.
+  **Single-source schema:** new `core.MergeStateEvent{ID,State,Role,Epic,Commit?,TS}` + `MergeState*`
+  state constants (in `core/state_event.go`, the discipline `IssueStateEvent`/`DLQAlert` use); `Commit`
+  is set **only on landed** (the new main tip a landed row links to provenance). **Subjects:** new
+  `messaging.MergeStateSubject`/`MergeStateWildcard`/`IssueIDFromMergeSubject` mirroring the issue-state
+  trio exactly (embedded-separator/wildcard/empty rejected) — a **distinct subject tree** because the
+  merge queue is a lifecycle layered over the integrate stage. **Announce:** new
+  `o.announceMergeState(issue, state, commit)` (sibling of `announceState` in `transition.go`) — fire-and-
+  forget core NATS over `o.nc`, marshal/publish failure logged-not-propagated so the emit can't wedge the
+  merge path. **The split between who emits which state is the design point:** the orchestrator-observable
+  queue steps (`queued` on `mergeCandidate` entry, `landed`/`conflicted`/`regate-failed` off the `Merge`
+  return) are announced by `mergeCandidate`; the merger's *internal* steps (`rebasing`, `re-gating`) are
+  announced via a new **`MergeProgress func(state string)`** callback threaded into the `Merger` interface +
+  `gitMerger.Merge` (a nil-guarded no-op), which the orchestrator passes as a closure that just publishes —
+  so the **git merger stays NATS-unaware**, calling `progress(...)` at the precise rebase/re-gate boundaries
+  exactly as it already calls `ReGate`. A fast-forward (main didn't move) correctly emits only `queued →
+  landed`. beads/git stay authoritative; these events are never the source of truth (the view's periodic
+  backstop reconverges a dropped one). Specs were pre-updated (messaging.md `merge.<id>.state` row + §,
+  integration.md "The queue announces itself"); no CLI/config/route/view change ⇒ **no `docs/` change**
+  (the merge-queue *view* doc lands with T4.25). Tests: messaging subject round-trip + malformed-reject;
+  gitMerger emits `rebasing` (nil-regate, no `re-gating`) and `rebasing→re-gating` (with regate) at the
+  unit level; orchestrator end-to-end via `handleResult` — `queued→landed` (fast-forward, landed carries
+  commit+role+epic, queued carries none), `queued→rebasing→re-gating→landed` (rebase+passing re-gate),
+  `queued→conflicted` (rebase conflict), `queued→rebasing→re-gating→regate-failed` (two-green-branches),
+  each asserting subject-id == body-id (the invariant the T4.25 pump relies on). Updated the `fakeMerger`
+  + all `gitMerger.Merge` test call sites for the new param. `make check` green (lint 0, **749 pass / 2
+  skip**). **Unblocks T4.25** (merge-state SSE pump + merge-queue view, the last of the T4.19–T4.25 batch).
+  (needs T3.9, T3.10, T3.11) ([integration.md](specs/integration.md), [messaging.md](specs/messaging.md), [components/orchestrator.md](specs/components/orchestrator.md))
 - [ ] **T4.25 Merge-state SSE pump + merge-queue view** — Non-TCB (controlroom). The
   transport+consume half: `live.StartMergeStatePump` (sibling of `StartIssueStatePump`) tails
   `harness.merge.*.state` and broadcasts a `merge-state` SSE event; `GET /merge` renders the

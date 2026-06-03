@@ -40,6 +40,17 @@ var errReGateFailed = errors.New("orchestrator: rebased result failed re-gate")
 // branch gate already graded, and pure-git merge tests pass nil).
 type ReGate func(ctx context.Context, landedRef string) (prov core.Provenance, accepted bool, err error)
 
+// MergeProgress is an opaque step callback the merger invokes as a candidate moves through the
+// merge train's *internal* steps — rebasing (the candidate is being replayed onto the current
+// main) and re-gating (the rebased combination is being re-verified). It is how the orchestrator
+// announces those mid-merge transitions (T4.24) without the merger knowing anything about NATS:
+// the orchestrator passes a closure that publishes a core.MergeStateEvent, the merger just calls
+// it at the precise boundary, exactly as it already calls ReGate. The queue-level steps the
+// orchestrator observes directly (queued on entry, landed/conflicted/regate-failed on the
+// Merge return) are announced by the caller, not through this callback. A nil callback is a
+// no-op (pure-git merge tests pass nil), and a state is one of the core.MergeState* constants.
+type MergeProgress func(state string)
+
 // gitMerger is the default Merger. It lands a verified candidate on main as a serialized
 // merge queue (a merge train): each candidate is rebased onto the CURRENT main tip before
 // a trusted provenance commit is written on top, so independently-based green branches
@@ -102,7 +113,10 @@ func NewGitMerger(bin string) Merger {
 // ref and asks regate to verify it, landing only an accepted result and recording the
 // provenance regate returns. A fast-forward skips the re-gate — it lands the exact tree the
 // branch gate already verified, so there is nothing new to grade. A nil regate also skips it.
-func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov core.Provenance, regate ReGate) (string, error) {
+func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov core.Provenance, regate ReGate, progress MergeProgress) (string, error) {
+	if progress == nil {
+		progress = func(string) {} // no-op so the emit sites below need no nil guard
+	}
 	mainTip, err := m.run(ctx, repo, "rev-parse", "--verify", "refs/heads/main")
 	if err != nil {
 		return "", fmt.Errorf("orchestrator: resolve main tip: %w", err)
@@ -128,6 +142,10 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov core.Prove
 	landedRef := ref
 	rebased := false
 	if _, ffErr := m.run(ctx, repo, "merge-base", "--is-ancestor", "refs/heads/main", ref); ffErr != nil {
+		// main moved under the candidate: it must be rebased onto the current tip before it can
+		// land. Announce the step before the (potentially slow, possibly conflicting) rebase so
+		// the merge-queue view shows it in flight, not only after it resolves.
+		progress(core.MergeStateRebasing)
 		rebasedTip, tmpRef, cleanup, conflict, rerr := m.rebaseOntoMain(ctx, repo, ref, prov.Issue)
 		if cleanup != nil {
 			// Defer the temp-ref deletion until after main is advanced, so the rebased
@@ -158,6 +176,9 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov core.Prove
 	// gate already graded (a fast-forward lands that exact tree), so re-gating is confined to
 	// the rebase path — that is where the two-green-branches breakage can hide.
 	if rebased && regate != nil {
+		// Announce the re-gate before running it: this is the step where two independently-green
+		// branches can break together, the one the merge-queue view most wants to surface live.
+		progress(core.MergeStateReGating)
 		regated, accepted, gerr := regate(ctx, landedRef)
 		if gerr != nil {
 			return "", fmt.Errorf("orchestrator: re-gate rebased result for %q: %w", ref, gerr)

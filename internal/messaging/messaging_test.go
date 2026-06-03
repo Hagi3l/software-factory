@@ -49,6 +49,33 @@ func TestIssueIDFromStateSubject(t *testing.T) {
 	}
 }
 
+// TestMergeStateSubject proves the merge-state subject helpers mirror the issue-state trio
+// (T4.24): the constructor round-trips through the inverse, and a malformed subject — the wrong
+// shape, the wildcard itself, an embedded separator, an empty id — yields "" so the T4.25 pump
+// drops it rather than attributing a step to a bogus id.
+func TestMergeStateSubject(t *testing.T) {
+	if got := MergeStateSubject("iss-7"); got != "harness.merge.iss-7.state" {
+		t.Errorf("MergeStateSubject = %q, want harness.merge.iss-7.state", got)
+	}
+	if MergeStateWildcard != "harness.merge.*.state" {
+		t.Errorf("MergeStateWildcard = %q, want harness.merge.*.state", MergeStateWildcard)
+	}
+	cases := []struct{ subj, want string }{
+		{MergeStateSubject("iss-7"), "iss-7"},
+		{"harness.merge.harness-2.state", "harness-2"},
+		{"harness.issue.abc.state", ""}, // issue-state subject, not merge
+		{"harness.merge..state", ""},
+		{MergeStateWildcard, ""}, // the literal "*" carries no id
+		{"harness.merge.a.b.state", ""},
+		{"", ""},
+	}
+	for _, c := range cases {
+		if got := IssueIDFromMergeSubject(c.subj); got != c.want {
+			t.Errorf("IssueIDFromMergeSubject(%q) = %q, want %q", c.subj, got, c.want)
+		}
+	}
+}
+
 // TestAgentIDFromEventSubject proves the inverse of AgentEventsSubject round-trips and
 // that malformed subjects (the wrong shape, the wildcard itself, an empty id) yield ""
 // rather than a bogus id — the control room relies on this to label tailed events.
