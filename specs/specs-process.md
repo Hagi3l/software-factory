@@ -63,7 +63,9 @@ read-only situational awareness: the board, the [event stream](messaging.md),
 Each wizard session stores two things as provenance behind the spec it produces:
 the **conversation transcript** (in the [artifact store](components/artifact-store.md))
 and the **finalized decisions** (a short markdown sidecar in git, per epic/spec
-area). The spec itself stays the source of truth; these are the "why" behind it.
+area — recording both agreed decisions and forks deliberately left open, the latter
+being pre-context for any later `needs-spec-clarification` escalation). The spec
+itself stays the source of truth; these are the "why" behind it.
 Git history of the decisions sidecar is the decision-evolution record — no separate
 status or supersession machinery.
 

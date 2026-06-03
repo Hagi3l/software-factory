@@ -144,32 +144,43 @@ func parseDraft(reply string) (Draft, bool) {
 }
 
 // DecisionRecord is one finalized decision destined for the git decisions sidecar — a settled
-// point and its one-line rationale. It is derived from the agreed items of the alignment
+// point and its one-line rationale. It is derived from the resolved items of the alignment
 // ledger (FinalizedDecisions), keeping the ledger the single source of the "why" rather than
-// asking the planner to re-state decisions in a second place.
+// asking the planner to re-state decisions in a second place. Deferred marks a fork that was
+// knowingly left open rather than decided (T4.27): the sidecar records it as "deliberately left
+// open" — pre-context for the needs-spec-clarification escalation a defer may later raise.
 type DecisionRecord struct {
 	Point     string
 	Rationale string
+	Deferred  bool
 }
 
-// FinalizedDecisions projects the agreed items of an alignment ledger into the decisions
-// sidecar's bullet list: each settled point (with the chosen fork option folded into the
-// point text) plus its rationale. Open items are excluded — only converged decisions are
-// "finalized." This is what makes the ledger, not a parallel block, the source of the sidecar.
+// FinalizedDecisions projects the resolved items of an alignment ledger into the decisions
+// sidecar's bullet list (T4.13/T4.27): each `agreed` point (with the chosen fork option folded
+// into the point text) as a settled decision, and each `deferred` point as an explicitly-recorded
+// open item (Deferred=true) — so the sidecar carries both what was decided *and* what was
+// knowingly left for later. Still-`open`/`discussing` items are excluded — only resolved forks
+// are "finalized" (the approval gate, ApprovalDecisions, auto-defers plain opens before this runs
+// so an approved ledger has none left). This is what makes the ledger, not a parallel block, the
+// source of the sidecar.
 func FinalizedDecisions(items []LedgerItem) []DecisionRecord {
 	var out []DecisionRecord
 	for _, it := range items {
-		if it.Status != ledgerStatusAgreed {
-			continue
-		}
-		point := it.Question
-		for _, o := range it.Options {
-			if o.Selected {
-				point = it.Question + " → " + o.Label
-				break
+		switch it.Status {
+		case ledgerStatusAgreed:
+			point := it.Question
+			for _, o := range it.Options {
+				if o.Selected {
+					point = it.Question + " → " + o.Label
+					break
+				}
 			}
+			out = append(out, DecisionRecord{Point: point, Rationale: it.Rationale})
+		case ledgerStatusDeferred:
+			// A deferred fork is recorded by its question alone — it was *not* decided, so no
+			// option is folded in. The rationale (if any) explains why it was left open.
+			out = append(out, DecisionRecord{Point: it.Question, Rationale: it.Rationale, Deferred: true})
 		}
-		out = append(out, DecisionRecord{Point: point, Rationale: it.Rationale})
 	}
 	return out
 }

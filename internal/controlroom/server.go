@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/a-h/templ"
@@ -206,7 +207,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /create/messages/{session}", s.handleCreateMessages)
 	s.mux.HandleFunc("POST /create/message", s.handleCreateMessage)
 	s.mux.HandleFunc("GET /create/ledger/{session}", s.handleCreateLedger)     // T4.13 — alignment-ledger panel fragment
-	s.mux.HandleFunc("POST /create/ledger/select", s.handleCreateLedgerSelect) // T4.13 — chip click funnels through the planner
+	s.mux.HandleFunc("POST /create/ledger/answer", s.handleCreateLedgerAnswer) // T4.27 — batched fork answers funnel through the planner
 	s.mux.HandleFunc("GET /create/draft/{session}", s.handleCreateDraft)       // T4.14 — drafted spec + seed issues panel fragment
 	s.mux.HandleFunc("POST /create/approve", s.handleCreateApprove)            // T4.14 — the consent gate: commit the approved draft
 
@@ -846,19 +847,22 @@ func (s *Server) handleCreateLedger(w http.ResponseWriter, r *http.Request) {
 	s.render(w, r, views.LedgerPanel(sess.ID, sess.Ledger()))
 }
 
-// handleCreateLedgerSelect records a chip click: it funnels the chosen fork option back
-// through the planner (Session.Choose Sends a canned message so the planner re-emits the
-// ledger reflecting the decision), then returns the transcript fragment so the human's choice
-// shows immediately. The refreshed ledger arrives separately over the `ledger` SSE nudge. An
-// out-of-range index is a no-op inside Choose. Data endpoint: 503 with no planner, 400 on a
-// malformed form, 404 for an unknown session.
-func (s *Server) handleCreateLedgerSelect(w http.ResponseWriter, r *http.Request) {
+// handleCreateLedgerAnswer records a batch of fork answers (T4.27, specs/control-room.md "Forks
+// are surfaced and answered in batches"): the human resolves any combination of open forks in a
+// single submit, and the engine funnels them back through the planner as one user turn (per-fork
+// chip pick / free text / "let's discuss"), so the planner reconciles the whole batch and
+// re-emits the ledger. It returns the transcript fragment so the human's answers show at once;
+// the refreshed ledger arrives separately over the `ledger` SSE nudge. The per-fork inputs are
+// named opt-<i>/text-<i>/discuss-<i>/note-<i> against the latest ledger (the same indices the
+// view rendered); each index is re-resolved in Answer, so a stale index is a no-op. Data
+// endpoint: 503 with no planner, 400 on a malformed form, 404 for an unknown session.
+func (s *Server) handleCreateLedgerAnswer(w http.ResponseWriter, r *http.Request) {
 	if s.planner == nil {
 		http.Error(w, "wizard unavailable: the requirements planner is not configured\n", http.StatusServiceUnavailable)
 		return
 	}
 	if err := r.ParseForm(); err != nil {
-		http.Error(w, "could not parse the selection\n", http.StatusBadRequest)
+		http.Error(w, "could not parse the answers\n", http.StatusBadRequest)
 		return
 	}
 	sess := s.planner.Get(r.FormValue("session"))
@@ -866,10 +870,53 @@ func (s *Server) handleCreateLedgerSelect(w http.ResponseWriter, r *http.Request
 		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
 		return
 	}
-	itemIdx, _ := strconv.Atoi(r.FormValue("item"))
-	optIdx, _ := strconv.Atoi(r.FormValue("option"))
-	sess.Choose(itemIdx, optIdx)
+	sess.Answer(parseForkAnswers(r, len(sess.Ledger())))
 	s.render(w, r, views.WizardTranscript(sess.Messages()))
+}
+
+// parseForkAnswers collects the per-fork answer inputs from a batch submit into []ForkAnswer,
+// one per fork that carries any resolution (a chip pick, free text, or a "let's discuss" flag).
+// It iterates fork indices [0,count) — the latest ledger length — reading the opt-<i>/text-<i>/
+// discuss-<i>/note-<i> fields the view emitted; a fork with none of them is skipped, so an empty
+// submit yields no answers (a no-op in Answer). Indices are re-resolved against the latest ledger
+// in Answer, so a stale index simply drops.
+func parseForkAnswers(r *http.Request, count int) []wizard.ForkAnswer {
+	var answers []wizard.ForkAnswer
+	for i := 0; i < count; i++ {
+		discuss := r.FormValue("discuss-"+strconv.Itoa(i)) != ""
+		text := r.FormValue("text-" + strconv.Itoa(i))
+		optStr := r.FormValue("opt-" + strconv.Itoa(i))
+		if !discuss && strings.TrimSpace(text) == "" && optStr == "" {
+			continue // this fork was left unanswered in the batch
+		}
+		opt := -1
+		if optStr != "" {
+			if v, err := strconv.Atoi(optStr); err == nil {
+				opt = v
+			}
+		}
+		answers = append(answers, wizard.ForkAnswer{
+			ItemIdx: i,
+			OptIdx:  opt,
+			Text:    text,
+			Discuss: discuss,
+			Note:    r.FormValue("note-" + strconv.Itoa(i)),
+		})
+	}
+	return answers
+}
+
+// ledgerBlockedMessage builds the soft-gate refusal notice (T4.27) shown when APPROVE is pressed
+// with forks still under discussion: it names the flagged questions the human must consciously
+// resolve (agree or defer) before the spec can be committed. A discussing item is never
+// auto-deferred — it is the human's own flag, so a stuck discussion can't hold the spec hostage
+// only by their own hand.
+func ledgerBlockedMessage(blocked []wizard.LedgerItem) string {
+	qs := make([]string, 0, len(blocked))
+	for _, it := range blocked {
+		qs = append(qs, it.Question)
+	}
+	return "Cannot approve while these are still under discussion — agree or defer each first: " + strings.Join(qs, "; ") + "."
 }
 
 // handleCreateDraft returns just the draft panel fragment (T4.14) — the proposed spec files +
@@ -924,11 +971,19 @@ func (s *Server) handleCreateApprove(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, views.CreateApproveResult(wizard.SeedResult{}, "Nothing to approve yet — keep the conversation going until the planner drafts a spec and seed issues."))
 		return
 	}
+	// Soft approval gate (T4.27): a converged ledger is required. Items still under discussion
+	// block — the human must consciously resolve them — while plain open forks are auto-deferred
+	// and recorded (nothing dropped silently). decisions is what lands in the sidecar.
+	decisions, blocked := wizard.ApprovalDecisions(sess.Ledger())
+	if len(blocked) > 0 {
+		s.render(w, r, views.CreateApproveResult(wizard.SeedResult{}, ledgerBlockedMessage(blocked)))
+		return
+	}
 	res, err := s.seeder.Seed(r.Context(), wizard.SeedRequest{
 		Summary:    draft.Summary,
 		Specs:      draft.Specs,
 		Issues:     draft.Issues,
-		Decisions:  wizard.FinalizedDecisions(sess.Ledger()),
+		Decisions:  decisions,
 		Transcript: sess.Transcript(),
 	})
 	if err != nil {
@@ -1035,11 +1090,17 @@ func (s *Server) handleResolveApprove(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, views.ResolveApproveResult(wizard.ResolveResult{}, "Nothing to resolve yet — keep the conversation going until the planner drafts a spec refinement."))
 		return
 	}
+	// Soft approval gate (T4.27), same as Create: discussing items block, open forks auto-defer.
+	decisions, blocked := wizard.ApprovalDecisions(sess.Ledger())
+	if len(blocked) > 0 {
+		s.render(w, r, views.ResolveApproveResult(wizard.ResolveResult{}, ledgerBlockedMessage(blocked)))
+		return
+	}
 	res, err := s.resolver.Resolve(r.Context(), wizard.ResolveRequest{
 		IssueID:    sess.ResolveIssue(),
 		Summary:    draft.Summary,
 		Specs:      draft.Specs,
-		Decisions:  wizard.FinalizedDecisions(sess.Ledger()),
+		Decisions:  decisions,
 		Transcript: sess.Transcript(),
 	})
 	if err != nil {

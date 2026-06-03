@@ -91,21 +91,92 @@ func TestParseLedgerSkipsEmpty(t *testing.T) {
 	}
 }
 
-// TestParseLedgerStatusNormalize proves status is normalized case-insensitively: anything that
-// is not "agreed" (any case) becomes "open".
+// TestParseLedgerStatusNormalize proves status is normalized case-insensitively over the four
+// states (T4.27): agreed/discussing/deferred map to themselves (any case), and an unknown or
+// blank value falls back to open.
 func TestParseLedgerStatusNormalize(t *testing.T) {
 	reply := "x\n```ledger\n" +
-		`[{"question":"a","status":"AGREED"},{"question":"b","status":"weird"},{"question":"c","status":""}]` +
+		`[{"question":"a","status":"AGREED"},{"question":"b","status":"weird"},{"question":"c","status":""},` +
+		`{"question":"d","status":"Discussing"},{"question":"e","status":"DEFERRED"}]` +
 		"\n```"
 	items, _ := parseLedger(reply)
-	if len(items) != 3 {
-		t.Fatalf("items = %d, want 3", len(items))
+	if len(items) != 5 {
+		t.Fatalf("items = %d, want 5", len(items))
 	}
 	if items[0].Status != ledgerStatusAgreed {
 		t.Errorf("AGREED should normalize to agreed, got %q", items[0].Status)
 	}
 	if items[1].Status != ledgerStatusOpen || items[2].Status != ledgerStatusOpen {
 		t.Errorf("unknown/blank status should normalize to open, got %q %q", items[1].Status, items[2].Status)
+	}
+	if items[3].Status != ledgerStatusDiscussing {
+		t.Errorf("Discussing should normalize to discussing, got %q", items[3].Status)
+	}
+	if items[4].Status != ledgerStatusDeferred {
+		t.Errorf("DEFERRED should normalize to deferred, got %q", items[4].Status)
+	}
+}
+
+// TestLedgerItemAnswerable proves the answerable predicate (T4.27): open and discussing forks
+// invite input; agreed and deferred are terminal/read-only.
+func TestLedgerItemAnswerable(t *testing.T) {
+	cases := map[string]bool{
+		ledgerStatusOpen:       true,
+		ledgerStatusDiscussing: true,
+		ledgerStatusAgreed:     false,
+		ledgerStatusDeferred:   false,
+	}
+	for status, want := range cases {
+		if got := (LedgerItem{Status: status}).Answerable(); got != want {
+			t.Errorf("Answerable(%q) = %v, want %v", status, got, want)
+		}
+	}
+}
+
+// TestApprovalDecisions proves the soft approval gate (T4.27): a discussing item blocks (decisions
+// nil, the item returned in blocked); otherwise plain open forks are auto-deferred and recorded
+// alongside the agreed decisions.
+func TestApprovalDecisions(t *testing.T) {
+	// A discussing item blocks approval — nothing is finalized.
+	blocking := []LedgerItem{
+		{Question: "Decided", Status: ledgerStatusAgreed},
+		{Question: "Mulling", Status: ledgerStatusDiscussing},
+	}
+	decisions, blocked := ApprovalDecisions(blocking)
+	if decisions != nil {
+		t.Errorf("decisions = %+v, want nil when an item is discussing", decisions)
+	}
+	if len(blocked) != 1 || blocked[0].Question != "Mulling" {
+		t.Fatalf("blocked = %+v, want the discussing item", blocked)
+	}
+
+	// With no discussing item, plain open forks auto-defer and land as recorded open items; agreed
+	// forks land as decisions.
+	converged := []LedgerItem{
+		{Question: "Auth?", Status: ledgerStatusAgreed, Rationale: "Out of scope."},
+		{Question: "Caching?", Status: ledgerStatusOpen, Rationale: "Punt to v2."},
+		{Question: "Already deferred", Status: ledgerStatusDeferred},
+	}
+	decisions, blocked = ApprovalDecisions(converged)
+	if blocked != nil {
+		t.Fatalf("blocked = %+v, want nil for a converged ledger", blocked)
+	}
+	if len(decisions) != 3 {
+		t.Fatalf("decisions = %d, want 3 (agreed + auto-deferred open + already-deferred)", len(decisions))
+	}
+	if decisions[0].Point != "Auth?" || decisions[0].Deferred {
+		t.Errorf("decision[0] = %+v, want the agreed decision", decisions[0])
+	}
+	if decisions[1].Point != "Caching?" || !decisions[1].Deferred {
+		t.Errorf("decision[1] = %+v, want the auto-deferred open fork recorded", decisions[1])
+	}
+	if !decisions[2].Deferred {
+		t.Errorf("decision[2] = %+v, want the already-deferred fork recorded", decisions[2])
+	}
+
+	// autoDeferOpen does not mutate the caller's slice.
+	if converged[1].Status != ledgerStatusOpen {
+		t.Errorf("ApprovalDecisions mutated the source ledger: %+v", converged[1])
 	}
 }
 

@@ -305,7 +305,9 @@ threefold:
    link-integrity, not just issue creation.
 3. **Gate on explicit human approval.** The human reviews the drafted spec + the
    seed issues and approves *before* anything is written. **That approval is the
-   consent boundary** — everything past it is autonomous.
+   consent boundary** — everything past it is autonomous. Approval is itself gated
+   on a converged [alignment ledger](#the-alignment-ledger) (no fork left `open` or
+   `discussing`).
 
 Data flow:
 
@@ -326,15 +328,57 @@ is therefore observable/replayable like any other.
 ## The alignment ledger
 
 Alongside the conversation, a live **ledger** shows where you are — a lightly
-structured list the planner maintains and you steer:
+structured list the planner maintains and you steer. It is the shared "where are
+we" view a plain chat lacks — a *working aid*, not a durable object model.
 
-- **Forks become chips.** When the planner surfaces a decision, it renders the
-  options as selectable chips (with the tradeoff); click one and it moves to
-  *agreed*, or type a nuance and the planner folds it in. Freeform typing is always
-  available.
-- **Each item is agreed or open**, with a one-line rationale. The ledger is the
-  shared "where are we" view a plain chat lacks — a *working aid*, not a durable
-  object model.
+**Forks become chips.** When the planner surfaces a decision, it renders the
+options as selectable chips (with the tradeoff). Each fork offers the same three
+moves: **pick a chip** (it moves to *agreed*); **type free text** (the planner
+folds the nuance in — the canned options are only its *guess* at the answer space,
+and catching where that guess missed is the whole job of this stage, so freeform is
+first-class on *every* fork, never just a fallback); or **flag "let's discuss"**
+(the human isn't ready to decide and wants the planner to go deeper on this one,
+optionally with a note on *what* gives them pause).
+
+**Forks are surfaced and answered in batches, not one at a time.** The planner
+posts a coherent set of currently-independent open forks at once, and the human
+resolves them in any combination in a single submit — far fewer round-trips than a
+linear question-at-a-time chat. Attribution stays unambiguous because **every
+answer carries its fork's id** (free-text answers are prefixed with the fork
+number); the planner reconciles the whole batch on its next turn — *including*
+noticing that one answer made another fork moot ("given your answer to Q1, Q3 falls
+away"). The division of labour is deliberate: the **ledger stays dumb and the
+planner stays smart** — the UI guarantees clean attribution, the planner owns all
+dependency reasoning, so there is no dependency graph to encode in the ledger.
+Dependent forks simply appear in the next batch once their prerequisites are agreed.
+
+**Each item is `open`, `agreed`, `discussing`, or `deferred`**, with a one-line
+rationale. `open` is the start state; it resolves to `agreed` (decided),
+`discussing` (the human flagged it — **non-terminal**: the planner keeps going), or
+`deferred` ("we agree *not* to decide this now" — terminal, and counts as
+resolved). `discussing` is the only non-terminal resolution, which is exactly what
+gates approval.
+
+**Approval is gated on a converged ledger.** Because everything past APPROVE is
+autonomous (the [consent boundary](#the-wizard--the-only-human-in-the-loop-surface)),
+the human cannot commit a spec with a fork still `open` or `discussing`. The gate is
+**soft, not a lock**: the human may press Approve with plain `open` forks remaining,
+which **auto-converts them to `deferred` and records them** — nothing vanishes
+silently and the human stays sovereign. The one exception is `discussing`: an item
+the human *actively* flagged is never auto-deferred out from under them; to approve,
+they must consciously downgrade it to `agreed` or `deferred` themselves. This keeps
+the human's own loop terminating — a stuck discussion can't hold the spec hostage —
+without ever silently dropping a decision.
+
+**Deferring is not free, and that is the point.** A `deferred` fork means the spec
+stays silent on that point, so an implementing agent may later hit it as a
+[spec gap](specs-process.md) and return `needs-spec-clarification` — routing
+straight back into [Resolve mode](#create-and-resolve-are-the-same-component) of
+this same wizard. The discuss/defer mechanic and the dead-letter escalation loop are
+the *same loop at two different times*: decide it now in the conversation, or decide
+it later when an agent forces the issue. So a `deferred` fork is recorded in the
+decisions sidecar ("deliberately left open: X"), and that future escalation arrives
+with its own pre-written context instead of as a surprise.
 
 **What gets stored is deliberately minimal.** The specs are the source of truth;
 the ledger and conversation are *provenance*:
@@ -342,7 +386,10 @@ the ledger and conversation are *provenance*:
 - the **conversation transcript** → the [artifact store](components/artifact-store.md),
   linked from the seed epic (replayable, the "why");
 - the **finalized decisions** → a simple markdown sidecar in git (a short bulleted
-  list, one line of rationale each, per epic/spec area).
+  list, one line of rationale each, per epic/spec area). `agreed` forks land as
+  decisions; `deferred` forks land as explicitly-recorded open items ("deliberately
+  left open: X"), so the sidecar carries both what was decided *and* what was
+  knowingly left for later — pre-context for the escalation a defer may later raise.
 
 Git history of that sidecar *is* the decision-evolution log — there is no
 status/supersession machinery. Changing your mind later just means re-running the
@@ -378,9 +425,12 @@ fresh or unsticking dead-lettered work.
 - **Decomposition preview:** dry-run the planner's breakdown ("this becomes ~5
   implement tasks") inside the wizard before approval. (Leaning defer.) — *under
   discussion.*
-- **In-session ledger shape:** plain agreed/open checklist vs. the lightly-structured
-  items described above (just enough to bind chips/confirm). Currently specified as
-  the latter. — *minor, under discussion.*
+- ~~**In-session ledger shape:** plain agreed/open checklist vs. the
+  lightly-structured items.~~ **Decided:** the lightly-structured shape — forks
+  surfaced and answered in **batches** (every answer carrying its fork id), a
+  first-class free-text move on every fork, and four item states
+  (`open`/`agreed`/`discussing`/`deferred`) with approval **soft-gated** on a
+  converged ledger. See [The alignment ledger](#the-alignment-ledger).
 - ~~**Coarse live trigger → precise issue-state event.**~~ **Decided:** the
   single-writer orchestrator emits a typed [`issue-state` event](messaging.md) on
   every status transition, and the board / DAG / dead-letter views refresh off it

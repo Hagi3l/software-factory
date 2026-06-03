@@ -101,16 +101,24 @@ is autonomous. It's a guided conversation, not a form:
    cases, what to reject, and what's out of scope, converging on testable acceptance
    criteria.
 2. **Alignment ledger** — a live panel beside the conversation showing where things
-   stand: each item agreed or open with a one-line rationale, and forks rendered as
-   selectable chips with their tradeoff. Clicking a chip steers the conversation
-   (it's folded back through the planner, not a separate client-side model).
+   stand: each fork in one of four states (`open`, `agreed`, `discussing`, `deferred`)
+   with a one-line rationale. Forks are surfaced and answered **in batches**: each
+   answerable fork offers selectable option chips, a first-class **free-text** box (for
+   the nuance the canned options missed), and a **"let's discuss"** flag (with an
+   optional note), and you resolve any combination in a single **Submit answers**. Every
+   answer is folded back through the planner (not a separate client-side model), which
+   reconciles the batch on its next turn — including dropping forks one answer made moot.
 3. **Draft** — once intent converges, the planner drafts the spec markdown and the
    seed issues. You see the proposed specs and issues before committing.
-4. **APPROVE** — an explicit consent gate. Approving commits the **server-side** draft
-   (the trusted planner's snapshot, never browser content): it validates the spec
-   (safe paths, link integrity, every spec maps to ≥1 issue, seed issues enter at a
-   legal entry stage), writes the spec files, stores the transcript, writes a decisions
-   sidecar from the agreed ledger items, git-commits, and creates the seed issues. The
+4. **APPROVE** — an explicit consent gate, **soft-gated on a converged ledger**: you
+   cannot commit with a fork still `discussing` (the planner names which to resolve
+   first), but plain `open` forks are **auto-deferred and recorded** rather than blocking
+   you — nothing is silently dropped. Approving commits the **server-side** draft (the
+   trusted planner's snapshot, never browser content): it validates the spec (safe paths,
+   link integrity, every spec maps to ≥1 issue, seed issues enter at a legal entry
+   stage), writes the spec files, stores the transcript, writes a decisions sidecar (the
+   `agreed` forks as decisions and the `deferred` forks as "deliberately left open: X"
+   pre-context for a later escalation), git-commits, and creates the seed issues. The
    running pipeline picks them up.
 
 If the wizard isn't configured (no `requirements_planner` block, or standalone

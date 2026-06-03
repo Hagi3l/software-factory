@@ -297,61 +297,69 @@ func TestLedgerTurnParsesAndStreamsClean(t *testing.T) {
 	}
 }
 
-// TestChooseFunnelsThroughPlanner proves a chip choice with valid indices appends a user turn
-// carrying the canned choice message and dispatches a fresh planner turn; out-of-range indices
-// are a no-op. The first turn seeds a ledger so Choose has something to pick from.
-func TestChooseFunnelsThroughPlanner(t *testing.T) {
+// TestAnswerBatchFunnelsThroughPlanner proves a batch of fork answers (T4.27) is funneled back
+// through the planner as ONE user turn enumerating each answered fork by number (a chip pick, a
+// free-text answer, and a "let's discuss" flag together), and dispatches a fresh planner turn.
+// Out-of-range / empty answers are skipped. The first turn seeds a multi-fork ledger.
+func TestAnswerBatchFunnelsThroughPlanner(t *testing.T) {
 	const seed = "Where we stand.\n```ledger\n" +
 		`[{"question":"Which datastore?","status":"open","options":[` +
 		`{"label":"Postgres","tradeoff":"mature ops","selected":false},` +
-		`{"label":"SQLite","tradeoff":"single-node","selected":false}]}]` +
+		`{"label":"SQLite","tradeoff":"single-node","selected":false}]},` +
+		`{"question":"Auth in v1?","status":"open","options":[]},` +
+		`{"question":"Rate limiting?","status":"open","options":[]}]` +
 		"\n```"
-	const after = "Agreed on Postgres.\n```ledger\n" +
-		`[{"question":"Which datastore?","status":"agreed","options":[` +
-		`{"label":"Postgres","selected":true},{"label":"SQLite","selected":false}]}]` +
+	const after = "Got it.\n```ledger\n" +
+		`[{"question":"Which datastore?","status":"agreed","options":[{"label":"Postgres","selected":true}]}]` +
 		"\n```"
 	srv := modeltest.NewServer(t, []modeltest.Turn{{Text: seed}, {Text: after}})
 	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
 	sess := p.New()
 
-	// First turn seeds the ledger.
-	if !sess.Send("pick a datastore") {
+	if !sess.Send("design the orders service") {
 		t.Fatal("first Send returned false")
 	}
-	waitFor(t, func() bool { return !sess.Busy() && len(sess.Ledger()) == 1 }, "ledger was not seeded")
+	waitFor(t, func() bool { return !sess.Busy() && len(sess.Ledger()) == 3 }, "ledger was not seeded")
 
-	// Out-of-range indices are a no-op: no new turn, no new message.
+	// An empty / all-out-of-range batch is a no-op (no new turn, no new message).
 	before := len(sess.Messages())
-	if got := sess.Choose(5, 0); got != "" {
-		t.Errorf("Choose with bad item index returned %q, want empty", got)
+	if got := sess.Answer(nil); got != "" {
+		t.Errorf("empty batch returned %q, want empty", got)
 	}
-	if got := sess.Choose(0, 9); got != "" {
-		t.Errorf("Choose with bad option index returned %q, want empty", got)
+	if got := sess.Answer([]wizard.ForkAnswer{{ItemIdx: 9, OptIdx: 0}}); got != "" {
+		t.Errorf("out-of-range batch returned %q, want empty", got)
 	}
 	if len(sess.Messages()) != before {
-		t.Errorf("an out-of-range Choose recorded a message")
+		t.Errorf("a no-op Answer recorded a message")
 	}
 
-	// A valid choice appends the canned user message and runs a planner turn.
-	msg := sess.Choose(0, 0)
-	want := `For "Which datastore?", I choose: Postgres.`
-	if msg != want {
-		t.Errorf("Choose message = %q, want %q", msg, want)
+	// A real batch: chip pick on fork 1, free text on fork 2, "let's discuss" on fork 3.
+	msg := sess.Answer([]wizard.ForkAnswer{
+		{ItemIdx: 0, OptIdx: 0},
+		{ItemIdx: 1, OptIdx: -1, Text: "Use the existing OAuth provider."},
+		{ItemIdx: 2, OptIdx: -1, Discuss: true, Note: "unsure of the target"},
+	})
+	for _, want := range []string{
+		"Here are my answers to the open forks:",
+		`1. "Which datastore?" → I choose: Postgres.`,
+		`2. "Auth in v1?" → Use the existing OAuth provider.`,
+		`3. "Rate limiting?" → let's discuss: unsure of the target`,
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("batch message missing %q\ngot: %s", want, msg)
+		}
 	}
-	waitFor(t, func() bool { return !sess.Busy() && len(sess.Messages()) == 4 }, "the choice did not drive a planner turn")
+	waitFor(t, func() bool { return !sess.Busy() && len(sess.Messages()) == 4 }, "the batch did not drive a planner turn")
 
 	msgs := sess.Messages()
-	if msgs[2].Role != "user" || msgs[2].Text != want {
-		t.Errorf("message[2] = %+v, want the canned user choice", msgs[2])
+	if msgs[2].Role != "user" || msgs[2].Text != msg {
+		t.Errorf("message[2] = %+v, want the enumerated batch turn", msgs[2])
 	}
-	if msgs[3].Role != "assistant" || !strings.Contains(msgs[3].Text, "Agreed on Postgres") {
+	if msgs[3].Role != "assistant" || !strings.Contains(msgs[3].Text, "Got it") {
 		t.Errorf("message[3] = %+v, want the planner's follow-up", msgs[3])
 	}
-	if led := sess.Ledger(); len(led) != 1 || led[0].Status != "agreed" {
-		t.Errorf("ledger after choice = %+v, want the item flipped to agreed", led)
-	}
 	if srv.Requests() != 2 {
-		t.Errorf("model requests = %d, want 2 (seed + choice)", srv.Requests())
+		t.Errorf("model requests = %d, want 2 (seed + batch)", srv.Requests())
 	}
 }
 

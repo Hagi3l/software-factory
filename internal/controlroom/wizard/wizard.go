@@ -285,28 +285,58 @@ func (s *Session) Transcript() []byte {
 	return b
 }
 
-// Choose funnels a chip click back through the conversation: it reads the option the human
-// picked from the latest ledger and Sends a canned message naming the question and choice, so
-// the planner re-emits the ledger reflecting the decision (the planner stays the single source
-// of truth — there is no client-side ledger mutation). Out-of-range indices are a no-op (the
-// ledger may have moved on since the page was rendered) and return "". On success it returns
-// the message it sent.
-func (s *Session) Choose(itemIdx, optIdx int) string {
-	s.mu.Lock()
-	if itemIdx < 0 || itemIdx >= len(s.ledger) {
-		s.mu.Unlock()
-		return ""
-	}
-	it := s.ledger[itemIdx]
-	if optIdx < 0 || optIdx >= len(it.Options) {
-		s.mu.Unlock()
-		return ""
-	}
-	question := it.Question
-	label := it.Options[optIdx].Label
-	s.mu.Unlock() // release before Send, which takes the lock itself
+// ForkAnswer is one human resolution to an open fork in a batch submit (T4.27,
+// specs/control-room.md "Forks are surfaced and answered in batches"): which fork (ItemIdx,
+// resolved against the latest ledger snapshot) and the resolution. The three first-class moves
+// are mutually exclusive, applied in precedence order: Discuss (flag "let's discuss", with an
+// optional Note on what gives the human pause) wins; then free Text (the human types the answer,
+// folding in nuance the canned options missed); then a chosen option (OptIdx >= 0, a chip pick).
+// An answer carrying none of these is dropped.
+type ForkAnswer struct {
+	ItemIdx int
+	OptIdx  int // chosen option index, or < 0 for none
+	Text    string
+	Discuss bool
+	Note    string
+}
 
-	msg := fmt.Sprintf("For %q, I choose: %s.", question, label)
+// Answer funnels a batch of fork resolutions back through the conversation as ONE user turn that
+// enumerates each answered fork by its number + question, so the planner attributes every answer
+// unambiguously and reconciles the whole batch on its next turn — including noticing that one
+// answer made another fork moot. Chip picks, free text, and "let's discuss" flags all become
+// lines in that single turn; the planner re-emits the ledger reflecting them (the planner stays
+// the single source of truth — there is no client-side ledger mutation). Each answer's ItemIdx is
+// resolved against the latest ledger; an out-of-range or empty answer is skipped. An empty batch
+// (nothing resolvable) is a no-op returning "". On success it returns the message it sent.
+func (s *Session) Answer(answers []ForkAnswer) string {
+	s.mu.Lock()
+	ledger := slices.Clone(s.ledger)
+	s.mu.Unlock()
+
+	var lines []string
+	for _, a := range answers {
+		if a.ItemIdx < 0 || a.ItemIdx >= len(ledger) {
+			continue // the ledger may have moved on since the page was rendered
+		}
+		it := ledger[a.ItemIdx]
+		n := a.ItemIdx + 1 // 1-based fork number, the id the planner attributes answers by
+		switch {
+		case a.Discuss:
+			line := fmt.Sprintf("%d. %q → let's discuss", n, it.Question)
+			if note := strings.TrimSpace(a.Note); note != "" {
+				line += ": " + note
+			}
+			lines = append(lines, line)
+		case strings.TrimSpace(a.Text) != "":
+			lines = append(lines, fmt.Sprintf("%d. %q → %s", n, it.Question, strings.TrimSpace(a.Text)))
+		case a.OptIdx >= 0 && a.OptIdx < len(it.Options):
+			lines = append(lines, fmt.Sprintf("%d. %q → I choose: %s.", n, it.Question, it.Options[a.OptIdx].Label))
+		}
+	}
+	if len(lines) == 0 {
+		return ""
+	}
+	msg := "Here are my answers to the open forks:\n" + strings.Join(lines, "\n")
 	s.Send(msg)
 	return msg
 }

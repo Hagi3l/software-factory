@@ -5,21 +5,32 @@ import (
 	"strings"
 )
 
-// The alignment ledger (T4.13, specs/control-room.md "The alignment ledger") is a lightly-
-// structured, latest-wins snapshot of where a requirements conversation stands: each item is
-// a point that is either *agreed* or still *open*, with a one-line rationale and — for an
-// unsettled fork — the options under consideration. It is a working aid, not a durable object
-// model: nothing here is persisted (that is the consent-gated APPROVE work). The planner is
-// the single source of truth — it re-emits the COMPLETE ledger each turn as a trailing fenced
-// ```ledger JSON block appended after its prose, which the engine parses out (parseLedger),
-// stores on the session, and the view renders. Chip clicks and freeform both funnel back
-// through Send so the planner re-emits the ledger reflecting the choice; there is no parallel
-// client-side mutable model.
+// The alignment ledger (T4.13/T4.27, specs/control-room.md "The alignment ledger") is a
+// lightly-structured, latest-wins snapshot of where a requirements conversation stands: each
+// item is a fork in one of four states — `open` (the start state), `agreed` (decided),
+// `discussing` (the human flagged it and wants the planner to go deeper — the only non-terminal
+// resolution), or `deferred` (knowingly left for later — terminal, counts as resolved) — with a
+// one-line rationale and, for an unsettled fork, the options under consideration. It is a working
+// aid, not a durable object model: nothing here is persisted (that is the consent-gated APPROVE
+// work). The planner is the single source of truth — it re-emits the COMPLETE ledger each turn as
+// a trailing fenced ```ledger JSON block appended after its prose, which the engine parses out
+// (parseLedger), stores on the session, and the view renders. Chip picks, free text, and
+// "let's discuss" flags all funnel back through Send (Answer) so the planner re-emits the ledger
+// reflecting them; there is no parallel client-side mutable model ("dumb ledger, smart planner").
 type LedgerItem struct {
 	Question  string
-	Status    string // ledgerStatusAgreed or ledgerStatusOpen
+	Status    string // one of the ledgerStatus* states
 	Rationale string
 	Options   []LedgerOption // nil for a settled (non-fork) point
+}
+
+// Answerable reports whether a fork still invites human input: `open` (not yet resolved) and
+// `discussing` (the human flagged it but has not decided) are answerable; `agreed` and
+// `deferred` are terminal and render read-only. The view uses this to decide which forks get
+// chips + a free-text box + a "let's discuss" control, and the soft approval gate uses the
+// two answerable states to decide what blocks (discussing) or is auto-deferred (open).
+func (it LedgerItem) Answerable() bool {
+	return it.Status == ledgerStatusOpen || it.Status == ledgerStatusDiscussing
 }
 
 // LedgerOption is one selectable fork choice with its tradeoff. Selected marks the choice the
@@ -31,8 +42,12 @@ type LedgerOption struct {
 }
 
 const (
-	ledgerStatusAgreed = "agreed"
-	ledgerStatusOpen   = "open"
+	// The four item states (T4.27). open → start state; agreed/deferred → terminal (both count
+	// as *resolved*); discussing → the only non-terminal resolution (the human flagged it).
+	ledgerStatusOpen       = "open"
+	ledgerStatusAgreed     = "agreed"
+	ledgerStatusDiscussing = "discussing"
+	ledgerStatusDeferred   = "deferred"
 	// ledgerFence opens the trailing fenced block the planner appends. The closing fence is a
 	// bare ``` so the block can carry arbitrary JSON without colliding with the opener.
 	ledgerFence = "```ledger"
@@ -143,12 +158,60 @@ func displayProse(reply string) string {
 	return strings.TrimRight(reply[:cut], " \t\r\n")
 }
 
-// normalizeStatus maps the wire status to the canonical ledger status: case-insensitive
-// "agreed" stays agreed, everything else (including blank) is open — open is the safe default
-// for an unrecognized value so an item is never silently treated as settled.
+// normalizeStatus maps the wire status to one of the four canonical ledger states (T4.27),
+// case-insensitively: agreed/discussing/deferred map to themselves, and everything else
+// (including blank or an unrecognized value) falls back to open — open is the safe default so
+// an item is never silently treated as settled, matching T4.13's degrade-gracefully contract.
 func normalizeStatus(s string) string {
-	if strings.EqualFold(strings.TrimSpace(s), ledgerStatusAgreed) {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case ledgerStatusAgreed:
 		return ledgerStatusAgreed
+	case ledgerStatusDiscussing:
+		return ledgerStatusDiscussing
+	case ledgerStatusDeferred:
+		return ledgerStatusDeferred
+	default:
+		return ledgerStatusOpen
 	}
-	return ledgerStatusOpen
+}
+
+// ApprovalDecisions is the soft approval gate (T4.27, specs/control-room.md "Approval is gated
+// on a converged ledger") evaluated server-side over the latest-wins ledger snapshot at the
+// moment of consent. The gate is soft, not a lock:
+//
+//   - Any item still `discussing` BLOCKS approval — it is returned in blocked, and decisions is
+//     nil. A discussing item is one the human *actively* flagged, so it is never auto-deferred
+//     out from under them; they must consciously downgrade it to agreed or deferred first. This
+//     keeps the human's own loop terminating without ever silently dropping a flagged decision.
+//   - Otherwise every still-`open` fork is auto-converted to `deferred` (nothing vanishes
+//     silently — the human may approve with open forks remaining, and they land in the sidecar
+//     as "deliberately left open"), and decisions is the FinalizedDecisions over that converted
+//     ledger: agreed forks as settled decisions, deferred forks as recorded open items.
+//
+// blocked is non-nil only when approval is refused; decisions is non-nil (possibly empty) only
+// when it is allowed. The caller surfaces blocked as a notice and commits decisions otherwise.
+func ApprovalDecisions(items []LedgerItem) (decisions []DecisionRecord, blocked []LedgerItem) {
+	for _, it := range items {
+		if it.Status == ledgerStatusDiscussing {
+			blocked = append(blocked, it)
+		}
+	}
+	if len(blocked) > 0 {
+		return nil, blocked
+	}
+	return FinalizedDecisions(autoDeferOpen(items)), nil
+}
+
+// autoDeferOpen returns a copy of the ledger with every still-`open` item converted to
+// `deferred` — the soft-gate behavior on APPROVE. Only Status is changed, so a shallow clone
+// (sharing the Options slices) is safe.
+func autoDeferOpen(items []LedgerItem) []LedgerItem {
+	out := make([]LedgerItem, len(items))
+	for i, it := range items {
+		if it.Status == ledgerStatusOpen {
+			it.Status = ledgerStatusDeferred
+		}
+		out[i] = it
+	}
+	return out
 }

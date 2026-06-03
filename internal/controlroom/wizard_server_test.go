@@ -202,7 +202,11 @@ func TestCreateLedgerRendersPanel(t *testing.T) {
 		"Which datastore?",        // the question
 		"Postgres",                // a chip label
 		"SQLite",                  // the other chip
-		`hx-post="/create/ledger/select"`, // the chip funnels through the planner
+		`hx-post="/create/ledger/answer"`, // the batch form funnels through the planner
+		`name="opt-0"`,            // the per-fork chip radios
+		`name="text-0"`,           // the first-class free-text box
+		`name="discuss-0"`,        // the "let's discuss" flag
+		"Submit answers",          // the batch submit button
 	} {
 		if !strings.Contains(frag.body, want) {
 			t.Errorf("ledger panel missing %q\nbody: %s", want, frag.body)
@@ -214,47 +218,50 @@ func TestCreateLedgerRendersPanel(t *testing.T) {
 	}
 }
 
-// TestCreateLedgerSelectRecordsTurn proves POST /create/ledger/select funnels a chip choice
-// through the planner — recording the canned user message and returning the transcript
-// fragment — and that an unknown session 404s.
-func TestCreateLedgerSelectRecordsTurn(t *testing.T) {
+// TestCreateLedgerAnswerRecordsTurn proves POST /create/ledger/answer funnels a batch of fork
+// answers through the planner (T4.27) — recording one enumerated user turn and returning the
+// transcript fragment — and that an unknown session 404s.
+func TestCreateLedgerAnswerRecordsTurn(t *testing.T) {
 	const reply = "Where we stand.\n```ledger\n" +
 		`[{"question":"Which datastore?","status":"open","options":[` +
-		`{"label":"Postgres","tradeoff":"mature ops","selected":false}]}]` +
+		`{"label":"Postgres","tradeoff":"mature ops","selected":false}]},` +
+		`{"question":"Auth in v1?","status":"open","options":[]}]` +
 		"\n```"
 	ts, p := wizardServer(t, reply)
 	sess := p.New()
 
-	// Seed the ledger so there is a chip to choose.
-	if !sess.Send("pick a datastore") {
+	// Seed the ledger so there are forks to answer.
+	if !sess.Send("design it") {
 		t.Fatal("Send returned false")
 	}
-	waitFor(t, func() bool { return !sess.Busy() && len(sess.Ledger()) == 1 }, "ledger not seeded")
+	waitFor(t, func() bool { return !sess.Busy() && len(sess.Ledger()) == 2 }, "ledger not seeded")
 
-	form := url.Values{"session": {sess.ID}, "item": {"0"}, "option": {"0"}}
-	pr, err := http.PostForm(ts.URL+"/create/ledger/select", form)
+	// A batch: chip pick on fork 0, free text on fork 1.
+	form := url.Values{"session": {sess.ID}, "opt-0": {"0"}, "text-1": {"Use OAuth."}}
+	pr, err := http.PostForm(ts.URL+"/create/ledger/answer", form)
 	if err != nil {
-		t.Fatalf("POST select: %v", err)
+		t.Fatalf("POST answer: %v", err)
 	}
 	data, _ := io.ReadAll(pr.Body)
 	_ = pr.Body.Close()
 	if pr.StatusCode != http.StatusOK {
-		t.Fatalf("select status = %d, want 200", pr.StatusCode)
+		t.Fatalf("answer status = %d, want 200", pr.StatusCode)
 	}
-	if !strings.Contains(string(data), "I choose: Postgres") {
-		t.Errorf("transcript fragment missing the canned choice: %s", string(data))
+	body := string(data)
+	if !strings.Contains(body, "I choose: Postgres") || !strings.Contains(body, "Use OAuth.") {
+		t.Errorf("transcript fragment missing the batch answers: %s", body)
 	}
-	waitFor(t, func() bool { return !sess.Busy() }, "choice turn did not complete")
+	waitFor(t, func() bool { return !sess.Busy() }, "answer turn did not complete")
 
 	// Unknown session 404s.
-	bad := url.Values{"session": {"deadbeef"}, "item": {"0"}, "option": {"0"}}
-	ur, err := http.PostForm(ts.URL+"/create/ledger/select", bad)
+	bad := url.Values{"session": {"deadbeef"}, "opt-0": {"0"}}
+	ur, err := http.PostForm(ts.URL+"/create/ledger/answer", bad)
 	if err != nil {
-		t.Fatalf("POST select unknown: %v", err)
+		t.Fatalf("POST answer unknown: %v", err)
 	}
 	_ = ur.Body.Close()
 	if ur.StatusCode != http.StatusNotFound {
-		t.Errorf("select unknown session = %d, want 404", ur.StatusCode)
+		t.Errorf("answer unknown session = %d, want 404", ur.StatusCode)
 	}
 }
 
@@ -277,6 +284,23 @@ func (f *fakeSeeder) Seed(_ context.Context, req wizard.SeedRequest) (wizard.See
 const draftReply = "Ready to build.\n```draft\n" +
 	`{"summary":"CSV export","specs":[{"path":"specs/export.md","content":"# Export\n\nBody.\n"}],` +
 	`"issues":[{"title":"Add CSV export","body":"Build it.","spec":"specs/export.md"}]}` +
+	"\n```"
+
+// discussReply carries both a draft and a ledger with an item the human flagged `discussing` —
+// the soft approval gate (T4.27) must refuse to commit while it stands.
+const discussReply = "Let's settle this.\n```ledger\n" +
+	`[{"question":"Which datastore?","status":"discussing","rationale":"Need the scale target."}]` +
+	"\n```\n```draft\n" +
+	`{"summary":"X","specs":[{"path":"specs/x.md","content":"# X\n\nB.\n"}],"issues":[{"title":"Do X","spec":"specs/x.md"}]}` +
+	"\n```"
+
+// deferReply carries a draft and a ledger with one agreed + one still-open fork — approval must
+// succeed, auto-deferring the open fork and recording both in the decisions handed to the Seeder.
+const deferReply = "Ready.\n```ledger\n" +
+	`[{"question":"Auth in v1?","status":"agreed","rationale":"Out of scope."},` +
+	`{"question":"Caching?","status":"open","rationale":"Punt to v2."}]` +
+	"\n```\n```draft\n" +
+	`{"summary":"X","specs":[{"path":"specs/x.md","content":"# X\n\nB.\n"}],"issues":[{"title":"Do X","spec":"specs/x.md"}]}` +
 	"\n```"
 
 // TestCreateDraftRendersPanel proves GET /create/draft/{session} renders the draft fragment: the
@@ -449,6 +473,80 @@ func TestCreateApproveGuards(t *testing.T) {
 		_ = pr.Body.Close()
 		if pr.StatusCode != http.StatusNotFound {
 			t.Errorf("unknown session = %d, want 404", pr.StatusCode)
+		}
+	})
+}
+
+// TestCreateApproveSoftGate proves the T4.27 soft approval gate: an item still `discussing`
+// blocks the commit (the Seeder is never called and the flagged question is named), while plain
+// `open` forks are auto-deferred and recorded — the Seeder receives both the agreed decision and
+// the auto-deferred open fork (marked Deferred), nothing silently dropped.
+func TestCreateApproveSoftGate(t *testing.T) {
+	t.Run("discussing blocks", func(t *testing.T) {
+		seeder := &fakeSeeder{}
+		p := wizard.NewPlanner(scriptedAdapter{reply: discussReply}, "persona", wizard.WithTurnTimeout(5*time.Second))
+		s := New(Options{Planner: p, Seeder: seeder})
+		ts := httptest.NewServer(s.Handler())
+		t.Cleanup(ts.Close)
+		sess := p.New()
+		if !sess.Send("go") {
+			t.Fatal("Send returned false")
+		}
+		waitFor(t, func() bool { return !sess.Busy() && !sess.Draft().Empty() && len(sess.Ledger()) == 1 }, "draft/ledger not produced")
+
+		pr, err := http.PostForm(ts.URL+"/create/approve", url.Values{"session": {sess.ID}})
+		if err != nil {
+			t.Fatalf("POST approve: %v", err)
+		}
+		data, _ := io.ReadAll(pr.Body)
+		_ = pr.Body.Close()
+		body := string(data)
+		if !strings.Contains(body, "under discussion") || !strings.Contains(body, "Which datastore?") {
+			t.Errorf("missing discussing-blocked notice naming the fork: %s", body)
+		}
+		if seeder.got != nil {
+			t.Error("Seeder was called despite a discussing item blocking approval")
+		}
+	})
+
+	t.Run("auto-defers open", func(t *testing.T) {
+		seeder := &fakeSeeder{res: wizard.SeedResult{Commit: "abc1234"}}
+		p := wizard.NewPlanner(scriptedAdapter{reply: deferReply}, "persona", wizard.WithTurnTimeout(5*time.Second))
+		s := New(Options{Planner: p, Seeder: seeder})
+		ts := httptest.NewServer(s.Handler())
+		t.Cleanup(ts.Close)
+		sess := p.New()
+		if !sess.Send("go") {
+			t.Fatal("Send returned false")
+		}
+		waitFor(t, func() bool { return !sess.Busy() && !sess.Draft().Empty() && len(sess.Ledger()) == 2 }, "draft/ledger not produced")
+
+		pr, err := http.PostForm(ts.URL+"/create/approve", url.Values{"session": {sess.ID}})
+		if err != nil {
+			t.Fatalf("POST approve: %v", err)
+		}
+		data, _ := io.ReadAll(pr.Body)
+		_ = pr.Body.Close()
+		if pr.StatusCode != http.StatusOK {
+			t.Fatalf("approve status = %d, want 200", pr.StatusCode)
+		}
+		if !strings.Contains(string(data), "work seeded") {
+			t.Errorf("approve with only open forks should succeed (soft gate): %s", string(data))
+		}
+		if seeder.got == nil {
+			t.Fatal("Seeder was not called")
+		}
+		var agreed, deferred bool
+		for _, d := range seeder.got.Decisions {
+			if d.Point == "Auth in v1?" && !d.Deferred {
+				agreed = true
+			}
+			if d.Point == "Caching?" && d.Deferred {
+				deferred = true
+			}
+		}
+		if !agreed || !deferred {
+			t.Errorf("decisions = %+v, want the agreed fork + the auto-deferred open fork", seeder.got.Decisions)
 		}
 	})
 }

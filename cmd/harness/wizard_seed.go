@@ -360,10 +360,17 @@ func decisionsSidecar(summary string, decisions []wizard.DecisionRecord, transcr
 		b.WriteString("_No structured decisions were recorded for this work._\n")
 	} else {
 		for _, d := range decisions {
+			// A deferred fork (T4.27) was knowingly left open, not decided — record it as such so
+			// the sidecar carries both what was decided and what was set aside (pre-context for the
+			// needs-spec-clarification escalation a defer may later raise).
+			point := d.Point
+			if d.Deferred {
+				point = "Deliberately left open: " + d.Point
+			}
 			if r := strings.TrimSpace(d.Rationale); r != "" {
-				fmt.Fprintf(&b, "- %s — %s\n", d.Point, r)
+				fmt.Fprintf(&b, "- %s — %s\n", point, r)
 			} else {
-				fmt.Fprintf(&b, "- %s\n", d.Point)
+				fmt.Fprintf(&b, "- %s\n", point)
 			}
 		}
 	}

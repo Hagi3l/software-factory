@@ -91,24 +91,33 @@ func TestDisplayProseCutsBothFences(t *testing.T) {
 	}
 }
 
-// TestFinalizedDecisions proves the decisions sidecar is derived from the AGREED ledger items:
-// open items are excluded, and a selected fork option is folded into the point text — so the
-// ledger, not a parallel block, is the single source of the sidecar.
+// TestFinalizedDecisions proves the decisions sidecar is derived from the RESOLVED ledger items
+// (T4.13/T4.27): agreed items become decisions (a selected fork option folded into the point
+// text), deferred items become recorded open items (Deferred=true, question only — no option
+// folded), and still-open/discussing items are excluded — so the ledger, not a parallel block,
+// is the single source of the sidecar.
 func TestFinalizedDecisions(t *testing.T) {
 	items := []LedgerItem{
 		{Question: "Auth in v1?", Status: ledgerStatusAgreed, Rationale: "Out of scope."},
 		{Question: "Datastore?", Status: ledgerStatusAgreed, Rationale: "Ops familiarity.",
 			Options: []LedgerOption{{Label: "Postgres", Selected: true}, {Label: "SQLite"}}},
 		{Question: "Still open?", Status: ledgerStatusOpen, Rationale: "TBD."},
+		{Question: "Under discussion?", Status: ledgerStatusDiscussing, Rationale: "Mulling."},
+		{Question: "Rate limiting?", Status: ledgerStatusDeferred, Rationale: "Punt to v2.",
+			Options: []LedgerOption{{Label: "Token bucket", Selected: true}}},
 	}
 	got := FinalizedDecisions(items)
-	if len(got) != 2 {
-		t.Fatalf("decisions = %d, want 2 (open excluded): %+v", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("decisions = %d, want 3 (open + discussing excluded): %+v", len(got), got)
 	}
-	if got[0].Point != "Auth in v1?" || got[0].Rationale != "Out of scope." {
+	if got[0].Point != "Auth in v1?" || got[0].Rationale != "Out of scope." || got[0].Deferred {
 		t.Errorf("decision[0] wrong: %+v", got[0])
 	}
 	if got[1].Point != "Datastore? → Postgres" {
 		t.Errorf("selected option not folded into point: %q", got[1].Point)
+	}
+	// A deferred fork is recorded by its question alone (no option folded) with Deferred set.
+	if got[2].Point != "Rate limiting?" || !got[2].Deferred {
+		t.Errorf("decision[2] = %+v, want the deferred fork recorded by question only", got[2])
 	}
 }

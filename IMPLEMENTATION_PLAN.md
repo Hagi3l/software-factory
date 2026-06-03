@@ -33,9 +33,9 @@ good autonomous implementation) — a later validation concern, never an enginee
   The verbose per-task findings were pruned once complete — that history lives in git,
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
 - **Open tasks (`- [ ]`) keep their full detail** — Phase 5, plus the handful of optional items
-  left in Phase 2 (T2.11/T2.12). T4.26 (Config view) is now **done**, closing the Phase-4 control
-  room entirely; the only remaining *engineering* of new substrate is Phase 5 (production isolation
-  & distribution).
+  left in Phase 2 (T2.11/T2.12). T4.26 (Config view) closed the original Phase-4 view roster and
+  **T4.27 (ledger batched-forks/discuss-defer/soft-gate) is now done — Phase 4 is fully complete**;
+  the only remaining *engineering* of new substrate is Phase 5 (production isolation & distribution).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -1000,6 +1000,39 @@ components/artifact-store.md, glossary.md).
   (nil-config notice, full render incl. masked-secret-no-leak + nav highlight + not-a-feed). `make check`-adjacent
   green: `go build ./...`, `go vet ./...`, `golangci-lint` (0 issues), `go test ./...` all pass.
   ([control-room.md](specs/control-room.md), [configuration.md](specs/configuration.md))
+- [x] **T4.27 Ledger: batched forks, free-text, discuss/defer states + soft approval gate** — *done.*
+  **Non-TCB** (controlroom + the trusted planner persona). Extends T4.13/T4.14 without replacing them — the
+  planner stays the single source of truth (it re-emits the COMPLETE ```ledger block each turn; the engine keeps
+  a latest-wins snapshot). **(1) Four item states:** `normalizeStatus` (`ledger.go`) now maps
+  `open`/`agreed`/`discussing`/`deferred` (unknown→open, never errors); `LedgerItem.Answerable()` = open||discussing
+  drives which forks invite input and the gate. Views tint each state (agreed→ok, open→warn, discussing→
+  `st-progress` "needs you", deferred→`st-idle` muted). **(2) Batched forks:** `Session.Choose` (one canned turn
+  per chip) replaced by **`Session.Answer([]ForkAnswer)`** — one user turn enumerating each answered fork by its
+  1-based number + question (chip pick / free text / "let's discuss"+note, precedence in that order), so the
+  planner attributes unambiguously and reconciles the batch (dropping moot forks). The ledger panel is now ONE
+  batch `<form>` POSTing `/create/ledger/answer` (replaces `/create/ledger/select`); each answerable fork renders
+  option chips (radios `opt-<i>`), a first-class free-text box (`text-<i>`), and a discuss checkbox+note
+  (`discuss-<i>`/`note-<i>`); `parseForkAnswers` (server) collects them against the latest ledger. "Dumb ledger,
+  smart planner" — no dependency graph in the engine. **(3) Soft approval gate:** new
+  **`wizard.ApprovalDecisions(items) (decisions, blocked)`** — a `discussing` item BLOCKS (returned in `blocked`,
+  decisions nil; never auto-deferred — the human's own flag); otherwise plain `open` forks **auto-defer**
+  (`autoDeferOpen`) and the converged ledger yields the decisions. Both `handleCreateApprove` and
+  `handleResolveApprove` enforce it server-side before committing (`ledgerBlockedMessage` names the flagged
+  questions). **(4) Deferred in the sidecar:** `DecisionRecord` gained `Deferred bool`; `FinalizedDecisions` now
+  emits agreed forks as decisions AND deferred forks as recorded open items (question only, no option folded); the
+  cmd-side `decisionsSidecar` renders them as "Deliberately left open: X" — pre-context for a later
+  needs-spec-clarification escalation. **Persona:** the requirements-planner alignment-ledger section rewritten
+  for the four states, batched independent forks, the `Here are my answers to the open forks:` enumerated-answer
+  format, marking `discussing` when flagged, and dropping moot forks. **Docs:** `docs/control-room.md` wizard
+  section updated (four states, batched/free-text/discuss, soft gate, deferred sidecar). `make generate` ran
+  (st-progress/st-idle tints compiled). Tests: `normalizeStatus` 4 states + unknown→open, `Answerable`,
+  `ApprovalDecisions` (discussing blocks / open auto-defers + no source mutation), `FinalizedDecisions` with
+  deferred, `Answer` batch (enumerated turn + chip/text/discuss + out-of-range skip), server
+  `/create/ledger/answer` round-trip + panel renders the new inputs, and the soft-gate approve (discussing blocks
+  Seeder, open auto-defers into the Seeder's decisions). lint 0, **785 pass / 2 skip** (the runner full-suite
+  timeout is the documented NATS-teardown flake; runner passes in isolation in 0.08s). **Completes Phase 4.**
+  (needs T4.13, T4.14; touches T4.15's sidecar consumer)
+  ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
 
 ## Phase 5 — Production isolation & distribution
 
