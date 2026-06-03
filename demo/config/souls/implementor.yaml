@@ -4,7 +4,7 @@
 # `go-toolchain` sandbox image (bash + grep + git). One soul per role, no selector.
 name:    demo-implementor
 role:    implementor
-model:   "qwen3.6:27b"
+model:   "deepseek/deepseek-v4-flash"
 persona: souls/prompts/implementor.md
 tools:   [fs, shell, git]
 sandbox: go-toolchain

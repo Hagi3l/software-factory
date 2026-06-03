@@ -1,19 +1,18 @@
-# Demo infrastructure overlay (env: dev) — points the harness at a LOCAL model served by
-# Ollama through its OpenAI-compatible endpoint, so the demo runs with no API key and no
-# cost. See demo/README.md.
+# Demo infrastructure overlay (env: dev) — points the harness at a REMOTE model served by
+# OpenRouter through its OpenAI-compatible endpoint. See demo/README.md.
 #
-# The model call is made by the runner on the HOST (the trusted side holds the adapter),
-# NOT from inside the sandbox — the agent only emits a canonical request and the runner
-# calls Ollama. So `localhost:11434` is reached from the host and the sandbox stays
-# zero-network, which is the whole point. (run.sh exports a dummy OPENAI_API_KEY because
-# the OpenAI Go SDK requires a non-empty key even though Ollama ignores it.)
+# The model call is made by the runner on the HOST (the trusted side holds the adapter +
+# the API key), NOT from inside the sandbox — the agent only emits a canonical request and
+# the runner calls OpenRouter. So `openrouter.ai` is reached from the host and the sandbox
+# stays zero-network, which is the whole point. (run.sh requires OPENAI_API_KEY to hold
+# your OpenRouter key — the openai-compat adapter sends it as the bearer token.)
 sandbox:
   backend: docker
   egress:  broker-only
-  # A weak local model is slow, and `wall` bounds the WHOLE invocation including the time
-  # the runner spends waiting on inference. Set generously; raise it if a stage dead-letters
-  # with a wall-budget reason on slow hardware. The page build itself needs little CPU/mem.
-  limits:  { cpu: 2, mem: 2Gi, wall: 45m }
+  # `wall` bounds the WHOLE invocation including the time the runner spends waiting on
+  # inference. A hosted model is fast, but keep this generous so a slow network round-trip
+  # never dead-letters a stage. The page build itself needs little CPU/mem.
+  limits:  { cpu: 2, mem: 2Gi, wall: 20m }
   # profiles resolves the logical profile a soul names (soul.sandbox: go-toolchain) to the
   # concrete image the docker backend boots. The demo reuses the kernel go-toolchain image
   # (bash + grep + git is all the static-HTML gate needs); run.sh builds it locally tagged
@@ -32,10 +31,12 @@ artifacts:
 otel:
   endpoint: ""        # tracing off for the demo ("stdout" to see spans, host:port for OTLP)
 models:
-  # The local model, named EXACTLY as `ollama list` shows it — the registry key is sent
-  # verbatim to Ollama as the model field, and the souls below reference this same name.
-  # run.sh substitutes this (and the endpoint) when you set MODEL= / OLLAMA_HOST=.
-  # No `cost` block ⇒ $0; spend is bounded by the token and wall caps in harness.yaml.
-  "qwen3.6:27b":
+  # The OpenRouter model slug, sent verbatim as the request's model field; the souls below
+  # reference this same registry key. run.sh substitutes this (and the endpoint) when you
+  # set MODEL= / MODEL_ENDPOINT=.
+  # cost is the per-million-token price → USD accounting for the policy.budget dollar cap;
+  # spend is also bounded by the token and wall caps regardless.
+  "deepseek/deepseek-v4-flash":
     provider: openai-compat
-    endpoint: http://localhost:11434/v1
+    endpoint: https://openrouter.ai/api/v1
+    cost: { input_per_mtok: 0.0983, output_per_mtok: 0.1966 }

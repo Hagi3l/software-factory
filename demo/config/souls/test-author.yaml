@@ -6,7 +6,7 @@
 # the environment. One soul per role, so no selector is needed.
 name:    demo-test-author
 role:    test-author
-model:   "qwen3.6:27b"
+model:   "deepseek/deepseek-v4-flash"
 persona: souls/prompts/test-author.md
 tools:   [fs, shell, git]
 sandbox: go-toolchain
