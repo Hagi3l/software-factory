@@ -109,18 +109,48 @@ func TestBoardGroupsByStageInOrder(t *testing.T) {
 	if board.Total != 5 {
 		t.Errorf("Total = %d, want 5", board.Total)
 	}
-	// plan/integrate are empty so are skipped; weird is appended alphabetically; unassigned last.
+	// Every declared stage is kept in order — plan/integrate render as empty columns rather
+	// than vanishing; weird (undeclared, but present in data) is appended alphabetically;
+	// unassigned last.
 	var stages []string
 	for _, c := range board.Columns {
 		stages = append(stages, c.Stage)
 	}
-	if want := []string{"implement", "qa", "weird", unassignedStage}; !reflect.DeepEqual(stages, want) {
+	if want := []string{"plan", "implement", "qa", "integrate", "weird", unassignedStage}; !reflect.DeepEqual(stages, want) {
 		t.Errorf("column order = %v, want %v", stages, want)
 	}
+	// The empty declared stages carry zero cards.
+	if got := len(board.Columns[0].Cards); got != 0 {
+		t.Errorf("plan column cards = %d, want 0 (empty declared stage)", got)
+	}
 	// implement column cards are sorted by id.
-	impl := board.Columns[0]
+	impl := board.Columns[1]
 	if len(impl.Cards) != 2 || impl.Cards[0].ID != "h-1" || impl.Cards[1].ID != "h-3" {
 		t.Errorf("implement cards = %+v, want [h-1 h-3] in order", impl.Cards)
+	}
+}
+
+// TestBoardRendersFullPipelineWhenEmpty proves a board with no issues still renders the full
+// declared pipeline as empty count-0 columns (the skeleton), so the operator reads the shape
+// of the factory at rest — specs/control-room.md "Columns are the pipeline, not the data".
+func TestBoardRendersFullPipelineWhenEmpty(t *testing.T) {
+	r := NewReader(&fakeIssues{}, &fakeArts{}, &fakeProv{})
+	board, err := r.Board(context.Background(), []string{"plan", "implement", "qa", "integrate"})
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	if board.Total != 0 {
+		t.Errorf("Total = %d, want 0", board.Total)
+	}
+	var stages []string
+	for _, c := range board.Columns {
+		stages = append(stages, c.Stage)
+		if len(c.Cards) != 0 {
+			t.Errorf("stage %q has %d cards, want 0", c.Stage, len(c.Cards))
+		}
+	}
+	if want := []string{"plan", "implement", "qa", "integrate"}; !reflect.DeepEqual(stages, want) {
+		t.Errorf("column order = %v, want %v", stages, want)
 	}
 }
 

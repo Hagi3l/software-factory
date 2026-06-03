@@ -109,7 +109,7 @@ func TestBoardRendersColumnsInPipelineOrder(t *testing.T) {
 	for _, want := range []string{
 		"Build the thing", "Write the tests", "Plan the epic", // every card
 		"harness-1", "harness-2", "harness-3", // ids
-		"planner", "test-author", "implementor", // role column headers
+		"planner", "test-author", "implementor", "security", // role column headers — every declared stage
 		"attempt 2",              // the retried card surfaces its generation
 		`sse-connect="/events"`,  // wired to the T4.3 substrate
 		`hx-get="/board/cards"`,  // live fragment refresh target
@@ -119,13 +119,15 @@ func TestBoardRendersColumnsInPipelineOrder(t *testing.T) {
 			t.Errorf("board page missing %q", want)
 		}
 	}
-	// Pipeline order: planner before test-author before implementor; security is empty so
-	// it is skipped (the board reflects the data, no empty columns).
-	if pos(r.body, "planner") > pos(r.body, "test-author") || pos(r.body, "test-author") > pos(r.body, "implementor") {
+	// Pipeline order, in full: every declared stage renders left-to-right, including the
+	// empty 'security' column (the board shows the whole pipeline, not just occupied stages).
+	if pos(r.body, "planner") > pos(r.body, "test-author") ||
+		pos(r.body, "test-author") > pos(r.body, "implementor") ||
+		pos(r.body, "implementor") > pos(r.body, ">security<") {
 		t.Errorf("columns not in pipeline order: %q", colOrder(r.body))
 	}
-	if strings.Contains(r.body, ">security<") {
-		t.Errorf("empty 'security' column should be skipped")
+	if !strings.Contains(r.body, ">security<") {
+		t.Errorf("empty 'security' column should still render as a column")
 	}
 }
 

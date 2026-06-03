@@ -76,7 +76,22 @@ of the build (`go generate`), not the runtime.
 
 ### The board, in motion
 
-The board is a *live* kanban, so two things make a card legible at a glance:
+**Columns are the pipeline, not the data.** The board renders one column per
+declared stage of the configured [DAG](workflow.md) — the full pipeline
+(`requirements → plan → author-tests → implement → qa → integrate`) in flow order,
+left-to-right — **whether or not any issue currently occupies it**. An empty stage
+is a column with a count of `0`, not an absent column. This is deliberate: the
+operator reads the shape of the whole factory at rest, the layout never reflows as
+work flows through it, and a card animating into a stage lands in a column that
+already exists. A brand-new run with no issues yet shows the full empty skeleton,
+not a blank page. Stages that appear in the data but are *not* declared in the DAG
+(an ad-hoc role) and the catch-all **unassigned** column are the exception — they
+materialise only when they actually hold work, since the config never promised
+them. (When not attached to a running factory there is nothing to read, so the
+board shows a notice instead; see [observability.md](observability.md).)
+
+Beyond the static shape, the board is a *live* kanban, so two things make a card
+legible at a glance:
 
 - **Animated moves.** Each card carries a stable identity (the issue id). When the
   [`issue-state` event](messaging.md) nudges a refetch and the new fragment places a

@@ -107,9 +107,13 @@ const unassignedStage = "(unassigned)"
 
 // Board groups every issue by stage for the kanban view. stageOrder is the pipeline order
 // (e.g. the configured DAG: requirements→plan→…→integrate) so columns read left-to-right
-// like the flow; any stage present in the data but absent from stageOrder is appended in
-// stable alphabetical order (so an ad-hoc role still shows), with unassigned work last.
-// Cards within a column are ordered by id for a stable render.
+// like the flow. Every declared stage gets a column whether or not it currently holds work
+// (an empty stage renders as a count-0 column, not an absent one) so the board shows the
+// shape of the whole pipeline at rest and never reflows as work flows through it
+// (specs/control-room.md). Any stage present in the data but absent from stageOrder — an
+// ad-hoc role the config never declared — is appended in stable alphabetical order, with
+// unassigned work last; those materialize only when they actually hold cards. Cards within
+// a column are ordered by id for a stable render.
 func (r *Reader) Board(ctx context.Context, stageOrder []string) (Board, error) {
 	issues, err := r.issues.ListAll(ctx)
 	if err != nil {
@@ -133,14 +137,16 @@ func (r *Reader) Board(ctx context.Context, stageOrder []string) (Board, error) 
 	return board, nil
 }
 
-// orderedStages returns the stages present in byStage, ordered by stageOrder first, then
-// any remaining stages alphabetically, with the unassigned column always last. A stage in
-// stageOrder with no issues is skipped (no empty columns) — the board reflects the data.
+// orderedStages returns the board's columns in render order: every declared stage first, in
+// stageOrder, then any remaining stages present only in the data alphabetically, with the
+// unassigned column always last. A declared stage with no issues is *kept* (rendered as an
+// empty count-0 column) so the board always shows the full pipeline; only undeclared stages
+// are data-driven (they appear when they hold work) — see specs/control-room.md.
 func orderedStages(stageOrder []string, byStage map[string][]IssueCard) []string {
 	var out []string
 	seen := make(map[string]bool)
 	for _, s := range stageOrder {
-		if _, ok := byStage[s]; ok && !seen[s] {
+		if !seen[s] {
 			out = append(out, s)
 			seen[s] = true
 		}
