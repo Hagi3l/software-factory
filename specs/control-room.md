@@ -239,8 +239,13 @@ What it renders, in flow order:
   digest-pinned artifact, and — for a role fulfilled by several souls — the souls ordered
   by **selection specificity**, the empty-selector one marked the catch-all default. This
   is the orchestrator's own [selection resolution](configuration.md) made legible, so "why
-  did this issue route to that soul" is answerable by reading, not tracing. Personas are
-  **linked**, not inlined (the prompts are long markdown).
+  did this issue route to that soul" is answerable by reading, not tracing. Each soul's
+  **persona** — its verbatim system prompt ([components/agent.md](components/agent.md)) — sits
+  behind a per-soul lazy fold: the path is always shown, and expanding it fetches the file's
+  bytes on demand (so the long markdown never bloats the page) and shows them as **inert escaped
+  text**, the literal prompt the model receives, never rendered markup. The trusted,
+  non-sandboxed **requirements planner** is shown here too — set apart from the sandboxed souls —
+  because it carries a persona the same way.
 - **Policy** — budgets, retry caps, and the `tcb_paths` globs that define the
   permanently-human-reviewed [TCB boundary](bootstrap.md).
 - **Infra** — the environment overlay, **redacted** (below).

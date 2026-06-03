@@ -3,6 +3,8 @@ package controlroom
 import (
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -88,13 +90,112 @@ func TestConfigRenders(t *testing.T) {
 			t.Errorf("/config leaked %q", secret)
 		}
 	}
-	// Config is a static snapshot, not a feed: it has no self-refetch fragment (the only
-	// sse-connect on the page is the layout's status bar, shared by every view).
-	if strings.Contains(r.body, `hx-get="/config`) {
-		t.Errorf("/config should not refetch itself — config is restart-static")
+	// Config is a static snapshot, not a feed: nothing on the page auto-refetches. The lazy
+	// persona folds DO hx-get, but only on user expand (click once) — never on a timer or SSE.
+	if strings.Contains(r.body, `hx-trigger="every`) {
+		t.Errorf("/config should not poll — config is restart-static")
+	}
+	if strings.Contains(r.body, `hx-get="/config/souls/`) && !strings.Contains(r.body, `hx-trigger="click once"`) {
+		t.Errorf("/config persona fold must be lazy (click once), not auto-loaded")
+	}
+	// The persona body is fetched lazily, so the prompt text must NOT be inlined in the page.
+	if strings.Contains(r.body, "loading…") == false {
+		t.Errorf("/config persona fold placeholder missing — body should be lazily loaded")
 	}
 	// The nav highlights the active view.
 	if !strings.Contains(r.body, `href="/config"`) {
 		t.Errorf("/config nav entry missing")
+	}
+}
+
+// personaTestCfg writes real persona files under a temp config root and returns a config whose
+// soul + requirements planner point at them, so the persona route can read actual bytes.
+func personaTestCfg(t *testing.T) *config.Config {
+	t.Helper()
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "souls", "prompts"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	write := func(rel, body string) string {
+		p := filepath.Join(root, rel)
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		return p
+	}
+	soulPersona := write("souls/prompts/planner.md", "# Planner soul\nYou decompose work into a plan.\n")
+	rpPersona := write("souls/prompts/requirements.md", "# Requirements planner\nYou elicit testable intent.\n")
+	return &config.Config{
+		Root: root,
+		Harness: &config.Harness{
+			RequirementsPlanner: &config.RequirementsPlanner{Model: "claude-opus-4-8", Persona: rpPersona},
+		},
+		Souls: []core.Soul{
+			{Name: "planner-go", Role: "planner", Model: "claude-opus-4-8", Persona: soulPersona},
+		},
+	}
+}
+
+// TestPersonaRouteServesSoul: the lazy persona fragment returns the soul's persona file verbatim
+// as inert escaped text — the literal system prompt the agent boots from.
+func TestPersonaRouteServesSoul(t *testing.T) {
+	s := New(Options{Config: personaTestCfg(t)})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	r := get(t, ts, "/config/souls/planner-go/persona")
+	if r.status != http.StatusOK {
+		t.Fatalf("persona status = %d, want 200", r.status)
+	}
+	if !strings.Contains(r.body, "You decompose work into a plan.") {
+		t.Errorf("persona body missing soul prompt, got: %s", r.body)
+	}
+	// It is a bare fragment (a <pre>), not the whole page chrome.
+	if strings.Contains(r.body, "<nav") || strings.Contains(r.body, `href="/static/app.css"`) {
+		t.Errorf("persona route should return a fragment, not the full page")
+	}
+}
+
+// TestPersonaRouteServesRequirementsPlanner: the reserved planner key resolves to the
+// requirements planner persona, even though it is not a soul.
+func TestPersonaRouteServesRequirementsPlanner(t *testing.T) {
+	s := New(Options{Config: personaTestCfg(t)})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	r := get(t, ts, "/config/souls/requirements-planner/persona")
+	if r.status != http.StatusOK {
+		t.Fatalf("persona status = %d, want 200", r.status)
+	}
+	if !strings.Contains(r.body, "You elicit testable intent.") {
+		t.Errorf("requirements planner persona missing, got: %s", r.body)
+	}
+}
+
+// TestPersonaRouteUnknownName: a name not in the declared roster 404s — the route reads only
+// files the validated config names, never a path built from the URL (no traversal).
+func TestPersonaRouteUnknownName(t *testing.T) {
+	s := New(Options{Config: personaTestCfg(t)})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	for _, name := range []string{"nope", "..%2f..%2fetc%2fpasswd"} {
+		r := get(t, ts, "/config/souls/"+name+"/persona")
+		if r.status != http.StatusNotFound {
+			t.Errorf("persona for %q status = %d, want 404", name, r.status)
+		}
+	}
+}
+
+// TestPersonaRouteNotAttached: standalone `harness serve` (no in-process config) 404s rather
+// than reading from a nil config.
+func TestPersonaRouteNotAttached(t *testing.T) {
+	s := New(Options{})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	r := get(t, ts, "/config/souls/planner-go/persona")
+	if r.status != http.StatusNotFound {
+		t.Errorf("persona not-attached status = %d, want 404", r.status)
 	}
 }

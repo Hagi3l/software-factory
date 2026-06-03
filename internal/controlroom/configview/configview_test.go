@@ -283,3 +283,37 @@ func TestEmptyProfileDefaults(t *testing.T) {
 		t.Errorf("empty profile = %q, want autonomous default", v.Identity.Profile)
 	}
 }
+
+// TestReqPlannerRowConfigured: a declared requirements planner projects resolved (model joined
+// to provider+cost from the registry, persona path shown relative to root) and flagged
+// Configured, so the view renders its card beside the soul roster.
+func TestReqPlannerRowConfigured(t *testing.T) {
+	cfg := sampleConfig()
+	cfg.Harness.RequirementsPlanner = &config.RequirementsPlanner{
+		Model:   "claude-opus-4-8",
+		Persona: "souls/prompts/requirements.md",
+	}
+
+	rp := Build(cfg, "dev").ReqPlanner
+	if !rp.Configured {
+		t.Fatal("ReqPlanner.Configured = false, want true")
+	}
+	if rp.Key != ReqPlannerKey {
+		t.Errorf("Key = %q, want %q", rp.Key, ReqPlannerKey)
+	}
+	if rp.Provider != "anthropic" || rp.Cost == "" {
+		t.Errorf("planner model not resolved: provider=%q cost=%q", rp.Provider, rp.Cost)
+	}
+	// Persona is shown relative to the config root (resolvePersonas-style absolute under root).
+	if rp.PersonaPath != "souls/prompts/requirements.md" {
+		t.Errorf("PersonaPath = %q, want relative path", rp.PersonaPath)
+	}
+}
+
+// TestReqPlannerRowUnconfigured: with no requirements_planner declared (the wizard is disabled),
+// the row is a zero/unconfigured value, so the view omits the card.
+func TestReqPlannerRowUnconfigured(t *testing.T) {
+	if rp := Build(sampleConfig(), "dev").ReqPlanner; rp.Configured {
+		t.Errorf("ReqPlanner.Configured = true with no planner declared, want false")
+	}
+}

@@ -35,6 +35,12 @@ import (
 // "deliberately hidden", not "unset"; an unset field stays empty (see mask).
 const redactedMark = "«redacted»"
 
+// ReqPlannerKey is the persona-route key (GET /config/souls/{name}/persona) for the
+// requirements planner, which is not a soul and so has no soul Name. The server looks up
+// soul names first, so a soul of this name would shadow it — but no soul fulfills the
+// trusted requirements stage, so the collision is theoretical.
+const ReqPlannerKey = "requirements-planner"
+
 // ConfigView is the whole rendered Config page model. It is built once per request from the
 // validated config (cheap; config is static) with redaction applied a single time, so the
 // structured sections and the per-section raw folds agree by construction.
@@ -47,8 +53,13 @@ type ConfigView struct {
 	Stages      []StageRow
 	Checks      []CheckRow
 	Roles       []RoleRow
-	Policy      PolicyView
-	Infra       InfraView
+	// ReqPlanner is the trusted, non-sandboxed requirements planner, shown beside the soul
+	// roster because it carries a persona (its system prompt) too — but set apart, since it
+	// is not a sandboxed soul. Its Configured flag is false when no requirements_planner is
+	// declared (the wizard is then disabled), and the view omits the card.
+	ReqPlanner ReqPlannerRow
+	Policy     PolicyView
+	Infra      InfraView
 
 	// Per-section raw folds: the effective config re-serialized to YAML with redaction
 	// applied (InfraYAML), or verbatim where the section holds no secrets (the rest).
@@ -97,7 +108,8 @@ type RoleRow struct {
 
 // SoulRow is one soul shown resolved: its model joined to provider+cost, its sandbox profile
 // joined to the concrete digest-pinned artifact, its selector, and whether it is the
-// catch-all default (empty selector). The persona is linked (the path), not inlined.
+// catch-all default (empty selector). PersonaPath is the path label; the persona body
+// (the soul's verbatim system prompt) is fetched lazily by the view from the persona route.
 type SoulRow struct {
 	Name        string
 	Model       string
@@ -112,6 +124,19 @@ type SoulRow struct {
 
 // KV is a sorted selector key/value pair, rendered as a chip.
 type KV struct{ Key, Val string }
+
+// ReqPlannerRow is the requirements planner shown resolved like a soul (model joined to
+// provider+cost) but flagged as the trusted, non-sandboxed interactive planner — it has no
+// sandbox and never runs untrusted. Key is its persona-route key (ReqPlannerKey); Configured
+// is false when no requirements_planner block is declared.
+type ReqPlannerRow struct {
+	Key         string
+	Model       string
+	Provider    string
+	Cost        string // formatted per-Mtok price, "" when unpriced or the model is unknown
+	PersonaPath string
+	Configured  bool
+}
 
 // PolicyView is the termination/autonomy policy, formatted for display (uncapped dimensions
 // show ∞ rather than a misleading 0).
@@ -188,6 +213,7 @@ func Build(cfg *config.Config, env string) ConfigView {
 	}
 
 	v.Roles = roleRows(cfg)
+	v.ReqPlanner = reqPlannerRow(cfg)
 	v.SoulsYAML = marshalYAML(cfg.Souls)
 
 	if cfg.Infra != nil {
@@ -347,6 +373,30 @@ func roleRows(cfg *config.Config) []RoleRow {
 		rows = append(rows, RoleRow{Role: r, Souls: sr})
 	}
 	return rows
+}
+
+// reqPlannerRow resolves the requirements planner into its display form, mirroring soulRow:
+// its model is joined to the infra registry for provider+cost, its persona path shown
+// relative to the config root. Configured is false (a zero row) when no requirements_planner
+// is declared, which the view reads to omit the card.
+func reqPlannerRow(cfg *config.Config) ReqPlannerRow {
+	if cfg.Harness == nil || cfg.Harness.RequirementsPlanner == nil {
+		return ReqPlannerRow{}
+	}
+	rp := cfg.Harness.RequirementsPlanner
+	row := ReqPlannerRow{
+		Key:         ReqPlannerKey,
+		Model:       rp.Model,
+		PersonaPath: relPersona(cfg.Root, cfg.RequirementsPlannerPersonaPath()),
+		Configured:  true,
+	}
+	if cfg.Infra != nil {
+		if mp, ok := cfg.Infra.Models[rp.Model]; ok {
+			row.Provider = mp.Provider
+			row.Cost = formatCost(mp.Cost)
+		}
+	}
+	return row
 }
 
 // soulRow resolves one soul against the infra registry into its display form.

@@ -153,11 +153,14 @@ templ configSouls(v configview.ConfigView) {
 			concrete image, ordered by selector specificity (the orchestrator's own selection made legible).
 			The empty-selector soul is the role's catch-all default.
 		</p>
-		if len(v.Roles) == 0 {
+		if len(v.Roles) == 0 && !v.ReqPlanner.Configured {
 			<p class="text-sm text-muted">No souls configured.</p>
 		} else {
 			for _, role := range v.Roles {
 				@configRole(role)
+			}
+			if v.ReqPlanner.Configured {
+				@configReqPlanner(v.ReqPlanner)
 			}
 		}
 		@rawFold(v.SoulsYAML)
@@ -201,9 +204,78 @@ templ configSoul(s configview.SoulRow) {
 				@kvXS("cost", s.Cost)
 			}
 			@kvXS("sandbox", s.Sandbox+" → "+s.Image)
-			@kvXS("persona", s.PersonaPath)
 		</dl>
+		@personaFold(s.Name, s.PersonaPath)
 	</div>
+}
+
+// configReqPlanner is the requirements planner — the trusted, non-sandboxed interactive
+// planner the wizard drives. It is shown beside the soul roster (it has a persona = system
+// prompt too) but set apart: a "trusted · non-sandboxed" badge and no sandbox/selector,
+// because it never runs untrusted. Omitted entirely when no requirements_planner is declared.
+templ configReqPlanner(rp configview.ReqPlannerRow) {
+	<div class="rounded-lg border border-border">
+		<div class="border-b border-border bg-surface px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted">requirements</div>
+		<div class="space-y-1 px-3 py-2 text-sm">
+			<div class="flex flex-wrap items-baseline gap-2">
+				<span class="font-mono text-xs text-fg">requirements planner</span>
+				<span class="rounded bg-accent-soft px-1.5 py-0.5 text-xs text-accent-strong">trusted · non-sandboxed</span>
+			</div>
+			<dl class="grid grid-cols-1 gap-x-6 gap-y-1 text-xs text-muted sm:grid-cols-2">
+				<div class="flex gap-2">
+					<dt class="text-faint">model</dt>
+					<dd>
+						{ rp.Model }
+						if rp.Provider != "" {
+							<span class="text-faint">({ rp.Provider })</span>
+						}
+					</dd>
+				</div>
+				if rp.Cost != "" {
+					@kvXS("cost", rp.Cost)
+				}
+			</dl>
+			@personaFold(rp.Key, rp.PersonaPath)
+		</div>
+	</div>
+}
+
+// personaFold is the lazy disclosure for a soul's persona — the verbatim system prompt the
+// agent boots from (specs/components/agent.md). The body is fetched from the persona route
+// only on first expand (hx-trigger="click once"), so the config projection stays IO-free and
+// long prompts never bloat the initial page. Shown as inert escaped text (the persona route
+// returns a <pre>, never rendered markdown), consistent with every other text surface and the
+// hostile-by-assumption threat model — though personas are trusted, human-authored config.
+templ personaFold(key, path string) {
+	<details class="mt-1">
+		<summary
+			class="cursor-pointer text-xs text-faint hover:text-fg"
+			hx-get={ "/config/souls/" + key + "/persona" }
+			hx-trigger="click once"
+			hx-target="next .persona-body"
+			hx-swap="innerHTML"
+		>
+			persona: <span class="text-muted">{ path }</span> — system prompt (verbatim)
+		</summary>
+		<div class="persona-body">
+			<pre class="mt-1 overflow-x-auto rounded bg-canvas p-3 text-xs text-faint">loading…</pre>
+		</div>
+	</details>
+}
+
+// PersonaContent is the persona-route fragment: a soul's persona file shown verbatim as inert
+// escaped text (templ escapes it), labeled with the path. It is the literal system prompt the
+// model receives, not rendered markdown — honest about the bytes and consistent with how the
+// rest of the control room treats text content.
+templ PersonaContent(content string) {
+	<pre class="mt-1 overflow-x-auto rounded bg-canvas p-3 text-xs text-faint">{ content }</pre>
+}
+
+// PersonaError is the persona-route fragment when the file cannot be read (a config gap that
+// harness validate would normally catch). It renders the reason inline rather than failing the
+// whole page, mirroring the raw-fold marshal-error handling.
+templ PersonaError(msg string) {
+	<pre class="mt-1 overflow-x-auto rounded bg-st-warn-bg p-3 text-xs text-st-warn">{ msg }</pre>
 }
 
 // configPolicy is the termination/autonomy policy.

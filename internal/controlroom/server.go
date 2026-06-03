@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"time"
 
@@ -193,8 +194,9 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /budgets/items", s.handleBudgetsItems)
 	s.mux.HandleFunc("GET /provenance", s.handleProvenance) // T4.10 — merged-commit provenance chain
 	s.mux.HandleFunc("GET /provenance/items", s.handleProvenanceItems)
-	s.mux.HandleFunc("GET /status/bar", s.handleStatusBar) // T4.19 — layout status-bar live fragment
-	s.mux.HandleFunc("GET /config", s.handleConfig)        // T4.26 — the declared factory at rest (read-only)
+	s.mux.HandleFunc("GET /status/bar", s.handleStatusBar)                // T4.19 — layout status-bar live fragment
+	s.mux.HandleFunc("GET /config", s.handleConfig)                       // T4.26 — the declared factory at rest (read-only)
+	s.mux.HandleFunc("GET /config/souls/{name}/persona", s.handlePersona) // lazy persona (system-prompt) fold fragment
 
 	// Create-Task wizard (T4.12) — the human's action surface. GET /create mints a fresh
 	// conversation session and renders the page; the per-session SSE stream carries the live
@@ -549,6 +551,49 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, views.ConfigPage(configview.Build(s.cfg, s.env)))
+}
+
+// handlePersona serves a soul's persona — its verbatim system prompt — as the lazy fold
+// fragment behind the Config view (specs/components/agent.md: the persona is the soul's only
+// behavioral input, loaded as the system prompt). The {name} is resolved against the declared
+// roster (soul names, then the requirements planner), never used to build a path — so a crafted
+// name cannot traverse the filesystem; an unknown name 404s. Persona files are trusted,
+// human-authored, in-repo config, and the content is rendered as inert escaped text either way.
+func (s *Server) handlePersona(w http.ResponseWriter, r *http.Request) {
+	if s.cfg == nil {
+		http.NotFound(w, r)
+		return
+	}
+	path, ok := s.personaPathFor(r.PathValue("name"))
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		s.log.Error("controlroom: persona read failed", "path", path, "err", err)
+		s.render(w, r, views.PersonaError("Could not read persona file: "+err.Error()))
+		return
+	}
+	s.render(w, r, views.PersonaContent(string(data)))
+}
+
+// personaPathFor resolves a persona-route {name} to its file path via the declared config —
+// soul names first (PersonaPath handles the config-root join), then the requirements planner's
+// reserved key. It returns ok=false for any name not in the roster, so the handler reads only
+// files the validated config already names; the URL name is never joined into a path itself.
+func (s *Server) personaPathFor(name string) (string, bool) {
+	for _, soul := range s.cfg.Souls {
+		if soul.Name == name {
+			return s.cfg.PersonaPath(soul), true
+		}
+	}
+	if name == configview.ReqPlannerKey {
+		if p := s.cfg.RequirementsPlannerPersonaPath(); p != "" {
+			return p, true
+		}
+	}
+	return "", false
 }
 
 // handleDLQ renders the full dead-letter queue page (T4.8) — the escalations awaiting a
