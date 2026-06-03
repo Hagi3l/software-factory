@@ -1,0 +1,330 @@
+package views
+
+import "github.com/Loxstomper/harness/internal/controlroom/configview"
+
+// ConfigPage is the Config view (specs/control-room.md, "The config view", T4.26): the
+// declared factory at rest — role-flow pipeline, gate checks, the resolved soul roster,
+// policy, and redacted infra — read-only. Config is restart-static, so unlike the board /
+// budgets / DLQ it is deliberately NOT a feed: a plain server-rendered snapshot, no SSE, no
+// refetch. It reflects the running factory by construction (the control room is co-located in
+// `harness run`, so the rendered object is the very validated config that process holds). The
+// view shows, never mutates — the control room's only write surfaces are the wizard (spec) and
+// the DLQ (approve/reject); config is the substrate, changed by editing files and restarting.
+//
+// Each section carries a "raw" fold whose body is the effective config re-serialized with the
+// same redactions applied (configview, "effective config (redacted)"), never the file bytes —
+// so raw can never leak what rendered masks.
+templ ConfigPage(v configview.ConfigView) {
+	@Layout("Harness — Config", "config") {
+		<style>
+			.cfg-svg .dag-node { cursor: default; }
+		</style>
+		<div class="space-y-8">
+			<div class="flex items-baseline justify-between gap-4">
+				<h1 class="text-xl font-semibold tracking-tight">Config</h1>
+				<a href="/dag" class="text-xs text-st-progress hover:underline">issue DAG →</a>
+			</div>
+			@configIdentity(v.Identity)
+			@configPipeline(v)
+			@configChecks(v)
+			@configSouls(v)
+			@configPolicy(v)
+			@configInfra(v)
+		</div>
+	}
+}
+
+// configIdentity is the "which factory is this" strip.
+templ configIdentity(id configview.Identity) {
+	<section class="rounded-lg border border-border bg-surface p-4">
+		<dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+			@kv("Config root", id.Root)
+			@kv("Infra overlay", "infra."+id.Env+".yaml")
+			@kv("Autonomy profile", id.Profile)
+			<div class="flex gap-2">
+				<dt class="text-muted">Validation</dt>
+				<dd class="font-medium text-st-ok">validated ✓</dd>
+			</div>
+		</dl>
+	</section>
+}
+
+// configPipeline renders the role-flow graph (server-side SVG) and the stages table behind it.
+templ configPipeline(v configview.ConfigView) {
+	<section class="space-y-3">
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Pipeline</h2>
+		<p class="max-w-3xl text-sm text-muted">
+			The declared role-flow — the shape work flows through (distinct from the
+			<a href="/dag" class="text-st-progress hover:underline">issue DAG</a>, which is the work itself).
+			Solid edges are <span class="font-medium">produces</span> (the happy path); dashed amber edges are
+			<span class="font-medium">on_failure</span> (retry / branch).
+		</p>
+		if v.PipelineSVG != "" {
+			<div class="cfg-svg overflow-auto rounded-lg border border-border bg-canvas p-3">
+				@templ.Raw(v.PipelineSVG)
+			</div>
+		}
+		@configStagesTable(v.Stages)
+		@rawFold(v.StagesYAML)
+	</section>
+}
+
+templ configStagesTable(stages []configview.StageRow) {
+	if len(stages) == 0 {
+		<p class="text-sm text-muted">No stages declared.</p>
+	} else {
+		<div class="overflow-x-auto rounded-lg border border-border">
+			<table class="min-w-full divide-y divide-border text-sm">
+				<thead class="bg-surface text-left text-xs uppercase tracking-wide text-muted">
+					<tr>
+						<th class="px-3 py-2 font-medium">Stage</th>
+						<th class="px-3 py-2 font-medium">Kind</th>
+						<th class="px-3 py-2 font-medium">Role</th>
+						<th class="px-3 py-2 font-medium">Pre</th>
+						<th class="px-3 py-2 font-medium">Post</th>
+						<th class="px-3 py-2 font-medium">on_failure</th>
+						<th class="px-3 py-2 font-medium">Produces</th>
+					</tr>
+				</thead>
+				<tbody class="divide-y divide-border">
+					for _, st := range stages {
+						@configStageRow(st)
+					}
+				</tbody>
+			</table>
+		</div>
+	}
+}
+
+templ configStageRow(st configview.StageRow) {
+	<tr class="hover:bg-surface align-top">
+		<td class="px-3 py-2 font-mono text-xs text-fg">
+			if st.Role != "" {
+				<a href={ templ.URL("/board") } class="text-st-progress hover:underline">{ st.Name }</a>
+			} else {
+				{ st.Name }
+			}
+		</td>
+		<td class="px-3 py-2 text-muted">{ st.Kind }</td>
+		<td class="px-3 py-2 text-muted">{ orDash(st.Role) }</td>
+		<td class="px-3 py-2 text-muted">{ orDash(st.Precondition) }</td>
+		<td class="px-3 py-2 font-mono text-xs text-muted">{ orDash(joinList(st.Postcondition)) }</td>
+		<td class="px-3 py-2 text-muted">{ orDash(st.OnFailure) }</td>
+		<td class="px-3 py-2 text-muted">{ orDash(joinList(st.Produces)) }</td>
+	</tr>
+}
+
+// configChecks is the check registry: postcondition name → shell command.
+templ configChecks(v configview.ConfigView) {
+	<section class="space-y-3">
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Checks</h2>
+		if len(v.Checks) == 0 {
+			<p class="text-sm text-muted">No command checks registered.</p>
+		} else {
+			<div class="overflow-x-auto rounded-lg border border-border">
+				<table class="min-w-full divide-y divide-border text-sm">
+					<thead class="bg-surface text-left text-xs uppercase tracking-wide text-muted">
+						<tr>
+							<th class="px-3 py-2 font-medium">Postcondition</th>
+							<th class="px-3 py-2 font-medium">Command</th>
+						</tr>
+					</thead>
+					<tbody class="divide-y divide-border">
+						for _, c := range v.Checks {
+							<tr class="hover:bg-surface">
+								<td class="px-3 py-2 font-mono text-xs text-fg">{ c.Name }</td>
+								<td class="px-3 py-2 font-mono text-xs text-muted">{ c.Command }</td>
+							</tr>
+						}
+					</tbody>
+				</table>
+			</div>
+		}
+		@rawFold(v.ChecksYAML)
+	</section>
+}
+
+// configSouls is the resolved soul roster, grouped by role and ordered by selection specificity.
+templ configSouls(v configview.ConfigView) {
+	<section class="space-y-3">
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Souls</h2>
+		<p class="max-w-3xl text-sm text-muted">
+			Each role's souls, resolved — model joined to its provider + cost, sandbox joined to the
+			concrete image, ordered by selector specificity (the orchestrator's own selection made legible).
+			The empty-selector soul is the role's catch-all default.
+		</p>
+		if len(v.Roles) == 0 {
+			<p class="text-sm text-muted">No souls configured.</p>
+		} else {
+			for _, role := range v.Roles {
+				@configRole(role)
+			}
+		}
+		@rawFold(v.SoulsYAML)
+	</section>
+}
+
+templ configRole(role configview.RoleRow) {
+	<div class="rounded-lg border border-border">
+		<div class="border-b border-border bg-surface px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted">{ role.Role }</div>
+		<div class="divide-y divide-border">
+			for _, s := range role.Souls {
+				@configSoul(s)
+			}
+		</div>
+	</div>
+}
+
+templ configSoul(s configview.SoulRow) {
+	<div class="space-y-1 px-3 py-2 text-sm">
+		<div class="flex flex-wrap items-baseline gap-2">
+			<span class="font-mono text-xs text-fg">{ s.Name }</span>
+			if s.CatchAll {
+				<span class="rounded bg-st-warn-bg px-1.5 py-0.5 text-xs text-st-warn">catch-all</span>
+			} else {
+				for _, kv := range s.Selector {
+					<span class="rounded bg-accent-soft px-1.5 py-0.5 text-xs text-accent-strong">{ kv.Key }={ kv.Val }</span>
+				}
+			}
+		</div>
+		<dl class="grid grid-cols-1 gap-x-6 gap-y-1 text-xs text-muted sm:grid-cols-2">
+			<div class="flex gap-2">
+				<dt class="text-faint">model</dt>
+				<dd>
+					{ s.Model }
+					if s.Provider != "" {
+						<span class="text-faint">({ s.Provider })</span>
+					}
+				</dd>
+			</div>
+			if s.Cost != "" {
+				@kvXS("cost", s.Cost)
+			}
+			@kvXS("sandbox", s.Sandbox+" → "+s.Image)
+			@kvXS("persona", s.PersonaPath)
+		</dl>
+	</div>
+}
+
+// configPolicy is the termination/autonomy policy.
+templ configPolicy(v configview.ConfigView) {
+	<section class="space-y-3">
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Policy</h2>
+		<div class="rounded-lg border border-border bg-surface p-4">
+			<dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+				@kv("Profile", v.Policy.Profile)
+				@kv("Max retries", v.Policy.MaxRetries)
+				@kv("Issue budget", "tokens "+v.Policy.Budget.Tokens+" · "+v.Policy.Budget.USD+" · wall "+v.Policy.Budget.Wall)
+				@kv("Epic budget", "tokens "+v.Policy.EpicBudget.Tokens+" · "+v.Policy.EpicBudget.USD)
+				@kv("Dead-letter", v.Policy.DeadLetter)
+			</dl>
+			if len(v.Policy.TCBPaths) > 0 {
+				<div class="mt-3">
+					<div class="text-xs uppercase tracking-wide text-faint">TCB paths (always human-reviewed)</div>
+					<ul class="mt-1 flex flex-wrap gap-1">
+						for _, p := range v.Policy.TCBPaths {
+							<li class="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs text-muted">{ p }</li>
+						}
+					</ul>
+				</div>
+			}
+		</div>
+		@rawFold(v.PolicyYAML)
+	</section>
+}
+
+// configInfra is the environment overlay, redacted (topology masked; allowlist + digests kept).
+templ configInfra(v configview.ConfigView) {
+	<section class="space-y-3">
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Infra <span class="font-normal normal-case text-faint">(redacted)</span></h2>
+		<div class="rounded-lg border border-border bg-surface p-4">
+			<dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
+				@kv("Sandbox backend", v.Infra.SandboxBackend)
+				@kv("Egress", v.Infra.Egress)
+				@kv("Limits", v.Infra.Limits)
+				@kv("NATS", v.Infra.NATSURL)
+				@kv("Artifacts", v.Infra.ArtifactsBackend+" "+v.Infra.ArtifactsPath)
+				@kv("OTel", orDash(v.Infra.OTelEndpoint))
+			</dl>
+			if len(v.Infra.Allowlist) > 0 {
+				<div class="mt-3">
+					<div class="text-xs uppercase tracking-wide text-faint">Egress allowlist</div>
+					<ul class="mt-1 flex flex-wrap gap-1">
+						for _, a := range v.Infra.Allowlist {
+							<li class="rounded bg-canvas px-1.5 py-0.5 font-mono text-xs text-muted">{ a }</li>
+						}
+					</ul>
+				</div>
+			}
+			if len(v.Infra.Profiles) > 0 {
+				<div class="mt-3">
+					<div class="text-xs uppercase tracking-wide text-faint">Sandbox profiles</div>
+					<ul class="mt-1 space-y-0.5">
+						for _, p := range v.Infra.Profiles {
+							<li class="font-mono text-xs text-muted">{ p.Name } → { profileArtifact(p) }</li>
+						}
+					</ul>
+				</div>
+			}
+			if len(v.Infra.Models) > 0 {
+				<div class="mt-3">
+					<div class="text-xs uppercase tracking-wide text-faint">Model registry</div>
+					<ul class="mt-1 space-y-0.5">
+						for _, m := range v.Infra.Models {
+							<li class="text-xs text-muted">
+								<span class="font-mono text-fg">{ m.Name }</span>
+								<span class="text-faint">{ m.Provider }</span>
+								if m.Cost != "" {
+									<span class="text-faint">· { m.Cost }</span>
+								}
+								if m.Endpoint != "" {
+									<span class="text-faint">· { m.Endpoint }</span>
+								}
+							</li>
+						}
+					</ul>
+				</div>
+			}
+		</div>
+		@rawFold(v.InfraYAML)
+	</section>
+}
+
+// rawFold is the per-section "raw" disclosure: the effective config re-serialized with the
+// same redactions applied (never the file bytes), so raw can never leak what rendered masks.
+// A native <details> is the fold — no JS needed, and it works without Alpine attached.
+templ rawFold(yaml string) {
+	if yaml != "" {
+		<details class="mt-1">
+			<summary class="cursor-pointer text-xs text-muted hover:text-fg">effective config (redacted)</summary>
+			<pre class="mt-1 overflow-x-auto rounded bg-canvas p-3 text-xs text-faint">{ yaml }</pre>
+		</details>
+	}
+}
+
+// kv / kvXS render a definition pair at two sizes.
+templ kv(label, value string) {
+	<div class="flex gap-2">
+		<dt class="text-muted">{ label }</dt>
+		<dd class="font-medium text-fg">{ orDash(value) }</dd>
+	</div>
+}
+
+templ kvXS(label, value string) {
+	<div class="flex gap-2">
+		<dt class="text-faint">{ label }</dt>
+		<dd class="text-muted">{ orDash(value) }</dd>
+	</div>
+}
+
+// ConfigMessage renders the Config chrome with a single notice instead of the sections — used
+// when the control room is not attached to a running factory (a standalone `harness serve` has
+// no in-process config to show). Mirrors BoardMessage / BudgetsMessage.
+templ ConfigMessage(msg string) {
+	@Layout("Harness — Config", "config") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">Config</h1>
+			<p class="mt-2 text-muted">{ msg }</p>
+		</div>
+	}
+}

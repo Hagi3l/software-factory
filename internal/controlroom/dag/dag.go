@@ -32,7 +32,21 @@ type Node struct {
 type Edge struct {
 	From string // the blocker
 	To   string // the dependent (blocked by From)
+	// Kind optionally classifies the edge so the renderer can style it distinctly. An
+	// empty Kind is the default dependency edge (solid slate) — the issue-DAG (T4.6) leaves
+	// it empty, so its render is byte-for-byte unchanged. The config role-flow graph (T4.26)
+	// sets it to EdgeProduces (happy-path, solid) or EdgeOnFailure (retry/branch, dashed
+	// amber) so the declared pipeline's success and failure routes read apart.
+	Kind string
 }
+
+// Edge kinds for the role-flow graph (T4.26). They classify a declared pipeline edge so the
+// renderer can draw the happy path and the retry/branch routes distinctly. The issue-DAG
+// uses neither (its edges are plain dependencies), so its rendering is unaffected.
+const (
+	EdgeProduces  = "produces"
+	EdgeOnFailure = "on_failure"
+)
 
 // Graph is the whole dependency graph: the issue nodes and the edges between them.
 type Graph struct {
@@ -46,9 +60,11 @@ type Placed struct {
 	X, Y, W, H int
 }
 
-// PlacedEdge is an edge with its endpoint pixel coordinates, ready to draw as a line.
+// PlacedEdge is an edge with its endpoint pixel coordinates, ready to draw as a line. Kind
+// carries the source Edge.Kind through layout so RenderSVG can style it.
 type PlacedEdge struct {
 	From, To       string
+	Kind           string
 	X1, Y1, X2, Y2 int
 }
 
@@ -92,7 +108,7 @@ func Layout(g Graph) Diagram {
 	sort.Strings(ids)
 
 	// Keep only edges whose endpoints both exist; build the blocker adjacency (From→To).
-	type edge struct{ from, to string }
+	type edge struct{ from, to, kind string }
 	var edges []edge
 	children := make(map[string][]string) // blocker -> dependents
 	indeg := make(map[string]int)         // dependents blocked count, for root detection
@@ -103,7 +119,7 @@ func Layout(g Graph) Diagram {
 		if _, ok := index[e.To]; !ok {
 			continue
 		}
-		edges = append(edges, edge{from: e.From, to: e.To})
+		edges = append(edges, edge{from: e.From, to: e.To, kind: e.Kind})
 		children[e.From] = append(children[e.From], e.To)
 		indeg[e.To]++
 	}
@@ -176,7 +192,7 @@ func Layout(g Graph) Diagram {
 	var pedges []PlacedEdge
 	for _, e := range edges {
 		a, b := pos[e.from], pos[e.to]
-		pedges = append(pedges, PlacedEdge{From: e.from, To: e.to, X1: a[0], Y1: a[1], X2: b[0], Y2: b[1]})
+		pedges = append(pedges, PlacedEdge{From: e.from, To: e.to, Kind: e.kind, X1: a[0], Y1: a[1], X2: b[0], Y2: b[1]})
 	}
 
 	width := marginX*2 + nodeW
@@ -195,43 +211,109 @@ func Layout(g Graph) Diagram {
 // appended when truncated), so a long title cannot blow out the fixed-width box.
 const titleMax = 24
 
+// RenderOptions tunes how RenderSVG emits a graph so the one layout+renderer serves both
+// the issue-DAG (T4.6) and the config role-flow graph (T4.26) — single source, no parallel
+// renderer. The zero value reproduces the issue-DAG rendering exactly.
+type RenderOptions struct {
+	// NodeHref maps a node id to its drill-through href. nil reproduces the issue-DAG's
+	// "/issue/{id}" anchor; a non-nil func returning "" renders that node with no anchor
+	// (the role-flow graph's stage nodes are not click-through).
+	NodeHref func(id string) string
+	// NodeFill maps a node's Status to a fill color (inline hex, no Tailwind). nil uses the
+	// board status palette (statusFill); the role-flow graph supplies a stage-kind palette.
+	NodeFill func(status string) string
+	// Label names the graph for the SVG's aria-label; empty defaults to the issue-DAG label.
+	Label string
+}
+
 // RenderSVG lays out the graph and emits a standalone <svg> element: a <defs> arrowhead
 // <marker>, then every edge first as <line class="dag-edge" data-from/data-to marker-end>,
 // then every node as <a href="/issue/{id}"><g class="dag-node" data-node="{id}">…</g></a>
 // (the anchor is the click-through into the issue-detail view). All dynamic text — ids and
 // titles, which are semi-untrusted — is XML-escaped; titles are rune-truncated. An empty
 // graph yields a minimal valid <svg> with no nodes and no panic.
-func RenderSVG(g Graph) string {
+func RenderSVG(g Graph) string { return RenderSVGWith(g, RenderOptions{}) }
+
+// RenderSVGWith is RenderSVG with explicit options. RenderSVG is exactly RenderSVGWith with
+// the zero RenderOptions, so the issue-DAG output is unchanged; the config role-flow graph
+// passes a stage-kind fill and an anchor-suppressing NodeHref. An on_failure-kind edge (only
+// the role-flow graph emits one) is drawn dashed amber with its own marker — that second
+// marker is added to <defs> only when such an edge exists, so a graph without one (every
+// issue-DAG) renders byte-for-byte as before.
+func RenderSVGWith(g Graph, o RenderOptions) string {
 	d := Layout(g)
 
-	var b strings.Builder
-	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" class="dag-svg" role="img" aria-label="issue dependency graph">`,
-		d.Width, d.Height, d.Width, d.Height)
+	label := o.Label
+	if label == "" {
+		label = "issue dependency graph"
+	}
 
-	// Arrowhead marker, referenced by every edge's marker-end.
-	b.WriteString(`<defs><marker id="dag-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"></path></marker></defs>`)
+	var b strings.Builder
+	fmt.Fprintf(&b, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 %d %d" width="%d" height="%d" class="dag-svg" role="img" aria-label="%s">`,
+		d.Width, d.Height, d.Width, d.Height, attr(label))
+
+	hasFail := false
+	for _, e := range d.Edges {
+		if e.Kind == EdgeOnFailure {
+			hasFail = true
+			break
+		}
+	}
+
+	// Arrowhead marker(s), referenced by every edge's marker-end. The amber failure-edge
+	// marker is emitted only when an on_failure edge is present, so the default <defs> is
+	// identical to before for any graph without one.
+	b.WriteString(`<defs><marker id="dag-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#64748b"></path></marker>`)
+	if hasFail {
+		b.WriteString(`<marker id="dag-arrow-fail" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f59e0b"></path></marker>`)
+	}
+	b.WriteString(`</defs>`)
 
 	// Edges first so nodes paint over them.
 	for _, e := range d.Edges {
+		if e.Kind == EdgeOnFailure {
+			fmt.Fprintf(&b,
+				`<line class="dag-edge" data-kind="on_failure" data-from="%s" data-to="%s" x1="%d" y1="%d" x2="%d" y2="%d" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#dag-arrow-fail)"></line>`,
+				attr(e.From), attr(e.To), e.X1, e.Y1, e.X2, e.Y2)
+			continue
+		}
 		fmt.Fprintf(&b,
 			`<line class="dag-edge" data-from="%s" data-to="%s" x1="%d" y1="%d" x2="%d" y2="%d" stroke="#64748b" stroke-width="1.5" marker-end="url(#dag-arrow)"></line>`,
 			attr(e.From), attr(e.To), e.X1, e.Y1, e.X2, e.Y2)
 	}
 
-	// Nodes as drill-through anchors.
+	fill := statusFill
+	if o.NodeFill != nil {
+		fill = o.NodeFill
+	}
+
+	// Nodes; the default is a drill-through anchor into the issue-detail view, an explicit
+	// NodeHref overrides the target, and an empty href suppresses the anchor entirely.
 	for _, n := range d.Nodes {
 		id := html.EscapeString(n.ID)
-		fmt.Fprintf(&b, `<a href="/issue/%s"><g class="dag-node" data-node="%s">`, attr(n.ID), attr(n.ID))
+		anchored := true
+		if o.NodeHref == nil {
+			fmt.Fprintf(&b, `<a href="/issue/%s"><g class="dag-node" data-node="%s">`, attr(n.ID), attr(n.ID))
+		} else if href := o.NodeHref(n.ID); href != "" {
+			fmt.Fprintf(&b, `<a href="%s"><g class="dag-node" data-node="%s">`, attr(href), attr(n.ID))
+		} else {
+			anchored = false
+			fmt.Fprintf(&b, `<g class="dag-node" data-node="%s">`, attr(n.ID))
+		}
 		fmt.Fprintf(&b,
 			`<rect x="%d" y="%d" width="%d" height="%d" rx="6" fill="%s" stroke="#1e293b" stroke-width="1"></rect>`,
-			n.X, n.Y, n.W, n.H, statusFill(n.Status))
+			n.X, n.Y, n.W, n.H, fill(n.Status))
 		fmt.Fprintf(&b,
 			`<text x="%d" y="%d" font-family="monospace" font-size="11" fill="#0f172a">%s</text>`,
 			n.X+8, n.Y+18, id)
 		fmt.Fprintf(&b,
 			`<text x="%d" y="%d" font-family="sans-serif" font-size="12" fill="#0f172a">%s</text>`,
 			n.X+8, n.Y+36, html.EscapeString(truncate(n.Title, titleMax)))
-		b.WriteString(`</g></a>`)
+		if anchored {
+			b.WriteString(`</g></a>`)
+		} else {
+			b.WriteString(`</g>`)
+		}
 	}
 
 	b.WriteString(`</svg>`)

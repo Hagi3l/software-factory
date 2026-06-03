@@ -33,8 +33,9 @@ good autonomous implementation) — a later validation concern, never an enginee
   The verbose per-task findings were pruned once complete — that history lives in git,
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
 - **Open tasks (`- [ ]`) keep their full detail** — Phase 5, plus the handful of optional items
-  left in Phase 2 (T2.11/T2.12). **Phase 4 is now complete** (T4.25 closed the last open task — the
-  merge-queue surface), so the only remaining engineering is Phase 5 (production isolation & distribution).
+  left in Phase 2 (T2.11/T2.12). T4.26 (Config view) is now **done**, closing the Phase-4 control
+  room entirely; the only remaining *engineering* of new substrate is Phase 5 (production isolation
+  & distribution).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -961,6 +962,44 @@ components/artifact-store.md, glossary.md).
   wiring, bare fragment, empty-is-calm, not-attached notice/503). `make check` green (lint 0, **764 pass /
   2 skip**); `-race` clean on the live package. **Completes Phase 4.** (needs T4.24)
   ([control-room.md](specs/control-room.md), [messaging.md](specs/messaging.md))
+- [x] **T4.26 Config view** — *done.* The declared factory at rest, made readable (control-room.md "The config
+  view"). **Non-TCB** (controlroom read-only; no orchestrator/runner/broker/gate change), human-reviewed.
+  `GET /config` — a plain server-rendered page (config is restart-static, so deliberately **not** a feed: no
+  SSE, no fragment/refetch — the one Reader-independent data view). **New leaf package
+  `internal/controlroom/configview`** owns the projection: it imports `internal/config` + `core` + the T4.6
+  `dag` renderer and returns a `ConfigView` of presentation structs (views import it, like `query`/`dag`). It is
+  **NOT** a `query.Reader` method — config doesn't come from the beads/git/artifact stores; the validated
+  `*config.Config` + env name are threaded into **`controlroom.Options{Config,Env}`** the way
+  `BudgetCaps`/`StageOrder`/`SpecDepth` already are (server gains `cfg`/`env`; `run.go` passes `cfg` + a new
+  `runOptions.env` from the `--env` flag). `configview.Build(cfg, env)` applies redaction **once** so the
+  structured sections and the per-section raw folds agree by construction. **Rendered + raw are one model:**
+  each section has a native `<details>` "raw" fold whose body is the **effective config re-serialized +
+  redacted** (`yaml.Marshal` of a redacted copy, labeled "effective config (redacted)"), never the file bytes
+  — proven by a test that the masked secrets (`nats.url`, artifact path, otel/model endpoints) never appear in
+  the raw YAML while kept values (allowlist, image digest, provider) do. **Redaction by allowlist**
+  (`redactInfra` masks `nats.url` / model+otel endpoints / artifact path; **keeps** `broker.allowlist` + the
+  image/rootfs digests + provider/cost; copies the Models map so the running config is never mutated — pinned
+  by a test). **Sections, in flow order:** identity strip (root · `infra.<env>.yaml` · profile · validated✓);
+  **pipeline graph** server-side SVG by **reusing the `dag` renderer** — extended minimally with
+  **`Edge.Kind`** + **`RenderSVGWith(g, RenderOptions{NodeHref,NodeFill,Label})`** so `produces` (solid) and
+  `on_failure` (dashed amber, own marker) edges style apart and stage nodes render anchor-less with a stage-kind
+  palette; **`RenderSVG` is exactly `RenderSVGWith(zero)`** so the issue-DAG output is byte-identical (the
+  failure marker is added to `<defs>` only when an on_failure edge exists). `roleFlowGraph` drops self-loops
+  (`plan→plan`) but keeps cross-stage back-edges (`qa→implement`). Cross-linked each way with the DAG view.
+  **stages** table (name/kind/pre/post/`on_failure`/`produces`); **checks** registry (name → command);
+  **souls** roster shown **resolved** — `model`→provider+cost, `sandbox`→concrete digest via `ResolveImage`,
+  souls ordered by **selector specificity** (mirrors the orchestrator's `selectSoul`: most-specific first,
+  empty-selector marked catch-all, stable name tie-break) with personas **linked** (path relative to root), not
+  inlined; **policy** (budgets/retries/`tcb_paths`, uncapped shown ∞); **infra** redacted. **Wiring:** `config`
+  entry in `views.NavItems`, `/config` handler + `implemented` set ahead of the nav-placeholder loop, nil config
+  → not-attached notice (200). `make generate` ran (templ + Tailwind). **Docs:** `docs/control-room.md` views
+  table updated. Tests: configview projection (identity/stage-kind labels), soul specificity + resolution,
+  redaction (structured + raw-fold no-leak + source-not-mutated), role-flow SVG (produces/on_failure styling,
+  no `/issue/` anchor, self-loop drop, back-edge keep, custom fill/label), policy ∞-formatting, nil-config; dag
+  (`RenderSVG`==`RenderSVGWith(zero)`, kind-less graph emits no failure styling, role-flow options); server
+  (nil-config notice, full render incl. masked-secret-no-leak + nav highlight + not-a-feed). `make check`-adjacent
+  green: `go build ./...`, `go vet ./...`, `golangci-lint` (0 issues), `go test ./...` all pass.
+  ([control-room.md](specs/control-room.md), [configuration.md](specs/configuration.md))
 
 ## Phase 5 — Production isolation & distribution
 

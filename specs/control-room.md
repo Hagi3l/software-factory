@@ -43,6 +43,7 @@ of the build (`go generate`), not the runtime.
 | **Dead-letter queue** | escalations needing a human — *the action surface* | beads + artifact store |
 | **Budgets** | token/$/wall-clock burn vs. caps, per epic/issue | beads + OTel metrics |
 | **Provenance** | trace any merged commit back to issue→soul→model→prompt→evidence | git + artifact store |
+| **Config** | the declared factory at rest: role-flow pipeline, gate checks, the resolved soul roster, policy, and redacted infra — read-only | validated config (in-process) |
 
 ### Rendering
 - **Live:** NATS → SSE → htmx swaps; the board and feed update without refresh.
@@ -183,6 +184,83 @@ the same transition routes; a landed row links onward to [Provenance](#the-views
 refetches on the `merge-state` nudge with the usual periodic backstop. Like the board it
 is **read-only** — the human never reorders the queue; the orchestrator is the single
 writer and integration is its function, not a lever.
+
+---
+
+## The config view
+
+The factory is **config-driven** ([configuration.md](configuration.md)) — the pipeline,
+the souls, the gates, and the infrastructure are all declarative — yet none of it was
+*readable* anywhere. The board renders the stage columns, the budgets view the policy
+caps, and verification/provenance the souls *per issue*; but the **declared factory as a
+whole** — the thing in `harness.yaml` + `souls/` — could be run and not inspected. This
+view is that missing window: **the declarative pipeline at rest**, read-only.
+
+It is the natural complement to the [DAG view](#the-views): the two are the *two graphs*
+the [architecture](architecture.md) distinguishes — the DAG view shows the **issue**
+dependency graph (the data flowing through), this view the **role-flow** (the declared
+pipeline the data flows through). They stay separate pages — the DAG view is about work,
+the config view about shape — cross-linked one line each way, never duplicated.
+
+**Read-only is the principle, not a limitation.** The control room has exactly two write
+surfaces — the [wizard](#the-wizard--the-only-human-in-the-loop-surface) (spec) and the
+[dead-letter queue](#the-views) (approve/reject) — because the human's only levers are
+intent and escalation. Config is neither: it is the substrate, changed by editing files
+and restarting (`configuration.md` decides restart over hot-reload for v1). Letting the UI
+edit it would invent a third write surface the architecture deliberately omits. The config
+view *shows*, never mutates.
+
+**It reflects the running factory by construction.** The control room is
+[co-located](observability.md) in the `harness run` process, so the config it renders is
+the very validated object that process is running — not a re-read of files that may have
+since moved. There is therefore no staleness and no "reload" affordance, and the page is a
+plain server-rendered snapshot: config is restart-static, so it is deliberately *not* a
+feed (see [Rendering](#rendering) — nothing that cannot change while you watch is rendered
+live). Under a standalone `harness serve` with no attached factory there is no config to
+show, so the view shows the same not-attached notice as the other live views.
+
+What it renders, in flow order:
+
+- **Identity strip** — the config root, the active infra overlay (the `infra.<env>.yaml`
+  in force), the `policy.profile` (`trusted-dev`/`autonomous`), and that the config passed
+  startup validation. *Which* factory is this.
+- **Pipeline graph** — the role-flow rendered **server-side to SVG** (the same renderer the
+  [DAG view](#rendering) uses, fed the declared stages instead of issues), with `produces`
+  and `on_failure` edges styled distinctly so the happy path and the retry/branch edges
+  read apart.
+- **Stages** — the textual detail behind the graph: each stage's `role`/`kind`, pre/post
+  conditions, `on_failure` and `produces`. A stage links to its
+  [board](#the-board-in-motion) column, tying the declared pipeline to the work currently
+  in it.
+- **Checks** — the [check registry](configuration.md): each postcondition name and the
+  shell command that realizes it in the verification sandbox.
+- **Souls** — the roster, shown **resolved**, not as raw soul files: each soul's `model`
+  joined to its provider and cost, its `sandbox` profile joined to the concrete
+  digest-pinned artifact, and — for a role fulfilled by several souls — the souls ordered
+  by **selection specificity**, the empty-selector one marked the catch-all default. This
+  is the orchestrator's own [selection resolution](configuration.md) made legible, so "why
+  did this issue route to that soul" is answerable by reading, not tracing. Personas are
+  **linked**, not inlined (the prompts are long markdown).
+- **Policy** — budgets, retry caps, and the `tcb_paths` globs that define the
+  permanently-human-reviewed [TCB boundary](bootstrap.md).
+- **Infra** — the environment overlay, **redacted** (below).
+
+**Rendered and raw are one model, two projections.** Every section renders structured, with
+a per-section "raw" fold (Alpine) exposing the underlying YAML. Crucially the raw fold is
+**not the file bytes**: it is the *effective, post-overlay-merge config re-serialized with
+the same redactions applied* — labelled "effective config (redacted)" — so it shows what is
+actually running and can never leak what the rendered view masks. One redacted view model
+feeds both faces; they cannot disagree.
+
+**Redaction is by allowlist.** Secrets are never in config to begin with (`configuration.md`
+— keys come from the environment), so redaction targets *topology*, not credentials: the
+`nats.url`, model `endpoint`s, the `otel` endpoint, and the artifact store path/bucket are
+masked. The egress `broker.allowlist` and the digest-pinned image/rootfs identifiers are
+kept visible — they are operational policy and build provenance, not secrets. The allowlist
+masks the named sensitive fields and shows everything else, so a field added to infra later
+cannot silently leak. This is belt-and-suspenders pending the open question of **who may
+operate the control room** ([OPEN](#open-questions)); when that lands, redaction may follow
+the viewer's role.
 
 ---
 

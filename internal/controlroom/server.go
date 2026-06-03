@@ -23,7 +23,9 @@ import (
 
 	"github.com/a-h/templ"
 
+	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/controlroom/assets"
+	"github.com/Loxstomper/harness/internal/controlroom/configview"
 	"github.com/Loxstomper/harness/internal/controlroom/live"
 	"github.com/Loxstomper/harness/internal/controlroom/query"
 	"github.com/Loxstomper/harness/internal/controlroom/views"
@@ -84,6 +86,15 @@ type Options struct {
 	// it pre-loads (query.ResolveContext) and to compute the blast radius (query.BlastRadius).
 	Repo      string
 	SpecDepth int
+	// Config is the validated, in-process factory config behind the read-only Config view
+	// (T4.26). It is the very object the running factory holds (the control room is co-located
+	// in `harness run`), so the view reflects the running factory with zero staleness. nil for a
+	// standalone `harness serve` (no attached factory), in which case /config renders the
+	// not-attached notice. Env names the active infra overlay (infra.<env>.yaml) for the
+	// identity strip. Threaded here, not into the Reader, because config does not come from the
+	// beads/git/artifact stores — mirroring how StageOrder/BudgetCaps/SpecDepth are threaded.
+	Config *config.Config
+	Env    string
 }
 
 // Server renders the control room. It is an http.Handler (via Handler) so its routes can
@@ -104,6 +115,8 @@ type Server struct {
 	resolver   wizard.Resolver
 	repo       string
 	specDepth  int
+	cfg        *config.Config
+	env        string
 }
 
 // New builds the server and registers every route. Routes are registered eagerly so a
@@ -128,6 +141,8 @@ func New(opts Options) *Server {
 		resolver:   opts.Resolver,
 		repo:       opts.Repo,
 		specDepth:  opts.SpecDepth,
+		cfg:        opts.Config,
+		env:        opts.Env,
 	}
 	s.routes()
 	return s
@@ -179,6 +194,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /provenance", s.handleProvenance) // T4.10 — merged-commit provenance chain
 	s.mux.HandleFunc("GET /provenance/items", s.handleProvenanceItems)
 	s.mux.HandleFunc("GET /status/bar", s.handleStatusBar) // T4.19 — layout status-bar live fragment
+	s.mux.HandleFunc("GET /config", s.handleConfig)        // T4.26 — the declared factory at rest (read-only)
 
 	// Create-Task wizard (T4.12) — the human's action surface. GET /create mints a fresh
 	// conversation session and renders the page; the per-session SSE stream carries the live
@@ -207,7 +223,7 @@ func (s *Server) routes() {
 	// above so the mux is not asked to register a duplicate pattern.
 	implemented := map[string]bool{
 		"board": true, "dag": true, "activity": true, "merge": true, "dlq": true,
-		"budgets": true, "provenance": true, "create": true,
+		"budgets": true, "provenance": true, "create": true, "config": true,
 	}
 	for _, item := range views.NavItems {
 		if implemented[item.Key] {
@@ -519,6 +535,20 @@ func (s *Server) handleStatusBar(w http.ResponseWriter, r *http.Request) {
 		active = s.activity.ActiveAgents(activeAgentWindow)
 	}
 	s.render(w, r, views.StatusBar(st, active))
+}
+
+// handleConfig renders the read-only Config view (T4.26) — the declared factory at rest. With
+// no in-process config wired (a standalone `harness serve` has no attached factory) it shows the
+// not-attached notice, mirroring the Reader-backed views. It is the one Reader-independent data
+// view: config is the validated in-process object, not a store read, so there is nothing to fault
+// or refresh — the page is a plain server-rendered snapshot (config is restart-static), built once
+// from the threaded config with redaction applied inside configview.Build.
+func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
+	if s.cfg == nil {
+		s.render(w, r, views.ConfigMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to inspect the declared config."))
+		return
+	}
+	s.render(w, r, views.ConfigPage(configview.Build(s.cfg, s.env)))
 }
 
 // handleDLQ renders the full dead-letter queue page (T4.8) — the escalations awaiting a

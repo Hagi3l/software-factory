@@ -150,3 +150,58 @@ func TestRenderSVGEmptyGraphNoPanic(t *testing.T) {
 		t.Errorf("empty graph did not render a minimal valid svg: %q", svg)
 	}
 }
+
+// TestRenderSVGWithDefaultMatchesRenderSVG: RenderSVG must be exactly RenderSVGWith with the
+// zero options, so the issue-DAG output is unaffected by the role-flow extension.
+func TestRenderSVGWithDefaultMatchesRenderSVG(t *testing.T) {
+	g := Graph{
+		Nodes: []Node{{ID: "h-1", Title: "first", Status: "open"}, {ID: "h-2", Title: "second", Status: "blocked"}},
+		Edges: []Edge{{From: "h-1", To: "h-2"}},
+	}
+	if RenderSVG(g) != RenderSVGWith(g, RenderOptions{}) {
+		t.Error("RenderSVG diverged from RenderSVGWith(zero options)")
+	}
+	// A plain (kind-less) graph must not emit the failure marker or dashed styling.
+	svg := RenderSVG(g)
+	if strings.Contains(svg, "dag-arrow-fail") || strings.Contains(svg, "stroke-dasharray") {
+		t.Errorf("kind-less graph leaked failure-edge styling:\n%s", svg)
+	}
+}
+
+// TestRenderSVGWithRoleFlow: the config role-flow options — a stage-kind fill, an
+// anchor-suppressing NodeHref, and an on_failure edge — render distinctly: no /issue/ anchor,
+// the dashed amber failure edge with its own marker, the custom fill, and the custom label.
+func TestRenderSVGWithRoleFlow(t *testing.T) {
+	g := Graph{
+		Nodes: []Node{{ID: "plan", Title: "planner", Status: "plan"}, {ID: "implement", Title: "implementor", Status: "agent"}},
+		Edges: []Edge{
+			{From: "plan", To: "implement", Kind: EdgeProduces},
+			{From: "implement", To: "plan", Kind: EdgeOnFailure},
+		},
+	}
+	svg := RenderSVGWith(g, RenderOptions{
+		NodeHref: func(string) string { return "" },
+		NodeFill: func(status string) string {
+			if status == "plan" {
+				return "#abcdef"
+			}
+			return "#123456"
+		},
+		Label: "role flow",
+	})
+	if strings.Contains(svg, "/issue/") || strings.Contains(svg, "<a ") {
+		t.Errorf("role-flow nodes should have no anchor:\n%s", svg)
+	}
+	if !strings.Contains(svg, `data-node="plan"`) {
+		t.Errorf("missing stage node:\n%s", svg)
+	}
+	if !strings.Contains(svg, "#abcdef") {
+		t.Errorf("custom NodeFill not applied:\n%s", svg)
+	}
+	if !strings.Contains(svg, `aria-label="role flow"`) {
+		t.Errorf("custom label not applied:\n%s", svg)
+	}
+	if !strings.Contains(svg, `data-kind="on_failure"`) || !strings.Contains(svg, "dag-arrow-fail") || !strings.Contains(svg, "stroke-dasharray") {
+		t.Errorf("on_failure edge not styled distinctly:\n%s", svg)
+	}
+}

@@ -67,6 +67,7 @@ func cmdRun(args []string) error {
 		bdBin:     *bdBin,
 		serveAddr: *serveAddr,
 		natsAddr:  *natsAddr,
+		env:       *env,
 	}, log)
 	if err != nil {
 		return err
@@ -105,6 +106,10 @@ type runOptions struct {
 	// source. Empty (the default) builds no server. Kept here, not in config, because
 	// it is a deployment knob of this command like bdBin.
 	serveAddr string
+	// env is the active infra-overlay environment name (infra.<env>.yaml). It is threaded
+	// into the control room's Config view (T4.26) for the identity strip — "which overlay is
+	// in force". A deployment knob of this command like serveAddr, not config.
+	env string
 	// natsAddr, when non-empty (host:port), exposes this run's embedded NATS on a TCP
 	// listener so a separate `harness approve`/`reject` process can publish approvals to it
 	// (the trusted-dev gate, T2.10). Empty (the default) keeps NATS in-process only. Like
@@ -316,6 +321,8 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			Resolver:   resolver,
 			Repo:       repo,
 			SpecDepth:  cfg.Harness.SpecDepth,
+			Config:     cfg,
+			Env:        opts.env,
 		})
 	}
 
