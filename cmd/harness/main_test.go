@@ -12,6 +12,11 @@ import (
 // testConfigDir is the shipped bootstrap config, relative to this package dir.
 const testConfigDir = "../../config"
 
+// demoConfigDir is the local-model demo config (demo/run.sh), relative to this package
+// dir. It is a separate, hand-maintained config tree, so it can drift from a schema
+// change made against the shipped config above; TestValidateDemoConfig guards it.
+const demoConfigDir = "../../demo/config"
+
 // TestDispatchExitCodes pins the CLI's exit-code contract: 0 for success/help/
 // version, 2 for a usage error (missing/unknown command), 1 for a command error
 // (a bad config). The exit code is the only thing a shell or CI step sees, so it is
@@ -53,6 +58,22 @@ func TestValidateShippedConfig(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("shipped config failed validation: %v", err)
+	}
+}
+
+// TestValidateDemoConfig is the regression guard on the demo config (demo/run.sh): the
+// config the local-model demo ships with must pass the full startup gate. The demo is a
+// hand-maintained tree separate from the shipped config, so a schema change made against
+// config/ (e.g. the sandbox.profiles registry) can silently rot it — run.sh would fail at
+// `harness validate` only when an operator next runs the demo. This fails loudly in CI
+// instead.
+func TestValidateDemoConfig(t *testing.T) {
+	cfg, err := loadConfig(demoConfigDir, "dev")
+	if err != nil {
+		t.Fatalf("load demo config: %v", err)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("demo config failed validation: %v", err)
 	}
 }
 

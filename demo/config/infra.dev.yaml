@@ -14,6 +14,13 @@ sandbox:
   # the runner spends waiting on inference. Set generously; raise it if a stage dead-letters
   # with a wall-budget reason on slow hardware. The page build itself needs little CPU/mem.
   limits:  { cpu: 2, mem: 2Gi, wall: 45m }
+  # profiles resolves the logical profile a soul names (soul.sandbox: go-toolchain) to the
+  # concrete image the docker backend boots. The demo reuses the kernel go-toolchain image
+  # (bash + grep + git is all the static-HTML gate needs); run.sh builds it locally tagged
+  # `go-toolchain`, so the profile maps to that bare tag rather than harness/go-toolchain:dev.
+  profiles:
+    go-toolchain:
+      image: go-toolchain
 nats:
   url: nats://localhost:4222
   jetstream: { replicas: 1, max_age: 168h }
