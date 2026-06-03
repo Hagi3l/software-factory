@@ -26,9 +26,9 @@ templ MergeQueuePage(rows []query.MergeRow) {
 		<div class="space-y-4">
 			<div class="flex items-baseline justify-between">
 				<h1 class="text-xl font-semibold tracking-tight">Merge queue</h1>
-				<span class="text-sm text-slate-500">{ strconv.Itoa(len(rows)) } in the train</span>
+				<span class="text-sm text-muted">{ strconv.Itoa(len(rows)) } in the train</span>
 			</div>
-			<p class="max-w-3xl text-sm text-slate-500">
+			<p class="max-w-3xl text-sm text-muted">
 				The serialized merge train in flight — each integrate candidate's step as it rebases onto main and re-gates. Read-only: the orchestrator is the single writer and integration is its function, not a lever.
 			</p>
 			<div hx-ext="sse" sse-connect="/events">
@@ -51,9 +51,9 @@ templ MergeQueuePage(rows []query.MergeRow) {
 // nothing is integrating — so it reads as calm, not an error.
 templ MergeQueueList(rows []query.MergeRow) {
 	if len(rows) == 0 {
-		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-6 text-center">
-			<p class="text-sm text-slate-300">The merge train is empty.</p>
-			<p class="mt-1 text-xs text-slate-500">Candidates appear here as they enter the serialized merge queue.</p>
+		<div class="rounded-lg border border-border bg-surface p-6 text-center">
+			<p class="text-sm text-fg">The merge train is empty.</p>
+			<p class="mt-1 text-xs text-muted">Candidates appear here as they enter the serialized merge queue.</p>
 		</div>
 	} else {
 		<ul class="flex flex-col gap-2">
@@ -73,25 +73,25 @@ templ MergeQueueList(rows []query.MergeRow) {
 templ mergeRow(row query.MergeRow) {
 	<li class={ mergeRowClass(row) }>
 		<div class="flex items-center justify-between gap-2">
-			<span class="font-mono text-xs text-slate-500">{ row.ID }</span>
+			<span class="font-mono text-xs text-muted">{ row.ID }</span>
 			@mergeStateBadge(row.State)
 		</div>
 		<p class="mt-1 text-sm">
-			<a href={ templ.URL("/issue/" + row.ID) } class="text-slate-100 hover:text-white hover:underline">{ orDash(row.Title) }</a>
+			<a href={ templ.URL("/issue/" + row.ID) } class="text-fg hover:text-fg hover:underline">{ orDash(row.Title) }</a>
 		</p>
-		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
 			if row.Role != "" {
 				<span>{ row.Role }</span>
 			}
 			if row.Spec != "" {
-				<span class="font-mono text-slate-500">{ row.Spec }</span>
+				<span class="font-mono text-muted">{ row.Spec }</span>
 			}
 			if row.State == "landed" && row.Commit != "" {
-				<span class="font-mono text-emerald-300">{ shortHash(row.Commit) }</span>
-				<a href="/provenance" class="text-sky-400 hover:text-sky-300 hover:underline">Provenance →</a>
+				<span class="font-mono text-st-ok">{ shortHash(row.Commit) }</span>
+				<a href="/provenance" class="text-st-progress hover:text-st-progress hover:underline">Provenance →</a>
 			}
 			if row.Failed {
-				<a href={ templ.URL("/issue/" + row.ID) } class="text-rose-300 hover:text-rose-200 hover:underline">Dead-letter / fix →</a>
+				<a href={ templ.URL("/issue/" + row.ID) } class="text-st-blocked hover:text-st-blocked hover:underline">Dead-letter / fix →</a>
 			}
 		</div>
 	</li>
@@ -104,7 +104,7 @@ templ MergeQueueMessage(msg string) {
 	@Layout("Harness — Merge queue", "merge") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Merge queue</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }
@@ -115,13 +115,13 @@ templ MergeQueueMessage(msg string) {
 templ mergeStateBadge(state string) {
 	switch state {
 		case "landed":
-			<span class="rounded bg-emerald-500/20 px-1.5 py-0.5 text-xs text-emerald-300">{ state }</span>
+			<span class="rounded bg-st-ok-bg px-1.5 py-0.5 text-xs text-st-ok">{ state }</span>
 		case "conflicted", "regate-failed":
-			<span class="rounded bg-rose-500/20 px-1.5 py-0.5 text-xs text-rose-300">{ state }</span>
+			<span class="rounded bg-st-blocked-bg px-1.5 py-0.5 text-xs text-st-blocked">{ state }</span>
 		case "rebasing", "re-gating":
-			<span class="rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-300">{ state }</span>
+			<span class="rounded bg-st-warn-bg px-1.5 py-0.5 text-xs text-st-warn">{ state }</span>
 		default:
-			<span class="rounded bg-sky-500/20 px-1.5 py-0.5 text-xs text-sky-300">{ state }</span>
+			<span class="rounded bg-st-progress-bg px-1.5 py-0.5 text-xs text-st-progress">{ state }</span>
 	}
 }
 
@@ -131,10 +131,10 @@ templ mergeStateBadge(state string) {
 func mergeRowClass(row query.MergeRow) string {
 	switch {
 	case row.Failed:
-		return "rounded-md border border-rose-900/50 bg-rose-950/20 p-3"
+		return "rounded-md border border-st-blocked/30 bg-st-blocked-bg p-3"
 	case row.State == "landed":
-		return "rounded-md border border-emerald-900/40 bg-emerald-950/10 p-3"
+		return "rounded-md border border-st-ok/40 bg-st-ok-bg p-3"
 	default:
-		return "rounded-md border border-slate-800 bg-slate-900/40 p-3"
+		return "rounded-md border border-border bg-surface p-3"
 	}
 }

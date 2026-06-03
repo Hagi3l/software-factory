@@ -12,7 +12,7 @@ package views
 // (Board, DAG, Activity, …) be a thin templ that only renders its own panel.
 templ Layout(title string, active string) {
 	<!DOCTYPE html>
-	<html lang="en" class="h-full bg-slate-950 text-slate-100">
+	<html lang="en" class="h-full bg-canvas text-fg">
 		<head>
 			<meta charset="utf-8"/>
 			<meta name="viewport" content="width=device-width, initial-scale=1"/>
@@ -23,10 +23,10 @@ templ Layout(title string, active string) {
 			<script src="/static/alpine.min.js" defer></script>
 			<script src="/static/alerts.js" defer></script>
 		</head>
-		<body class="flex h-full flex-col">
-			<header class="flex items-center gap-6 border-b border-slate-800 bg-slate-900/60 px-6 py-3">
-				<a href="/" class="text-sm font-semibold tracking-tight text-slate-100">
-					harness <span class="text-slate-500">control room</span>
+		<body class="flex h-full flex-col font-sans antialiased">
+			<header class="flex items-center gap-6 border-b border-border bg-surface px-6 py-3">
+				<a href="/" class="text-sm font-semibold tracking-tight text-fg">
+					harness <span class="text-faint">control room</span>
 				</a>
 				<nav class="flex flex-wrap gap-1 text-sm">
 					for _, item := range NavItems {
@@ -67,8 +67,8 @@ var NavItems = []NavItem{
 
 templ navLink(item NavItem, active string) {
 	if item.Key == active {
-		<a href={ templ.SafeURL(item.Href) } class="rounded px-2 py-1 font-medium bg-slate-700 text-white">{ item.Label }</a>
+		<a href={ templ.SafeURL(item.Href) } class="rounded-md px-2.5 py-1 font-medium bg-accent-soft text-accent-strong ring-1 ring-accent/20">{ item.Label }</a>
 	} else {
-		<a href={ templ.SafeURL(item.Href) } class="rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100">{ item.Label }</a>
+		<a href={ templ.SafeURL(item.Href) } class="rounded-md px-2.5 py-1 text-muted hover:bg-canvas hover:text-fg">{ item.Label }</a>
 	}
 }

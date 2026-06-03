@@ -9,3 +9,104 @@
 
 @source "../views/**/*.templ";
 @source "../views/**/*_templ.go";
+
+/* Vendored Geist (OFL) — woff2 under static/fonts, embedded in the binary and served
+   from /static, so the typeface ships zero-network like every other asset. Only the
+   weights the UI actually uses are bundled: Sans 400/500/600, Mono 400/500. Geist Mono
+   carries the machine text (issue ids, timers, spec paths); Geist Sans is the UI face.
+   font-display:swap so first paint never blocks on the font. */
+@font-face {
+	font-family: "Geist";
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url("/static/fonts/GeistSans-Regular.woff2") format("woff2");
+}
+@font-face {
+	font-family: "Geist";
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url("/static/fonts/GeistSans-Medium.woff2") format("woff2");
+}
+@font-face {
+	font-family: "Geist";
+	font-style: normal;
+	font-weight: 600;
+	font-display: swap;
+	src: url("/static/fonts/GeistSans-SemiBold.woff2") format("woff2");
+}
+@font-face {
+	font-family: "Geist Mono";
+	font-style: normal;
+	font-weight: 400;
+	font-display: swap;
+	src: url("/static/fonts/GeistMono-Regular.woff2") format("woff2");
+}
+@font-face {
+	font-family: "Geist Mono";
+	font-style: normal;
+	font-weight: 500;
+	font-display: swap;
+	src: url("/static/fonts/GeistMono-Medium.woff2") format("woff2");
+}
+
+/* Design tokens. In Tailwind v4 every @theme custom property generates utilities, so a
+   `--color-surface` here yields `bg-surface` / `text-surface` / `border-surface`, and the
+   font tokens drive `font-sans` / `font-mono`. Views reference these semantic names instead
+   of raw palette literals (slate-900/40 …) so the whole control room re-themes from one place.
+
+   The palette is the agreed light-mode "refined SaaS" system (specs/control-room.md):
+     - Surfaces are near-white with SHADOW-driven depth — cards share the panel's white and
+       lift on `shadow-card`, not on a background step (the light-mode analogue of dark's
+       border-driven layering).
+     - One restrained brand accent — CYAN — reserved for INTERACTIVE affordances only
+       (links, active nav, focus rings, the Create-Task button). On white the bright cyan
+       washes out, so the interactive value is cyan-600/700.
+     - Status colors signal STATE only and never appear as a glow: each is a saturated
+       foreground over a -50 tint chip (blocked rose, in-progress violet, healthy emerald,
+       warn amber, idle gray). in-progress is violet (moved off blue) so it never reads as
+       the cyan interactive accent. */
+@theme {
+	/* Surfaces & text */
+	--color-canvas: #fafafa;
+	--color-surface: #ffffff;
+	--color-raised: #ffffff;
+	--color-border: #ececef;
+	--color-border-strong: #d8d8de;
+	--color-fg: #18181b;
+	--color-muted: #6b6b76;
+	--color-faint: #9a9aa3;
+
+	/* Interactive brand accent (cyan) — fills, rings, links. NOT a status color. */
+	--color-accent: #0891b2;
+	--color-accent-strong: #0e7490;
+	--color-accent-soft: #ecfeff;
+	--color-accent-ring: oklch(0.715 0.143 215.221 / 0.4);
+
+	/* Status foregrounds + their tint-chip backgrounds (state only). */
+	--color-st-blocked: #e11d48;
+	--color-st-blocked-bg: #fff1f2;
+	--color-st-progress: #7c3aed;
+	--color-st-progress-bg: #f5f3ff;
+	--color-st-ok: #059669;
+	--color-st-ok-bg: #ecfdf5;
+	--color-st-warn: #b45309;
+	--color-st-warn-bg: #fffbeb;
+	--color-st-idle: #52525b;
+	--color-st-idle-bg: #f4f4f5;
+
+	/* Typefaces (vendored above). */
+	--font-sans: "Geist", ui-sans-serif, system-ui, sans-serif;
+	--font-mono: "Geist Mono", ui-monospace, "SF Mono", monospace;
+
+	/* Card lift — the light-mode depth cue (used as shadow-card). */
+	--shadow-card: 0 1px 2px rgb(0 0 0 / 0.06), 0 1px 3px rgb(0 0 0 / 0.04);
+	--shadow-card-hover: 0 2px 4px rgb(0 0 0 / 0.07), 0 4px 12px rgb(0 0 0 / 0.06);
+}
+
+/* Antialiasing for the grotesk — Geist is designed for it. */
+html {
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+}

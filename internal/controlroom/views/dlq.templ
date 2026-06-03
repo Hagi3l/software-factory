@@ -25,9 +25,9 @@ templ DeadLetterPage(items []query.DeadLetter) {
 		<div class="space-y-4">
 			<div class="flex items-baseline justify-between">
 				<h1 class="text-xl font-semibold tracking-tight">Dead-letter queue</h1>
-				<span class="text-sm text-slate-500">{ strconv.Itoa(len(items)) } awaiting a human</span>
+				<span class="text-sm text-muted">{ strconv.Itoa(len(items)) } awaiting a human</span>
 			</div>
-			<p class="max-w-3xl text-sm text-slate-500">
+			<p class="max-w-3xl text-sm text-muted">
 				Work the factory dead-lettered — budget or retries exhausted, or an escalation it could not resolve. A human triages each by refining the governing spec, never by editing code.
 			</p>
 			<div hx-ext="sse" sse-connect="/events">
@@ -50,9 +50,9 @@ templ DeadLetterPage(items []query.DeadLetter) {
 // state — nothing needs a human — so it reads as reassurance, not an error.
 templ DeadLetterList(items []query.DeadLetter) {
 	if len(items) == 0 {
-		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-6 text-center">
-			<p class="text-sm text-slate-300">Nothing needs a human.</p>
-			<p class="mt-1 text-xs text-slate-500">No work has dead-lettered — the queue is empty.</p>
+		<div class="rounded-lg border border-border bg-surface p-6 text-center">
+			<p class="text-sm text-fg">Nothing needs a human.</p>
+			<p class="mt-1 text-xs text-muted">No work has dead-lettered — the queue is empty.</p>
 		</div>
 	} else {
 		<ul class="flex flex-col gap-2">
@@ -72,33 +72,33 @@ templ DeadLetterList(items []query.DeadLetter) {
 // exhausted retry cap are the two non-escalation causes (specs/workflow.md). The row is no longer
 // a single anchor — it carries two distinct links — so it is a card, not a click-through.
 templ deadLetterRow(dl query.DeadLetter) {
-	<li class="rounded-md border border-rose-900/50 bg-rose-950/20 p-3">
+	<li class="rounded-md border border-st-blocked/30 bg-st-blocked-bg p-3">
 		<div class="flex items-center justify-between gap-2">
-			<span class="font-mono text-xs text-slate-500">{ dl.ID }</span>
+			<span class="font-mono text-xs text-muted">{ dl.ID }</span>
 			<div class="flex items-center gap-3">
-				<span class="rounded bg-rose-500/20 px-1.5 py-0.5 text-xs text-rose-300">blocked</span>
+				<span class="rounded bg-st-blocked-bg px-1.5 py-0.5 text-xs text-st-blocked">blocked</span>
 				// The verification view is forensic and renders for rejected candidates too (T4.23),
 				// so it is the first place a triager looks: what did the gate actually find? It
 				// degrades to the producer≠verifier soul split plus a notice when the issue
 				// dead-lettered before its candidate was ever gated.
-				<a href={ templ.URL("/verification/" + dl.ID) } class="text-xs text-sky-400 hover:text-sky-300 hover:underline">Verification</a>
-				<a href={ templ.URL("/resolve/" + dl.ID) } class="rounded bg-emerald-600/90 px-2 py-0.5 text-xs font-medium text-white transition hover:bg-emerald-500">Resolve →</a>
+				<a href={ templ.URL("/verification/" + dl.ID) } class="text-xs text-st-progress hover:text-st-progress hover:underline">Verification</a>
+				<a href={ templ.URL("/resolve/" + dl.ID) } class="rounded bg-st-ok px-2 py-0.5 text-xs font-medium text-white transition hover:bg-st-ok">Resolve →</a>
 			</div>
 		</div>
 		<p class="mt-1 text-sm">
-			<a href={ templ.URL("/issue/" + dl.ID) } class="text-slate-100 hover:text-white hover:underline">{ dl.Title }</a>
+			<a href={ templ.URL("/issue/" + dl.ID) } class="text-fg hover:text-fg hover:underline">{ dl.Title }</a>
 		</p>
 		if dl.Reason != "" {
-			<p class="mt-1 text-xs text-rose-200/90">{ dl.Reason }</p>
+			<p class="mt-1 text-xs text-st-blocked">{ dl.Reason }</p>
 		}
-		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
 			if dl.Role != "" {
 				<span>{ dl.Role }</span>
 			}
 			if dl.Spec != "" {
-				<span class="font-mono text-slate-500">{ dl.Spec }</span>
+				<span class="font-mono text-muted">{ dl.Spec }</span>
 			}
-			<span class="text-amber-400">attempt { strconv.Itoa(dl.Attempt) }</span>
+			<span class="text-st-warn">attempt { strconv.Itoa(dl.Attempt) }</span>
 			<span>{ strconv.Itoa(dl.SpentTokens) } tokens · { formatUSD(dl.SpentUSD) }</span>
 		</div>
 	</li>
@@ -111,7 +111,7 @@ templ DeadLetterMessage(msg string) {
 	@Layout("Harness — Dead-letter", "dlq") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Dead-letter queue</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }

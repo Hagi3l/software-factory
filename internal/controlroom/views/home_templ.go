@@ -45,20 +45,20 @@ func Home(version string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"mx-auto max-w-3xl space-y-6\"><div><h1 class=\"text-2xl font-semibold tracking-tight\">Control room</h1><p class=\"mt-1 text-slate-400\">The human's read-only window into the factory and the only place to act. Build <span class=\"font-mono text-slate-300\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"mx-auto max-w-3xl space-y-6\"><div><h1 class=\"text-2xl font-semibold tracking-tight\">Control room</h1><p class=\"mt-1 text-muted\">The human's read-only window into the factory and the only place to act. Build <span class=\"font-mono text-fg\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(version)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/home.templ`, Line: 14, Col: 59}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/home.templ`, Line: 14, Col: 52}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</span>.</p></div><div class=\"rounded-lg border border-slate-800 bg-slate-900/40 p-4\"><p class=\"text-sm text-slate-300\">The server scaffold and asset pipeline are live (T4.1). The views below are wired into the navigation and land in subsequent tasks.</p></div><div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</span>.</p></div><div class=\"rounded-lg border border-border bg-surface p-4\"><p class=\"text-sm text-fg\">The server scaffold and asset pipeline are live (T4.1). The views below are wired into the navigation and land in subsequent tasks.</p></div><div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -76,14 +76,14 @@ func Home(version string) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" class=\"block rounded-lg border border-slate-800 bg-slate-900/40 p-4 hover:border-slate-600 hover:bg-slate-900\"><span class=\"font-medium text-slate-100\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 4, "\" class=\"block rounded-lg border border-border bg-surface p-4 hover:border-border-strong hover:bg-surface\"><span class=\"font-medium text-fg\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(item.Label)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/home.templ`, Line: 26, Col: 59}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/home.templ`, Line: 26, Col: 52}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
@@ -157,7 +157,7 @@ func Placeholder(label string, active string) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</h1><p class=\"mt-2 text-slate-400\">This view is not built yet — it lands in a later Phase 4 task.</p></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</h1><p class=\"mt-2 text-muted\">This view is not built yet — it lands in a later Phase 4 task.</p></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

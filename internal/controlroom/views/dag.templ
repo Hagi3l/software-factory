@@ -28,7 +28,7 @@ templ DAGPage(g dag.Graph) {
 		<div class="space-y-4">
 			<div class="flex items-baseline justify-between">
 				<h1 class="text-xl font-semibold tracking-tight">DAG</h1>
-				<span class="text-sm text-slate-500">issue dependency graph</span>
+				<span class="text-sm text-muted">issue dependency graph</span>
 			</div>
 			<div hx-ext="sse" sse-connect="/events">
 				<div
@@ -51,7 +51,7 @@ templ DAGPage(g dag.Graph) {
 // Alpine wrapper (dagHover) drives hover-to-highlight over the SVG's data attributes.
 templ DAGGraph(g dag.Graph) {
 	if len(g.Nodes) == 0 {
-		<p class="text-slate-400">No issues yet.</p>
+		<p class="text-muted">No issues yet.</p>
 	} else {
 		<div x-data="dagHover()" @mouseover="hover($event)" @mouseout="clear()" class="overflow-auto">
 			@templ.Raw(dag.RenderSVG(g))
@@ -66,7 +66,7 @@ templ DAGMessage(msg string) {
 	@Layout("Harness — DAG", "dag") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">DAG</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }

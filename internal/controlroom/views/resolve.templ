@@ -20,7 +20,7 @@ templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messa
 		<div class="mx-auto flex max-w-3xl flex-col gap-4">
 			<div>
 				<h1 class="text-xl font-semibold tracking-tight">Resolve</h1>
-				<p class="mt-1 text-sm text-slate-400">
+				<p class="mt-1 text-sm text-muted">
 					Refine the spec to unstick dead-lettered work. The planner is pre-loaded with the
 					escalation and the governing spec slice; converge on a minimal spec edit, then approve
 					— the factory re-pins and reissues the affected work automatically.
@@ -51,7 +51,7 @@ templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messa
 					hx-get={ "/create/messages/" + sessionID }
 					hx-trigger="sse:turn, every 8s"
 					hx-swap="innerHTML"
-					class="flex min-h-64 flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/40 p-4"
+					class="flex min-h-64 flex-col gap-3 rounded-lg border border-border bg-surface p-4"
 				>
 					@WizardTranscript(msgs)
 				</div>
@@ -68,12 +68,12 @@ templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messa
 						rows="3"
 						required
 						placeholder="Describe how the spec should be clarified, or answer the planner's question…"
-						class="w-full resize-y rounded-md border border-slate-700 bg-slate-900 p-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-slate-500 focus:outline-none"
+						class="w-full resize-y rounded-md border border-border-strong bg-surface p-3 text-sm text-fg placeholder:text-muted focus:border-border-strong focus:outline-none"
 					></textarea>
 					<div class="flex justify-end">
 						<button
 							type="submit"
-							class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
+							class="rounded-md bg-accent-strong px-4 py-2 text-sm font-medium text-white transition hover:bg-accent"
 						>Send</button>
 					</div>
 				</form>
@@ -87,29 +87,29 @@ templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messa
 // when a transcript was harvested — the raw transcript and the replayed decision trail. This is
 // the "pre-loaded with the escalation … and the agent transcript that raised it" surface.
 templ resolveEscalation(rc query.ResolveContext) {
-	<div class="flex flex-col gap-2 rounded-lg border border-rose-900/50 bg-rose-950/20 p-4">
+	<div class="flex flex-col gap-2 rounded-lg border border-st-blocked/30 bg-st-blocked-bg p-4">
 		<div class="flex flex-wrap items-center gap-2">
-			<span class="font-mono text-xs text-slate-500">{ rc.Issue.ID }</span>
+			<span class="font-mono text-xs text-muted">{ rc.Issue.ID }</span>
 			@statusBadge(rc.Issue.Status)
 			if rc.Issue.Role != "" {
-				<span class="text-xs text-slate-400">{ rc.Issue.Role }</span>
+				<span class="text-xs text-muted">{ rc.Issue.Role }</span>
 			}
 		</div>
-		<p class="text-sm font-medium text-slate-100">{ rc.Issue.Title }</p>
+		<p class="text-sm font-medium text-fg">{ rc.Issue.Title }</p>
 		if rc.Issue.DeadLetterReason != "" {
-			<p class="text-xs text-rose-200">Why it is stuck: { rc.Issue.DeadLetterReason }</p>
+			<p class="text-xs text-st-blocked">Why it is stuck: { rc.Issue.DeadLetterReason }</p>
 		}
-		<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-			<span class="text-amber-400">attempt { strconv.Itoa(rc.Issue.Attempt) }</span>
+		<div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+			<span class="text-st-warn">attempt { strconv.Itoa(rc.Issue.Attempt) }</span>
 			<span>{ strconv.Itoa(rc.Issue.SpentTokens) } tokens · { formatUSD(rc.Issue.SpentUSD) }</span>
 		</div>
 		<div class="flex flex-wrap items-center gap-x-4 gap-y-1 pt-1 text-xs">
-			<a href={ templ.URL("/issue/" + rc.Issue.ID) } class="text-sky-400 hover:text-sky-300 hover:underline">issue detail</a>
+			<a href={ templ.URL("/issue/" + rc.Issue.ID) } class="text-st-progress hover:text-st-progress hover:underline">issue detail</a>
 			if rc.TranscriptAvailable {
-				<a href={ templ.URL("/artifact/" + rc.TranscriptHash) } target="_blank" rel="noopener" class="text-sky-400 hover:text-sky-300 hover:underline">agent transcript</a>
-				<a href={ templ.URL("/replay/" + rc.Issue.ID) } class="text-sky-400 hover:text-sky-300 hover:underline">▸ replay decision trail</a>
+				<a href={ templ.URL("/artifact/" + rc.TranscriptHash) } target="_blank" rel="noopener" class="text-st-progress hover:text-st-progress hover:underline">agent transcript</a>
+				<a href={ templ.URL("/replay/" + rc.Issue.ID) } class="text-st-progress hover:text-st-progress hover:underline">▸ replay decision trail</a>
 			} else if rc.TranscriptHash != "" {
-				<span class="text-slate-600" title="not resolvable in the artifact store">transcript unavailable</span>
+				<span class="text-faint" title="not resolvable in the artifact store">transcript unavailable</span>
 			}
 		</div>
 	</div>
@@ -121,16 +121,16 @@ templ resolveEscalation(rc query.ResolveContext) {
 // slice failed to resolve) it says so rather than rendering an empty box.
 templ resolveSpecSlice(rc query.ResolveContext) {
 	if rc.Spec != "" {
-		<details class="rounded-lg border border-slate-800 bg-slate-900/40">
-			<summary class="cursor-pointer px-4 py-2 text-sm text-slate-200">Governing spec slice — <span class="font-mono text-xs text-slate-500">{ rc.Spec }</span></summary>
+		<details class="rounded-lg border border-border bg-surface">
+			<summary class="cursor-pointer px-4 py-2 text-sm text-fg">Governing spec slice — <span class="font-mono text-xs text-muted">{ rc.Spec }</span></summary>
 			if rc.SpecSlice != "" {
-				<pre class="overflow-x-auto whitespace-pre-wrap border-t border-slate-800 px-4 py-3 text-xs leading-relaxed text-slate-300">{ rc.SpecSlice }</pre>
+				<pre class="overflow-x-auto whitespace-pre-wrap border-t border-border px-4 py-3 text-xs leading-relaxed text-fg">{ rc.SpecSlice }</pre>
 			} else {
-				<p class="border-t border-slate-800 px-4 py-3 text-xs text-slate-500">The spec slice could not be resolved (the file may be mid-edit or missing).</p>
+				<p class="border-t border-border px-4 py-3 text-xs text-muted">The spec slice could not be resolved (the file may be mid-edit or missing).</p>
 			}
 		</details>
 	} else {
-		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500">
+		<div class="rounded-lg border border-border bg-surface p-4 text-sm text-muted">
 			This issue names no governing spec — refine the spec the work should be derived from.
 		</div>
 	}
@@ -144,16 +144,16 @@ templ resolveSpecSlice(rc query.ResolveContext) {
 // shown — Resolve refines a spec and reopens the stuck issue, it does not create new work.
 templ ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query.BlastRadius) {
 	if len(draft.Specs) == 0 {
-		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500">
+		<div class="rounded-lg border border-border bg-surface p-4 text-sm text-muted">
 			The refined spec will appear here, with its blast radius and an Approve button, once the
 			planner proposes an edit.
 		</div>
 	} else {
-		<div class="flex flex-col gap-4 rounded-lg border border-emerald-900/40 bg-slate-900/40 p-4">
+		<div class="flex flex-col gap-4 rounded-lg border border-st-ok/40 bg-surface p-4">
 			<div class="flex flex-col gap-1">
-				<h2 class="text-sm font-semibold tracking-tight text-slate-200">Proposed spec refinement</h2>
+				<h2 class="text-sm font-semibold tracking-tight text-fg">Proposed spec refinement</h2>
 				if draft.Summary != "" {
-					<p class="text-sm text-slate-300">{ draft.Summary }</p>
+					<p class="text-sm text-fg">{ draft.Summary }</p>
 				}
 			</div>
 			@draftSpecFiles(draft.Specs)
@@ -163,10 +163,10 @@ templ ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query
 					hx-post="/resolve/approve"
 					hx-target="#wizard-result"
 					hx-swap="innerHTML"
-					class="flex flex-col gap-2 border-t border-slate-800 pt-3"
+					class="flex flex-col gap-2 border-t border-border pt-3"
 				>
 					<input type="hidden" name="session" value={ session }/>
-					<p class="text-xs text-amber-300/90">
+					<p class="text-xs text-st-warn">
 						Approving commits the spec refinement, stores this conversation, and returns the
 						dead-lettered issue to the ready pool. The factory then re-pins and reissues the
 						affected work shown above. This is the consent boundary.
@@ -174,12 +174,12 @@ templ ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query
 					<div class="flex justify-end">
 						<button
 							type="submit"
-							class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500"
+							class="rounded-md bg-st-ok px-4 py-2 text-sm font-medium text-white transition hover:bg-st-ok"
 						>Approve &amp; resolve</button>
 					</div>
 				</form>
 			} else {
-				<p class="border-t border-slate-800 pt-3 text-xs text-slate-500">
+				<p class="border-t border-border pt-3 text-xs text-muted">
 					Resolve is unavailable here — run the wizard under <code>harness run --serve-addr</code> to refine specs and reopen work.
 				</p>
 			}
@@ -192,23 +192,23 @@ templ ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query
 // re-pin and reissue, and the merged (epic, spec-path) units it would re-derive. Nothing affected
 // is itself signal (a localized clarification), so it reads as reassurance rather than emptiness.
 templ blastRadius(br query.BlastRadius) {
-	<div class="flex flex-col gap-2 border-t border-slate-800 pt-3">
-		<h3 class="text-xs font-medium uppercase tracking-wide text-slate-400">Blast radius</h3>
-		<p class="text-xs text-slate-500">The dead-lettered issue is reopened against the refined spec. Beyond it, this edit will:</p>
+	<div class="flex flex-col gap-2 border-t border-border pt-3">
+		<h3 class="text-xs font-medium uppercase tracking-wide text-muted">Blast radius</h3>
+		<p class="text-xs text-muted">The dead-lettered issue is reopened against the refined spec. Beyond it, this edit will:</p>
 		if len(br.InFlight) == 0 && len(br.Merged) == 0 {
-			<p class="text-xs text-slate-400">affect no other in-flight or merged work — the slice no other pinned issue depends on.</p>
+			<p class="text-xs text-muted">affect no other in-flight or merged work — the slice no other pinned issue depends on.</p>
 		} else {
 			if len(br.InFlight) > 0 {
 				<div class="flex flex-col gap-1">
-					<p class="text-xs text-amber-300">re-pin &amp; reissue { strconv.Itoa(len(br.InFlight)) } in-flight item(s):</p>
+					<p class="text-xs text-st-warn">re-pin &amp; reissue { strconv.Itoa(len(br.InFlight)) } in-flight item(s):</p>
 					<ul class="flex flex-col gap-1 pl-1">
 						for _, it := range br.InFlight {
-							<li class="text-xs text-slate-400">
-								<a href={ templ.URL("/issue/" + it.ID) } class="font-mono text-sky-400 hover:text-sky-300 hover:underline">{ it.ID }</a>
+							<li class="text-xs text-muted">
+								<a href={ templ.URL("/issue/" + it.ID) } class="font-mono text-st-progress hover:text-st-progress hover:underline">{ it.ID }</a>
 								if it.Role != "" {
 									<span>{ " · " + it.Role }</span>
 								}
-								<span class="font-mono text-slate-600">{ " · " + shortHash(it.SpecHash) }</span>
+								<span class="font-mono text-faint">{ " · " + shortHash(it.SpecHash) }</span>
 							</li>
 						}
 					</ul>
@@ -216,12 +216,12 @@ templ blastRadius(br query.BlastRadius) {
 			}
 			if len(br.Merged) > 0 {
 				<div class="flex flex-col gap-1">
-					<p class="text-xs text-amber-300">re-derive { strconv.Itoa(len(br.Merged)) } merged unit(s) (one re-planning pass each):</p>
+					<p class="text-xs text-st-warn">re-derive { strconv.Itoa(len(br.Merged)) } merged unit(s) (one re-planning pass each):</p>
 					<ul class="flex flex-col gap-1 pl-1">
 						for _, g := range br.Merged {
-							<li class="text-xs text-slate-400">
+							<li class="text-xs text-muted">
 								<span class="font-mono">{ g.Spec }</span>
-								<span class="text-slate-600">{ " · epic " + g.Epic + " · " + strconv.Itoa(g.Members) + " closed" }</span>
+								<span class="text-faint">{ " · epic " + g.Epic + " · " + strconv.Itoa(g.Members) + " closed" }</span>
 							</li>
 						}
 					</ul>
@@ -237,13 +237,13 @@ templ blastRadius(br query.BlastRadius) {
 // not-attached notice). It is the fragment swapped into #wizard-result by the approve form.
 templ ResolveApproveResult(res wizard.ResolveResult, err string) {
 	if err != "" {
-		<div class="rounded-lg border border-rose-900/50 bg-rose-950/30 p-4 text-sm text-rose-200">
+		<div class="rounded-lg border border-st-blocked/30 bg-st-blocked-bg p-4 text-sm text-st-blocked">
 			{ err }
 		</div>
 	} else {
-		<div class="flex flex-col gap-2 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-4">
-			<h2 class="text-sm font-semibold tracking-tight text-emerald-200">Resolved — spec refined</h2>
-			<p class="text-xs text-slate-400">
+		<div class="flex flex-col gap-2 rounded-lg border border-st-ok/40 bg-st-ok-bg p-4">
+			<h2 class="text-sm font-semibold tracking-tight text-st-ok">Resolved — spec refined</h2>
+			<p class="text-xs text-muted">
 				Committed
 				if res.Commit != "" {
 					as <code>{ shortHash(res.Commit) }</code>
@@ -252,9 +252,9 @@ templ ResolveApproveResult(res wizard.ResolveResult, err string) {
 			</p>
 			if res.ReopenedIssue != "" {
 				<p class="text-sm">
-					<span class="text-slate-300">Reopened </span>
-					<a href={ templ.URL("/issue/" + res.ReopenedIssue) } class="font-mono text-indigo-300 hover:text-indigo-200">{ res.ReopenedIssue }</a>
-					<span class="text-slate-300"> — back in flight against the refined spec.</span>
+					<span class="text-fg">Reopened </span>
+					<a href={ templ.URL("/issue/" + res.ReopenedIssue) } class="font-mono text-accent hover:text-accent-strong">{ res.ReopenedIssue }</a>
+					<span class="text-fg"> — back in flight against the refined spec.</span>
 				</p>
 			}
 		</div>
@@ -268,7 +268,7 @@ templ ResolveMessage(msg string) {
 	@Layout("Harness — Resolve", "dlq") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Resolve</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }

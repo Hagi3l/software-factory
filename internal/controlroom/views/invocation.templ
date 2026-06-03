@@ -43,18 +43,18 @@ templ InvocationPage(inv query.Invocation, entries []live.Entry) {
 templ invocationHeader(inv query.Invocation) {
 	<div class="space-y-1">
 		<div class="flex items-center gap-3">
-			<span class="font-mono text-xs text-slate-500">{ inv.ID }</span>
+			<span class="font-mono text-xs text-muted">{ inv.ID }</span>
 			@statusBadge(inv.Status)
-			<span class="text-xs text-slate-400">{ orDash(inv.Role) }</span>
+			<span class="text-xs text-muted">{ orDash(inv.Role) }</span>
 		</div>
-		<h1 class="text-xl font-semibold tracking-tight text-slate-100">{ orDash(inv.Title) }</h1>
+		<h1 class="text-xl font-semibold tracking-tight text-fg">{ orDash(inv.Title) }</h1>
 		if inv.Spec != "" {
-			<p class="font-mono text-xs text-slate-500">{ inv.Spec }</p>
+			<p class="font-mono text-xs text-muted">{ inv.Spec }</p>
 		}
 		<div class="flex gap-3 pt-1 text-sm">
-			<a href={ templ.URL("/issue/" + inv.ID) } class="text-sky-400 hover:text-sky-300 hover:underline">▸ Issue detail</a>
+			<a href={ templ.URL("/issue/" + inv.ID) } class="text-st-progress hover:text-st-progress hover:underline">▸ Issue detail</a>
 			if inv.ReplayAvailable {
-				<a href={ templ.URL("/replay/" + inv.ID) } class="text-sky-400 hover:text-sky-300 hover:underline">▸ Replay decision trail</a>
+				<a href={ templ.URL("/replay/" + inv.ID) } class="text-st-progress hover:text-st-progress hover:underline">▸ Replay decision trail</a>
 			}
 		</div>
 	</div>
@@ -78,8 +78,8 @@ templ InvocationBody(inv query.Invocation, entries []live.Entry) {
 // shows (built from the shared query row builder), so the two never disagree. Each dimension shows
 // burn / cap and the tinted percent badge (rose breach / amber ≥80% / emerald), reusing budgetPct.
 templ invocationBudget(b query.IssueBudgetRow) {
-	<section class="rounded-lg border border-slate-800 bg-slate-900/40 p-3">
-		<h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-400">Budget</h2>
+	<section class="rounded-lg border border-border bg-surface p-3">
+		<h2 class="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">Budget</h2>
 		<dl class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
 			@invocationMeter("Tokens", formatTokens(b.Tokens), capTokens(b.TokenCap), b.TokenPct, b.TokenOver, b.TokenCap > 0)
 			@invocationMeter("Spend", formatUSD(b.USD), capUSD(b.USDCap), b.USDPct, b.USDOver, b.USDCap > 0)
@@ -93,10 +93,10 @@ templ invocationBudget(b query.IssueBudgetRow) {
 // badge. Reuses budgetPct so the breach/near-cap/healthy tinting matches the Budgets view exactly.
 templ invocationMeter(label, used, cap string, pct int, over, capped bool) {
 	<div>
-		<dt class="text-xs uppercase tracking-wide text-slate-500">{ label }</dt>
+		<dt class="text-xs uppercase tracking-wide text-muted">{ label }</dt>
 		<dd class="mt-0.5 whitespace-nowrap">
-			<span class="text-slate-200">{ used }</span>
-			<span class="text-slate-600">/ { cap }</span>
+			<span class="text-fg">{ used }</span>
+			<span class="text-faint">/ { cap }</span>
 			@budgetPct(pct, over, capped)
 		</dd>
 	</div>
@@ -106,12 +106,12 @@ templ invocationMeter(label, used, cap string, pct int, over, capped bool) {
 // view stops claiming to be live and points the human at the forensic Replay (when merged) and the
 // issue detail. The feed below still shows whatever recent activity is retained in the buffer.
 templ invocationTerminal(inv query.Invocation) {
-	<div class="rounded-lg border border-slate-700 bg-slate-800/40 px-3 py-2 text-sm text-slate-300">
+	<div class="rounded-lg border border-border-strong bg-canvas px-3 py-2 text-sm text-fg">
 		<span>This invocation has finished ({ inv.Status }). Live updates have stopped — see the forensic record:</span>
 		if inv.ReplayAvailable {
-			<a href={ templ.URL("/replay/" + inv.ID) } class="ml-1 text-sky-400 hover:underline">Replay decision trail →</a>
+			<a href={ templ.URL("/replay/" + inv.ID) } class="ml-1 text-st-progress hover:underline">Replay decision trail →</a>
 		} else {
-			<a href={ templ.URL("/issue/" + inv.ID) } class="ml-1 text-sky-400 hover:underline">Issue detail →</a>
+			<a href={ templ.URL("/issue/" + inv.ID) } class="ml-1 text-st-progress hover:underline">Issue detail →</a>
 		}
 	</div>
 }
@@ -122,11 +122,11 @@ templ invocationTerminal(inv query.Invocation) {
 templ invocationFeed(entries []live.Entry) {
 	<section class="space-y-2">
 		<div class="flex items-baseline justify-between">
-			<h2 class="text-xs font-semibold uppercase tracking-wide text-slate-400">Activity</h2>
-			<span class="text-xs text-slate-500">live</span>
+			<h2 class="text-xs font-semibold uppercase tracking-wide text-muted">Activity</h2>
+			<span class="text-xs text-muted">live</span>
 		</div>
 		if len(entries) == 0 {
-			<p class="text-sm text-slate-400">No activity retained for this invocation.</p>
+			<p class="text-sm text-muted">No activity retained for this invocation.</p>
 		} else {
 			<ul class="flex flex-col gap-1">
 				for _, e := range entries {
@@ -138,11 +138,11 @@ templ invocationFeed(entries []live.Entry) {
 }
 
 templ invocationRow(e live.Entry) {
-	<li class="flex items-start gap-3 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2">
-		<span class="shrink-0 font-mono text-xs tabular-nums text-slate-500">{ activityTime(e.At) }</span>
+	<li class="flex items-start gap-3 rounded-md border border-border bg-surface px-3 py-2">
+		<span class="shrink-0 font-mono text-xs tabular-nums text-muted">{ activityTime(e.At) }</span>
 		@activityBadge(e.Kind)
-		<span class="shrink-0 font-mono text-xs text-slate-400">{ e.AgentID }</span>
-		<span class="whitespace-pre-wrap break-all text-sm text-slate-200">{ e.Detail }</span>
+		<span class="shrink-0 font-mono text-xs text-muted">{ e.AgentID }</span>
+		<span class="whitespace-pre-wrap break-all text-sm text-fg">{ e.Detail }</span>
 	</li>
 }
 
@@ -153,7 +153,7 @@ templ InvocationMessage(msg string) {
 	@Layout("Harness — Invocation", "") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Invocation</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }

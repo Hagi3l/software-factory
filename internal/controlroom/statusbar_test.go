@@ -39,9 +39,9 @@ func TestStatusBarFragment(t *testing.T) {
 			t.Errorf("/status/bar missing %q\nbody: %s", want, r.body)
 		}
 	}
-	// Escalations > 0 is tinted rose so a stuck factory stands out.
-	if !strings.Contains(r.body, "text-rose-300") {
-		t.Errorf("/status/bar should tint a non-zero escalation count rose\nbody: %s", r.body)
+	// Escalations > 0 is tinted with the blocked status color so a stuck factory stands out.
+	if !strings.Contains(r.body, "text-st-blocked") {
+		t.Errorf("/status/bar should tint a non-zero escalation count with the blocked status color\nbody: %s", r.body)
 	}
 }
 

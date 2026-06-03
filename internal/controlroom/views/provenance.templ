@@ -18,9 +18,9 @@ templ ProvenancePage(commits []query.MergedCommit) {
 		<div class="space-y-4">
 			<div class="flex items-baseline justify-between gap-4">
 				<h1 class="text-xl font-semibold tracking-tight">Provenance</h1>
-				<span class="text-sm text-slate-500">most recent merges to main</span>
+				<span class="text-sm text-muted">most recent merges to main</span>
 			</div>
-			<p class="max-w-3xl text-sm text-slate-500">
+			<p class="max-w-3xl text-sm text-muted">
 				Every merged commit traced back to the issue, soul, model, prompt, and gate evidence that produced it. Follow a prompt or check to its raw artifact; follow an issue to its detail page.
 			</p>
 			<div hx-ext="sse" sse-connect="/events">
@@ -42,9 +42,9 @@ templ ProvenancePage(commits []query.MergedCommit) {
 // is a normal early state (nothing has merged yet), so it reads as a plain note, not an error.
 templ ProvenanceList(commits []query.MergedCommit) {
 	if len(commits) == 0 {
-		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-6 text-center">
-			<p class="text-sm text-slate-300">No merges yet.</p>
-			<p class="mt-1 text-xs text-slate-500">Provenance appears here as candidates are accepted and merged to main.</p>
+		<div class="rounded-lg border border-border bg-surface p-6 text-center">
+			<p class="text-sm text-fg">No merges yet.</p>
+			<p class="mt-1 text-xs text-muted">Provenance appears here as candidates are accepted and merged to main.</p>
 		</div>
 	} else {
 		<ul class="flex flex-col gap-2">
@@ -56,16 +56,16 @@ templ ProvenanceList(commits []query.MergedCommit) {
 }
 
 templ provenanceRow(c query.MergedCommit) {
-	<li class="rounded-md border border-slate-800 bg-slate-900/40 p-3">
+	<li class="rounded-md border border-border bg-surface p-3">
 		<div class="flex items-center justify-between gap-2">
-			<span class="font-mono text-xs text-emerald-300">{ shortHash(c.Commit) }</span>
+			<span class="font-mono text-xs text-st-ok">{ shortHash(c.Commit) }</span>
 			if c.Provenance.Issue != "" {
-				<a href={ templ.URL("/issue/" + c.Provenance.Issue) } class="font-mono text-xs text-sky-300 hover:underline">{ c.Provenance.Issue }</a>
+				<a href={ templ.URL("/issue/" + c.Provenance.Issue) } class="font-mono text-xs text-st-progress hover:underline">{ c.Provenance.Issue }</a>
 			}
 		</div>
-		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
-			<span>soul <span class="text-slate-200">{ orDash(c.Provenance.Soul) }</span></span>
-			<span>model <span class="text-slate-200">{ orDash(c.Provenance.Model) }</span></span>
+		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
+			<span>soul <span class="text-fg">{ orDash(c.Provenance.Soul) }</span></span>
+			<span>model <span class="text-fg">{ orDash(c.Provenance.Model) }</span></span>
 			@provLink("prompt", c.Provenance.PromptSHA)
 			@provLink("tests", c.Provenance.Traceability)
 		</div>
@@ -84,9 +84,9 @@ templ provenanceRow(c query.MergedCommit) {
 // survives the /artifact/{hash} route (Go 1.22 path routing) and templ.URL passes it through.
 templ provLink(label string, hash string) {
 	if hash != "" {
-		<span>{ label } <a href={ templ.URL("/artifact/" + hash) } class="font-mono text-sky-300 hover:underline">{ shortHash(hash) }</a></span>
+		<span>{ label } <a href={ templ.URL("/artifact/" + hash) } class="font-mono text-st-progress hover:underline">{ shortHash(hash) }</a></span>
 	} else {
-		<span class="text-slate-600">{ label } —</span>
+		<span class="text-faint">{ label } —</span>
 	}
 }
 
@@ -95,9 +95,9 @@ templ provLink(label string, hash string) {
 // as a plain badge so the check still shows it passed.
 templ verifiedBadge(v string) {
 	if verifiedHash(v) != "" {
-		<a href={ templ.URL("/artifact/" + verifiedHash(v)) } class="rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-300 hover:bg-emerald-500/25">{ verifiedName(v) }</a>
+		<a href={ templ.URL("/artifact/" + verifiedHash(v)) } class="rounded bg-st-ok-bg px-1.5 py-0.5 text-xs text-st-ok hover:bg-st-ok-bg">{ verifiedName(v) }</a>
 	} else {
-		<span class="rounded bg-slate-700/40 px-1.5 py-0.5 text-xs text-slate-400">{ verifiedName(v) }</span>
+		<span class="rounded bg-st-idle-bg px-1.5 py-0.5 text-xs text-muted">{ verifiedName(v) }</span>
 	}
 }
 
@@ -107,7 +107,7 @@ templ ProvenanceMessage(msg string) {
 	@Layout("Harness — Provenance", "provenance") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Provenance</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }

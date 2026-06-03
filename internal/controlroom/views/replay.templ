@@ -23,21 +23,21 @@ templ ReplayPage(rep query.Replay) {
 		<div class="mx-auto max-w-4xl space-y-6">
 			<div class="space-y-2">
 				<div class="flex flex-wrap items-center gap-3">
-					<span class="font-mono text-sm text-slate-500">{ rep.Issue.ID }</span>
+					<span class="font-mono text-sm text-muted">{ rep.Issue.ID }</span>
 					@statusBadge(rep.Issue.Status)
 					if rep.Merged {
-						<span class="rounded bg-emerald-500/20 px-1.5 py-0.5 text-xs text-emerald-300">merged</span>
+						<span class="rounded bg-st-ok-bg px-1.5 py-0.5 text-xs text-st-ok">merged</span>
 					}
 				</div>
 				<h1 class="text-2xl font-semibold tracking-tight">Replay — { orDash(rep.Issue.Title) }</h1>
 				<div class="flex flex-wrap items-center gap-4 text-xs">
-					<a href={ templ.URL("/issue/" + rep.Issue.ID) } class="text-sky-400 hover:text-sky-300 hover:underline">← Issue detail</a>
+					<a href={ templ.URL("/issue/" + rep.Issue.ID) } class="text-st-progress hover:text-st-progress hover:underline">← Issue detail</a>
 					if rep.Hash != "" {
 						<a
 							href={ templ.URL("/artifact/" + rep.Hash) }
 							target="_blank"
 							rel="noopener"
-							class="font-mono text-slate-500 hover:text-slate-300 hover:underline"
+							class="font-mono text-muted hover:text-fg hover:underline"
 						>raw transcript { shortHash(rep.Hash) }</a>
 					}
 				</div>
@@ -47,14 +47,14 @@ templ ReplayPage(rep query.Replay) {
 			} else {
 				if rep.System != "" {
 					<section class="space-y-2">
-						<h2 class="text-sm font-medium text-slate-400">System</h2>
-						<pre class="whitespace-pre-wrap break-words rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-300">{ rep.System }</pre>
+						<h2 class="text-sm font-medium text-muted">System</h2>
+						<pre class="whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-4 text-xs text-fg">{ rep.System }</pre>
 					</section>
 				}
 				<section class="space-y-3">
 					<div class="flex items-baseline justify-between">
-						<h2 class="text-sm font-medium text-slate-400">Decision trail</h2>
-						<span class="text-xs text-slate-500">
+						<h2 class="text-sm font-medium text-muted">Decision trail</h2>
+						<span class="text-xs text-muted">
 							{ strconv.Itoa(len(rep.Turns)) } turns · { strconv.Itoa(rep.TotalInput) } in · { strconv.Itoa(rep.TotalOutput) } out
 						</span>
 					</div>
@@ -71,13 +71,13 @@ templ ReplayPage(rep query.Replay) {
 // loaded points the human at the raw bytes; no hash at all means none was retained (the
 // trail lives only on the merge trailer — unmerged or unharvested work has none).
 templ replayNotice(rep query.Replay) {
-	<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-6">
+	<div class="rounded-lg border border-border bg-surface p-6">
 		if rep.Hash != "" {
-			<p class="text-sm text-slate-300">The transcript for this invocation could not be loaded from the artifact store.</p>
-			<p class="mt-1 text-xs text-slate-500">Its content address is <span class="font-mono">{ rep.Hash }</span> — try the raw-bytes link above.</p>
+			<p class="text-sm text-fg">The transcript for this invocation could not be loaded from the artifact store.</p>
+			<p class="mt-1 text-xs text-muted">Its content address is <span class="font-mono">{ rep.Hash }</span> — try the raw-bytes link above.</p>
 		} else {
-			<p class="text-sm text-slate-300">No decision trail was captured for this invocation.</p>
-			<p class="mt-1 text-xs text-slate-500">The transcript is retained only for work merged to main; this issue has not merged, or no transcript was harvested.</p>
+			<p class="text-sm text-fg">No decision trail was captured for this invocation.</p>
+			<p class="mt-1 text-xs text-muted">The transcript is retained only for work merged to main; this issue has not merged, or no transcript was harvested.</p>
 		}
 	</div>
 }
@@ -85,14 +85,14 @@ templ replayNotice(rep query.Replay) {
 // replayTurn renders one llm-turn: its inbound context (what the model newly saw), the
 // model's response, the tools it asked to call, and the turn's stop reason and token cost.
 templ replayTurn(t query.ReplayTurn) {
-	<article class="rounded-lg border border-slate-800 bg-slate-900/40">
-		<header class="flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-2">
-			<span class="text-sm font-medium text-slate-300">Turn { strconv.Itoa(t.Index) }</span>
-			<div class="flex items-center gap-3 text-xs text-slate-500">
+	<article class="rounded-lg border border-border bg-surface">
+		<header class="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
+			<span class="text-sm font-medium text-fg">Turn { strconv.Itoa(t.Index) }</span>
+			<div class="flex items-center gap-3 text-xs text-muted">
 				@replayStopBadge(t.Stop)
 				<span class="tabular-nums">{ strconv.Itoa(t.InputTokens) } in · { strconv.Itoa(t.OutputTokens) } out</span>
 				if t.CacheRead > 0 {
-					<span class="tabular-nums text-slate-600">{ strconv.Itoa(t.CacheRead) } cached</span>
+					<span class="tabular-nums text-faint">{ strconv.Itoa(t.CacheRead) } cached</span>
 				}
 			</div>
 		</header>
@@ -102,8 +102,8 @@ templ replayTurn(t query.ReplayTurn) {
 			}
 			if t.Text != "" {
 				<div class="space-y-1">
-					<div class="text-xs font-medium uppercase tracking-wide text-emerald-400">assistant</div>
-					<pre class="whitespace-pre-wrap break-words rounded-md border border-slate-800 bg-slate-950/60 p-3 text-sm text-slate-100">{ t.Text }</pre>
+					<div class="text-xs font-medium uppercase tracking-wide text-st-ok">assistant</div>
+					<pre class="whitespace-pre-wrap break-words rounded-md border border-border bg-canvas p-3 text-sm text-fg">{ t.Text }</pre>
 				</div>
 			}
 			for _, tc := range t.ToolCalls {
@@ -118,15 +118,15 @@ templ replayTurn(t query.ReplayTurn) {
 // failure the model had to recover from reads at a glance.
 templ replayInbound(m query.ReplayMessage) {
 	<div class="space-y-1">
-		<div class="text-xs font-medium uppercase tracking-wide text-slate-500">{ orDash(m.Role) }</div>
+		<div class="text-xs font-medium uppercase tracking-wide text-muted">{ orDash(m.Role) }</div>
 		if m.Text != "" {
-			<pre class="whitespace-pre-wrap break-words rounded-md border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-300">{ m.Text }</pre>
+			<pre class="whitespace-pre-wrap break-words rounded-md border border-border bg-canvas p-3 text-sm text-fg">{ m.Text }</pre>
 		}
 		for _, tr := range m.ToolResults {
 			if tr.IsError {
-				<pre class="whitespace-pre-wrap break-words rounded-md border border-rose-900/50 bg-rose-950/20 p-3 text-xs text-rose-200">{ tr.Content }</pre>
+				<pre class="whitespace-pre-wrap break-words rounded-md border border-st-blocked/30 bg-st-blocked-bg p-3 text-xs text-st-blocked">{ tr.Content }</pre>
 			} else {
-				<pre class="whitespace-pre-wrap break-words rounded-md border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-400">{ tr.Content }</pre>
+				<pre class="whitespace-pre-wrap break-words rounded-md border border-border bg-canvas p-3 text-xs text-muted">{ tr.Content }</pre>
 			}
 		}
 	</div>
@@ -136,11 +136,11 @@ templ replayInbound(m query.ReplayMessage) {
 templ replayToolCall(tc query.ReplayToolCall) {
 	<div class="space-y-1">
 		<div class="flex items-center gap-2 text-xs">
-			<span class="font-medium uppercase tracking-wide text-indigo-400">tool call</span>
-			<span class="font-mono text-slate-200">{ tc.Name }</span>
+			<span class="font-medium uppercase tracking-wide text-accent">tool call</span>
+			<span class="font-mono text-fg">{ tc.Name }</span>
 		</div>
 		if tc.Args != "" {
-			<pre class="overflow-x-auto whitespace-pre rounded-md border border-indigo-900/40 bg-slate-950/60 p-3 text-xs text-indigo-200">{ tc.Args }</pre>
+			<pre class="overflow-x-auto whitespace-pre rounded-md border border-accent/30 bg-canvas p-3 text-xs text-accent-strong">{ tc.Args }</pre>
 		}
 	</div>
 }
@@ -152,15 +152,15 @@ templ replayToolCall(tc query.ReplayToolCall) {
 templ replayStopBadge(stop string) {
 	switch stop {
 		case "tool_use":
-			<span class="rounded-full bg-indigo-500/20 px-2 py-0.5 text-indigo-300">{ stop }</span>
+			<span class="rounded-full bg-accent-soft px-2 py-0.5 text-accent">{ stop }</span>
 		case "end_turn":
-			<span class="rounded-full bg-emerald-500/20 px-2 py-0.5 text-emerald-300">{ stop }</span>
+			<span class="rounded-full bg-st-ok-bg px-2 py-0.5 text-st-ok">{ stop }</span>
 		case "max_tokens":
-			<span class="rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-300">{ stop }</span>
+			<span class="rounded-full bg-st-warn-bg px-2 py-0.5 text-st-warn">{ stop }</span>
 		case "":
-			<span class="rounded-full bg-slate-700/40 px-2 py-0.5 text-slate-400">—</span>
+			<span class="rounded-full bg-st-idle-bg px-2 py-0.5 text-muted">—</span>
 		default:
-			<span class="rounded-full bg-slate-700/40 px-2 py-0.5 text-slate-300">{ stop }</span>
+			<span class="rounded-full bg-st-idle-bg px-2 py-0.5 text-fg">{ stop }</span>
 	}
 }
 
@@ -173,7 +173,7 @@ templ ReplayNotAttached(msg string) {
 	@Layout("Harness — Replay", "") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Replay</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }

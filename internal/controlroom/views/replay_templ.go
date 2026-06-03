@@ -59,14 +59,14 @@ func ReplayPage(rep query.Replay) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"mx-auto max-w-4xl space-y-6\"><div class=\"space-y-2\"><div class=\"flex flex-wrap items-center gap-3\"><span class=\"font-mono text-sm text-slate-500\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"mx-auto max-w-4xl space-y-6\"><div class=\"space-y-2\"><div class=\"flex flex-wrap items-center gap-3\"><span class=\"font-mono text-sm text-muted\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(rep.Issue.ID)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 26, Col: 66}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 26, Col: 62}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
@@ -81,7 +81,7 @@ func ReplayPage(rep query.Replay) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if rep.Merged {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<span class=\"rounded bg-emerald-500/20 px-1.5 py-0.5 text-xs text-emerald-300\">merged</span>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<span class=\"rounded bg-st-ok-bg px-1.5 py-0.5 text-xs text-st-ok\">merged</span>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -112,7 +112,7 @@ func ReplayPage(rep query.Replay) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" class=\"text-sky-400 hover:text-sky-300 hover:underline\">← Issue detail</a> ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "\" class=\"text-st-progress hover:text-st-progress hover:underline\">← Issue detail</a> ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -130,7 +130,7 @@ func ReplayPage(rep query.Replay) templ.Component {
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" target=\"_blank\" rel=\"noopener\" class=\"font-mono text-slate-500 hover:text-slate-300 hover:underline\">raw transcript ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" target=\"_blank\" rel=\"noopener\" class=\"font-mono text-muted hover:text-fg hover:underline\">raw transcript ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -159,14 +159,14 @@ func ReplayPage(rep query.Replay) templ.Component {
 				}
 			} else {
 				if rep.System != "" {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<section class=\"space-y-2\"><h2 class=\"text-sm font-medium text-slate-400\">System</h2><pre class=\"whitespace-pre-wrap break-words rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-300\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<section class=\"space-y-2\"><h2 class=\"text-sm font-medium text-muted\">System</h2><pre class=\"whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-4 text-xs text-fg\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var8 string
 					templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(rep.System)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 51, Col: 141}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 51, Col: 126}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 					if templ_7745c5c3_Err != nil {
@@ -177,7 +177,7 @@ func ReplayPage(rep query.Replay) templ.Component {
 						return templ_7745c5c3_Err
 					}
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " <section class=\"space-y-3\"><div class=\"flex items-baseline justify-between\"><h2 class=\"text-sm font-medium text-slate-400\">Decision trail</h2><span class=\"text-xs text-slate-500\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, " <section class=\"space-y-3\"><div class=\"flex items-baseline justify-between\"><h2 class=\"text-sm font-medium text-muted\">Decision trail</h2><span class=\"text-xs text-muted\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -269,19 +269,19 @@ func replayNotice(rep query.Replay) templ.Component {
 			templ_7745c5c3_Var12 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"rounded-lg border border-slate-800 bg-slate-900/40 p-6\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"rounded-lg border border-border bg-surface p-6\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if rep.Hash != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<p class=\"text-sm text-slate-300\">The transcript for this invocation could not be loaded from the artifact store.</p><p class=\"mt-1 text-xs text-slate-500\">Its content address is <span class=\"font-mono\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 20, "<p class=\"text-sm text-fg\">The transcript for this invocation could not be loaded from the artifact store.</p><p class=\"mt-1 text-xs text-muted\">Its content address is <span class=\"font-mono\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var13 string
 			templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(rep.Hash)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 77, Col: 99}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 77, Col: 95}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 			if templ_7745c5c3_Err != nil {
@@ -292,7 +292,7 @@ func replayNotice(rep query.Replay) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<p class=\"text-sm text-slate-300\">No decision trail was captured for this invocation.</p><p class=\"mt-1 text-xs text-slate-500\">The transcript is retained only for work merged to main; this issue has not merged, or no transcript was harvested.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 22, "<p class=\"text-sm text-fg\">No decision trail was captured for this invocation.</p><p class=\"mt-1 text-xs text-muted\">The transcript is retained only for work merged to main; this issue has not merged, or no transcript was harvested.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -328,20 +328,20 @@ func replayTurn(t query.ReplayTurn) templ.Component {
 			templ_7745c5c3_Var14 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<article class=\"rounded-lg border border-slate-800 bg-slate-900/40\"><header class=\"flex flex-wrap items-center justify-between gap-2 border-b border-slate-800 px-4 py-2\"><span class=\"text-sm font-medium text-slate-300\">Turn ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 24, "<article class=\"rounded-lg border border-border bg-surface\"><header class=\"flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2\"><span class=\"text-sm font-medium text-fg\">Turn ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var15 string
 		templ_7745c5c3_Var15, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(t.Index))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 90, Col: 80}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 90, Col: 73}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var15))
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</span><div class=\"flex items-center gap-3 text-xs text-slate-500\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "</span><div class=\"flex items-center gap-3 text-xs text-muted\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -380,14 +380,14 @@ func replayTurn(t query.ReplayTurn) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if t.CacheRead > 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<span class=\"tabular-nums text-slate-600\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<span class=\"tabular-nums text-faint\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var18 string
 			templ_7745c5c3_Var18, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(t.CacheRead))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 95, Col: 74}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 95, Col: 70}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var18))
 			if templ_7745c5c3_Err != nil {
@@ -409,14 +409,14 @@ func replayTurn(t query.ReplayTurn) templ.Component {
 			}
 		}
 		if t.Text != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<div class=\"space-y-1\"><div class=\"text-xs font-medium uppercase tracking-wide text-emerald-400\">assistant</div><pre class=\"whitespace-pre-wrap break-words rounded-md border border-slate-800 bg-slate-950/60 p-3 text-sm text-slate-100\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<div class=\"space-y-1\"><div class=\"text-xs font-medium uppercase tracking-wide text-st-ok\">assistant</div><pre class=\"whitespace-pre-wrap break-words rounded-md border border-border bg-canvas p-3 text-sm text-fg\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var19 string
 			templ_7745c5c3_Var19, templ_7745c5c3_Err = templ.JoinStringErrs(t.Text)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 106, Col: 136}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 106, Col: 120}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var19))
 			if templ_7745c5c3_Err != nil {
@@ -465,14 +465,14 @@ func replayInbound(m query.ReplayMessage) templ.Component {
 			templ_7745c5c3_Var20 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"space-y-1\"><div class=\"text-xs font-medium uppercase tracking-wide text-slate-500\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"space-y-1\"><div class=\"text-xs font-medium uppercase tracking-wide text-muted\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var21 string
 		templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(orDash(m.Role))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 121, Col: 90}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 121, Col: 86}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 		if templ_7745c5c3_Err != nil {
@@ -483,14 +483,14 @@ func replayInbound(m query.ReplayMessage) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if m.Text != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<pre class=\"whitespace-pre-wrap break-words rounded-md border border-slate-800 bg-slate-950/40 p-3 text-sm text-slate-300\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<pre class=\"whitespace-pre-wrap break-words rounded-md border border-border bg-canvas p-3 text-sm text-fg\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var22 string
 			templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(m.Text)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 123, Col: 134}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 123, Col: 118}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 			if templ_7745c5c3_Err != nil {
@@ -503,14 +503,14 @@ func replayInbound(m query.ReplayMessage) templ.Component {
 		}
 		for _, tr := range m.ToolResults {
 			if tr.IsError {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<pre class=\"whitespace-pre-wrap break-words rounded-md border border-rose-900/50 bg-rose-950/20 p-3 text-xs text-rose-200\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<pre class=\"whitespace-pre-wrap break-words rounded-md border border-st-blocked/30 bg-st-blocked-bg p-3 text-xs text-st-blocked\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var23 string
 				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(tr.Content)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 127, Col: 139}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 127, Col: 145}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 				if templ_7745c5c3_Err != nil {
@@ -521,14 +521,14 @@ func replayInbound(m query.ReplayMessage) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<pre class=\"whitespace-pre-wrap break-words rounded-md border border-slate-800 bg-slate-950/40 p-3 text-xs text-slate-400\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<pre class=\"whitespace-pre-wrap break-words rounded-md border border-border bg-canvas p-3 text-xs text-muted\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var24 string
 				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(tr.Content)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 129, Col: 139}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 129, Col: 126}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 				if templ_7745c5c3_Err != nil {
@@ -570,14 +570,14 @@ func replayToolCall(tc query.ReplayToolCall) templ.Component {
 			templ_7745c5c3_Var25 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<div class=\"space-y-1\"><div class=\"flex items-center gap-2 text-xs\"><span class=\"font-medium uppercase tracking-wide text-indigo-400\">tool call</span> <span class=\"font-mono text-slate-200\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 44, "<div class=\"space-y-1\"><div class=\"flex items-center gap-2 text-xs\"><span class=\"font-medium uppercase tracking-wide text-accent\">tool call</span> <span class=\"font-mono text-fg\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var26 string
 		templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(tc.Name)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 140, Col: 51}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 140, Col: 44}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 		if templ_7745c5c3_Err != nil {
@@ -588,14 +588,14 @@ func replayToolCall(tc query.ReplayToolCall) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if tc.Args != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<pre class=\"overflow-x-auto whitespace-pre rounded-md border border-indigo-900/40 bg-slate-950/60 p-3 text-xs text-indigo-200\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<pre class=\"overflow-x-auto whitespace-pre rounded-md border border-accent/30 bg-canvas p-3 text-xs text-accent-strong\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var27 string
 			templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(tc.Args)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 143, Col: 139}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 143, Col: 132}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 			if templ_7745c5c3_Err != nil {
@@ -641,14 +641,14 @@ func replayStopBadge(stop string) templ.Component {
 		ctx = templ.ClearChildren(ctx)
 		switch stop {
 		case "tool_use":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<span class=\"rounded-full bg-indigo-500/20 px-2 py-0.5 text-indigo-300\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<span class=\"rounded-full bg-accent-soft px-2 py-0.5 text-accent\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var29 string
 			templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(stop)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 155, Col: 81}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 155, Col: 75}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 			if templ_7745c5c3_Err != nil {
@@ -659,14 +659,14 @@ func replayStopBadge(stop string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		case "end_turn":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<span class=\"rounded-full bg-emerald-500/20 px-2 py-0.5 text-emerald-300\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 51, "<span class=\"rounded-full bg-st-ok-bg px-2 py-0.5 text-st-ok\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var30 string
 			templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(stop)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 157, Col: 83}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 157, Col: 71}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 			if templ_7745c5c3_Err != nil {
@@ -677,14 +677,14 @@ func replayStopBadge(stop string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		case "max_tokens":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<span class=\"rounded-full bg-amber-500/20 px-2 py-0.5 text-amber-300\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 53, "<span class=\"rounded-full bg-st-warn-bg px-2 py-0.5 text-st-warn\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var31 string
 			templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(stop)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 159, Col: 79}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 159, Col: 75}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 			if templ_7745c5c3_Err != nil {
@@ -695,19 +695,19 @@ func replayStopBadge(stop string) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		case "":
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<span class=\"rounded-full bg-slate-700/40 px-2 py-0.5 text-slate-400\">—</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 55, "<span class=\"rounded-full bg-st-idle-bg px-2 py-0.5 text-muted\">—</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		default:
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<span class=\"rounded-full bg-slate-700/40 px-2 py-0.5 text-slate-300\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 56, "<span class=\"rounded-full bg-st-idle-bg px-2 py-0.5 text-fg\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var32 string
 			templ_7745c5c3_Var32, templ_7745c5c3_Err = templ.JoinStringErrs(stop)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 163, Col: 79}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 163, Col: 70}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var32))
 			if templ_7745c5c3_Err != nil {
@@ -760,14 +760,14 @@ func ReplayNotAttached(msg string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<div class=\"mx-auto max-w-3xl\"><h1 class=\"text-xl font-semibold tracking-tight\">Replay</h1><p class=\"mt-2 text-slate-400\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<div class=\"mx-auto max-w-3xl\"><h1 class=\"text-xl font-semibold tracking-tight\">Replay</h1><p class=\"mt-2 text-muted\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var35 string
 			templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinStringErrs(msg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 176, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/replay.templ`, Line: 176, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 			if templ_7745c5c3_Err != nil {

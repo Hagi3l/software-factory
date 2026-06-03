@@ -9,21 +9,21 @@ templ Home(version string) {
 		<div class="mx-auto max-w-3xl space-y-6">
 			<div>
 				<h1 class="text-2xl font-semibold tracking-tight">Control room</h1>
-				<p class="mt-1 text-slate-400">
+				<p class="mt-1 text-muted">
 					The human's read-only window into the factory and the only place to act.
-					Build <span class="font-mono text-slate-300">{ version }</span>.
+					Build <span class="font-mono text-fg">{ version }</span>.
 				</p>
 			</div>
-			<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
-				<p class="text-sm text-slate-300">
+			<div class="rounded-lg border border-border bg-surface p-4">
+				<p class="text-sm text-fg">
 					The server scaffold and asset pipeline are live (T4.1). The views below are
 					wired into the navigation and land in subsequent tasks.
 				</p>
 			</div>
 			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 				for _, item := range NavItems {
-					<a href={ templ.SafeURL(item.Href) } class="block rounded-lg border border-slate-800 bg-slate-900/40 p-4 hover:border-slate-600 hover:bg-slate-900">
-						<span class="font-medium text-slate-100">{ item.Label }</span>
+					<a href={ templ.SafeURL(item.Href) } class="block rounded-lg border border-border bg-surface p-4 hover:border-border-strong hover:bg-surface">
+						<span class="font-medium text-fg">{ item.Label }</span>
 					</a>
 				}
 			</div>
@@ -38,7 +38,7 @@ templ Placeholder(label string, active string) {
 	@Layout("Harness — "+label, active) {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-2xl font-semibold tracking-tight">{ label }</h1>
-			<p class="mt-2 text-slate-400">This view is not built yet — it lands in a later Phase 4 task.</p>
+			<p class="mt-2 text-muted">This view is not built yet — it lands in a later Phase 4 task.</p>
 		</div>
 	}
 }

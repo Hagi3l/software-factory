@@ -28,7 +28,7 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 		<div class="mx-auto flex max-w-3xl flex-col gap-4">
 			<div>
 				<h1 class="text-xl font-semibold tracking-tight">Create Task</h1>
-				<p class="mt-1 text-sm text-slate-400">
+				<p class="mt-1 text-sm text-muted">
 					A steered conversation with the requirements planner. Describe what you want
 					built; it will probe for examples, edge cases, what to reject, and what is out
 					of scope — converging on testable intent. Nothing is written until you approve.
@@ -57,7 +57,7 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 					hx-get={ "/create/messages/" + sessionID }
 					hx-trigger="sse:turn, every 8s"
 					hx-swap="innerHTML"
-					class="flex min-h-64 flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/40 p-4"
+					class="flex min-h-64 flex-col gap-3 rounded-lg border border-border bg-surface p-4"
 				>
 					@WizardTranscript(msgs)
 				</div>
@@ -74,12 +74,12 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 						rows="3"
 						required
 						placeholder="Describe the change you want, or answer the planner's question…"
-						class="w-full resize-y rounded-md border border-slate-700 bg-slate-900 p-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-slate-500 focus:outline-none"
+						class="w-full resize-y rounded-md border border-border-strong bg-surface p-3 text-sm text-fg placeholder:text-muted focus:border-border-strong focus:outline-none"
 					></textarea>
 					<div class="flex justify-end">
 						<button
 							type="submit"
-							class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500"
+							class="rounded-md bg-accent-strong px-4 py-2 text-sm font-medium text-white transition hover:bg-accent"
 						>Send</button>
 					</div>
 				</form>
@@ -96,7 +96,7 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 // the streamed reply into a proper bubble and resets the live line for the next turn.
 templ WizardTranscript(msgs []wizard.Message) {
 	if len(msgs) == 0 {
-		<p class="text-sm text-slate-500">No messages yet — say what you'd like built to begin.</p>
+		<p class="text-sm text-muted">No messages yet — say what you'd like built to begin.</p>
 	} else {
 		for _, m := range msgs {
 			@wizardBubble(m)
@@ -105,7 +105,7 @@ templ WizardTranscript(msgs []wizard.Message) {
 	// The streaming target: assistant `delta` events replace its content as the reply is
 	// generated. Empty (between turns) it renders nothing; whitespace-pre-wrap preserves the
 	// model's line breaks while it streams.
-	<div id="wizard-live" sse-swap="delta" class="whitespace-pre-wrap text-sm leading-relaxed text-slate-300"></div>
+	<div id="wizard-live" sse-swap="delta" class="whitespace-pre-wrap text-sm leading-relaxed text-fg"></div>
 }
 
 // wizardBubble renders one finalized turn — the human's prompt aligned right, the planner's
@@ -115,11 +115,11 @@ templ WizardTranscript(msgs []wizard.Message) {
 templ wizardBubble(m wizard.Message) {
 	if m.Role == "user" {
 		<div class="flex justify-end">
-			<div class="max-w-[85%] whitespace-pre-wrap rounded-lg bg-indigo-600/30 px-3 py-2 text-sm text-slate-100">{ m.Text }</div>
+			<div class="max-w-[85%] whitespace-pre-wrap rounded-lg bg-accent-soft px-3 py-2 text-sm text-fg">{ m.Text }</div>
 		</div>
 	} else {
 		<div class="flex justify-start">
-			<div class="max-w-[85%] whitespace-pre-wrap rounded-lg bg-slate-800/70 px-3 py-2 text-sm text-slate-200">{ m.Text }</div>
+			<div class="max-w-[85%] whitespace-pre-wrap rounded-lg bg-canvas px-3 py-2 text-sm text-fg">{ m.Text }</div>
 		</div>
 	}
 }
@@ -132,12 +132,12 @@ templ wizardBubble(m wizard.Message) {
 // the panel reads as a deliberate surface from the first paint.
 templ LedgerPanel(session string, items []wizard.LedgerItem) {
 	if len(items) == 0 {
-		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500">
+		<div class="rounded-lg border border-border bg-surface p-4 text-sm text-muted">
 			Alignment ledger — decisions appear here as you converge.
 		</div>
 	} else {
-		<div class="flex flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/40 p-4">
-			<h2 class="text-sm font-semibold tracking-tight text-slate-200">Alignment ledger</h2>
+		<div class="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4">
+			<h2 class="text-sm font-semibold tracking-tight text-fg">Alignment ledger</h2>
 			<ul class="flex flex-col gap-3">
 				for i, it := range items {
 					@ledgerRow(session, i, it)
@@ -154,10 +154,10 @@ templ ledgerRow(session string, idx int, it wizard.LedgerItem) {
 	<li class="flex flex-col gap-1.5">
 		<div class="flex items-start gap-2">
 			<span class={ ledgerStatusClass(it.Status) }>{ it.Status }</span>
-			<span class="text-sm text-slate-200">{ it.Question }</span>
+			<span class="text-sm text-fg">{ it.Question }</span>
 		</div>
 		if it.Rationale != "" {
-			<p class="pl-1 text-xs text-slate-500">{ it.Rationale }</p>
+			<p class="pl-1 text-xs text-muted">{ it.Rationale }</p>
 		}
 		if len(it.Options) > 0 {
 			<div class="flex flex-wrap gap-2 pt-0.5">
@@ -205,9 +205,9 @@ func ledgerVals(session string, itemIdx, optIdx int) string {
 func chipClass(selected bool) string {
 	base := "rounded-full border px-3 py-1 text-xs transition focus:outline-none "
 	if selected {
-		return base + "border-emerald-500/40 bg-emerald-500/20 text-emerald-200"
+		return base + "border-st-ok/40 bg-st-ok-bg text-st-ok"
 	}
-	return base + "border-slate-700 bg-slate-800/70 text-slate-200 hover:border-slate-500 hover:bg-slate-700/70"
+	return base + "border-border-strong bg-canvas text-fg hover:border-border-strong hover:bg-st-idle-bg"
 }
 
 // ledgerStatusClass returns the Tailwind classes for the status badge: agreed → emerald tint,
@@ -215,9 +215,9 @@ func chipClass(selected bool) string {
 func ledgerStatusClass(status string) string {
 	base := "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide "
 	if status == "agreed" {
-		return base + "bg-emerald-500/20 text-emerald-300"
+		return base + "bg-st-ok-bg text-st-ok"
 	}
-	return base + "bg-amber-500/20 text-amber-300"
+	return base + "bg-st-warn-bg text-st-warn"
 }
 
 // DraftPanel renders the drafted spec + seed issues the planner proposes (T4.14,
@@ -230,22 +230,22 @@ func ledgerStatusClass(status string) string {
 // output but still model-authored markdown, never rendered as markup.
 templ DraftPanel(session string, draft wizard.Draft, canApprove bool) {
 	if draft.Empty() {
-		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500">
+		<div class="rounded-lg border border-border bg-surface p-4 text-sm text-muted">
 			Drafted spec &amp; seed issues — these appear here, with an Approve button, once the
 			planner has converged enough to propose them.
 		</div>
 	} else {
-		<div class="flex flex-col gap-4 rounded-lg border border-emerald-900/40 bg-slate-900/40 p-4">
+		<div class="flex flex-col gap-4 rounded-lg border border-st-ok/40 bg-surface p-4">
 			<div class="flex flex-col gap-1">
-				<h2 class="text-sm font-semibold tracking-tight text-slate-200">Proposed change</h2>
+				<h2 class="text-sm font-semibold tracking-tight text-fg">Proposed change</h2>
 				if draft.Summary != "" {
-					<p class="text-sm text-slate-300">{ draft.Summary }</p>
+					<p class="text-sm text-fg">{ draft.Summary }</p>
 				}
 			</div>
 			@draftSpecFiles(draft.Specs)
 			if len(draft.Issues) > 0 {
 				<div class="flex flex-col gap-2">
-					<h3 class="text-xs font-medium uppercase tracking-wide text-slate-400">Seed issues</h3>
+					<h3 class="text-xs font-medium uppercase tracking-wide text-muted">Seed issues</h3>
 					<ul class="flex flex-col gap-2">
 						for _, is := range draft.Issues {
 							@draftIssueRow(is)
@@ -258,10 +258,10 @@ templ DraftPanel(session string, draft wizard.Draft, canApprove bool) {
 					hx-post="/create/approve"
 					hx-target="#wizard-result"
 					hx-swap="innerHTML"
-					class="flex flex-col gap-2 border-t border-slate-800 pt-3"
+					class="flex flex-col gap-2 border-t border-border pt-3"
 				>
 					<input type="hidden" name="session" value={ session }/>
-					<p class="text-xs text-amber-300/90">
+					<p class="text-xs text-st-warn">
 						Approving commits the spec to git, writes the decisions record, stores this
 						conversation, and creates the seed issues. This is the consent boundary —
 						everything after it is autonomous.
@@ -269,12 +269,12 @@ templ DraftPanel(session string, draft wizard.Draft, canApprove bool) {
 					<div class="flex justify-end">
 						<button
 							type="submit"
-							class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500"
+							class="rounded-md bg-st-ok px-4 py-2 text-sm font-medium text-white transition hover:bg-st-ok"
 						>Approve &amp; seed</button>
 					</div>
 				</form>
 			} else {
-				<p class="border-t border-slate-800 pt-3 text-xs text-slate-500">
+				<p class="border-t border-border pt-3 text-xs text-muted">
 					Approval is unavailable here — run the wizard under <code>harness run --serve-addr</code> to commit specs and seed issues.
 				</p>
 			}
@@ -289,11 +289,11 @@ templ DraftPanel(session string, draft wizard.Draft, canApprove bool) {
 templ draftSpecFiles(specs []wizard.DraftSpec) {
 	if len(specs) > 0 {
 		<div class="flex flex-col gap-2">
-			<h3 class="text-xs font-medium uppercase tracking-wide text-slate-400">Spec files</h3>
+			<h3 class="text-xs font-medium uppercase tracking-wide text-muted">Spec files</h3>
 			for _, sp := range specs {
-				<details class="rounded-md border border-slate-800 bg-slate-950/40">
-					<summary class="cursor-pointer px-3 py-2 text-sm text-slate-200">{ sp.Path }</summary>
-					<pre class="overflow-x-auto whitespace-pre-wrap border-t border-slate-800 px-3 py-2 text-xs leading-relaxed text-slate-300">{ sp.Content }</pre>
+				<details class="rounded-md border border-border bg-canvas">
+					<summary class="cursor-pointer px-3 py-2 text-sm text-fg">{ sp.Path }</summary>
+					<pre class="overflow-x-auto whitespace-pre-wrap border-t border-border px-3 py-2 text-xs leading-relaxed text-fg">{ sp.Content }</pre>
 				</details>
 			}
 		</div>
@@ -304,18 +304,18 @@ templ draftSpecFiles(specs []wizard.DraftSpec) {
 // at (defaulting note left to the planner), and the spec file it is governed by. Title/body are
 // inert escaped text.
 templ draftIssueRow(is wizard.DraftIssue) {
-	<li class="flex flex-col gap-1 rounded-md border border-slate-800 bg-slate-950/40 px-3 py-2">
+	<li class="flex flex-col gap-1 rounded-md border border-border bg-canvas px-3 py-2">
 		<div class="flex flex-wrap items-center gap-2">
-			<span class="text-sm font-medium text-slate-200">{ is.Title }</span>
+			<span class="text-sm font-medium text-fg">{ is.Title }</span>
 			if is.Role != "" {
-				<span class="rounded-full bg-slate-800 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-300">{ is.Role }</span>
+				<span class="rounded-full bg-canvas px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-fg">{ is.Role }</span>
 			}
 		</div>
 		if is.Spec != "" {
-			<span class="text-xs text-slate-500">{ is.Spec }</span>
+			<span class="text-xs text-muted">{ is.Spec }</span>
 		}
 		if is.Body != "" {
-			<p class="whitespace-pre-wrap text-xs text-slate-400">{ is.Body }</p>
+			<p class="whitespace-pre-wrap text-xs text-muted">{ is.Body }</p>
 		}
 	</li>
 }
@@ -326,13 +326,13 @@ templ draftIssueRow(is wizard.DraftIssue) {
 // fragment swapped into #wizard-result by the approve form.
 templ CreateApproveResult(res wizard.SeedResult, err string) {
 	if err != "" {
-		<div class="rounded-lg border border-rose-900/50 bg-rose-950/30 p-4 text-sm text-rose-200">
+		<div class="rounded-lg border border-st-blocked/30 bg-st-blocked-bg p-4 text-sm text-st-blocked">
 			{ err }
 		</div>
 	} else {
-		<div class="flex flex-col gap-2 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-4">
-			<h2 class="text-sm font-semibold tracking-tight text-emerald-200">Approved — work seeded</h2>
-			<p class="text-xs text-slate-400">
+		<div class="flex flex-col gap-2 rounded-lg border border-st-ok/40 bg-st-ok-bg p-4">
+			<h2 class="text-sm font-semibold tracking-tight text-st-ok">Approved — work seeded</h2>
+			<p class="text-xs text-muted">
 				Committed
 				if res.Commit != "" {
 					as <code>{ shortHash(res.Commit) }</code>
@@ -343,10 +343,10 @@ templ CreateApproveResult(res wizard.SeedResult, err string) {
 				<ul class="flex flex-col gap-1">
 					for _, is := range res.Issues {
 						<li class="text-sm">
-							<a href={ templ.URL("/issue/" + is.ID) } class="text-indigo-300 hover:text-indigo-200">{ is.ID }</a>
-							<span class="text-slate-300">{ " " + is.Title }</span>
+							<a href={ templ.URL("/issue/" + is.ID) } class="text-accent hover:text-accent-strong">{ is.ID }</a>
+							<span class="text-fg">{ " " + is.Title }</span>
 							if is.Role != "" {
-								<span class="text-xs text-slate-500">{ " (" + is.Role + ")" }</span>
+								<span class="text-xs text-muted">{ " (" + is.Role + ")" }</span>
 							}
 						</li>
 					}
@@ -364,7 +364,7 @@ templ CreateMessage(msg string) {
 	@Layout("Harness — Create Task", "create") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Create Task</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }

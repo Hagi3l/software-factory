@@ -19,10 +19,10 @@ templ IssueDetailPage(d query.IssueDetail) {
 		<div class="mx-auto max-w-4xl space-y-6">
 			<div class="space-y-2">
 				<div class="flex flex-wrap items-center gap-3">
-					<span class="font-mono text-sm text-slate-500">{ d.Issue.ID }</span>
+					<span class="font-mono text-sm text-muted">{ d.Issue.ID }</span>
 					@statusBadge(d.Issue.Status)
 					if d.Merged {
-						<span class="rounded bg-emerald-500/20 px-1.5 py-0.5 text-xs text-emerald-300">merged</span>
+						<span class="rounded bg-st-ok-bg px-1.5 py-0.5 text-xs text-st-ok">merged</span>
 					}
 				</div>
 				<h1 class="text-2xl font-semibold tracking-tight">{ d.Issue.Title }</h1>
@@ -31,9 +31,9 @@ templ IssueDetailPage(d query.IssueDetail) {
 					// invariant the action is to refine the spec, so the detail page offers the
 					// Resolve wizard (T4.15) directly — the same launch point as the DLQ — alongside
 					// the orchestrator's reason it terminated.
-					<a href={ templ.URL("/resolve/" + d.Issue.ID) } class="inline-block rounded bg-emerald-600/90 px-2.5 py-1 text-sm font-medium text-white transition hover:bg-emerald-500">Resolve this escalation →</a>
+					<a href={ templ.URL("/resolve/" + d.Issue.ID) } class="inline-block rounded bg-st-ok px-2.5 py-1 text-sm font-medium text-white transition hover:bg-st-ok">Resolve this escalation →</a>
 					if d.Issue.DeadLetterReason != "" {
-						<p class="text-sm text-rose-300">{ d.Issue.DeadLetterReason }</p>
+						<p class="text-sm text-st-blocked">{ d.Issue.DeadLetterReason }</p>
 					}
 				}
 				<div class="flex flex-wrap items-center gap-4">
@@ -41,18 +41,18 @@ templ IssueDetailPage(d query.IssueDetail) {
 						// The decision trail is reachable only once the transcript hash is retained on
 						// the merge trailer (T4.7b), so the replay drill-through surfaces only for merged
 						// work — exactly where Replay can reconstruct it.
-						<a href={ templ.URL("/replay/" + d.Issue.ID) } class="inline-block text-sm text-sky-400 hover:text-sky-300 hover:underline">▸ Replay decision trail</a>
+						<a href={ templ.URL("/replay/" + d.Issue.ID) } class="inline-block text-sm text-st-progress hover:text-st-progress hover:underline">▸ Replay decision trail</a>
 					}
 					if d.Issue.GateVerdict != "" {
 						// The trust argument — producer≠verifier souls, red→green, mutation, scanners —
 						// reachable for *any* gated candidate (the verdict is stamped on every disposition,
 						// T4.22), so this surfaces for rejected work too, not only merged.
-						<a href={ templ.URL("/verification/" + d.Issue.ID) } class="inline-block text-sm text-sky-400 hover:text-sky-300 hover:underline">▸ Verification</a>
+						<a href={ templ.URL("/verification/" + d.Issue.ID) } class="inline-block text-sm text-st-progress hover:text-st-progress hover:underline">▸ Verification</a>
 					}
 				</div>
 			</div>
 			<section class="space-y-2">
-				<h2 class="text-sm font-medium text-slate-400">Brief</h2>
+				<h2 class="text-sm font-medium text-muted">Brief</h2>
 				<dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
 					@field("Role", orDash(d.Issue.Role), false)
 					@field("Spec", orDash(d.Issue.Spec), true)
@@ -66,12 +66,12 @@ templ IssueDetailPage(d query.IssueDetail) {
 					@field("Spend", strconv.Itoa(d.Issue.SpentTokens)+" tokens · "+formatUSD(d.Issue.SpentUSD), false)
 				</dl>
 				if d.Issue.Body != "" {
-					<pre class="whitespace-pre-wrap break-words rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-200">{ d.Issue.Body }</pre>
+					<pre class="whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-4 text-sm text-fg">{ d.Issue.Body }</pre>
 				}
 			</section>
 			if d.Merged {
 				<section class="space-y-2">
-					<h2 class="text-sm font-medium text-slate-400">Provenance</h2>
+					<h2 class="text-sm font-medium text-muted">Provenance</h2>
 					<dl class="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
 						@field("Soul", orDash(d.Provenance.Soul), false)
 						@field("Model", orDash(d.Provenance.Model), true)
@@ -80,17 +80,17 @@ templ IssueDetailPage(d query.IssueDetail) {
 			}
 			if d.Diff != "" {
 				<section class="space-y-2">
-					<h2 class="text-sm font-medium text-slate-400">Candidate diff</h2>
+					<h2 class="text-sm font-medium text-muted">Candidate diff</h2>
 					// The diff is agent-authored output, but templ escapes this text node, so it
 					// renders as inert text rather than markup — safe inline (the raw-bytes nosniff
 					// contract is for the /artifact endpoint, not this server-rendered page).
-					<pre class="overflow-x-auto whitespace-pre rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-xs text-slate-200">{ d.Diff }</pre>
+					<pre class="overflow-x-auto whitespace-pre rounded-lg border border-border bg-surface p-4 text-xs text-fg">{ d.Diff }</pre>
 				</section>
 			}
 			<section class="space-y-2">
-				<h2 class="text-sm font-medium text-slate-400">Evidence</h2>
+				<h2 class="text-sm font-medium text-muted">Evidence</h2>
 				if len(d.Evidence) == 0 {
-					<p class="text-sm text-slate-500">No evidence recorded yet.</p>
+					<p class="text-sm text-muted">No evidence recorded yet.</p>
 				} else {
 					<ul class="flex flex-col gap-2">
 						for _, e := range d.Evidence {
@@ -107,11 +107,11 @@ templ IssueDetailPage(d query.IssueDetail) {
 // machine token (a path, a ref, a hash) so it renders in a monospace face.
 templ field(label, value string, mono bool) {
 	<div>
-		<dt class="text-slate-500">{ label }</dt>
+		<dt class="text-muted">{ label }</dt>
 		if mono {
-			<dd class="break-all font-mono text-slate-200">{ value }</dd>
+			<dd class="break-all font-mono text-fg">{ value }</dd>
 		} else {
-			<dd class="text-slate-200">{ value }</dd>
+			<dd class="text-fg">{ value }</dd>
 		}
 	</div>
 }
@@ -122,22 +122,22 @@ templ field(label, value string, mono bool) {
 // just without a click-through. The hash is rendered short for legibility; the anchor
 // carries the full address.
 templ evidenceItem(e query.ArtifactLink) {
-	<li class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2 text-sm">
+	<li class="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-surface px-3 py-2 text-sm">
 		<div class="flex items-center gap-3">
-			<span class="text-slate-200">{ e.Label }</span>
-			<span class="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400">{ e.Kind }</span>
+			<span class="text-fg">{ e.Label }</span>
+			<span class="rounded-full bg-canvas px-2 py-0.5 text-xs text-muted">{ e.Kind }</span>
 		</div>
 		if e.Available {
 			<a
 				href={ templ.URL("/artifact/" + e.Hash) }
 				target="_blank"
 				rel="noopener"
-				class="font-mono text-xs text-sky-400 hover:text-sky-300 hover:underline"
+				class="font-mono text-xs text-st-progress hover:text-st-progress hover:underline"
 			>{ shortHash(e.Hash) }</a>
 		} else if e.Hash != "" {
-			<span class="font-mono text-xs text-slate-600" title="not resolvable in the artifact store">{ shortHash(e.Hash) } · unavailable</span>
+			<span class="font-mono text-xs text-faint" title="not resolvable in the artifact store">{ shortHash(e.Hash) } · unavailable</span>
 		} else {
-			<span class="text-xs text-slate-600">no evidence persisted</span>
+			<span class="text-xs text-faint">no evidence persisted</span>
 		}
 	</li>
 }
@@ -149,7 +149,7 @@ templ IssueDetailMessage(msg string) {
 	@Layout("Harness — Issue", "") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Issue</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }

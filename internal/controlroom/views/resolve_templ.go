@@ -56,7 +56,7 @@ func ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messag
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"mx-auto flex max-w-3xl flex-col gap-4\"><div><h1 class=\"text-xl font-semibold tracking-tight\">Resolve</h1><p class=\"mt-1 text-sm text-slate-400\">Refine the spec to unstick dead-lettered work. The planner is pre-loaded with the escalation and the governing spec slice; converge on a minimal spec edit, then approve — the factory re-pins and reissues the affected work automatically.</p></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 1, "<div class=\"mx-auto flex max-w-3xl flex-col gap-4\"><div><h1 class=\"text-xl font-semibold tracking-tight\">Resolve</h1><p class=\"mt-1 text-sm text-muted\">Refine the spec to unstick dead-lettered work. The planner is pre-loaded with the escalation and the governing spec slice; converge on a minimal spec edit, then approve — the factory re-pins and reissues the affected work automatically.</p></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -136,7 +136,7 @@ func ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messag
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" hx-trigger=\"sse:turn, every 8s\" hx-swap=\"innerHTML\" class=\"flex min-h-64 flex-col gap-3 rounded-lg border border-slate-800 bg-slate-900/40 p-4\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "\" hx-trigger=\"sse:turn, every 8s\" hx-swap=\"innerHTML\" class=\"flex min-h-64 flex-col gap-3 rounded-lg border border-border bg-surface p-4\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -157,7 +157,7 @@ func ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messag
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\"> <textarea name=\"text\" rows=\"3\" required placeholder=\"Describe how the spec should be clarified, or answer the planner's question…\" class=\"w-full resize-y rounded-md border border-slate-700 bg-slate-900 p-3 text-sm text-slate-100 placeholder:text-slate-500 focus:border-slate-500 focus:outline-none\"></textarea><div class=\"flex justify-end\"><button type=\"submit\" class=\"rounded-md bg-indigo-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-indigo-500\">Send</button></div></form></div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "\"> <textarea name=\"text\" rows=\"3\" required placeholder=\"Describe how the spec should be clarified, or answer the planner's question…\" class=\"w-full resize-y rounded-md border border-border-strong bg-surface p-3 text-sm text-fg placeholder:text-muted focus:border-border-strong focus:outline-none\"></textarea><div class=\"flex justify-end\"><button type=\"submit\" class=\"rounded-md bg-accent-strong px-4 py-2 text-sm font-medium text-white transition hover:bg-accent\">Send</button></div></form></div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -196,14 +196,14 @@ func resolveEscalation(rc query.ResolveContext) templ.Component {
 			templ_7745c5c3_Var8 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div class=\"flex flex-col gap-2 rounded-lg border border-rose-900/50 bg-rose-950/20 p-4\"><div class=\"flex flex-wrap items-center gap-2\"><span class=\"font-mono text-xs text-slate-500\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "<div class=\"flex flex-col gap-2 rounded-lg border border-st-blocked/30 bg-st-blocked-bg p-4\"><div class=\"flex flex-wrap items-center gap-2\"><span class=\"font-mono text-xs text-muted\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var9 string
 		templ_7745c5c3_Var9, templ_7745c5c3_Err = templ.JoinStringErrs(rc.Issue.ID)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 92, Col: 63}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 92, Col: 59}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var9))
 		if templ_7745c5c3_Err != nil {
@@ -218,14 +218,14 @@ func resolveEscalation(rc query.ResolveContext) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if rc.Issue.Role != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<span class=\"text-xs text-slate-400\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "<span class=\"text-xs text-muted\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(rc.Issue.Role)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 95, Col: 56}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 95, Col: 52}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {
@@ -236,14 +236,14 @@ func resolveEscalation(rc query.ResolveContext) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</div><p class=\"text-sm font-medium text-slate-100\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 15, "</div><p class=\"text-sm font-medium text-fg\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var11 string
 		templ_7745c5c3_Var11, templ_7745c5c3_Err = templ.JoinStringErrs(rc.Issue.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 98, Col: 64}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 98, Col: 57}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var11))
 		if templ_7745c5c3_Err != nil {
@@ -254,14 +254,14 @@ func resolveEscalation(rc query.ResolveContext) templ.Component {
 			return templ_7745c5c3_Err
 		}
 		if rc.Issue.DeadLetterReason != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<p class=\"text-xs text-rose-200\">Why it is stuck: ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 17, "<p class=\"text-xs text-st-blocked\">Why it is stuck: ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var12 string
 			templ_7745c5c3_Var12, templ_7745c5c3_Err = templ.JoinStringErrs(rc.Issue.DeadLetterReason)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 100, Col: 80}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 100, Col: 82}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var12))
 			if templ_7745c5c3_Err != nil {
@@ -272,14 +272,14 @@ func resolveEscalation(rc query.ResolveContext) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400\"><span class=\"text-amber-400\">attempt ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 19, "<div class=\"flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted\"><span class=\"text-st-warn\">attempt ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		var templ_7745c5c3_Var13 string
 		templ_7745c5c3_Var13, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(rc.Issue.Attempt))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 103, Col: 72}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 103, Col: 70}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var13))
 		if templ_7745c5c3_Err != nil {
@@ -324,7 +324,7 @@ func resolveEscalation(rc query.ResolveContext) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" class=\"text-sky-400 hover:text-sky-300 hover:underline\">issue detail</a> ")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 23, "\" class=\"text-st-progress hover:text-st-progress hover:underline\">issue detail</a> ")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -342,7 +342,7 @@ func resolveEscalation(rc query.ResolveContext) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" target=\"_blank\" rel=\"noopener\" class=\"text-sky-400 hover:text-sky-300 hover:underline\">agent transcript</a> <a href=\"")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 25, "\" target=\"_blank\" rel=\"noopener\" class=\"text-st-progress hover:text-st-progress hover:underline\">agent transcript</a> <a href=\"")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -355,12 +355,12 @@ func resolveEscalation(rc query.ResolveContext) templ.Component {
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" class=\"text-sky-400 hover:text-sky-300 hover:underline\">▸ replay decision trail</a>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 26, "\" class=\"text-st-progress hover:text-st-progress hover:underline\">▸ replay decision trail</a>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else if rc.TranscriptHash != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<span class=\"text-slate-600\" title=\"not resolvable in the artifact store\">transcript unavailable</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 27, "<span class=\"text-faint\" title=\"not resolvable in the artifact store\">transcript unavailable</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -399,14 +399,14 @@ func resolveSpecSlice(rc query.ResolveContext) templ.Component {
 		}
 		ctx = templ.ClearChildren(ctx)
 		if rc.Spec != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<details class=\"rounded-lg border border-slate-800 bg-slate-900/40\"><summary class=\"cursor-pointer px-4 py-2 text-sm text-slate-200\">Governing spec slice — <span class=\"font-mono text-xs text-slate-500\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 29, "<details class=\"rounded-lg border border-border bg-surface\"><summary class=\"cursor-pointer px-4 py-2 text-sm text-fg\">Governing spec slice — <span class=\"font-mono text-xs text-muted\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var20 string
 			templ_7745c5c3_Var20, templ_7745c5c3_Err = templ.JoinStringErrs(rc.Spec)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 125, Col: 149}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 125, Col: 138}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var20))
 			if templ_7745c5c3_Err != nil {
@@ -417,14 +417,14 @@ func resolveSpecSlice(rc query.ResolveContext) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if rc.SpecSlice != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<pre class=\"overflow-x-auto whitespace-pre-wrap border-t border-slate-800 px-4 py-3 text-xs leading-relaxed text-slate-300\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 31, "<pre class=\"overflow-x-auto whitespace-pre-wrap border-t border-border px-4 py-3 text-xs leading-relaxed text-fg\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var21 string
 				templ_7745c5c3_Var21, templ_7745c5c3_Err = templ.JoinStringErrs(rc.SpecSlice)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 127, Col: 142}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 127, Col: 132}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var21))
 				if templ_7745c5c3_Err != nil {
@@ -435,7 +435,7 @@ func resolveSpecSlice(rc query.ResolveContext) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<p class=\"border-t border-slate-800 px-4 py-3 text-xs text-slate-500\">The spec slice could not be resolved (the file may be mid-edit or missing).</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 33, "<p class=\"border-t border-border px-4 py-3 text-xs text-muted\">The spec slice could not be resolved (the file may be mid-edit or missing).</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -445,7 +445,7 @@ func resolveSpecSlice(rc query.ResolveContext) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500\">This issue names no governing spec — refine the spec the work should be derived from.</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 35, "<div class=\"rounded-lg border border-border bg-surface p-4 text-sm text-muted\">This issue names no governing spec — refine the spec the work should be derived from.</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -482,24 +482,24 @@ func ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query.
 		}
 		ctx = templ.ClearChildren(ctx)
 		if len(draft.Specs) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<div class=\"rounded-lg border border-slate-800 bg-slate-900/40 p-4 text-sm text-slate-500\">The refined spec will appear here, with its blast radius and an Approve button, once the planner proposes an edit.</div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 36, "<div class=\"rounded-lg border border-border bg-surface p-4 text-sm text-muted\">The refined spec will appear here, with its blast radius and an Approve button, once the planner proposes an edit.</div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<div class=\"flex flex-col gap-4 rounded-lg border border-emerald-900/40 bg-slate-900/40 p-4\"><div class=\"flex flex-col gap-1\"><h2 class=\"text-sm font-semibold tracking-tight text-slate-200\">Proposed spec refinement</h2>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 37, "<div class=\"flex flex-col gap-4 rounded-lg border border-st-ok/40 bg-surface p-4\"><div class=\"flex flex-col gap-1\"><h2 class=\"text-sm font-semibold tracking-tight text-fg\">Proposed spec refinement</h2>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			if draft.Summary != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<p class=\"text-sm text-slate-300\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 38, "<p class=\"text-sm text-fg\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var23 string
 				templ_7745c5c3_Var23, templ_7745c5c3_Err = templ.JoinStringErrs(draft.Summary)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 156, Col: 54}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 156, Col: 47}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var23))
 				if templ_7745c5c3_Err != nil {
@@ -523,7 +523,7 @@ func ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query.
 				return templ_7745c5c3_Err
 			}
 			if canResolve {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<form hx-post=\"/resolve/approve\" hx-target=\"#wizard-result\" hx-swap=\"innerHTML\" class=\"flex flex-col gap-2 border-t border-slate-800 pt-3\"><input type=\"hidden\" name=\"session\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<form hx-post=\"/resolve/approve\" hx-target=\"#wizard-result\" hx-swap=\"innerHTML\" class=\"flex flex-col gap-2 border-t border-border pt-3\"><input type=\"hidden\" name=\"session\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -536,12 +536,12 @@ func ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query.
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\"><p class=\"text-xs text-amber-300/90\">Approving commits the spec refinement, stores this conversation, and returns the dead-lettered issue to the ready pool. The factory then re-pins and reissues the affected work shown above. This is the consent boundary.</p><div class=\"flex justify-end\"><button type=\"submit\" class=\"rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium text-white transition hover:bg-emerald-500\">Approve &amp; resolve</button></div></form>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 42, "\"><p class=\"text-xs text-st-warn\">Approving commits the spec refinement, stores this conversation, and returns the dead-lettered issue to the ready pool. The factory then re-pins and reissues the affected work shown above. This is the consent boundary.</p><div class=\"flex justify-end\"><button type=\"submit\" class=\"rounded-md bg-st-ok px-4 py-2 text-sm font-medium text-white transition hover:bg-st-ok\">Approve &amp; resolve</button></div></form>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<p class=\"border-t border-slate-800 pt-3 text-xs text-slate-500\">Resolve is unavailable here — run the wizard under <code>harness run --serve-addr</code> to refine specs and reopen work.</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 43, "<p class=\"border-t border-border pt-3 text-xs text-muted\">Resolve is unavailable here — run the wizard under <code>harness run --serve-addr</code> to refine specs and reopen work.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -580,25 +580,25 @@ func blastRadius(br query.BlastRadius) templ.Component {
 			templ_7745c5c3_Var25 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<div class=\"flex flex-col gap-2 border-t border-slate-800 pt-3\"><h3 class=\"text-xs font-medium uppercase tracking-wide text-slate-400\">Blast radius</h3><p class=\"text-xs text-slate-500\">The dead-lettered issue is reopened against the refined spec. Beyond it, this edit will:</p>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 45, "<div class=\"flex flex-col gap-2 border-t border-border pt-3\"><h3 class=\"text-xs font-medium uppercase tracking-wide text-muted\">Blast radius</h3><p class=\"text-xs text-muted\">The dead-lettered issue is reopened against the refined spec. Beyond it, this edit will:</p>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
 		if len(br.InFlight) == 0 && len(br.Merged) == 0 {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<p class=\"text-xs text-slate-400\">affect no other in-flight or merged work — the slice no other pinned issue depends on.</p>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 46, "<p class=\"text-xs text-muted\">affect no other in-flight or merged work — the slice no other pinned issue depends on.</p>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 		} else {
 			if len(br.InFlight) > 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<div class=\"flex flex-col gap-1\"><p class=\"text-xs text-amber-300\">re-pin &amp; reissue ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 47, "<div class=\"flex flex-col gap-1\"><p class=\"text-xs text-st-warn\">re-pin &amp; reissue ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var26 string
 				templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(len(br.InFlight)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 203, Col: 92}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 203, Col: 90}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 				if templ_7745c5c3_Err != nil {
@@ -609,7 +609,7 @@ func blastRadius(br query.BlastRadius) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				for _, it := range br.InFlight {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<li class=\"text-xs text-slate-400\"><a href=\"")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 49, "<li class=\"text-xs text-muted\"><a href=\"")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -622,14 +622,14 @@ func blastRadius(br query.BlastRadius) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" class=\"font-mono text-sky-400 hover:text-sky-300 hover:underline\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 50, "\" class=\"font-mono text-st-progress hover:text-st-progress hover:underline\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var28 string
 					templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(it.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 207, Col: 122}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 207, Col: 130}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 					if templ_7745c5c3_Err != nil {
@@ -658,14 +658,14 @@ func blastRadius(br query.BlastRadius) templ.Component {
 							return templ_7745c5c3_Err
 						}
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<span class=\"font-mono text-slate-600\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 54, "<span class=\"font-mono text-faint\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var30 string
 					templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(" · " + shortHash(it.SpecHash))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 211, Col: 80}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 211, Col: 76}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 					if templ_7745c5c3_Err != nil {
@@ -686,14 +686,14 @@ func blastRadius(br query.BlastRadius) templ.Component {
 				return templ_7745c5c3_Err
 			}
 			if len(br.Merged) > 0 {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<div class=\"flex flex-col gap-1\"><p class=\"text-xs text-amber-300\">re-derive ")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 58, "<div class=\"flex flex-col gap-1\"><p class=\"text-xs text-st-warn\">re-derive ")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var31 string
 				templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(len(br.Merged)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 219, Col: 79}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 219, Col: 77}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 				if templ_7745c5c3_Err != nil {
@@ -704,7 +704,7 @@ func blastRadius(br query.BlastRadius) templ.Component {
 					return templ_7745c5c3_Err
 				}
 				for _, g := range br.Merged {
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<li class=\"text-xs text-slate-400\"><span class=\"font-mono\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 60, "<li class=\"text-xs text-muted\"><span class=\"font-mono\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
@@ -717,14 +717,14 @@ func blastRadius(br query.BlastRadius) templ.Component {
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
-					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</span> <span class=\"text-slate-600\">")
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 61, "</span> <span class=\"text-faint\">")
 					if templ_7745c5c3_Err != nil {
 						return templ_7745c5c3_Err
 					}
 					var templ_7745c5c3_Var33 string
 					templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(" · epic " + g.Epic + " · " + strconv.Itoa(g.Members) + " closed")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 224, Col: 106}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 224, Col: 102}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 					if templ_7745c5c3_Err != nil {
@@ -775,7 +775,7 @@ func ResolveApproveResult(res wizard.ResolveResult, err string) templ.Component 
 		}
 		ctx = templ.ClearChildren(ctx)
 		if err != "" {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<div class=\"rounded-lg border border-rose-900/50 bg-rose-950/30 p-4 text-sm text-rose-200\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<div class=\"rounded-lg border border-st-blocked/30 bg-st-blocked-bg p-4 text-sm text-st-blocked\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -793,7 +793,7 @@ func ResolveApproveResult(res wizard.ResolveResult, err string) templ.Component 
 				return templ_7745c5c3_Err
 			}
 		} else {
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "<div class=\"flex flex-col gap-2 rounded-lg border border-emerald-900/50 bg-emerald-950/20 p-4\"><h2 class=\"text-sm font-semibold tracking-tight text-emerald-200\">Resolved — spec refined</h2><p class=\"text-xs text-slate-400\">Committed ")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 67, "<div class=\"flex flex-col gap-2 rounded-lg border border-st-ok/40 bg-st-ok-bg p-4\"><h2 class=\"text-sm font-semibold tracking-tight text-st-ok\">Resolved — spec refined</h2><p class=\"text-xs text-muted\">Committed ")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -821,7 +821,7 @@ func ResolveApproveResult(res wizard.ResolveResult, err string) templ.Component 
 				return templ_7745c5c3_Err
 			}
 			if res.ReopenedIssue != "" {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "<p class=\"text-sm\"><span class=\"text-slate-300\">Reopened </span> <a href=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 71, "<p class=\"text-sm\"><span class=\"text-fg\">Reopened </span> <a href=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -834,20 +834,20 @@ func ResolveApproveResult(res wizard.ResolveResult, err string) templ.Component 
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "\" class=\"font-mono text-indigo-300 hover:text-indigo-200\">")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "\" class=\"font-mono text-accent hover:text-accent-strong\">")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var38 string
 				templ_7745c5c3_Var38, templ_7745c5c3_Err = templ.JoinStringErrs(res.ReopenedIssue)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 256, Col: 133}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 256, Col: 132}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var38))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "</a> <span class=\"text-slate-300\">— back in flight against the refined spec.</span></p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 73, "</a> <span class=\"text-fg\">— back in flight against the refined spec.</span></p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -897,14 +897,14 @@ func ResolveMessage(msg string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "<div class=\"mx-auto max-w-3xl\"><h1 class=\"text-xl font-semibold tracking-tight\">Resolve</h1><p class=\"mt-2 text-slate-400\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 75, "<div class=\"mx-auto max-w-3xl\"><h1 class=\"text-xl font-semibold tracking-tight\">Resolve</h1><p class=\"mt-2 text-muted\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var41 string
 			templ_7745c5c3_Var41, templ_7745c5c3_Err = templ.JoinStringErrs(msg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 271, Col: 39}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/resolve.templ`, Line: 271, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var41))
 			if templ_7745c5c3_Err != nil {

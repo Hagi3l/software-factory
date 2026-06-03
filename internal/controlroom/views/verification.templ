@@ -25,10 +25,10 @@ templ VerificationPage(v query.GateVerdictView) {
 		<div class="mx-auto max-w-4xl space-y-6">
 			<div class="space-y-2">
 				<div class="flex flex-wrap items-center gap-3">
-					<span class="font-mono text-sm text-slate-500">{ v.Issue.ID }</span>
+					<span class="font-mono text-sm text-muted">{ v.Issue.ID }</span>
 					@statusBadge(v.Issue.Status)
 					if v.Merged {
-						<span class="rounded bg-emerald-500/20 px-1.5 py-0.5 text-xs text-emerald-300">merged</span>
+						<span class="rounded bg-st-ok-bg px-1.5 py-0.5 text-xs text-st-ok">merged</span>
 					}
 					if v.Available {
 						@verdictBadge(v.Verdict.Passed)
@@ -36,13 +36,13 @@ templ VerificationPage(v query.GateVerdictView) {
 				</div>
 				<h1 class="text-2xl font-semibold tracking-tight">Verification — { orDash(v.Issue.Title) }</h1>
 				<div class="flex flex-wrap items-center gap-4 text-xs">
-					<a href={ templ.URL("/issue/" + v.Issue.ID) } class="text-sky-400 hover:text-sky-300 hover:underline">← Issue detail</a>
+					<a href={ templ.URL("/issue/" + v.Issue.ID) } class="text-st-progress hover:text-st-progress hover:underline">← Issue detail</a>
 					if v.Hash != "" {
 						<a
 							href={ templ.URL("/artifact/" + v.Hash) }
 							target="_blank"
 							rel="noopener"
-							class="font-mono text-slate-500 hover:text-slate-300 hover:underline"
+							class="font-mono text-muted hover:text-fg hover:underline"
 						>raw verdict { shortHash(v.Hash) }</a>
 					}
 				</div>
@@ -53,18 +53,18 @@ templ VerificationPage(v query.GateVerdictView) {
 			// verification sandbox, and that structural independence (not a third agent) IS the
 			// verification. Saying so explicitly is the point of the view.
 			<section class="space-y-3">
-				<h2 class="text-sm font-medium text-slate-400">Producer ≠ verifier</h2>
+				<h2 class="text-sm font-medium text-muted">Producer ≠ verifier</h2>
 				<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 					@soulCard("Test author", "authored the acceptance tests", v.TestsSoul)
 					@soulCard("Implementor", "implemented against them", v.ImplementSoul)
 				</div>
-				<p class="text-xs text-slate-500">
-					The <span class="font-mono text-slate-400">qa</span> gate has no verifier soul: it runs independently in the orchestrator-controlled clean verification sandbox. That structural separation — not a third agent — is the verification.
+				<p class="text-xs text-muted">
+					The <span class="font-mono text-muted">qa</span> gate has no verifier soul: it runs independently in the orchestrator-controlled clean verification sandbox. That structural separation — not a third agent — is the verification.
 				</p>
 			</section>
 			// The test↔spec traceability map: the only window into how the author read the prose.
 			<section class="space-y-2">
-				<h2 class="text-sm font-medium text-slate-400">Traceability</h2>
+				<h2 class="text-sm font-medium text-muted">Traceability</h2>
 				<ul class="flex flex-col gap-2">
 					@evidenceItem(v.Trace)
 				</ul>
@@ -74,11 +74,11 @@ templ VerificationPage(v query.GateVerdictView) {
 			} else {
 				<section class="space-y-3">
 					<div class="flex items-baseline justify-between">
-						<h2 class="text-sm font-medium text-slate-400">Gate verdict</h2>
-						<span class="text-xs text-slate-500">{ strconv.Itoa(len(v.Verdict.Checks)) } checks</span>
+						<h2 class="text-sm font-medium text-muted">Gate verdict</h2>
+						<span class="text-xs text-muted">{ strconv.Itoa(len(v.Verdict.Checks)) } checks</span>
 					</div>
 					if len(v.Verdict.Checks) == 0 {
-						<p class="text-sm text-slate-500">The gate run recorded no individual checks.</p>
+						<p class="text-sm text-muted">The gate run recorded no individual checks.</p>
 					} else {
 						<ul class="flex flex-col gap-2">
 							for _, c := range v.Verdict.Checks {
@@ -96,14 +96,14 @@ templ VerificationPage(v query.GateVerdictView) {
 // issue's lineage yet) reads as "not recorded" rather than a blank, so the card is never an
 // empty box that looks like a render bug.
 templ soulCard(role, did, soul string) {
-	<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-4">
-		<div class="text-xs uppercase tracking-wide text-slate-500">{ role }</div>
+	<div class="rounded-lg border border-border bg-surface p-4">
+		<div class="text-xs uppercase tracking-wide text-muted">{ role }</div>
 		if soul != "" {
-			<div class="mt-1 font-mono text-sm text-slate-100">{ soul }</div>
+			<div class="mt-1 font-mono text-sm text-fg">{ soul }</div>
 		} else {
-			<div class="mt-1 text-sm text-slate-600">not recorded</div>
+			<div class="mt-1 text-sm text-faint">not recorded</div>
 		}
-		<div class="mt-1 text-xs text-slate-500">{ did }</div>
+		<div class="mt-1 text-xs text-muted">{ did }</div>
 	</div>
 }
 
@@ -112,48 +112,48 @@ templ soulCard(role, did, soul string) {
 // with a link to its own captured-output evidence (untrusted raw bytes via /artifact). A
 // check cited with no persisted evidence still shows: that it ran is itself signal.
 templ verdictCheck(c core.GateCheckOutcome) {
-	<li class="space-y-2 rounded-md border border-slate-800 bg-slate-900/40 px-3 py-2.5 text-sm">
+	<li class="space-y-2 rounded-md border border-border bg-surface px-3 py-2.5 text-sm">
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="flex items-center gap-3">
 				@checkPassBadge(c.Passed)
-				<span class="text-slate-200">{ orDash(c.Name) }</span>
-				<span class="rounded-full bg-slate-800 px-2 py-0.5 text-xs text-slate-400">{ checkKindLabel(c.Kind) }</span>
+				<span class="text-fg">{ orDash(c.Name) }</span>
+				<span class="rounded-full bg-canvas px-2 py-0.5 text-xs text-muted">{ checkKindLabel(c.Kind) }</span>
 			</div>
 			if c.Evidence != "" {
 				<a
 					href={ templ.URL("/artifact/" + c.Evidence) }
 					target="_blank"
 					rel="noopener"
-					class="font-mono text-xs text-sky-400 hover:text-sky-300 hover:underline"
+					class="font-mono text-xs text-st-progress hover:text-st-progress hover:underline"
 				>{ shortHash(c.Evidence) }</a>
 			} else {
-				<span class="text-xs text-slate-600">no evidence persisted</span>
+				<span class="text-xs text-faint">no evidence persisted</span>
 			}
 		</div>
 		if c.Base != nil {
 			// A red→green proof: the acceptance tests must FAIL on the pre-implementation base
 			// (a non-zero exit is the red half) and PASS on the candidate (the check's own exit).
-			<div class="flex flex-wrap items-center gap-3 text-xs text-slate-400">
+			<div class="flex flex-wrap items-center gap-3 text-xs text-muted">
 				<span>base exit { strconv.Itoa(c.Base.ExitCode) }</span>
 				if c.Base.ExitCode != 0 {
-					<span class="text-rose-300">red ✓</span>
+					<span class="text-st-blocked">red ✓</span>
 				} else {
-					<span class="text-amber-300">base did not fail</span>
+					<span class="text-st-warn">base did not fail</span>
 				}
-				<span class="text-slate-600">→</span>
+				<span class="text-faint">→</span>
 				<span>candidate exit { strconv.Itoa(c.ExitCode) }</span>
 				if c.ExitCode == 0 {
-					<span class="text-emerald-300">green ✓</span>
+					<span class="text-st-ok">green ✓</span>
 				} else {
-					<span class="text-rose-300">candidate failed</span>
+					<span class="text-st-blocked">candidate failed</span>
 				}
 			</div>
 		} else if c.Metric != nil {
-			<div class="text-xs text-slate-400">
+			<div class="text-xs text-muted">
 				<span class="font-mono">{ metricSummary(c.Metric) }</span>
 			</div>
 		} else if c.ExitCode != 0 {
-			<div class="text-xs text-slate-500">exit { strconv.Itoa(c.ExitCode) }</div>
+			<div class="text-xs text-muted">exit { strconv.Itoa(c.ExitCode) }</div>
 		}
 	</li>
 }
@@ -162,18 +162,18 @@ templ verdictCheck(c core.GateCheckOutcome) {
 // literals stay inline (a templ switch, not a Go helper) so the Tailwind scanner sees them.
 templ verdictBadge(passed bool) {
 	if passed {
-		<span class="rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-300">gate passed</span>
+		<span class="rounded-full bg-st-ok-bg px-2 py-0.5 text-xs text-st-ok">gate passed</span>
 	} else {
-		<span class="rounded-full bg-rose-500/20 px-2 py-0.5 text-xs text-rose-300">gate failed</span>
+		<span class="rounded-full bg-st-blocked-bg px-2 py-0.5 text-xs text-st-blocked">gate failed</span>
 	}
 }
 
 // checkPassBadge tints one check's pass/fail.
 templ checkPassBadge(passed bool) {
 	if passed {
-		<span class="rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-300">pass</span>
+		<span class="rounded-full bg-st-ok-bg px-2 py-0.5 text-xs text-st-ok">pass</span>
 	} else {
-		<span class="rounded-full bg-rose-500/20 px-2 py-0.5 text-xs text-rose-300">fail</span>
+		<span class="rounded-full bg-st-blocked-bg px-2 py-0.5 text-xs text-st-blocked">fail</span>
 	}
 }
 
@@ -181,13 +181,13 @@ templ checkPassBadge(passed bool) {
 // not be loaded points the human at the raw bytes; no hash at all means the candidate has not
 // been gated yet (or the gate could not persist a record) — self-describing, never blank.
 templ verdictNotice(v query.GateVerdictView) {
-	<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-6">
+	<div class="rounded-lg border border-border bg-surface p-6">
 		if v.Hash != "" {
-			<p class="text-sm text-slate-300">The gate-verdict record for this issue could not be loaded from the artifact store.</p>
-			<p class="mt-1 text-xs text-slate-500">Its content address is <span class="font-mono">{ v.Hash }</span> — try the raw-bytes link above.</p>
+			<p class="text-sm text-fg">The gate-verdict record for this issue could not be loaded from the artifact store.</p>
+			<p class="mt-1 text-xs text-muted">Its content address is <span class="font-mono">{ v.Hash }</span> — try the raw-bytes link above.</p>
 		} else {
-			<p class="text-sm text-slate-300">No gate verdict has been recorded for this issue yet.</p>
-			<p class="mt-1 text-xs text-slate-500">A verdict is harvested for every gate run, pass or fail; this issue's candidate has not been gated.</p>
+			<p class="text-sm text-fg">No gate verdict has been recorded for this issue yet.</p>
+			<p class="mt-1 text-xs text-muted">A verdict is harvested for every gate run, pass or fail; this issue's candidate has not been gated.</p>
 		}
 	</div>
 }
@@ -201,7 +201,7 @@ templ VerificationNotAttached(msg string) {
 	@Layout("Harness — Verification", "") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Verification</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }

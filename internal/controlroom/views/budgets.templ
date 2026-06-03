@@ -24,9 +24,9 @@ templ BudgetsPage(b query.Budgets) {
 		<div class="space-y-6">
 			<div class="flex items-baseline justify-between gap-4">
 				<h1 class="text-xl font-semibold tracking-tight">Budgets</h1>
-				<span class="text-xs text-slate-500">{ capsSummary(b.Caps) }</span>
+				<span class="text-xs text-muted">{ capsSummary(b.Caps) }</span>
 			</div>
-			<p class="max-w-3xl text-sm text-slate-500">
+			<p class="max-w-3xl text-sm text-muted">
 				Token, dollar, and wall-clock burn against the configured caps — the termination guarantee that bounds the on_failure loop. Burn is the spend stamped on beads, the same number the orchestrator enforces budgets on. A rose meter is a breach.
 			</p>
 			<div hx-ext="sse" sse-connect="/events">
@@ -55,13 +55,13 @@ templ BudgetsBody(b query.Budgets) {
 
 templ epicBudgets(epics []query.EpicBudgetRow) {
 	<section class="space-y-2">
-		<h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Epics</h2>
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Epics</h2>
 		if len(epics) == 0 {
-			<p class="text-sm text-slate-500">No epics yet.</p>
+			<p class="text-sm text-muted">No epics yet.</p>
 		} else {
-			<div class="overflow-x-auto rounded-lg border border-slate-800">
-				<table class="min-w-full divide-y divide-slate-800 text-sm">
-					<thead class="bg-slate-900/60 text-left text-xs uppercase tracking-wide text-slate-500">
+			<div class="overflow-x-auto rounded-lg border border-border">
+				<table class="min-w-full divide-y divide-border text-sm">
+					<thead class="bg-surface text-left text-xs uppercase tracking-wide text-muted">
 						<tr>
 							<th class="px-3 py-2 font-medium">Epic</th>
 							<th class="px-3 py-2 font-medium">Issues</th>
@@ -69,7 +69,7 @@ templ epicBudgets(epics []query.EpicBudgetRow) {
 							<th class="px-3 py-2 font-medium">Spend</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-slate-800/60">
+					<tbody class="divide-y divide-border">
 						for _, e := range epics {
 							@epicBudgetRow(e)
 						}
@@ -81,17 +81,17 @@ templ epicBudgets(epics []query.EpicBudgetRow) {
 }
 
 templ epicBudgetRow(e query.EpicBudgetRow) {
-	<tr class="hover:bg-slate-900/40">
-		<td class="px-3 py-2 font-mono text-xs text-slate-300">{ e.EpicID }</td>
-		<td class="px-3 py-2 text-slate-400">{ strconv.Itoa(e.Issues) }</td>
+	<tr class="hover:bg-surface">
+		<td class="px-3 py-2 font-mono text-xs text-fg">{ e.EpicID }</td>
+		<td class="px-3 py-2 text-muted">{ strconv.Itoa(e.Issues) }</td>
 		<td class="px-3 py-2 whitespace-nowrap">
-			<span class="text-slate-200">{ formatTokens(e.Tokens) }</span>
-			<span class="text-slate-600">/ { capTokens(e.TokenCap) }</span>
+			<span class="text-fg">{ formatTokens(e.Tokens) }</span>
+			<span class="text-faint">/ { capTokens(e.TokenCap) }</span>
 			@budgetPct(e.TokenPct, e.TokenOver, e.TokenCap > 0)
 		</td>
 		<td class="px-3 py-2 whitespace-nowrap">
-			<span class="text-slate-200">{ formatUSD(e.USD) }</span>
-			<span class="text-slate-600">/ { capUSD(e.USDCap) }</span>
+			<span class="text-fg">{ formatUSD(e.USD) }</span>
+			<span class="text-faint">/ { capUSD(e.USDCap) }</span>
 			@budgetPct(e.USDPct, e.USDOver, e.USDCap > 0)
 		</td>
 	</tr>
@@ -99,13 +99,13 @@ templ epicBudgetRow(e query.EpicBudgetRow) {
 
 templ issueBudgets(issues []query.IssueBudgetRow) {
 	<section class="space-y-2">
-		<h2 class="text-sm font-semibold uppercase tracking-wide text-slate-400">Issues</h2>
+		<h2 class="text-sm font-semibold uppercase tracking-wide text-muted">Issues</h2>
 		if len(issues) == 0 {
-			<p class="text-sm text-slate-500">No issues yet.</p>
+			<p class="text-sm text-muted">No issues yet.</p>
 		} else {
-			<div class="overflow-x-auto rounded-lg border border-slate-800">
-				<table class="min-w-full divide-y divide-slate-800 text-sm">
-					<thead class="bg-slate-900/60 text-left text-xs uppercase tracking-wide text-slate-500">
+			<div class="overflow-x-auto rounded-lg border border-border">
+				<table class="min-w-full divide-y divide-border text-sm">
+					<thead class="bg-surface text-left text-xs uppercase tracking-wide text-muted">
 						<tr>
 							<th class="px-3 py-2 font-medium">Issue</th>
 							<th class="px-3 py-2 font-medium">Role</th>
@@ -115,7 +115,7 @@ templ issueBudgets(issues []query.IssueBudgetRow) {
 							<th class="px-3 py-2 font-medium">Wall</th>
 						</tr>
 					</thead>
-					<tbody class="divide-y divide-slate-800/60">
+					<tbody class="divide-y divide-border">
 						for _, i := range issues {
 							@issueBudgetRow(i)
 						}
@@ -127,29 +127,29 @@ templ issueBudgets(issues []query.IssueBudgetRow) {
 }
 
 templ issueBudgetRow(i query.IssueBudgetRow) {
-	<tr class="hover:bg-slate-900/40">
+	<tr class="hover:bg-surface">
 		<td class="px-3 py-2">
-			<a href={ templ.URL("/issue/" + i.ID) } class="font-mono text-xs text-sky-300 hover:underline">{ i.ID }</a>
+			<a href={ templ.URL("/issue/" + i.ID) } class="font-mono text-xs text-st-progress hover:underline">{ i.ID }</a>
 		</td>
-		<td class="px-3 py-2 text-slate-400">{ orDash(i.Role) }</td>
+		<td class="px-3 py-2 text-muted">{ orDash(i.Role) }</td>
 		<td class="px-3 py-2 whitespace-nowrap">
-			<span class="text-slate-200">{ strconv.Itoa(i.Attempt) }</span>
-			<span class="text-slate-600">/ { capRetries(i.MaxRetries) }</span>
+			<span class="text-fg">{ strconv.Itoa(i.Attempt) }</span>
+			<span class="text-faint">/ { capRetries(i.MaxRetries) }</span>
 			@budgetPct(i.RetryPct, i.RetryOver, i.MaxRetries > 0)
 		</td>
 		<td class="px-3 py-2 whitespace-nowrap">
-			<span class="text-slate-200">{ formatTokens(i.Tokens) }</span>
-			<span class="text-slate-600">/ { capTokens(i.TokenCap) }</span>
+			<span class="text-fg">{ formatTokens(i.Tokens) }</span>
+			<span class="text-faint">/ { capTokens(i.TokenCap) }</span>
 			@budgetPct(i.TokenPct, i.TokenOver, i.TokenCap > 0)
 		</td>
 		<td class="px-3 py-2 whitespace-nowrap">
-			<span class="text-slate-200">{ formatUSD(i.USD) }</span>
-			<span class="text-slate-600">/ { capUSD(i.USDCap) }</span>
+			<span class="text-fg">{ formatUSD(i.USD) }</span>
+			<span class="text-faint">/ { capUSD(i.USDCap) }</span>
 			@budgetPct(i.USDPct, i.USDOver, i.USDCap > 0)
 		</td>
 		<td class="px-3 py-2 whitespace-nowrap">
-			<span class="text-slate-200">{ formatDuration(i.Wall) }</span>
-			<span class="text-slate-600">/ { capDur(i.WallCap) }</span>
+			<span class="text-fg">{ formatDuration(i.Wall) }</span>
+			<span class="text-faint">/ { capDur(i.WallCap) }</span>
 			@budgetPct(i.WallPct, i.WallOver, i.WallCap > 0)
 		</td>
 	</tr>
@@ -162,11 +162,11 @@ templ issueBudgetRow(i query.IssueBudgetRow) {
 templ budgetPct(pct int, over bool, capped bool) {
 	if capped {
 		if over {
-			<span class="ml-1 rounded bg-rose-500/20 px-1.5 py-0.5 text-xs text-rose-300">{ strconv.Itoa(pct) }%</span>
+			<span class="ml-1 rounded bg-st-blocked-bg px-1.5 py-0.5 text-xs text-st-blocked">{ strconv.Itoa(pct) }%</span>
 		} else if pct >= 80 {
-			<span class="ml-1 rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-300">{ strconv.Itoa(pct) }%</span>
+			<span class="ml-1 rounded bg-st-warn-bg px-1.5 py-0.5 text-xs text-st-warn">{ strconv.Itoa(pct) }%</span>
 		} else {
-			<span class="ml-1 rounded bg-emerald-500/15 px-1.5 py-0.5 text-xs text-emerald-300">{ strconv.Itoa(pct) }%</span>
+			<span class="ml-1 rounded bg-st-ok-bg px-1.5 py-0.5 text-xs text-st-ok">{ strconv.Itoa(pct) }%</span>
 		}
 	}
 }
@@ -178,7 +178,7 @@ templ BudgetsMessage(msg string) {
 	@Layout("Harness — Budgets", "budgets") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Budgets</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }

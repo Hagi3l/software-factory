@@ -19,7 +19,7 @@ templ ActivityPage(entries []live.Entry) {
 		<div class="space-y-4" x-data="{ filter: 'all' }">
 			<div class="flex items-baseline justify-between">
 				<h1 class="text-xl font-semibold tracking-tight">Activity</h1>
-				<span class="text-sm text-slate-500">live</span>
+				<span class="text-sm text-muted">live</span>
 			</div>
 			<div class="flex gap-1 text-xs">
 				@activityFilterButton("all", "All")
@@ -46,9 +46,9 @@ templ ActivityPage(entries []live.Entry) {
 templ activityFilterButton(value, label string) {
 	<button
 		type="button"
-		class="rounded px-2 py-1 text-slate-400 hover:bg-slate-800 hover:text-slate-100"
+		class="rounded px-2 py-1 text-muted hover:bg-canvas hover:text-fg"
 		x-on:click={ "filter = '" + value + "'" }
-		x-bind:class={ "filter === '" + value + "' ? 'bg-slate-700 text-white' : ''" }
+		x-bind:class={ "filter === '" + value + "' ? 'bg-st-idle-bg text-fg' : ''" }
 	>{ label }</button>
 }
 
@@ -57,7 +57,7 @@ templ activityFilterButton(value, label string) {
 // the live refresh replaces only the rows, never the chrome.
 templ ActivityList(entries []live.Entry) {
 	if len(entries) == 0 {
-		<p class="text-sm text-slate-400">No activity yet.</p>
+		<p class="text-sm text-muted">No activity yet.</p>
 	} else {
 		<ul class="flex flex-col gap-1">
 			for _, e := range entries {
@@ -77,17 +77,17 @@ templ activityRow(e live.Entry) {
 		class={ "flex items-start gap-3 rounded-md border px-3 py-2", activityRowAccent(e.Source) }
 		x-show={ "filter === 'all' || filter === '" + e.Source + "'" }
 	>
-		<span class="shrink-0 font-mono text-xs tabular-nums text-slate-500">{ activityTime(e.At) }</span>
+		<span class="shrink-0 font-mono text-xs tabular-nums text-muted">{ activityTime(e.At) }</span>
 		@activityBadge(e.Kind)
 		if e.IssueID != "" {
 			// An agent row drills into the live invocation view scoped to this issue (T4.21,
 			// control-room.md "drill from … an activity-feed row"). The issue id rides on the
 			// event envelope (T4.20), so no beads read is needed to build the link.
-			<a href={ templ.URL("/invocation/" + e.IssueID) } class="shrink-0 font-mono text-xs text-sky-400 hover:text-sky-300 hover:underline">{ e.AgentID }</a>
+			<a href={ templ.URL("/invocation/" + e.IssueID) } class="shrink-0 font-mono text-xs text-st-progress hover:text-st-progress hover:underline">{ e.AgentID }</a>
 		} else {
-			<span class="shrink-0 font-mono text-xs text-slate-400">{ e.AgentID }</span>
+			<span class="shrink-0 font-mono text-xs text-muted">{ e.AgentID }</span>
 		}
-		<span class="whitespace-pre-wrap break-all text-sm text-slate-200">{ e.Detail }</span>
+		<span class="whitespace-pre-wrap break-all text-sm text-fg">{ e.Detail }</span>
 	</li>
 }
 
@@ -95,9 +95,9 @@ templ activityRow(e live.Entry) {
 // distinguishable from agent output even with the filter on "all".
 func activityRowAccent(source string) string {
 	if source == live.SourceSystem {
-		return "border-slate-700 bg-slate-800/40"
+		return "border-border-strong bg-canvas"
 	}
-	return "border-slate-800 bg-slate-900/40"
+	return "border-border bg-surface"
 }
 
 // activityBadge tints an event kind so the feed reads at a glance: agent channels
@@ -108,21 +108,21 @@ func activityRowAccent(source string) string {
 templ activityBadge(kind string) {
 	switch kind {
 		case "token":
-			<span class="shrink-0 rounded-full bg-indigo-500/20 px-2 py-0.5 text-xs text-indigo-300">{ kind }</span>
+			<span class="shrink-0 rounded-full bg-accent-soft px-2 py-0.5 text-xs text-accent">{ kind }</span>
 		case "reasoning":
-			<span class="shrink-0 rounded-full bg-violet-500/20 px-2 py-0.5 text-xs text-violet-300">{ kind }</span>
+			<span class="shrink-0 rounded-full bg-st-progress-bg px-2 py-0.5 text-xs text-st-progress">{ kind }</span>
 		case "tool":
-			<span class="shrink-0 rounded-full bg-emerald-500/20 px-2 py-0.5 text-xs text-emerald-300">{ kind }</span>
+			<span class="shrink-0 rounded-full bg-st-ok-bg px-2 py-0.5 text-xs text-st-ok">{ kind }</span>
 		case "progress":
-			<span class="shrink-0 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300">{ kind }</span>
+			<span class="shrink-0 rounded-full bg-st-warn-bg px-2 py-0.5 text-xs text-st-warn">{ kind }</span>
 		case "log", "info":
-			<span class="shrink-0 rounded-full bg-sky-500/20 px-2 py-0.5 text-xs text-sky-300">{ kind }</span>
+			<span class="shrink-0 rounded-full bg-st-progress-bg px-2 py-0.5 text-xs text-st-progress">{ kind }</span>
 		case "warn":
-			<span class="shrink-0 rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300">{ kind }</span>
+			<span class="shrink-0 rounded-full bg-st-warn-bg px-2 py-0.5 text-xs text-st-warn">{ kind }</span>
 		case "error":
 			<span class="shrink-0 rounded-full bg-red-500/20 px-2 py-0.5 text-xs text-red-300">{ kind }</span>
 		default:
-			<span class="shrink-0 rounded-full bg-slate-700/40 px-2 py-0.5 text-xs text-slate-300">{ kind }</span>
+			<span class="shrink-0 rounded-full bg-st-idle-bg px-2 py-0.5 text-xs text-fg">{ kind }</span>
 	}
 }
 
@@ -133,7 +133,7 @@ templ ActivityMessage(msg string) {
 	@Layout("Harness — Activity", "activity") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Activity</h1>
-			<p class="mt-2 text-slate-400">{ msg }</p>
+			<p class="mt-2 text-muted">{ msg }</p>
 		</div>
 	}
 }
