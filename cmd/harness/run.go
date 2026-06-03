@@ -230,6 +230,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	if opts.serveAddr != "" {
 		hub := live.NewHub()
 		activity := live.NewActivity(200)
+		mergeQueue := live.NewMergeQueue(100)
 		// Tee the factory's own structured log into the feed's "system" stream, so the
 		// activity view shows what the orchestrator/runner/gate are doing — not only
 		// per-agent token output. This is sound only here, in the co-located run, where the
@@ -257,6 +258,15 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			return nil, dlqErr
 		}
 		releases = append(releases, dlqPumpStop)
+		// The merge-state pump (T4.25) shares the same hub: it tails harness.merge.*.state so the
+		// merge-queue view sees each integrate candidate's step (queued → rebasing → re-gating →
+		// landed, or terminal conflicted / regate-failed) — the rebase-and-re-gate interval beads
+		// does not record — and records the latest step per candidate into the mergeQueue buffer.
+		mergePumpStop, mergeErr := live.StartMergeStatePump(nc, hub, mergeQueue)
+		if mergeErr != nil {
+			return nil, mergeErr
+		}
+		releases = append(releases, mergePumpStop)
 		reader := query.NewReader(
 			beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)),
 			store,
@@ -297,6 +307,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			Logger:     log,
 			Events:     hub,
 			Activity:   activity,
+			MergeQueue: mergeQueue,
 			Reader:     reader,
 			StageOrder: pipelineRoles(cfg),
 			BudgetCaps: budgetCaps(cfg),

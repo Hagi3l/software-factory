@@ -210,6 +210,85 @@ func (r *Reader) DeadLetters(ctx context.Context) ([]DeadLetter, error) {
 	return dls, nil
 }
 
+// MergeRow is one candidate in the serialized merge train, for the merge-queue view (T4.25):
+// the live merge step (from the typed merge-state event) joined to the issue's title/role/spec
+// (from beads), so the row reads as more than a bare id. State is one of the core.MergeState*
+// steps (queued/rebasing/re-gating/landed/conflicted/regate-failed); Terminal marks a row that
+// has left the train (landed or failed) and Failed marks the two interesting terminal outcomes
+// — conflicted / regate-failed — which correlate to the dead-letter or fix issue the same
+// transition routes. Commit is the landed main tip (set only on landed) so the row can link
+// onward to Provenance.
+type MergeRow struct {
+	ID       string
+	Title    string
+	Role     string
+	Spec     string
+	State    string
+	Commit   string
+	Terminal bool
+	Failed   bool
+}
+
+// MergeQueue projects the live merge-train snapshot (the merge-state buffer the pump feeds —
+// plan T4.25) into render-ready rows, enriching each candidate with its beads title/role/spec
+// via a single ListAll. The event order is preserved (the buffer already holds the train's
+// arrival order), so the view reads top-to-bottom as the queue is processed. A candidate whose
+// issue is no longer in beads (raced past, or evicted) still renders from the event alone — the
+// merge step is the point of this view, the title is enrichment. The merge step itself is never
+// reconstructed from beads (beads holds no per-step state); it comes only from the events, which
+// is why the buffer, not a beads read, is the source of membership and step.
+func (r *Reader) MergeQueue(ctx context.Context, events []core.MergeStateEvent) ([]MergeRow, error) {
+	if len(events) == 0 {
+		return nil, nil
+	}
+	issues, err := r.issues.ListAll(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("query: merge-queue: %w", err)
+	}
+	byID := make(map[string]core.Issue, len(issues))
+	for _, i := range issues {
+		byID[i.ID] = i
+	}
+	rows := make([]MergeRow, 0, len(events))
+	for _, ev := range events {
+		row := MergeRow{
+			ID:       ev.ID,
+			Role:     ev.Role,
+			State:    ev.State,
+			Commit:   ev.Commit,
+			Terminal: isTerminalMergeState(ev.State),
+			Failed:   isFailedMergeState(ev.State),
+		}
+		if iss, ok := byID[ev.ID]; ok {
+			row.Title = iss.Title
+			row.Spec = iss.Spec
+			if row.Role == "" {
+				row.Role = iss.Role
+			}
+		}
+		rows = append(rows, row)
+	}
+	return rows, nil
+}
+
+// isTerminalMergeState reports whether a merge step has left the train — landed (merged to
+// main) or one of the two failure outcomes — so the view can tint it apart from an in-flight row.
+func isTerminalMergeState(state string) bool {
+	switch state {
+	case core.MergeStateLanded, core.MergeStateConflicted, core.MergeStateRegateFailed:
+		return true
+	default:
+		return false
+	}
+}
+
+// isFailedMergeState reports whether a merge step is one of the two interesting terminal
+// failures — a rebase conflict or a re-gate failure — which the spec calls out as the rows that
+// correlate to a dead-letter or fix issue (specs/control-room.md "The merge-queue view").
+func isFailedMergeState(state string) bool {
+	return state == core.MergeStateConflicted || state == core.MergeStateRegateFailed
+}
+
 // ArtifactLink is a named, content-addressed evidence pointer for the issue-detail view —
 // a hash plus a human label plus whether it is still resolvable in the store.
 type ArtifactLink struct {

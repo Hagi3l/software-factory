@@ -429,3 +429,171 @@ func TestDLQPumpStopUnsubscribes(t *testing.T) {
 	default:
 	}
 }
+
+// TestMergeStatePump proves the orchestrator->hub bridge end to end over a real in-process
+// server: a marshaled core.MergeStateEvent published on a candidate's merge-state subject arrives
+// at a hub subscriber as a "merge-state" SSE event carrying the original payload intact, and is
+// also recorded into the merge-queue buffer the view reads. Like the other pumps it is exercised
+// against the actual transport.
+func TestMergeStatePump(t *testing.T) {
+	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewEmbeddedServer: %v", err)
+	}
+	t.Cleanup(srv.Shutdown)
+	nc, err := srv.Connect()
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(nc.Close)
+
+	hub := NewHub()
+	mq := NewMergeQueue(10)
+	stop, err := StartMergeStatePump(nc, hub, mq)
+	if err != nil {
+		t.Fatalf("StartMergeStatePump: %v", err)
+	}
+	defer stop()
+
+	ch, cancel := hub.Subscribe()
+	defer cancel()
+
+	want := core.MergeStateEvent{
+		ID:    "harness-7",
+		State: core.MergeStateReGating,
+		Role:  "integrate",
+		Epic:  "harness-1",
+		TS:    time.Unix(1700000000, 0).UTC(),
+	}
+	payload, err := json.Marshal(want)
+	if err != nil {
+		t.Fatalf("marshal MergeStateEvent: %v", err)
+	}
+	if err := nc.Publish(messaging.MergeStateSubject(want.ID), payload); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := nc.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	ev := recv(t, ch)
+	if ev.Name != "merge-state" {
+		t.Fatalf("event name = %q, want merge-state", ev.Name)
+	}
+	var got core.MergeStateEvent
+	if err := json.Unmarshal([]byte(ev.Data), &got); err != nil {
+		t.Fatalf("unmarshal MergeStateEvent: %v (data=%q)", err, ev.Data)
+	}
+	if got != want {
+		t.Fatalf("event = %+v, want %+v", got, want)
+	}
+
+	// The pump also fed the buffer the view reads.
+	snap := mq.Snapshot()
+	if len(snap) != 1 || snap[0].ID != want.ID || snap[0].State != want.State {
+		t.Fatalf("buffer snapshot = %+v, want one harness-7 re-gating row", snap)
+	}
+}
+
+// TestMergeStatePumpDropsMalformed confirms the pump's best-effort guards: a body that is not a
+// well-formed event (and an event missing its id) is dropped rather than broadcast or buffered.
+// The proof is ordering, exactly as for the issue-state pump: receiving the trailing valid event
+// first proves the bad ones never reached the hub.
+func TestMergeStatePumpDropsMalformed(t *testing.T) {
+	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewEmbeddedServer: %v", err)
+	}
+	t.Cleanup(srv.Shutdown)
+	nc, err := srv.Connect()
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(nc.Close)
+
+	hub := NewHub()
+	mq := NewMergeQueue(10)
+	stop, err := StartMergeStatePump(nc, hub, mq)
+	if err != nil {
+		t.Fatalf("StartMergeStatePump: %v", err)
+	}
+	defer stop()
+
+	ch, cancel := hub.Subscribe()
+	defer cancel()
+
+	// Not JSON at all — dropped.
+	if err := nc.Publish(messaging.MergeStateSubject("harness-1"), []byte("not json")); err != nil {
+		t.Fatalf("Publish malformed: %v", err)
+	}
+	// Well-formed JSON but no id — dropped (the id is the one field the view cannot act without).
+	if err := nc.Publish(messaging.MergeStateSubject("harness-2"), []byte(`{"state":"queued"}`)); err != nil {
+		t.Fatalf("Publish id-less: %v", err)
+	}
+	// The valid trailer — the only event that should reach the hub.
+	valid, err := json.Marshal(core.MergeStateEvent{ID: "harness-3", State: core.MergeStateLanded})
+	if err != nil {
+		t.Fatalf("marshal valid: %v", err)
+	}
+	if err := nc.Publish(messaging.MergeStateSubject("harness-3"), valid); err != nil {
+		t.Fatalf("Publish valid: %v", err)
+	}
+	if err := nc.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	ev := recv(t, ch)
+	var got core.MergeStateEvent
+	if err := json.Unmarshal([]byte(ev.Data), &got); err != nil {
+		t.Fatalf("unmarshal: %v (data=%q)", err, ev.Data)
+	}
+	if got.ID != "harness-3" {
+		t.Fatalf("first event id = %q, want harness-3 (malformed events should have been dropped)", got.ID)
+	}
+	// Only the valid event reached the buffer too.
+	if snap := mq.Snapshot(); len(snap) != 1 || snap[0].ID != "harness-3" {
+		t.Fatalf("buffer = %+v, want only harness-3", snap)
+	}
+}
+
+// TestMergeStatePumpStopUnsubscribes confirms the stop func detaches the subscription: after
+// stop, a published step no longer reaches the hub.
+func TestMergeStatePumpStopUnsubscribes(t *testing.T) {
+	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{StoreDir: t.TempDir()})
+	if err != nil {
+		t.Fatalf("NewEmbeddedServer: %v", err)
+	}
+	t.Cleanup(srv.Shutdown)
+	nc, err := srv.Connect()
+	if err != nil {
+		t.Fatalf("Connect: %v", err)
+	}
+	t.Cleanup(nc.Close)
+
+	hub := NewHub()
+	stop, err := StartMergeStatePump(nc, hub, NewMergeQueue(10))
+	if err != nil {
+		t.Fatalf("StartMergeStatePump: %v", err)
+	}
+	stop()
+
+	ch, cancel := hub.Subscribe()
+	defer cancel()
+
+	payload, err := json.Marshal(core.MergeStateEvent{ID: "harness-9", State: core.MergeStateQueued})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if err := nc.Publish(messaging.MergeStateSubject("harness-9"), payload); err != nil {
+		t.Fatalf("Publish: %v", err)
+	}
+	if err := nc.Flush(); err != nil {
+		t.Fatalf("Flush: %v", err)
+	}
+
+	select {
+	case ev := <-ch:
+		t.Fatalf("received event after stop: %+v", ev)
+	default:
+	}
+}

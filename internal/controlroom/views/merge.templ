@@ -1,0 +1,140 @@
+package views
+
+import (
+	"strconv"
+
+	"github.com/Loxstomper/harness/internal/controlroom/query"
+)
+
+// MergeQueuePage is the merge-queue view (specs/control-room.md "The merge-queue view", T4.25):
+// the serialized merge train made observable. Integration is otherwise invisible — between "a
+// branch's gate passed" and "a commit appeared on main" lies the rebase-and-re-gate interval
+// where independently-green branches actually break — so this view renders each integrate
+// candidate's current step from the typed merge-state events: queued → rebasing → re-gating →
+// landed, or the terminal conflicted / regate-failed. The interesting rows are the terminal
+// failures, which link to the issue (its dead-letter / fix routing); a landed row links onward to
+// Provenance. It is read-only: the human never reorders the queue — integration is the
+// orchestrator's function, not a lever.
+//
+// Like the board it is live over the T4.3 SSE substrate, but it triggers off the dedicated
+// merge-state event (T4.24/T4.25) rather than issue-state, since the steps it shows (rebasing /
+// re-gating) are merge-queue transitions, not beads-status transitions — with a slow periodic
+// backstop so a settled train still converges. The initial list renders inline so the page shows
+// data before htmx attaches.
+templ MergeQueuePage(rows []query.MergeRow) {
+	@Layout("Harness — Merge queue", "merge") {
+		<div class="space-y-4">
+			<div class="flex items-baseline justify-between">
+				<h1 class="text-xl font-semibold tracking-tight">Merge queue</h1>
+				<span class="text-sm text-slate-500">{ strconv.Itoa(len(rows)) } in the train</span>
+			</div>
+			<p class="max-w-3xl text-sm text-slate-500">
+				The serialized merge train in flight — each integrate candidate's step as it rebases onto main and re-gates. Read-only: the orchestrator is the single writer and integration is its function, not a lever.
+			</p>
+			<div hx-ext="sse" sse-connect="/events">
+				<div
+					id="merge"
+					hx-get="/merge/items"
+					hx-trigger="sse:merge-state throttle:2s, every 15s"
+					hx-swap="innerHTML"
+				>
+					@MergeQueueList(rows)
+				</div>
+			</div>
+		</div>
+	}
+}
+
+// MergeQueueList renders just the train rows. It is both embedded in MergeQueuePage for the
+// initial paint and returned bare from GET /merge/items as the htmx swap target, so the live
+// refresh replaces only the list, never the chrome. An empty train is the ordinary idle state —
+// nothing is integrating — so it reads as calm, not an error.
+templ MergeQueueList(rows []query.MergeRow) {
+	if len(rows) == 0 {
+		<div class="rounded-lg border border-slate-800 bg-slate-900/40 p-6 text-center">
+			<p class="text-sm text-slate-300">The merge train is empty.</p>
+			<p class="mt-1 text-xs text-slate-500">Candidates appear here as they enter the serialized merge queue.</p>
+		</div>
+	} else {
+		<ul class="flex flex-col gap-2">
+			for _, row := range rows {
+				@mergeRow(row)
+			}
+		</ul>
+	}
+}
+
+// mergeRow is one candidate in the train. The state badge is tinted by where the candidate is
+// in the merge lifecycle (sky/amber for in-flight steps, emerald for landed, rose for a terminal
+// failure) so the eye lands on the failures, the interesting rows. The title links to the issue
+// detail (T4.7) for the forensic trail — and for a failed candidate that is where the dead-letter
+// reason and the Resolve action live; a landed candidate shows its main commit and a "Provenance
+// →" link onward to the merged-commit trace.
+templ mergeRow(row query.MergeRow) {
+	<li class={ mergeRowClass(row) }>
+		<div class="flex items-center justify-between gap-2">
+			<span class="font-mono text-xs text-slate-500">{ row.ID }</span>
+			@mergeStateBadge(row.State)
+		</div>
+		<p class="mt-1 text-sm">
+			<a href={ templ.URL("/issue/" + row.ID) } class="text-slate-100 hover:text-white hover:underline">{ orDash(row.Title) }</a>
+		</p>
+		<div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-400">
+			if row.Role != "" {
+				<span>{ row.Role }</span>
+			}
+			if row.Spec != "" {
+				<span class="font-mono text-slate-500">{ row.Spec }</span>
+			}
+			if row.State == "landed" && row.Commit != "" {
+				<span class="font-mono text-emerald-300">{ shortHash(row.Commit) }</span>
+				<a href="/provenance" class="text-sky-400 hover:text-sky-300 hover:underline">Provenance →</a>
+			}
+			if row.Failed {
+				<a href={ templ.URL("/issue/" + row.ID) } class="text-rose-300 hover:text-rose-200 hover:underline">Dead-letter / fix →</a>
+			}
+		</div>
+	</li>
+}
+
+// MergeQueueMessage renders the merge-queue chrome with a single notice instead of the train —
+// used when the control room is not attached to a running factory (a standalone `harness serve`
+// has no live merge-state feed) or when the underlying read fails.
+templ MergeQueueMessage(msg string) {
+	@Layout("Harness — Merge queue", "merge") {
+		<div class="mx-auto max-w-3xl">
+			<h1 class="text-xl font-semibold tracking-tight">Merge queue</h1>
+			<p class="mt-2 text-slate-400">{ msg }</p>
+		</div>
+	}
+}
+
+// mergeStateBadge tints a candidate's current merge step. The class literals live in this templ
+// (not a Go helper) because the Tailwind @source scanner only reads *.templ + generated
+// *_templ.go, so a class assembled in plain Go would silently never compile into app.css.
+templ mergeStateBadge(state string) {
+	switch state {
+		case "landed":
+			<span class="rounded bg-emerald-500/20 px-1.5 py-0.5 text-xs text-emerald-300">{ state }</span>
+		case "conflicted", "regate-failed":
+			<span class="rounded bg-rose-500/20 px-1.5 py-0.5 text-xs text-rose-300">{ state }</span>
+		case "rebasing", "re-gating":
+			<span class="rounded bg-amber-500/20 px-1.5 py-0.5 text-xs text-amber-300">{ state }</span>
+		default:
+			<span class="rounded bg-sky-500/20 px-1.5 py-0.5 text-xs text-sky-300">{ state }</span>
+	}
+}
+
+// mergeRowClass tints the whole row: a failed candidate stands out rose (it needs attention,
+// like a dead-letter row), a landed one settles to a faint emerald, and an in-flight one stays
+// neutral. It is a class string chosen from literals defined here, so the scanner sees them.
+func mergeRowClass(row query.MergeRow) string {
+	switch {
+	case row.Failed:
+		return "rounded-md border border-rose-900/50 bg-rose-950/20 p-3"
+	case row.State == "landed":
+		return "rounded-md border border-emerald-900/40 bg-emerald-950/10 p-3"
+	default:
+		return "rounded-md border border-slate-800 bg-slate-900/40 p-3"
+	}
+}

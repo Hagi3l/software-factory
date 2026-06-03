@@ -47,10 +47,15 @@ const sseHeartbeat = 25 * time.Second
 // pipeline role order the board lays its columns out in (left-to-right flow); empty is
 // tolerated — the board falls back to alphabetical column order.
 type Options struct {
-	Version    string
-	Logger     *slog.Logger
-	Events     *live.Hub
-	Activity   *live.Activity
+	Version  string
+	Logger   *slog.Logger
+	Events   *live.Hub
+	Activity *live.Activity
+	// MergeQueue is the live merge-train buffer behind the merge-queue view (T4.25): the
+	// merge-state pump feeds it each integrate candidate's current step. It is nil for a
+	// standalone `harness serve` (no live merge-state feed), in which case /merge renders the
+	// not-attached notice and its fragment 503s — mirroring how a nil Activity degrades the feed.
+	MergeQueue *live.MergeQueue
 	Reader     *query.Reader
 	StageOrder []string
 	// BudgetCaps are the configured termination-guarantee ceilings the Budgets view (T4.10)
@@ -90,6 +95,7 @@ type Server struct {
 	version    string
 	events     *live.Hub
 	activity   *live.Activity
+	mergeQueue *live.MergeQueue
 	reader     *query.Reader
 	stageOrder []string
 	budgetCaps query.BudgetCaps
@@ -113,6 +119,7 @@ func New(opts Options) *Server {
 		version:    opts.Version,
 		events:     opts.Events,
 		activity:   opts.Activity,
+		mergeQueue: opts.MergeQueue,
 		reader:     opts.Reader,
 		stageOrder: opts.StageOrder,
 		budgetCaps: opts.BudgetCaps,
@@ -157,15 +164,17 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /dag/svg", s.handleDAGSVG)         // the htmx/SSE live SVG fragment
 	s.mux.HandleFunc("GET /activity", s.handleActivity)      // T4.5 — live agent feed
 	s.mux.HandleFunc("GET /activity/items", s.handleActivityItems)
-	s.mux.HandleFunc("GET /issue/{id}", s.handleIssue)         // T4.7 — issue / invocation detail
+	s.mux.HandleFunc("GET /issue/{id}", s.handleIssue)                      // T4.7 — issue / invocation detail
 	s.mux.HandleFunc("GET /invocation/{id}", s.handleInvocation)            // T4.21 — live scoped feed + budget meter
 	s.mux.HandleFunc("GET /invocation/{id}/items", s.handleInvocationItems) // the htmx/SSE live body fragment
-	s.mux.HandleFunc("GET /replay/{id}", s.handleReplay)       // T4.11 — reconstructed decision trail
-	s.mux.HandleFunc("GET /verification/{id}", s.handleVerification) // T4.23 — the trust argument (gate verdict + souls)
-	s.mux.HandleFunc("GET /artifact/{hash}", s.handleArtifact) // raw evidence content (untrusted)
-	s.mux.HandleFunc("GET /dlq", s.handleDLQ)                  // T4.8 — dead-letter queue (action surface)
-	s.mux.HandleFunc("GET /dlq/items", s.handleDLQItems)       // the htmx/SSE live fragment
-	s.mux.HandleFunc("GET /budgets", s.handleBudgets)          // T4.10 — burn vs caps, per epic/issue
+	s.mux.HandleFunc("GET /replay/{id}", s.handleReplay)                    // T4.11 — reconstructed decision trail
+	s.mux.HandleFunc("GET /verification/{id}", s.handleVerification)        // T4.23 — the trust argument (gate verdict + souls)
+	s.mux.HandleFunc("GET /artifact/{hash}", s.handleArtifact)              // raw evidence content (untrusted)
+	s.mux.HandleFunc("GET /merge", s.handleMerge)                           // T4.25 — serialized merge-train view
+	s.mux.HandleFunc("GET /merge/items", s.handleMergeItems)                // the htmx/SSE live fragment
+	s.mux.HandleFunc("GET /dlq", s.handleDLQ)                               // T4.8 — dead-letter queue (action surface)
+	s.mux.HandleFunc("GET /dlq/items", s.handleDLQItems)                    // the htmx/SSE live fragment
+	s.mux.HandleFunc("GET /budgets", s.handleBudgets)                       // T4.10 — burn vs caps, per epic/issue
 	s.mux.HandleFunc("GET /budgets/items", s.handleBudgetsItems)
 	s.mux.HandleFunc("GET /provenance", s.handleProvenance) // T4.10 — merged-commit provenance chain
 	s.mux.HandleFunc("GET /provenance/items", s.handleProvenanceItems)
@@ -178,10 +187,10 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /create/stream/{session}", s.handleCreateStream)
 	s.mux.HandleFunc("GET /create/messages/{session}", s.handleCreateMessages)
 	s.mux.HandleFunc("POST /create/message", s.handleCreateMessage)
-	s.mux.HandleFunc("GET /create/ledger/{session}", s.handleCreateLedger)       // T4.13 — alignment-ledger panel fragment
-	s.mux.HandleFunc("POST /create/ledger/select", s.handleCreateLedgerSelect)   // T4.13 — chip click funnels through the planner
-	s.mux.HandleFunc("GET /create/draft/{session}", s.handleCreateDraft)         // T4.14 — drafted spec + seed issues panel fragment
-	s.mux.HandleFunc("POST /create/approve", s.handleCreateApprove)              // T4.14 — the consent gate: commit the approved draft
+	s.mux.HandleFunc("GET /create/ledger/{session}", s.handleCreateLedger)     // T4.13 — alignment-ledger panel fragment
+	s.mux.HandleFunc("POST /create/ledger/select", s.handleCreateLedgerSelect) // T4.13 — chip click funnels through the planner
+	s.mux.HandleFunc("GET /create/draft/{session}", s.handleCreateDraft)       // T4.14 — drafted spec + seed issues panel fragment
+	s.mux.HandleFunc("POST /create/approve", s.handleCreateApprove)            // T4.14 — the consent gate: commit the approved draft
 
 	// Resolve mode (T4.15) — the wizard pre-loaded from a dead-lettered issue. The page mints a
 	// session grounded in the escalation + spec slice + transcript; the conversation, ledger, and
@@ -197,7 +206,7 @@ func (s *Server) routes() {
 	// and the routes a single source of truth. `implemented` excludes the views wired
 	// above so the mux is not asked to register a duplicate pattern.
 	implemented := map[string]bool{
-		"board": true, "dag": true, "activity": true, "dlq": true,
+		"board": true, "dag": true, "activity": true, "merge": true, "dlq": true,
 		"budgets": true, "provenance": true, "create": true,
 	}
 	for _, item := range views.NavItems {
@@ -548,6 +557,45 @@ func (s *Server) handleDLQItems(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, views.DeadLetterList(items))
+}
+
+// handleMerge renders the full merge-queue page (T4.25): the serialized merge train in flight,
+// each integrate candidate's current step. It reads the live merge-state buffer (the step, which
+// beads does not hold) and enriches it with the issue title/role/spec via the read model — so it
+// needs both. With neither wired (standalone `harness serve` has no merge-state feed) it shows a
+// "not attached" notice rather than an empty train; a read error renders the same chrome with the
+// reason so the page never 500s blank, mirroring the board/DLQ. The live list refreshes itself
+// from handleMergeItems on the merge-state nudge.
+func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
+	if s.mergeQueue == nil || s.reader == nil {
+		s.render(w, r, views.MergeQueueMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to watch the merge train."))
+		return
+	}
+	rows, err := s.reader.MergeQueue(r.Context(), s.mergeQueue.Snapshot())
+	if err != nil {
+		s.log.Error("controlroom: merge-queue read failed", "err", err)
+		s.render(w, r, views.MergeQueueMessage("Could not load the merge queue: "+err.Error()))
+		return
+	}
+	s.render(w, r, views.MergeQueuePage(rows))
+}
+
+// handleMergeItems returns just the train-list fragment — the htmx swap target the merge-queue
+// page re-fetches on the merge-state SSE nudge (throttled) and a periodic backstop. It is a data
+// endpoint, so with no live buffer or read model it answers 503, and a read error is a 500: htmx
+// leaves the last good train in place rather than swapping in an error.
+func (s *Server) handleMergeItems(w http.ResponseWriter, r *http.Request) {
+	if s.mergeQueue == nil || s.reader == nil {
+		http.Error(w, "merge queue unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
+		return
+	}
+	rows, err := s.reader.MergeQueue(r.Context(), s.mergeQueue.Snapshot())
+	if err != nil {
+		s.log.Error("controlroom: merge-queue fragment read failed", "err", err)
+		http.Error(w, "could not refresh the merge queue\n", http.StatusInternalServerError)
+		return
+	}
+	s.render(w, r, views.MergeQueueList(rows))
 }
 
 // provenanceLimit bounds the merged-commit history the provenance view loads — enough to

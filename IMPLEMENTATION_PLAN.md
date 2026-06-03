@@ -32,8 +32,9 @@ good autonomous implementation) — a later validation concern, never an enginee
   0–1 are done (see Status); Phases 2–3 are done bar a few open items kept in full below.
   The verbose per-task findings were pruned once complete — that history lives in git,
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
-- **Open tasks (`- [ ]`) keep their full detail** — Phases 4–5, plus the handful left in
-  Phases 2–3 (T2.11/T2.12).
+- **Open tasks (`- [ ]`) keep their full detail** — Phase 5, plus the handful of optional items
+  left in Phase 2 (T2.11/T2.12). **Phase 4 is now complete** (T4.25 closed the last open task — the
+  merge-queue surface), so the only remaining engineering is Phase 5 (production isolation & distribution).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -919,14 +920,47 @@ components/artifact-store.md, glossary.md).
   + all `gitMerger.Merge` test call sites for the new param. `make check` green (lint 0, **749 pass / 2
   skip**). **Unblocks T4.25** (merge-state SSE pump + merge-queue view, the last of the T4.19–T4.25 batch).
   (needs T3.9, T3.10, T3.11) ([integration.md](specs/integration.md), [messaging.md](specs/messaging.md), [components/orchestrator.md](specs/components/orchestrator.md))
-- [ ] **T4.25 Merge-state SSE pump + merge-queue view** — Non-TCB (controlroom). The
-  transport+consume half: `live.StartMergeStatePump` (sibling of `StartIssueStatePump`) tails
-  `harness.merge.*.state` and broadcasts a `merge-state` SSE event; `GET /merge` renders the
-  in-flight train — ordered `integrate` candidates with each one's current step, terminal failures
-  correlated to the [dead-letter](specs/control-room.md) / fix issue the same transition routes —
-  refetching on the `merge-state` nudge + periodic backstop. **Read-only** (the human never reorders
-  the queue; integration is the orchestrator's function, not a lever). Landed rows link onward to
-  Provenance. (needs T4.24) ([control-room.md](specs/control-room.md), [messaging.md](specs/messaging.md))
+- [x] **T4.25 Merge-state SSE pump + merge-queue view** — *done.* Non-TCB (controlroom). The
+  transport+consume half of the merge-queue surface, **the last of T4.19–T4.25 and the final open Phase
+  4 task**. **(1) Pump:** `live.StartMergeStatePump(nc, h, *MergeQueue)` (sibling of `StartIssueStatePump`)
+  tails `messaging.MergeStateWildcard` (`harness.merge.*.state`), drops a subject that doesn't parse to an
+  id or a body that isn't a well-formed `core.MergeStateEvent` (best-effort guards matching the other
+  pumps), **records the latest step per candidate into a buffer** and broadcasts the original bytes as a
+  `merge-state` SSE event — the same buffer+broadcast shape `StartAgentEventPump` uses for the activity
+  feed. **(2) Live buffer (`internal/controlroom/live/mergequeue.go`):** `MergeQueue` — bounded,
+  mutex-guarded, **latest-wins per issue id keeping the candidate in its train (insertion) position** (so
+  queued→rebasing→re-gating→landed updates in place, never reorders), oldest-evicted when over `max` (the
+  earliest-queued/landed rows age out first). It is the read model for the live step because **beads holds
+  no per-step state** — the rebase-and-re-gate interval only exists in the typed events (this is *why* a
+  buffer, not a beads read, sources the step); in-memory + best-effort like `live.Activity` (a restart
+  losing the live shape is harmless — git refs + beads stay authoritative). **(3) Query enrichment:**
+  `query.Reader.MergeQueue(ctx, []core.MergeStateEvent) ([]MergeRow, error)` joins each buffered event to
+  its beads issue (title/role/spec) via one `ListAll`, preserving event (train) order; a candidate raced
+  past/out of beads still renders from the event alone (the step is the point, the title is enrichment).
+  `MergeRow` carries `Terminal` (landed|conflicted|regate-failed) + `Failed` (the two interesting terminal
+  failures that correlate to a dead-letter/fix issue). **(4) View (`views/merge.templ`):**
+  `MergeQueuePage`/`MergeQueueList`/`mergeRow`/`MergeQueueMessage` mirror the DLQ two-handler page+fragment
+  pattern; the list sits in `<div hx-ext="sse" sse-connect="/events">` refetching `GET /merge/items` on
+  **`sse:merge-state throttle:2s, every 15s`** (the dedicated event, not issue-state — board cadence). The
+  state badge is tinted per merge step (sky/amber in-flight, emerald landed, rose failed) and the whole row
+  too, so the eye lands on failures; a landed row shows its short-hashed commit + a "Provenance →" link, a
+  failed row a "Dead-letter / fix →" link to `/issue/{id}`. Tint class literals live in `.templ` (incl. the
+  `mergeRowClass` Go helper, following the `chipClass`/`ledgerStatusClass` precedent) so the Tailwind
+  `@source` scanner compiles them. **(5) Server:** `Options.MergeQueue *live.MergeQueue` + `mergeQueue`
+  field; `handleMerge`/`handleMergeItems` registered ahead of the placeholder loop, `"merge"` added to the
+  `implemented` set; **both endpoints need the buffer *and* the reader** (the step + the title), so nil
+  either ⇒ not-attached notice (200) / 503 fragment, mirroring every Reader-backed view. New `merge` nav
+  item (`views.NavItems`, between activity and dlq). **(6) Wiring:** `buildRunComponents` builds
+  `live.NewMergeQueue(100)`, starts the pump behind `--serve-addr` sharing the hub (unsubscribe joins the
+  teardown stack), and threads the buffer into `controlroom.Options`. Ran `make generate` (templ +
+  Tailwind). Docs: `docs/control-room.md` views table + liveness note (Merge Queue on `merge-state`).
+  Tests: buffer (latest-wins-keeps-position, evict-oldest + re-add, id-less drop, snapshot-is-copy,
+  concurrent `Record` under `-race`); pump (round-trip into hub+buffer, malformed-drop-by-ordering,
+  stop-unsubscribe over real embedded NATS); query (enrich+order+terminal/failed flags, missing-issue
+  renders, empty, ListAll-error); server (full train render incl. steps/commit/provenance+issue links/SSE
+  wiring, bare fragment, empty-is-calm, not-attached notice/503). `make check` green (lint 0, **764 pass /
+  2 skip**); `-race` clean on the live package. **Completes Phase 4.** (needs T4.24)
+  ([control-room.md](specs/control-room.md), [messaging.md](specs/messaging.md))
 
 ## Phase 5 — Production isolation & distribution
 

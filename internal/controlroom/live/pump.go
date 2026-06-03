@@ -135,3 +135,41 @@ func StartDLQPump(nc *nats.Conn, h *Hub) (func(), error) {
 	}
 	return func() { _ = sub.Unsubscribe() }, nil
 }
+
+// StartMergeStatePump bridges the single-writer orchestrator's merge-queue step transitions to
+// the browser: it subscribes once to harness.merge.*.state (the wildcard) and broadcasts each
+// step into the hub as a "merge-state" SSE event, which the merge-queue view (plan T4.25)
+// consumes as an hx-trigger nudge to refetch the train. When mq is non-nil it also records the
+// step into the merge-queue buffer (the view reads that buffer to render the rows; the hub
+// broadcast is the live nudge that triggers the re-fetch) — the same buffer+broadcast shape the
+// agent-event pump uses for the activity feed. It returns a stop func that unsubscribes (wire it
+// into the run loop's teardown).
+//
+// It mirrors StartIssueStatePump's guards: the payload is already a complete
+// core.MergeStateEvent (the id is in the body, not only the subject), so the pump relays the
+// original bytes after validating them. Everything is best-effort, matching the fire-and-forget
+// core-NATS merge-state transitions it tails (specs/messaging.md, specs/integration.md "The
+// queue announces itself"): a subject that does not parse to an issue id, or a body that is not
+// a well-formed event, is dropped (a guard, not a path — the orchestrator only publishes a
+// marshaled event on a concrete subject), and a stalled browser is dropped by the hub. Losing a
+// step is harmless: the git refs + beads stay authoritative and the view keeps a periodic
+// backstop that re-reads the buffer.
+func StartMergeStatePump(nc *nats.Conn, h *Hub, mq *MergeQueue) (func(), error) {
+	sub, err := nc.Subscribe(messaging.MergeStateWildcard, func(msg *nats.Msg) {
+		if messaging.IssueIDFromMergeSubject(msg.Subject) == "" {
+			return
+		}
+		var ev core.MergeStateEvent
+		if err := json.Unmarshal(msg.Data, &ev); err != nil || ev.ID == "" {
+			return
+		}
+		if mq != nil {
+			mq.Record(ev)
+		}
+		h.Broadcast(Event{Name: "merge-state", Data: string(msg.Data)})
+	})
+	if err != nil {
+		return nil, err
+	}
+	return func() { _ = sub.Unsubscribe() }, nil
+}
