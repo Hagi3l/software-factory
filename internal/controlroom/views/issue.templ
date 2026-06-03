@@ -36,12 +36,20 @@ templ IssueDetailPage(d query.IssueDetail) {
 						<p class="text-sm text-rose-300">{ d.Issue.DeadLetterReason }</p>
 					}
 				}
-				if d.Provenance.Transcript != "" {
-					// The decision trail is reachable only once the transcript hash is retained on
-					// the merge trailer (T4.7b), so the replay drill-through surfaces only for merged
-					// work — exactly where Replay can reconstruct it.
-					<a href={ templ.URL("/replay/" + d.Issue.ID) } class="inline-block text-sm text-sky-400 hover:text-sky-300 hover:underline">▸ Replay decision trail</a>
-				}
+				<div class="flex flex-wrap items-center gap-4">
+					if d.Provenance.Transcript != "" {
+						// The decision trail is reachable only once the transcript hash is retained on
+						// the merge trailer (T4.7b), so the replay drill-through surfaces only for merged
+						// work — exactly where Replay can reconstruct it.
+						<a href={ templ.URL("/replay/" + d.Issue.ID) } class="inline-block text-sm text-sky-400 hover:text-sky-300 hover:underline">▸ Replay decision trail</a>
+					}
+					if d.Issue.GateVerdict != "" {
+						// The trust argument — producer≠verifier souls, red→green, mutation, scanners —
+						// reachable for *any* gated candidate (the verdict is stamped on every disposition,
+						// T4.22), so this surfaces for rejected work too, not only merged.
+						<a href={ templ.URL("/verification/" + d.Issue.ID) } class="inline-block text-sm text-sky-400 hover:text-sky-300 hover:underline">▸ Verification</a>
+					}
+				</div>
 			</div>
 			<section class="space-y-2">
 				<h2 class="text-sm font-medium text-slate-400">Brief</h2>

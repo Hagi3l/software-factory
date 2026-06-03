@@ -32,7 +32,7 @@ Top navigation:
 | **Board** | `/board` | Kanban over all issues, grouped into columns by pipeline stage. Cards show id/title/status/spec/retry generation and two **client-ticked timers** — time in the current state (`working`/`queued`/`blocked`) and total time since creation; click through to the **live invocation view** (which hands off to the forensic detail/Replay on termination). It refreshes on the orchestrator's typed [issue-state event](../specs/messaging.md), so a card moves *exactly* when the work advances, and the move is **animated** via the browser's View Transitions API (instant where unsupported). |
 | **DAG** | `/dag` | The issue dependency graph — what blocks what — rendered server-side to SVG (pure Go, no graphviz, no client graph lib). Hover highlights a node and its neighbours; click drills into the issue. |
 | **Activity** | `/activity` | "What the agents *and the factory* are doing right now" — a live feed with two sources, filterable by an **All / Agents / System** toggle. *Agent* rows are brokered from inside the sandbox: streamed model output coalesced into readable rows — `token` (the answer) and `reasoning` (the model's thinking, shown even when a turn is all tool calls) — plus one `tool` row per tool call (e.g. `write_file index.html`). *System* rows are the factory's own log teed in (`info`/`warn`/`error` from the orchestrator/runner/gate — dispatch, sandbox provision, gating, merge, dead-letter), tinted distinctly. So an agent that works purely through tool calls — and the machine driving it — both stay visible. |
-| **Dead-letter** | `/dlq` | The escalations awaiting a human — the primary *action* surface. Each row shows the triage signals (cumulative spend, retry generation, spec) and the dead-letter reason, and links to the detail page and Resolve mode. An empty queue reads as reassurance, not an error. |
+| **Dead-letter** | `/dlq` | The escalations awaiting a human — the primary *action* surface. Each row shows the triage signals (cumulative spend, retry generation, spec) and the dead-letter reason, and links to the detail page, the verification view, and Resolve mode. An empty queue reads as reassurance, not an error. |
 | **Budgets** | `/budgets` | Per-epic and per-issue burn vs. cap (tokens, USD, wall-clock), tinted by how close to the cap, breaches first. Read off the exact numbers the orchestrator enforces on. |
 | **Provenance** | `/provenance` | Recent merged commits, each tracing commit → issue → soul → model → prompt → evidence, with the prompt and each passing gate check linking to its raw artifact. |
 | **Create Task** | `/create` | The wizard — author a new spec and seed work. See below. |
@@ -55,6 +55,15 @@ Drill-through pages (not in the nav):
   by turn: exactly what the model saw (inbound messages), what it said, its tool calls,
   stop reason, and per-turn token usage. Reconstructed from the broker-captured
   transcript.
+- **Verification** (`/verification/{id}`) — the factory's *trust argument* for one issue,
+  made legible: the producer≠verifier soul split (the `author-tests` and `implement`
+  souls side by side, with the `qa` gate marked as running independently in the clean
+  [verification sandbox](../specs/glossary.md#verification-sandbox) — no verifier soul,
+  and that is the point), the red→green proof per check, the mutation score vs threshold,
+  the scanners, and the test↔spec traceability map. Reconstructed from the persisted
+  [`gate-verdict` record](../specs/components/artifact-store.md) (recorded for *every* gate
+  run), so it renders for **rejected** candidates too — exactly what a dead-letter triager
+  needs. A forensic snapshot (no live refresh). Drilled into from issue detail and the DLQ.
 - **Raw artifact** (`/artifact/{hash}`) — streams artifact content as `text/plain` with
   `nosniff` (artifact bytes are untrusted agent output and must never be interpreted as
   HTML/script).
@@ -127,7 +136,7 @@ still converges. The **Board, DAG, and DLQ** refetch on the orchestrator's typed
 update precisely when work moves between stages (and the board animates the move). The
 **Activity** feed instead refreshes on the finer-grained agent-event stream, since its
 job is to show per-turn agent progress as it happens. Budgets, Provenance, and the
-wizard refresh on the same substrate. Forensic pages (issue detail, Replay) are
+wizard refresh on the same substrate. Forensic pages (issue detail, Replay, Verification) are
 deliberately *not* live — they're
 snapshots, not feeds. Authentication is not yet implemented (an open item); session ids
 in the wizard are crypto-random but there's no login gate.

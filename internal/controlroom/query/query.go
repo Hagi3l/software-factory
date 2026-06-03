@@ -722,6 +722,11 @@ type GateVerdictView struct {
 	Hash          string // the gate-verdict artifact's content address, when one is stamped
 	Available     bool   // the record resolved + parsed from the store
 	Verdict       core.GateVerdict
+	// Trace is the test↔spec traceability map cited as evidence — the only window into how
+	// the author read the prose (specs/verification.md). It is read from the issue's own
+	// threaded stamp (issue.TraceMap), the same principled source as the souls; an empty hash
+	// renders as "not recorded" rather than a dead link.
+	Trace ArtifactLink
 }
 
 // GateVerdict reconstructs one issue's verification verdict: the assembled gate-verdict record
@@ -747,6 +752,7 @@ func (r *Reader) GateVerdict(ctx context.Context, id string) (GateVerdictView, e
 		TestsSoul:     issue.TestsSoul,
 		ImplementSoul: issue.ImplementSoul,
 		Hash:          issue.GateVerdict,
+		Trace:         r.link(ctx, "Traceability map", core.ArtifactKindTraceabilityMap, issue.TraceMap),
 	}
 
 	// Merged is a presentation flag (has this landed?); the souls come from the issue stamps

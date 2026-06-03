@@ -60,20 +60,26 @@ func (d detailProv) DiffByIssue(_ context.Context, id string) (string, bool, err
 func (detailProv) Recent(context.Context, int) ([]query.MergedCommit, error) { return nil, nil }
 
 const (
-	promptHash     = "sha256:promptaaaaaaaaaa"
-	transcriptHash = "sha256:transcriptccccc"
-	gateHash       = "sha256:gatebbbbbbbbbbbb"
-	traceHash      = "sha256:tracedddddddddd"
+	promptHash      = "sha256:promptaaaaaaaaaa"
+	transcriptHash  = "sha256:transcriptccccc"
+	gateHash        = "sha256:gatebbbbbbbbbbbb"
+	traceHash       = "sha256:tracedddddddddd" // harness-2's threaded map — deliberately NOT in the store (degrades to unavailable)
+	mergedTraceHash = "sha256:tracemerged1111" // harness-1's map — present in the store (a resolvable link)
+	verdictHash     = "sha256:verdicteeeeeeee"
 )
 
 func detailServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	issues := detailIssues{m: map[string]core.Issue{
-		// harness-1 is merged: provenance is present, evidence comes from the trailer.
+		// harness-1 is merged: provenance is present, evidence comes from the trailer. It also
+		// carries the producing-soul stamps + a gate-verdict hash (T4.22) so the verification
+		// view (T4.23) and the issue→verification drill-link render off the same fixture.
 		"harness-1": {
 			ID: "harness-1", Title: "Merged work", Status: "closed", Role: "implementor",
 			Spec: "specs/x.md", SpecHash: "sha256:speccccccccc", Base: "harness-0-candidate",
 			Attempt: 2, SpentTokens: 1234, SpentUSD: 0.0456, Body: "Implement the widget.",
+			TestsSoul: "go-test-author", ImplementSoul: "go-implementor",
+			TraceMap: mergedTraceHash, GateVerdict: verdictHash,
 		},
 		// harness-2 is in flight: no provenance, evidence falls back to the threaded map.
 		"harness-2": {
@@ -82,9 +88,18 @@ func detailServer(t *testing.T) *httptest.Server {
 		},
 	}}
 	arts := detailArts{content: map[string]string{
-		promptHash:     "you are an implementor; build the widget",
-		transcriptHash: `[{"request":{},"response":{}}]`,
-		gateHash:       "PASS: tests-pass\nok\tpkg\t0.1s",
+		promptHash:      "you are an implementor; build the widget",
+		transcriptHash:  `[{"request":{},"response":{}}]`,
+		gateHash:        "PASS: tests-pass\nok\tpkg\t0.1s",
+		mergedTraceHash: "TestWidget -> specs/x.md#widgets: the widget renders",
+		// A passing gate-verdict record (T4.22): a red→green proof (base fails, candidate
+		// passes), a mutation metric over threshold, and a scanner — the verification view's
+		// three rendered kinds in one record.
+		verdictHash: `{"passed":true,"checks":[` +
+			`{"name":"tests-red-then-green","kind":"red-green","passed":true,"exit_code":0,"evidence":"` + gateHash + `","base":{"exit_code":1}},` +
+			`{"name":"mutation","kind":"metric","passed":true,"metric":{"score":0.86,"parsed":true,"op":">=","threshold":0.8}},` +
+			`{"name":"govulncheck","kind":"command","passed":true,"exit_code":0}` +
+			`]}`,
 	}}
 	prov := detailProv{
 		byIssue: map[string]core.Provenance{
@@ -117,16 +132,16 @@ func TestIssueDetailMergedRendersEvidence(t *testing.T) {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		"Merged work",             // title
-		"harness-1",               // id
-		">merged<",                // the merged badge
-		"implementor",             // role
-		"specs/x.md",              // spec path (the brief)
-		"Implement the widget.",   // the body brief
-		"1234 tokens",             // budget spend
-		"$0.0456",                 // budget spend in dollars
-		"go-implementor",          // provenance soul
-		"claude-test",             // provenance model
+		"Merged work",                 // title
+		"harness-1",                   // id
+		">merged<",                    // the merged badge
+		"implementor",                 // role
+		"specs/x.md",                  // spec path (the brief)
+		"Implement the widget.",       // the body brief
+		"1234 tokens",                 // budget spend
+		"$0.0456",                     // budget spend in dollars
+		"go-implementor",              // provenance soul
+		"claude-test",                 // provenance model
 		"tests-pass",                  // a verified gate check label
 		"/artifact/" + promptHash,     // the prompt link points at the content endpoint
 		"/artifact/" + transcriptHash, // the transcript (replayable decision trail) link too

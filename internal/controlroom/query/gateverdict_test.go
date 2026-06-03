@@ -86,6 +86,38 @@ func TestGateVerdictMergedReadsIssueSouls(t *testing.T) {
 	}
 }
 
+// TestGateVerdictTraceLink proves the verification view's traceability link is read from the
+// issue's own threaded TraceMap stamp (the same principled source as the souls) and resolved
+// against the store: a present hash is Available, the label is set, and an absent map yields an
+// empty, unavailable link rather than a dead href.
+func TestGateVerdictTraceLink(t *testing.T) {
+	rec := core.GateVerdict{Passed: true}
+	withTrace := core.Issue{ID: "h-t", Role: "implementor", Status: "closed",
+		GateVerdict: "sha256:v", TraceMap: "sha256:trace"}
+	r := NewReader(
+		&fakeIssues{all: []core.Issue{withTrace}},
+		&fakeArts{present: map[string]string{"sha256:v": mustJSON(t, rec), "sha256:trace": "TestX -> spec#h"}},
+		&fakeProv{},
+	)
+	v, err := r.GateVerdict(context.Background(), "h-t")
+	if err != nil {
+		t.Fatalf("GateVerdict: %v", err)
+	}
+	if v.Trace.Hash != "sha256:trace" || !v.Trace.Available || v.Trace.Label != "Traceability map" {
+		t.Errorf("Trace = %+v, want hash sha256:trace, available, labeled", v.Trace)
+	}
+
+	noTrace := core.Issue{ID: "h-n", Role: "implementor", Status: "blocked", GateVerdict: ""}
+	r2 := NewReader(&fakeIssues{all: []core.Issue{noTrace}}, &fakeArts{}, &fakeProv{})
+	v2, err := r2.GateVerdict(context.Background(), "h-n")
+	if err != nil {
+		t.Fatalf("GateVerdict: %v", err)
+	}
+	if v2.Trace.Hash != "" || v2.Trace.Available {
+		t.Errorf("Trace = %+v, want empty/unavailable for an issue with no map", v2.Trace)
+	}
+}
+
 // TestGateVerdictNoRecord proves an issue with no stamped verdict (its candidate has not been
 // gated) yields Available=false with no hash — the view renders a notice rather than failing.
 func TestGateVerdictNoRecord(t *testing.T) {

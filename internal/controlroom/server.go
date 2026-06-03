@@ -161,6 +161,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /invocation/{id}", s.handleInvocation)            // T4.21 — live scoped feed + budget meter
 	s.mux.HandleFunc("GET /invocation/{id}/items", s.handleInvocationItems) // the htmx/SSE live body fragment
 	s.mux.HandleFunc("GET /replay/{id}", s.handleReplay)       // T4.11 — reconstructed decision trail
+	s.mux.HandleFunc("GET /verification/{id}", s.handleVerification) // T4.23 — the trust argument (gate verdict + souls)
 	s.mux.HandleFunc("GET /artifact/{hash}", s.handleArtifact) // raw evidence content (untrusted)
 	s.mux.HandleFunc("GET /dlq", s.handleDLQ)                  // T4.8 — dead-letter queue (action surface)
 	s.mux.HandleFunc("GET /dlq/items", s.handleDLQItems)       // the htmx/SSE live fragment
@@ -430,6 +431,29 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.render(w, r, views.ReplayPage(rep))
+}
+
+// handleVerification renders the verification view (T4.23) — the factory's trust argument
+// for one issue, drilled into from the issue-detail page and the dead-letter queue. It
+// mirrors handleReplay exactly: with no read model wired (standalone `harness serve`) it
+// shows the not-attached notice, and an unknown id or a read fault renders the same chrome
+// with the reason rather than a blank 500. A *known* issue whose candidate has not been gated
+// (no verdict record) is not an error — GateVerdict returns Available=false and the page
+// renders an in-chrome notice while still showing the producer≠verifier soul split. Like the
+// detail page it is a forensic snapshot, so it is plainly rendered with no live refresh.
+func (s *Server) handleVerification(w http.ResponseWriter, r *http.Request) {
+	if s.reader == nil {
+		s.render(w, r, views.VerificationNotAttached("Not attached to a running factory — start the control room with `harness run --serve-addr` to inspect verification verdicts."))
+		return
+	}
+	id := r.PathValue("id")
+	v, err := s.reader.GateVerdict(r.Context(), id)
+	if err != nil {
+		s.log.Error("controlroom: verification read failed", "id", id, "err", err)
+		s.render(w, r, views.VerificationNotAttached("Could not load verification for "+id+": "+err.Error()))
+		return
+	}
+	s.render(w, r, views.VerificationPage(v))
 }
 
 // handleArtifact streams an evidence artifact's raw content by hash — the click-through

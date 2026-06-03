@@ -852,14 +852,40 @@ components/artifact-store.md, glossary.md).
   spend isn't persisted to beads; a client-side wall ticker (like the board's T4.18 timer) could smooth it.
   (needs T4.20) ([control-room.md](specs/control-room.md))
 - [x] **T4.22 Gate-verdict record + producing-soul attribution** — *done.* **TCB-touching** (gate harvest + orchestrator advance + provenance trailer), human-reviewed. Two coupled pieces. **(1) Gate-verdict record:** new **`core.GateVerdict`** (`internal/core/gateverdict.go`) — the assembled, serializable per-check result of one gate run (`Passed` + `[]GateCheckOutcome{Name,Kind,Passed,ExitCode,Evidence,Base?,Metric?}`, with `GateRunOutcome`/`GateMetricOutcome` for the red→green base exit and the metric score/op/threshold) and the stable kind spelling (`GateCheckCommand/RedGreen/TestsRed/Metric`, the serialized mirror of the gate's unexported `checkKind`). New artifact kind **`core.ArtifactKindGateVerdict = "gate-verdict"`**. The gate **harvests it after `persistEvidence`** (new `Runner.persistVerdict` + `verdictRecord` mapper) so each check cites its own gate-evidence hash — the record is the *index* over the per-check output, not a copy (artifact-store.md). New **`gate.Report.Verdict core.ArtifactRef`** carries the hash back; best-effort like evidence (a nil/erroring store leaves it empty, never changes the verdict). Recorded for **every** run, pass or fail. **(2) Producing-soul attribution:** **`core.Issue` gains `TestsSoul`/`ImplementSoul`** (threaded forward like `TraceMap`) **+ `GateVerdict`** (the issue's gate-run record hash, stamped post-hoc per gate run, not threaded). beads: new metadata keys `tests_soul`/`implement_soul`/`gate_verdict`, `create()` threads the souls, `toCore` decodes all three, new `StampSouls`/`StampGateVerdict` (non-empty-only / empty-is-no-op, idempotent sets). The orchestrator **stamps the issue's own producing soul in `handleResult`** (new `stampProducingSoul`, keyed off the stage's reserved proof via `stageProves` — `tests-red`⇒TestsSoul, `tests-red-then-green`⇒ImplementSoul) before the disposition switch, **mutating the in-memory issue** so the just-stamped soul threads forward, and threads `issue.TestsSoul`/`issue.ImplementSoul` onto every produced/route/conflict child. It **stamps `report.Verdict.Hash`** onto the issue after the gate runs (StatusDone), for accept *and* route, so a rejected candidate's verdict stays reachable. **Trailer:** `core.Provenance` gains `TestsSoul`, rendered as `Tests-Soul:` on line 1 (`Soul: … | Model: … | Tests-Soul: …`) and parsed back (`ParseCommitMessage`/`parseTrailerLine`); `provenanceFor` sets `prov.TestsSoul = issue.TestsSoul` (Soul stays `selectSoul`). All stamps non-fatal (audit, not a correctness gate). **Read side:** new **`query.Reader.GateVerdict(id) → GateVerdictView`** (Issue, Merged, TestsSoul, ImplementSoul, Hash, Available, `core.GateVerdict`) — resolves the verdict record from `issue.GateVerdict` (reachable for merged *and* rejected work) and reads the souls **from the issue stamps, not the trailer** (on the shipped pipeline the integrate-producing stage is `qa`, so the trailer's `Soul` is the qa/security soul, not the implementor — the threaded `issue.ImplementSoul` is the principled source; the trailer's `Tests-Soul` is itself derived from it). Best-effort: a missing/unfetchable/corrupt record → `Available=false` with the hash retained for the raw-bytes link, never a blank page (mirrors Replay). **Specs were pre-updated** (security.md/integration.md trailer, verification.md "The gate verdict is recorded", artifact-store.md/glossary.md gate-verdict kind) — no spec edit needed; no CLI/config/route change ⇒ no `docs/` change. Tests: core trailer round-trip with `TestsSoul` + first-line layout; gate harvests command/red→green/metric/failed verdicts + best-effort empty-on-store-outage; beads souls threading + `StampSouls`/`StampGateVerdict` round-trips; orchestrator stamps TestsSoul (author-tests) + threads it, stamps ImplementSoul (red→green implement) + cites both on the trailer, gate-verdict stamped on accepted *and* rejected issues; query `GateVerdict` (rejected reads issue stamps, merged reads issue stamps not trailer, no-record/unresolvable degrade, issue-error fatal). `make check` green (lint 0, **738 pass / 2 skip**). **Unblocks T4.23** (verification view renders `GateVerdictView`). (needs T2.8, T2.9) ([verification.md](specs/verification.md), [components/artifact-store.md](specs/components/artifact-store.md), [security.md](specs/security.md))
-- [ ] **T4.23 Verification view** — Non-TCB (controlroom). `GET /verification/{id}` — forensic,
-  rendering T4.22's `gate-verdict` record + souls: the **producer≠verifier** soul split (author-tests
-  vs implement, the `qa` gate marked as the orchestrator-controlled clean
-  [verification sandbox](specs/glossary.md#verification-sandbox), no verifier soul), **red→green**
-  proof, **mutation score** vs threshold, **scanners**, and the
-  [test↔spec traceability map](specs/verification.md) (already persisted). Rendered for **rejected**
-  candidates too (what a DLQ triager needs). Raw gate output links via `/artifact/{hash}` (nosniff,
-  security.md Control 7). Drill-in from issue detail + DLQ. (needs T4.22)
+- [x] **T4.23 Verification view** — *done.* Non-TCB (controlroom). `GET /verification/{id}` — the factory's
+  **trust argument, made legible**: a forensic snapshot rendering T4.22's `gate-verdict` record + the
+  producing-soul stamps. **Mirrors the Replay/issue-detail forensic pattern exactly** (plain server-render,
+  no SSE, best-effort never-blank-500). **View:** `views/verification.templ` (`VerificationPage` +
+  `soulCard`/`verdictCheck`/`verdictBadge`/`checkPassBadge`/`verdictNotice`/`VerificationNotAttached`) +
+  `views/verification.go` text helpers (`checkKindLabel`, `metricSummary`/`fmtScore` — the kind→label and
+  mutation-score-vs-threshold formatting). Renders: **(1) producer≠verifier** — the `author-tests` and
+  `implement` souls side by side (from the issue's own threaded `TestsSoul`/`ImplementSoul` stamps, so it
+  shows for a *rejected* candidate with no merge trailer), with the `qa` gate explicitly marked as having
+  **no verifier soul** (it runs in the orchestrator-controlled clean verification sandbox — that structural
+  separation *is* the verification); **(2)** the **test↔spec traceability map** evidence link; **(3)** when a
+  verdict record resolved, the per-check list — **red→green** proof (base exit must fail → candidate exit must
+  pass, tinted red✓/green✓), **mutation metric** vs threshold, **scanners** — each check linking its own
+  captured-output evidence via `/artifact/{hash}` (nosniff, untrusted bytes). Degrades to a notice (no
+  verdict stamped, or unfetchable record with the raw-bytes link still offered) while still showing the soul
+  split — exactly what a DLQ triager needs. **Query:** added a `Trace ArtifactLink` field to the existing
+  `query.GateVerdictView` (T4.22), populated in `GateVerdict` from the issue's threaded `TraceMap` via the
+  shared `r.link` (resolves store availability) — the only query-layer change. **Server:** `handleVerification`
+  (registered ahead of the placeholder loop, after `/replay/{id}`) mirrors `handleReplay`: nil-reader →
+  not-attached notice (200), unknown-id/read-fault → in-chrome notice. **No nav item** (a drill-through like
+  `/issue` and `/replay`, not a top-level view). **Drill-in:** the issue-detail header gains a "▸ Verification"
+  link (shown whenever `issue.GateVerdict` is set — gated work, rejected *or* merged) alongside the Replay link,
+  and each DLQ row gains a "Verification" triage link (always offered — the page degrades gracefully when an
+  issue dead-lettered before its candidate was gated). Ran `make generate` (templ + Tailwind; emerald/rose/amber
+  tints compiled). **Specs pre-updated** in the T4.19–T4.25 spec pass (control-room.md "The verification view",
+  verification.md "The gate verdict is recorded") — no spec edit; `docs/control-room.md` updated (new
+  drill-through entry + forensic-pages list + DLQ row). Tests: query `Trace` link (present→available+labeled,
+  absent→empty/unavailable); server — full render (verdict badge, soul split, red→green base/candidate exits,
+  mutation `0.86 >= 0.80`, scanner, traceability + raw-verdict + check-evidence links, drill-back), no-verdict
+  notice (in-flight issue still shows soul split, no check list), not-attached, unknown-id, and the
+  issue→verification + DLQ→verification drill links. Enriched the shared `detailServer` fixture (harness-1
+  carries soul stamps + a passing gate-verdict record + an available trace map; harness-2's map stays
+  unavailable). `make check` green (lint 0, **744 pass / 2 skip**). **Unblocks T4.24/T4.25** (merge-queue
+  surface, the last of the T4.19–T4.25 batch). (needs T4.22)
   ([control-room.md](specs/control-room.md), [verification.md](specs/verification.md))
 - [ ] **T4.24 Merge-state transition events** — **TCB-touching** (merge path / orchestrator),
   human-reviewed. The emit half of the merge-queue surface: the orchestrator publishes a typed
