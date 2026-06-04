@@ -74,7 +74,10 @@ golangci-lint v2 — `brew install golangci-lint`; if it's in `$(go env GOPATH)/
 but not on PATH, run `export PATH="$PATH:$(go env GOPATH)/bin"` first), then unit
 tests. The `misspell` linter is `locale: US`, so use **US spellings in Go
 comments/identifiers** (`behavior`/`neighbor`/`fulfill`/`modeled`); specs may stay
-British. `make test-*`
+British. Code **formatting is not gated** — `.golangci.yml` enables no formatters and
+`make check` runs `golangci-lint run` (not `fmt`), so `gofmt -l` flags committed files
+that pass the gate cleanly; trust `golangci-lint run`, don't reformat unrelated files.
+`make test-*`
 targets emit `go test -json` to `test/results/`
 (gitignored) — each target produces a `.json` (ndjson) + `.stderr`. If `jq` can't
 parse the JSON, check the `.stderr` file for compile errors. Triage with `jq`
