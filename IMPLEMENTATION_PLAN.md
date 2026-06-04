@@ -1311,13 +1311,44 @@ is a build step, not a navigable language).
   `make check` green (lint 0, **859 pass / 2 skip**). No CLI/config/route/view change ⇒ no `docs/` change.
   **Unblocks T6.2/T6.3** (the tools are now thin wrappers over `Sessions` + the text-floor fallback policy).
   ([components/agent.md](specs/components/agent.md), [components/sandbox.md](specs/components/sandbox.md))
-- [ ] **T6.2 Comprehension (read) semantic tools** — `find_symbol` (project-wide symbol by name, no
-  path), `references`, `definition`, `implementation`, `hover`, `diagnostics`, over the T6.1 session,
-  each a canonical tool the [model layer](specs/models.md) exposes. **Intent-first; reads degrade
-  silently** — when no server resolves for a file, fall back to grep with results **labeled
-  "unverified"** so the model knows precision dropped (worst case = today's `search`). Keep
-  `search`/`read_file`/`list_dir` as the text floor with honest tool descriptions steering toward the
-  semantic tools. Ship the `go` entry for the demo. (needs T6.1) ([components/agent.md](specs/components/agent.md))
+- [x] **T6.2 Comprehension (read) semantic tools** — *done.* Six canonical, intent-first read tools —
+  `find_symbol`, `references`, `definition`, `implementation`, `hover`, `diagnostics` — as **thin wrappers
+  over the T6.1 `Sessions`** (`internal/agent/semantic.go`, new `SemanticReadTools(*Sessions) []Tool`),
+  appended to the per-invocation tool set in `run.go` between `WorkspaceTools` and `LifecycleTools` (they
+  capture the same `*Sessions` that already backs the edit tools, so semantic queries see edits via the T6.1
+  didChange coupling). Non-TCB (agent tool surface), human-reviewed. **Reads degrade *silently* to the text
+  floor (the structural property, not a persona nudge):** every tool calls the semantic engine first; on
+  **any** error (no opener / no manifest / no language entry — i.e. `ErrNoSemanticSession` — *or* a server-side
+  failure) it falls back to a `grep -rnE` over the worktree, prefixing the output with an explicit
+  **`[unverified: no language server available; showing text matches]`** banner so the model never mistakes a
+  text match for a semantic result (worst case = today's `search`). `find_symbol` greps the whole symbol name
+  (`\b<name>\b`, `regexp.QuoteMeta`); the **position-anchored** tools (`references`/`definition`/`implementation`/
+  `hover`) read the file, extract the **identifier at the position** (`identifierAt`, rune-aware, treats a caret
+  one-past-the-token as inside it) and grep *that* — an honest best-effort when only a position is known; a
+  position not on an identifier returns a recoverable error rather than guessing. `diagnostics` has **no** grep
+  equivalent (type-checking isn't a text search), so its degrade is an `[unverified]` note steering the model to
+  `run` the build/tests — deliberately annotated `//nolint:nilerr` (a missing server is a degrade, not a fatal
+  fault). A grep that *cannot run at all* (sandbox broken) stays **fatal** (the runner redelivers), distinct
+  from "no matches". **Positions are 1-based line+column on the tool surface** (matching what `find_symbol` and
+  `search`/`grep -n` print, so a location from one tool feeds straight into the next); the layer translates to
+  the session's 0-based LSP positions and back (`line0`/`char0`, `+1` on render). `find_symbol` defaults
+  `language` to `"go"` (demo scope — ship the `go`/gopls entry only). **Formatting:** locations as
+  `path:line:column` (worktree-relative via `relForURI`, which inverts the session's `file://<root>/<rel>` URI),
+  symbols as `Kind Name — path:line:col (detail)` (`symbolKindName` maps the LSP SymbolKind 1..26 enum, unknown
+  ⇒ `Symbol`), diagnostics as `path:line:col: severity: message [source]` (`severityName`). **Text-floor
+  honesty:** `search`'s description now states it is a plain-text floor and points at `find_symbol`/`references`/
+  `definition` for code symbols (the spec's "honest descriptions steering toward the semantic tools"). The spec
+  contract (agent.md "Semantic tools (LSP-backed)") was pre-written and matched as-is; no CLI/config/route/view
+  change ⇒ no spec/docs edit. Tests (`semantic_test.go`): tool-set + valid JSON schemas; **semantic success**
+  for each tool against the in-memory scripted LSP server (extended the shared `fakeLangServer` with
+  `workspace/symbol`/`references`/`hover` cases) asserting 0→1-based translation, relative paths, kind labels,
+  and *no* unverified banner; empty-result-is-not-an-error (`implementation`); arg validation (missing
+  name/path/line/character, 1-based floor); **silent degrade** (no-opener sandbox) for `find_symbol` (bounded
+  name grep) and `references` (identifier-at-position grep), non-identifier-position recoverable error,
+  diagnostics-points-at-`run`, and grep-exec-error-is-fatal; plus unit tables for `identifierAt`/`relForURI`/
+  `symbolKindName`. `make check` green (lint 0, **875 pass / 2 skip**). **Unblocks T6.3** (the write tools —
+  `rename`/`code_action` — apply a `WorkspaceEdit` and degrade *loudly*; they reuse `relForURI`/the position
+  decoding here). (needs T6.1) ([components/agent.md](specs/components/agent.md))
 - [ ] **T6.3 Transformation (write) semantic tools** — `rename` (project-wide) and `code_action` (the
   server's own fixes — organize imports, quickfix, extract), each producing a `WorkspaceEdit` the tool
   **applies to the worktree** and re-syncs into the T6.1 session. **Writes degrade loudly**: a `rename`

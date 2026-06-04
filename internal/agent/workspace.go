@@ -221,8 +221,10 @@ func listDirTool(sb sandbox.Sandbox) Tool {
 func searchTool(sb sandbox.Sandbox) Tool {
 	return funcTool{
 		def: model.ToolDef{
-			Name:        "search",
-			Description: "Search the worktree for a regular expression, returning matching lines with file and line number.",
+			Name: "search",
+			Description: "Search the worktree for a regular expression, returning matching lines with file and " +
+				"line number. This is a plain text search (the floor); for code symbols prefer find_symbol, " +
+				"references, or definition, which use the language server for precise, type-aware results.",
 			Params: json.RawMessage(`{
 				"type": "object",
 				"properties": {

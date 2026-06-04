@@ -377,6 +377,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	toolSource := func(inv agent.Invocation) ([]agent.Tool, func(), error) {
 		sessions := agent.NewSessions(inv.Sandbox, log)
 		tools := agent.WorkspaceTools(inv.Sandbox, sessions)
+		tools = append(tools, agent.SemanticReadTools(sessions)...)
 		tools = append(tools, agent.LifecycleTools(inv.Brief, inv.Broker)...)
 		return tools, sessions.Close, nil
 	}

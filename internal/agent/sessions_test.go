@@ -195,6 +195,19 @@ func fakeLangServer(in *bufio.Reader, out io.Writer, rec *recorder) {
 			write(map[string]any{"jsonrpc": "2.0", "id": *m.ID, "result": []map[string]any{
 				{"uri": "file:///work/a.go", "range": map[string]any{"start": map[string]int{"line": 7, "character": 0}, "end": map[string]int{"line": 7, "character": 3}}},
 			}})
+		case "textDocument/references":
+			write(map[string]any{"jsonrpc": "2.0", "id": *m.ID, "result": []map[string]any{
+				{"uri": "file:///work/a.go", "range": map[string]any{"start": map[string]int{"line": 2, "character": 5}, "end": map[string]int{"line": 2, "character": 8}}},
+				{"uri": "file:///work/b.go", "range": map[string]any{"start": map[string]int{"line": 9, "character": 1}, "end": map[string]int{"line": 9, "character": 4}}},
+			}})
+		case "textDocument/hover":
+			write(map[string]any{"jsonrpc": "2.0", "id": *m.ID, "result": map[string]any{
+				"contents": map[string]any{"kind": "markdown", "value": "func greet(name string) string"},
+			}})
+		case "workspace/symbol":
+			write(map[string]any{"jsonrpc": "2.0", "id": *m.ID, "result": []map[string]any{
+				{"name": "greet", "kind": 12, "location": map[string]any{"uri": "file:///work/a.go", "range": map[string]any{"start": map[string]int{"line": 2, "character": 5}, "end": map[string]int{"line": 2, "character": 10}}}},
+			}})
 		default:
 			if m.ID != nil {
 				write(map[string]any{"jsonrpc": "2.0", "id": *m.ID, "result": nil})
