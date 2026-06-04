@@ -29,14 +29,20 @@ import (
 // across the run. They are bound per invocation to the broker (submit pushes the
 // candidate through it) and the Brief (the issue id fixes the task-branch name and is the
 // default dependency for proposed children).
-func LifecycleTools(brief core.Brief, brk BrokerClient) []Tool {
-	lc := &lifecycle{brief: brief, brk: brk}
+//
+// transforms is the shared transformation ledger the semantic write tools (T6.3) record
+// into; the terminal tools fold it into the Result's evidence so the mechanism (semantic
+// vs text floor) of every rename/code_action travels with the candidate. It may be nil
+// (no semantic write tools wired), in which case the Result simply carries no Transforms.
+func LifecycleTools(brief core.Brief, brk BrokerClient, transforms *TransformLedger) []Tool {
+	lc := &lifecycle{brief: brief, brk: brk, transforms: transforms}
 	return []Tool{lc.submitTool(), lc.submitPlanTool(), lc.escalateTool(), lc.requestSubtaskTool(), lc.traceTestTool()}
 }
 
 type lifecycle struct {
-	brief core.Brief
-	brk   BrokerClient
+	brief      core.Brief
+	brk        BrokerClient
+	transforms *TransformLedger
 
 	mu        sync.Mutex
 	proposals []core.Proposal
@@ -110,10 +116,11 @@ func (lc *lifecycle) submitTool() Tool {
 			}
 
 			result := core.Result{
-				Status:   core.StatusDone,
-				Branch:   core.Branch{Ref: branch, Commits: []string{res.Commit}},
-				Proposes: lc.takeProposals(),
-				Trace:    lc.takeTrace(),
+				Status:     core.StatusDone,
+				Branch:     core.Branch{Ref: branch, Commits: []string{res.Commit}},
+				Proposes:   lc.takeProposals(),
+				Trace:      lc.takeTrace(),
+				Transforms: lc.transforms.take(),
 			}
 			return Outcome{Content: "submitted: " + res.Commit, Result: &result}, nil
 		},
@@ -154,9 +161,10 @@ func (lc *lifecycle) submitPlanTool() Tool {
 				return invalid("propose at least one child work item with request_subtask before submitting the plan"), nil
 			}
 			result := core.Result{
-				Status:   core.StatusDone,
-				Proposes: proposals,
-				Trace:    lc.takeTrace(),
+				Status:     core.StatusDone,
+				Proposes:   proposals,
+				Trace:      lc.takeTrace(),
+				Transforms: lc.transforms.take(),
 			}
 			return Outcome{Content: fmt.Sprintf("plan submitted: %d child issue(s)", len(proposals)), Result: &result}, nil
 		},
@@ -193,8 +201,9 @@ func (lc *lifecycle) escalateTool() Tool {
 				return invalid("reason is required to escalate"), nil
 			}
 			result := core.Result{
-				Status:   core.StatusNeedsSpecClarification,
-				Proposes: lc.takeProposals(),
+				Status:     core.StatusNeedsSpecClarification,
+				Proposes:   lc.takeProposals(),
+				Transforms: lc.transforms.take(),
 			}
 			return Outcome{Content: "escalated: " + a.Reason, Result: &result}, nil
 		},

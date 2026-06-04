@@ -40,6 +40,19 @@ type Result struct {
 	Evidence Evidence     // proof for the gate and the provenance trail
 	Proposes []Proposal   // proposed child issues (emergent breadth)
 
+	// Transforms is the transformation log the semantic write tools emit (Phase 6, T6.3):
+	// one entry per `rename`/`code_action` recording the MECHANISM it ran through —
+	// semantic (the language server's own WorkspaceEdit) or text (the degraded word-boundary
+	// floor). It exists because "writes degrade loudly": a rename that fell back to text can
+	// rewrite string literals, comments, and the right token in the wrong scope, so the
+	// provenance trail records which transformations are trustworthy and which warrant a
+	// closer look (a text-fallback rename more than a semantic one — see
+	// specs/components/agent.md "Mechanism is recorded"). Like the Trace map it is bulky
+	// structured evidence: the runner harvests it to the artifact store as an
+	// ArtifactKindTransformLog and clears the structured form, leaving only the ArtifactRef.
+	// Empty when the invocation ran no semantic write tools.
+	Transforms []TransformRecord
+
 	// Trace is the test↔spec traceability map an author-tests agent emits: one entry per
 	// acceptance test naming the spec heading and sentence it claims to encode. It does
 	// not prove faithfulness — the gate's red→green/mutation checks do that — but it makes
@@ -101,6 +114,33 @@ type TraceEntry struct {
 	Heading  string // the spec heading the test claims to encode, e.g. "Red→green proof"
 	Sentence string // the spec sentence the test claims to encode
 }
+
+// TransformRecord is one row of the transformation log a semantic write tool emits: the
+// tool that ran, what it acted on, the mechanism it ran through, and the blast radius. It
+// is the auditable record of "writes degrade loudly" — a transformation done via the
+// language server is precise; one that fell back to the text floor can corrupt comments
+// and string literals, so its mechanism + precision note travel with the provenance so a
+// reviewer (and the gate) can weigh it (see specs/components/agent.md "Semantic tools").
+type TransformRecord struct {
+	Tool      string `json:"tool"`            // the tool that ran, e.g. "rename" or "code_action"
+	Target    string `json:"target"`          // what it acted on, e.g. "greet → hello at a.go:3:6"
+	Mechanism string `json:"mechanism"`       // TransformMechanismSemantic or TransformMechanismText
+	Files     int    `json:"files,omitempty"` // number of files the transformation changed
+	Edits     int    `json:"edits,omitempty"` // number of individual edits applied
+	Note      string `json:"note,omitempty"`  // precision warning for a text fallback, or extra detail
+}
+
+// Transformation mechanisms: how a semantic write tool actually performed its change. The
+// distinction is the whole point of recording it — a text rename cannot distinguish a code
+// reference from a same-spelled word in a comment or string, so it is weighed more
+// suspiciously than a language-server rename.
+const (
+	// TransformMechanismSemantic means the language server produced the WorkspaceEdit (precise).
+	TransformMechanismSemantic = "semantic"
+	// TransformMechanismText means the language server was unavailable and the tool fell back
+	// to a word-boundary text replacement (imprecise — may touch comments/strings).
+	TransformMechanismText = "text"
+)
 
 // Branch identifies the candidate an agent produced. Agents never merge; they
 // produce a candidate branch and the trusted merge queue decides on it (see
@@ -169,6 +209,10 @@ const (
 	// Recorded for every run, pass or fail, so the verification view can render the trust
 	// argument forensically (see core.GateVerdict, specs/verification.md).
 	ArtifactKindGateVerdict = "gate-verdict"
+	// ArtifactKindTransformLog is the harvested transformation log (see Result.Transforms):
+	// the per-rename/code_action record of which mechanism (semantic vs text floor) ran, so
+	// a text-fallback transformation can be weighed more suspiciously than a semantic one.
+	ArtifactKindTransformLog = "transform-log"
 )
 
 // Proposal is a child issue an agent proposes (emergent breadth). The

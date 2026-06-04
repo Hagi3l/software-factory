@@ -42,12 +42,30 @@ func (s *lspSandbox) Exec(_ context.Context, cmd sandbox.Command) (sandbox.ExecR
 			}
 			return sandbox.ExecResult{Stdout: []byte(s.manifest)}, nil
 		}
-		if c, ok := s.files[p]; ok {
+		s.mu.Lock()
+		c, ok := s.files[p]
+		s.mu.Unlock()
+		if ok {
 			return sandbox.ExecResult{Stdout: []byte(c)}, nil
 		}
 		return sandbox.ExecResult{ExitCode: 1, Stderr: []byte("no such file")}, nil
 	}
+	// The write tools (T6.3) apply edits via writeFile: `sh -c '...cat > "$1"' sh <path>`
+	// with the content on stdin. Record the write so a test can read the result back.
+	if cmd.Path == "sh" && len(cmd.Args) == 4 && cmd.Args[0] == "-c" && strings.Contains(cmd.Args[1], "cat >") {
+		s.mu.Lock()
+		s.files[cmd.Args[3]] = string(cmd.Stdin)
+		s.mu.Unlock()
+		return sandbox.ExecResult{}, nil
+	}
 	return sandbox.ExecResult{ExitCode: 127}, nil
+}
+
+// file returns the (possibly edited) content of a worktree file the fake holds.
+func (s *lspSandbox) file(p string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.files[p]
 }
 
 func (s *lspSandbox) Teardown(context.Context) error { return nil }
@@ -207,6 +225,31 @@ func fakeLangServer(in *bufio.Reader, out io.Writer, rec *recorder) {
 		case "workspace/symbol":
 			write(map[string]any{"jsonrpc": "2.0", "id": *m.ID, "result": []map[string]any{
 				{"name": "greet", "kind": 12, "location": map[string]any{"uri": "file:///work/a.go", "range": map[string]any{"start": map[string]int{"line": 2, "character": 5}, "end": map[string]int{"line": 2, "character": 10}}}},
+			}})
+		case "textDocument/rename":
+			// Echo the requested new name into an edit replacing "greet" (0-based 2:5..2:10).
+			var p struct {
+				NewName string `json:"newName"`
+			}
+			_ = json.Unmarshal(m.Params, &p)
+			write(map[string]any{"jsonrpc": "2.0", "id": *m.ID, "result": map[string]any{
+				"changes": map[string]any{
+					"file:///work/a.go": []map[string]any{
+						{"range": map[string]any{"start": map[string]int{"line": 2, "character": 5}, "end": map[string]int{"line": 2, "character": 10}}, "newText": p.NewName},
+					},
+				},
+			}})
+		case "textDocument/codeAction":
+			// One action with an inline edit (organize imports) and one command-only action.
+			write(map[string]any{"jsonrpc": "2.0", "id": *m.ID, "result": []map[string]any{
+				{"title": "Organize Imports", "kind": "source.organizeImports", "edit": map[string]any{
+					"changes": map[string]any{
+						"file:///work/a.go": []map[string]any{
+							{"range": map[string]any{"start": map[string]int{"line": 0, "character": 0}, "end": map[string]int{"line": 0, "character": 0}}, "newText": "// organized\n"},
+						},
+					},
+				}},
+				{"title": "Run go vet", "kind": "source.fixAll", "command": map[string]any{"title": "vet", "command": "gopls.vet"}},
 			}})
 		default:
 			if m.ID != nil {

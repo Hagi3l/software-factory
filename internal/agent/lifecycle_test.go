@@ -43,7 +43,7 @@ func lcToolByName(t *testing.T, tools []Tool, name string) Tool {
 }
 
 func TestLifecycleToolSet(t *testing.T) {
-	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{})
+	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{}, nil)
 	got := map[string]bool{}
 	for _, tl := range tools {
 		got[tl.Def().Name] = true
@@ -62,7 +62,7 @@ func TestLifecycleToolSet(t *testing.T) {
 // the pushed commit.
 func TestSubmitPushesAndTerminates(t *testing.T) {
 	brk := &recordingBroker{pushCommit: "abc123"}
-	tools := LifecycleTools(lifecycleBrief(), brk)
+	tools := LifecycleTools(lifecycleBrief(), brk, nil)
 	out := invoke(t, lcToolByName(t, tools, "submit"), `{"summary":"did the thing"}`)
 
 	if out.Result == nil {
@@ -84,7 +84,7 @@ func TestSubmitPushesAndTerminates(t *testing.T) {
 // likely has not committed onto the candidate branch yet and can fix it and retry.
 func TestSubmitPushFailureIsRecoverable(t *testing.T) {
 	brk := &recordingBroker{pushErr: errors.New("no such ref")}
-	tools := LifecycleTools(lifecycleBrief(), brk)
+	tools := LifecycleTools(lifecycleBrief(), brk, nil)
 	out := invoke(t, lcToolByName(t, tools, "submit"), `{}`)
 
 	if out.Result != nil {
@@ -99,7 +99,7 @@ func TestSubmitPushFailureIsRecoverable(t *testing.T) {
 // candidate branch (a planner writes no code), and pushes nothing through the broker.
 func TestSubmitPlanFoldsProposalsNoPush(t *testing.T) {
 	brk := &recordingBroker{pushCommit: "should-not-be-used"}
-	tools := LifecycleTools(lifecycleBrief(), brk)
+	tools := LifecycleTools(lifecycleBrief(), brk, nil)
 
 	for _, args := range []string{
 		`{"title":"add order type","role":"test-author","key":"order-type"}`,
@@ -141,7 +141,7 @@ func TestSubmitPlanFoldsProposalsNoPush(t *testing.T) {
 // decomposition planner sets at issue-creation which soul each child's role resolves to
 // (see specs/configuration.md, core.Issue.Tags).
 func TestRequestSubtaskThreadsTags(t *testing.T) {
-	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{})
+	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{}, nil)
 	if out := invoke(t, lcToolByName(t, tools, "request_subtask"),
 		`{"title":"add order type","role":"test-author","tags":{"lang":"go"}}`); out.IsError {
 		t.Fatalf("request_subtask = %+v", out)
@@ -159,7 +159,7 @@ func TestRequestSubtaskThreadsTags(t *testing.T) {
 // assigns each child the spec file the orchestrator resolves its bounded slice from (T3.5,
 // see internal/spec, core.Issue.Spec).
 func TestRequestSubtaskThreadsSpec(t *testing.T) {
-	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{})
+	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{}, nil)
 	if out := invoke(t, lcToolByName(t, tools, "request_subtask"),
 		`{"title":"validate quantity","role":"test-author","spec":"specs/orders.md"}`); out.IsError {
 		t.Fatalf("request_subtask = %+v", out)
@@ -176,7 +176,7 @@ func TestRequestSubtaskThreadsSpec(t *testing.T) {
 // submit_plan with no proposals is a non-terminal error: a planner that decomposed
 // nothing would end the pipeline with no work, so it is told to propose first.
 func TestSubmitPlanRequiresProposals(t *testing.T) {
-	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{})
+	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{}, nil)
 	out := invoke(t, lcToolByName(t, tools, "submit_plan"), `{}`)
 	if out.Result != nil {
 		t.Errorf("submit_plan with no proposals must not terminate, got %+v", out.Result)
@@ -188,7 +188,7 @@ func TestSubmitPlanRequiresProposals(t *testing.T) {
 
 // escalate ends with needs-spec-clarification and requires a reason.
 func TestEscalate(t *testing.T) {
-	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{})
+	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{}, nil)
 	out := invoke(t, lcToolByName(t, tools, "escalate"), `{"reason":"spec contradicts itself"}`)
 	if out.Result == nil || out.Result.Status != core.StatusNeedsSpecClarification {
 		t.Fatalf("escalate = %+v, want terminal needs-spec-clarification", out)
@@ -204,7 +204,7 @@ func TestEscalate(t *testing.T) {
 // its Result.
 func TestRequestSubtaskAccumulatesIntoSubmit(t *testing.T) {
 	brk := &recordingBroker{pushCommit: "deadbeef"}
-	tools := LifecycleTools(lifecycleBrief(), brk)
+	tools := LifecycleTools(lifecycleBrief(), brk, nil)
 
 	out := invoke(t, lcToolByName(t, tools, "request_subtask"),
 		`{"title":"add metrics","body":"emit counters","role":"implement","depends_on":["iss-1"]}`)
@@ -227,7 +227,7 @@ func TestRequestSubtaskAccumulatesIntoSubmit(t *testing.T) {
 
 // request_subtask requires title and role.
 func TestRequestSubtaskValidation(t *testing.T) {
-	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{})
+	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{}, nil)
 	rs := lcToolByName(t, tools, "request_subtask")
 
 	if out := invoke(t, rs, `{"role":"implement"}`); !out.IsError || !strings.Contains(out.Content, "title is required") {
@@ -243,7 +243,7 @@ func TestRequestSubtaskValidation(t *testing.T) {
 // its reading of the pure-prose spec is auditable (see specs/verification.md).
 func TestTraceTestAccumulatesIntoSubmit(t *testing.T) {
 	brk := &recordingBroker{pushCommit: "cafe"}
-	tools := LifecycleTools(lifecycleBrief(), brk)
+	tools := LifecycleTools(lifecycleBrief(), brk, nil)
 
 	out := invoke(t, lcToolByName(t, tools, "trace_test"),
 		`{"test":"TestRejectsNegative","spec":"orders.md","heading":"Quantities","sentence":"reject negative quantities with a 400"}`)
@@ -274,7 +274,7 @@ func TestTraceTestAccumulatesIntoSubmit(t *testing.T) {
 // trace_test requires the test name and both the heading and the sentence: an entry that
 // names no spec sentence records no interpretation and is worthless for audit.
 func TestTraceTestValidation(t *testing.T) {
-	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{})
+	tools := LifecycleTools(lifecycleBrief(), &recordingBroker{}, nil)
 	tr := lcToolByName(t, tools, "trace_test")
 
 	if out := invoke(t, tr, `{"heading":"H","sentence":"S"}`); !out.IsError || !strings.Contains(out.Content, "test is required") {

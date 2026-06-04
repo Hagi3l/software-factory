@@ -84,6 +84,33 @@ func TestSessionsRealGopls(t *testing.T) {
 	if !hasSymbol(syms, "extra") {
 		t.Fatalf("after didChange DocumentSymbol = %v, want it to include extra", symbolNames(syms))
 	}
+
+	// 4) Real semantic rename (T6.3): write the edited body to disk so the overlay and disk
+	//    agree, then rename greet -> welcome via gopls and apply the WorkspaceEdit to the
+	//    worktree. Proves applyWorkspaceEdit consumes REAL gopls output correctly — every
+	//    greet reference (the declaration and the call in main) becomes welcome on disk.
+	if out, err := writeFile(ctx, sb, "main.go", edited); err != nil || out != nil {
+		t.Fatalf("seed edited main.go to disk: out=%v err=%v", out, err)
+	}
+	sessions.NotifyEdit(ctx, "main.go", edited)
+	we, err := sessions.Rename(ctx, "main.go", 2, 5, "welcome") // 0-based: greet at line 3, col 6
+	if err != nil {
+		t.Fatalf("Rename: %v", err)
+	}
+	files, edits, err := sessions.applyWorkspaceEdit(ctx, we)
+	if err != nil {
+		t.Fatalf("applyWorkspaceEdit: %v", err)
+	}
+	if files != 1 || edits < 2 {
+		t.Fatalf("rename applied files=%d edits=%d, want 1 file and >=2 edits (decl + call)", files, edits)
+	}
+	res, err := sb.Exec(ctx, sandbox.Command{Path: "cat", Args: []string{"--", "main.go"}})
+	if err != nil || res.ExitCode != 0 {
+		t.Fatalf("read renamed main.go: err=%v exit=%d", err, res.ExitCode)
+	}
+	if got := string(res.Stdout); strings.Contains(got, "greet") || !strings.Contains(got, "welcome") {
+		t.Fatalf("after real rename main.go =\n%s\nwant greet replaced by welcome everywhere", got)
+	}
 }
 
 func requireGoToolchain(t *testing.T) {

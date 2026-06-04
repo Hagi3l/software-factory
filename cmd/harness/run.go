@@ -376,9 +376,11 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// inert (edits no-op, queries degrade to the text floor).
 	toolSource := func(inv agent.Invocation) ([]agent.Tool, func(), error) {
 		sessions := agent.NewSessions(inv.Sandbox, log)
+		ledger := agent.NewTransformLedger()
 		tools := agent.WorkspaceTools(inv.Sandbox, sessions)
 		tools = append(tools, agent.SemanticReadTools(sessions)...)
-		tools = append(tools, agent.LifecycleTools(inv.Brief, inv.Broker)...)
+		tools = append(tools, agent.SemanticWriteTools(sessions, ledger)...)
+		tools = append(tools, agent.LifecycleTools(inv.Brief, inv.Broker, ledger)...)
 		return tools, sessions.Close, nil
 	}
 	loop := agent.New(toolSource, agent.BudgetFromPolicy(cfg.Harness.Policy), log)

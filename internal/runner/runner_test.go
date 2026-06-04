@@ -423,6 +423,88 @@ func TestFormatTraceabilityMap(t *testing.T) {
 	}
 }
 
+func TestHarvestStoresTransformLog(t *testing.T) {
+	records := []core.TransformRecord{
+		{Tool: "rename", Target: "a.go:3:6 → hello", Mechanism: core.TransformMechanismSemantic, Files: 2, Edits: 4},
+		{Tool: "rename", Target: "greet → hi at b.go:1:1", Mechanism: core.TransformMechanismText, Files: 1, Edits: 3, Note: "3 match(es) across 1 file(s); 1 inside comments or string literals (heuristic) — review them"},
+	}
+	b := &fakeBackend{}
+	inv := &harvestingInvoker{
+		called: make(chan struct{}, 2),
+		result: core.Result{Status: core.StatusDone, Branch: core.Branch{Ref: "candidate/iss-1"}, Transforms: records},
+	}
+	r, nc := newRunner(t, b, inv)
+
+	resultSub, err := nc.SubscribeSync(messaging.ResultSubject("implement"))
+	if err != nil {
+		t.Fatalf("subscribe results: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+
+	publishWork(t, nc, testBrief())
+	select {
+	case <-inv.called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("invoker was never called")
+	}
+
+	msg, err := resultSub.NextMsg(5 * time.Second)
+	if err != nil {
+		t.Fatalf("waiting for published result: %v", err)
+	}
+	var got core.Result
+	if err := json.Unmarshal(msg.Data, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	if len(got.Transforms) != 0 {
+		t.Errorf("Result.Transforms = %+v, want cleared after harvest (log travels by hash)", got.Transforms)
+	}
+	var logHash string
+	for _, a := range got.Evidence.Artifacts {
+		if a.Kind == core.ArtifactKindTransformLog {
+			logHash = a.Hash
+		}
+	}
+	if logHash == "" {
+		t.Fatalf("no %s artifact on Evidence; got %+v", core.ArtifactKindTransformLog, got.Evidence.Artifacts)
+	}
+	rc, err := r.store.Get(ctx, logHash)
+	if err != nil {
+		t.Fatalf("get transform log: %v", err)
+	}
+	defer rc.Close()
+	stored, _ := io.ReadAll(rc)
+	if !bytes.Equal(stored, formatTransformLog(records)) {
+		t.Errorf("stored log =\n%s\nwant\n%s", stored, formatTransformLog(records))
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("Run returned error: %v", err)
+	}
+}
+
+// formatTransformLog renders a stable, human-readable document — one block per applied
+// transformation in order — so the same log content-addresses to one hash and the
+// mechanism (semantic vs text floor) of each rename/code_action is auditable.
+func TestFormatTransformLog(t *testing.T) {
+	out := string(formatTransformLog([]core.TransformRecord{
+		{Tool: "rename", Target: "a.go:3:6 → hello", Mechanism: core.TransformMechanismSemantic, Files: 2, Edits: 4},
+		{Tool: "code_action", Target: "Organize Imports", Mechanism: core.TransformMechanismSemantic, Files: 1, Edits: 1, Note: "n/a"},
+	}))
+	want := "# Transformation log\n" +
+		"\ntool: rename\ntarget: a.go:3:6 → hello\nmechanism: semantic\nfiles: 2\nedits: 4\n" +
+		"\ntool: code_action\ntarget: Organize Imports\nmechanism: semantic\nfiles: 1\nedits: 1\nnote: n/a\n"
+	if out != want {
+		t.Errorf("formatTransformLog =\n%q\nwant\n%q", out, want)
+	}
+}
+
 func TestNakOnInvokeErrorRedelivers(t *testing.T) {
 	b := &fakeBackend{}
 	inv := &fakeInvoker{

@@ -32,11 +32,12 @@ good autonomous implementation) — a later validation concern, never an enginee
   0–1 are done (see Status); Phases 2–3 are done bar a few open items kept in full below.
   The verbose per-task findings were pruned once complete — that history lives in git,
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
-- **Open tasks (`- [ ]`) keep their full detail** — Phases 5–6, plus the handful of optional items
-  left in Phase 2 (T2.11/T2.12). T4.26 (Config view) closed the original Phase-4 view roster and
-  **T4.27 (ledger batched-forks/discuss-defer/soft-gate) is now done — Phase 4 is fully complete**;
-  the remaining *engineering* of new substrate is Phase 5 (production isolation & distribution) and
-  Phase 6 (agent semantic tooling — the LSP-backed tool surface added in the post-T4.27 spec pass).
+- **Open tasks (`- [ ]`) keep their full detail** — the remaining Phase 5 items, plus the handful of
+  optional items left in Phase 2 (T2.11/T2.12). T4.26 (Config view) closed the original Phase-4 view
+  roster and **T4.27 is done — Phase 4 is fully complete**; **Phase 6 (agent semantic tooling — the
+  LSP-backed tool surface) is now fully complete (T6.1–T6.3)**. The only remaining *engineering* of new
+  substrate is Phase 5 (production isolation & distribution) — and within it the Firecracker backend
+  (T5.2) is hardware-blocked and deliberately last; the live Phase-5 work is T5.5/T5.6/T5.7/T5.10/T5.11.
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -1349,13 +1350,53 @@ is a build step, not a navigable language).
   `symbolKindName`. `make check` green (lint 0, **875 pass / 2 skip**). **Unblocks T6.3** (the write tools —
   `rename`/`code_action` — apply a `WorkspaceEdit` and degrade *loudly*; they reuse `relForURI`/the position
   decoding here). (needs T6.1) ([components/agent.md](specs/components/agent.md))
-- [ ] **T6.3 Transformation (write) semantic tools** — `rename` (project-wide) and `code_action` (the
-  server's own fixes — organize imports, quickfix, extract), each producing a `WorkspaceEdit` the tool
-  **applies to the worktree** and re-syncs into the T6.1 session. **Writes degrade loudly**: a `rename`
-  with no semantic support **refuses, or text-renames with an explicit precision warning** (match count,
-  files, comment/string hits) — never a silent `sed`, which would corrupt literals/comments undetected.
-  The **mechanism used (semantic vs text-floor) is recorded in the Result evidence**, so the gate and
-  traceability map can weigh a text-fallback rename more suspiciously than a semantic one. (needs T6.1)
+- [x] **T6.3 Transformation (write) semantic tools** — *done.* Two intent-first write tools —
+  **`rename`** (project-wide) and **`code_action`** (the server's own fixes — organize imports,
+  quickfix, extract) — as thin wrappers over the T6.1 `Sessions` (`internal/agent/semantic_write.go`,
+  new `SemanticWriteTools(*Sessions, *TransformLedger)`), appended to the per-invocation tool set in
+  `run.go` between `SemanticReadTools` and `LifecycleTools`. Non-TCB (agent tool surface), human-reviewed.
+  **Writes degrade LOUDLY (the structural inverse of the reads' silent degrade):** `rename` calls the
+  language server first, applies the precise **`WorkspaceEdit`** it returns, and records a **semantic**
+  mechanism; with no server (or a server refusal) it falls back to a **word-boundary text rename** —
+  *performed* (word boundaries avoid the substring-corruption class structurally) but flagged with an
+  explicit `[unverified: … TEXT rename …]` warning carrying match count, files, and a **heuristic count of
+  hits inside comments/string literals** (`riskyMatch` — a single-line quote/`//` scan, reported as
+  heuristic) and recorded as a **text** mechanism — never a silent `sed`. `code_action` has **no text
+  floor** (no grep equivalent for "organize imports"), so with no server it **refuses loudly** (`IsError`).
+  **WorkspaceEdit application (the shared core):** `(*Sessions).applyWorkspaceEdit` writes each changed
+  file via the existing `writeFile` and re-syncs it into the running session via `NotifyEdit` (so a
+  follow-up `diagnostics`/`references` reads the new text — the T6.1 coupling extended to writes);
+  `applyTextEdits` splices a document's `TextEdit`s in **descending start order** (non-overlap invariant ⇒
+  earlier offsets stay valid), and `positionToOffset` does **UTF-16-aware** column→byte translation (LSP
+  columns are UTF-16 code units). A read/write fault mid-apply is **fatal** (broken sandbox, runner
+  redelivers), matching the text-floor edit tools. **Mechanism recorded in evidence (the spec's "Mechanism
+  is recorded"):** new **`core.Result.Transforms []TransformRecord`** (tool/target/mechanism/files/edits/
+  note) + mechanism constants `TransformMechanism{Semantic,Text}` + artifact kind
+  **`ArtifactKindTransformLog`**. A shared per-invocation **`agent.TransformLedger`** (nil-safe, the
+  write-side analog of the lifecycle's proposal/trace accumulators) is built in `run.go`'s `toolSource` and
+  handed to **both** `SemanticWriteTools` and `LifecycleTools(brief, brk, ledger)` (signature extended) —
+  the write tools `Record` into it, the terminal `submit`/`submit_plan`/`escalate` fold `ledger.take()`
+  into the Result. The runner **harvests** `res.Transforms` to the artifact store as a transform-log
+  (new `formatTransformLog`, stable/deterministic like the traceability map) and **clears the structured
+  form** so it travels by hash — same pattern as `Result.Trace`. **code_action selection:** omit
+  title/kind to **list** the offered actions; pass `title` (exact/substring) or `kind` (exact/prefix) to
+  apply the single match; a command-only action (no inline edit) is reported, not executed (the protocol
+  keeps server `Command`s opaque); range defaults to the whole file (for organize-imports) or the given
+  position. **Verified against REAL gopls** — `TestSessionsRealGopls` gained a step 4 that writes an edited
+  body to disk, renames `greet → welcome` via gopls, applies the WorkspaceEdit, and asserts every reference
+  (decl + call) became `welcome` on disk (proving `applyWorkspaceEdit` consumes real server output). Unit
+  tests (`semantic_write_test.go`, scripted in-memory LSP server extended with `rename`/`codeAction`):
+  tool-set + schemas, semantic rename (applies edit + re-syncs didChange + records semantic), arg
+  validation (incl. invalid identifier), **loud text degrade** (rewrites code+string+comment, 3 edits / 2
+  risky, text mechanism), non-identifier-position recoverable error, grep-fatal, code_action apply-by-kind,
+  list-when-no-selector, command-only refused, no-server loud refusal, and `submit` folds the ledger; plus
+  unit tables for `applyTextEdits`/`positionToOffset`/`riskyMatch`/`isIdentifier`/`selectAction`/`utf16Len`;
+  runner `formatTransformLog` + harvest-stores-transform-log. The spec contract (agent.md "Semantic tools",
+  "Mechanism is recorded") was **pre-written and matched as-is**; no CLI/config/route/view change ⇒ no
+  spec/docs edit. `make check` green (lint 0, **895 pass / 2 skip**). **Completes Phase 6.** **Deferred
+  (filed, not blocking):** a control-room surface for the transform log (a verification-view row weighing
+  text-fallback renames) — the record is now harvested and reachable on Evidence; only the read/render is a
+  follow-up, like T4.7b surfaced the transcript. (needs T6.1, T6.2)
   ([components/agent.md](specs/components/agent.md))
 
 ---
