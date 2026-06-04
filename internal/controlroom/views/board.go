@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/a-h/templ"
+
+	"github.com/Loxstomper/harness/internal/controlroom/query"
 )
 
 // cardVTName builds the per-card view-transition-name (T4.18, control-room.md "The board, in
@@ -48,6 +50,48 @@ func epochAttr(t time.Time) string {
 		return ""
 	}
 	return strconv.FormatInt(t.Unix(), 10)
+}
+
+// leadTime renders a closed card's lead time — how long the issue took from creation to close
+// (control-room.md "The board, in motion"). For a closed issue StateEnteredAt is the close
+// moment, so the lead time is StateEnteredAt − CreatedAt: a fixed value, rendered statically
+// server-side rather than client-ticked (a closed card has no live clock; the work is done).
+// Returns "" when either anchor is missing or the span is non-positive (legacy closes never
+// stamped state_entered_at), which the card renders as a dash.
+func leadTime(card query.IssueCard) string {
+	if card.StateEnteredAt.IsZero() || card.CreatedAt.IsZero() {
+		return ""
+	}
+	d := card.StateEnteredAt.Sub(card.CreatedAt)
+	if d <= 0 {
+		return ""
+	}
+	return fmtDuration(d)
+}
+
+// fmtDuration renders a duration as the same compact h/m/s string the board's client ticker
+// uses (ticker.js fmtDuration) — kept in lockstep so a static (closed) card and a live card
+// read identically: "45s", "3m12s", "2h05m", "1d04h".
+func fmtDuration(d time.Duration) string {
+	s := int(d.Seconds())
+	switch {
+	case s < 60:
+		return strconv.Itoa(s) + "s"
+	case s < 3600:
+		return strconv.Itoa(s/60) + "m" + pad2(s%60) + "s"
+	case s < 86400:
+		return strconv.Itoa(s/3600) + "h" + pad2((s%3600)/60) + "m"
+	default:
+		return strconv.Itoa(s/86400) + "d" + pad2((s%86400)/3600) + "h"
+	}
+}
+
+// pad2 left-pads a sub-unit count to two digits, matching ticker.js's padStart(2,'0').
+func pad2(n int) string {
+	if n < 10 {
+		return "0" + strconv.Itoa(n)
+	}
+	return strconv.Itoa(n)
 }
 
 // stateLabel maps a beads status to the word the card's time-in-state timer is prefixed with

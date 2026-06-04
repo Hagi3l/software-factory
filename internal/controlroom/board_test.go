@@ -63,7 +63,7 @@ func boardIssues() []core.Issue {
 	return []core.Issue{
 		{ID: "harness-1", Title: "Build the thing", Status: "in_progress", Role: "implementor", Attempt: 1, Spec: "specs/x.md", StateEnteredAt: cardEntered, CreatedAt: cardEntered.Add(-24 * time.Hour)},
 		{ID: "harness-2", Title: "Write the tests", Status: "blocked", Role: "test-author", Attempt: 2},
-		{ID: "harness-3", Title: "Plan the epic", Status: "closed", Role: "planner"},
+		{ID: "harness-3", Title: "Plan the epic", Status: "closed", Role: "planner", StateEnteredAt: cardEntered, CreatedAt: cardEntered.Add(-2 * time.Hour)},
 	}
 }
 
@@ -234,6 +234,38 @@ func TestBoardInMotion(t *testing.T) {
 	}
 	if !strings.Contains(boardTag, "sse:issue-state") {
 		t.Errorf("board not wired to the issue-state trigger")
+	}
+}
+
+// TestClosedCardShowsStaticLeadTime is the contract for a finished card: a closed issue has no
+// live clock (the work is done, so a ticking counter would only inflate meaninglessly). It
+// renders a single static lead time — how long it took, StateEnteredAt − CreatedAt — and carries
+// neither the Alpine ticker nor the timer anchors that would make it tick. The closed fixture
+// (harness-3) was created 2h before it closed.
+func TestClosedCardShowsStaticLeadTime(t *testing.T) {
+	ts := boardServer(t)
+	r := get(t, ts, "/board/cards")
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	// Isolate the closed card so the live in_progress card's ticker/anchors don't false-pass
+	// the negative assertions below.
+	i := strings.Index(r.body, `id="card-harness-3"`)
+	if i < 0 {
+		t.Fatalf("closed card harness-3 not rendered")
+	}
+	card := r.body[i:]
+	if j := strings.Index(card[len(`id="card-harness-3"`):], `id="card-harness-`); j >= 0 {
+		card = card[:len(`id="card-harness-3"`)+j] // stop before the next card, if any follows
+	}
+	if !strings.Contains(card, "took") || !strings.Contains(card, "2h00m") {
+		t.Errorf("closed card should show static lead time 'took 2h00m', got: %q", card)
+	}
+	if strings.Contains(card, "cardTicker()") {
+		t.Errorf("closed card must not carry the live ticker")
+	}
+	if strings.Contains(card, "data-state-since") || strings.Contains(card, "data-created") {
+		t.Errorf("closed card must not carry live timer anchors")
 	}
 }
 

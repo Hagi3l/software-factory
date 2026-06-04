@@ -98,23 +98,34 @@ templ boardCard(card query.IssueCard) {
 	</a>
 }
 
-// cardTimer is the card's live clock line (T4.18, control-room.md "The board, in motion"):
-// time in the current state (label keyed off status server-side) and total time since the
-// issue was created. The server emits two epoch anchors — data-state-since (StateEnteredAt)
-// and data-created (CreatedAt) — and never re-renders to tick; the Alpine ticker
-// (x-data="cardTicker()", ticker.js) rewrites the two x-ref spans every second in the
-// browser. An empty anchor (unstamped/absent) renders a dash. The current-state timer resets
-// naturally on the next transition, since the refetched card carries a fresh anchor.
+// cardTimer is the card's clock line (T4.18, control-room.md "The board, in motion"). For an
+// open/in-progress/blocked card it is *live*: time in the current state (label keyed off status
+// server-side) and total time since the issue was created. The server emits two epoch anchors —
+// data-state-since (StateEnteredAt) and data-created (CreatedAt) — and never re-renders to tick;
+// the Alpine ticker (x-data="cardTicker()", ticker.js) rewrites the two x-ref spans every second
+// in the browser. An empty anchor (unstamped/absent) renders a dash. The current-state timer
+// resets naturally on the next transition, since the refetched card carries a fresh anchor.
+//
+// A closed card has no live clock — the work is done, so a ticking counter would only inflate
+// meaninglessly. Instead it shows a single static lead time ("took 2h05m" = StateEnteredAt −
+// CreatedAt), rendered server-side with no ticker. Blocked cards stay live by design: their
+// time-in-state is the "how long has this been awaiting triage" signal.
 templ cardTimer(card query.IssueCard) {
-	<div
-		class="mt-2 flex items-center justify-between text-xs text-faint"
-		data-state-since={ epochAttr(card.StateEnteredAt) }
-		data-created={ epochAttr(card.CreatedAt) }
-		x-data="cardTicker()"
-	>
-		<span>{ stateLabel(card.Status) } <span x-ref="state" class="tabular-nums text-muted">—</span></span>
-		<span class="tabular-nums" x-ref="total">—</span>
-	</div>
+	if card.Status == "closed" {
+		<div class="mt-2 flex items-center justify-between text-xs text-faint">
+			<span>took <span class="tabular-nums text-muted">{ orDash(leadTime(card)) }</span></span>
+		</div>
+	} else {
+		<div
+			class="mt-2 flex items-center justify-between text-xs text-faint"
+			data-state-since={ epochAttr(card.StateEnteredAt) }
+			data-created={ epochAttr(card.CreatedAt) }
+			x-data="cardTicker()"
+		>
+			<span>{ stateLabel(card.Status) } <span x-ref="state" class="tabular-nums text-muted">—</span></span>
+			<span class="tabular-nums" x-ref="total">—</span>
+		</div>
+	}
 }
 
 // statusBadge tints the beads status so the board reads at a glance — blocked work (the

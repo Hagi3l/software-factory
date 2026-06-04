@@ -112,6 +112,11 @@ legible at a glance:
   refetched card carries a fresh `state_entered_at`). Optionally the in-progress
   timer tints toward its `budget.wall` ceiling — a live "about to breach" signal off
   data the orchestrator already enforces.
+  A **closed** card is the exception: the work is done, so there is no live clock —
+  it shows a single *static* lead time (`took 2h05m` = `state_entered_at − created_at`,
+  rendered server-side, no ticker). Only `closed` freezes; a **blocked** card keeps
+  ticking by design, since its time-in-state is the "how long has this been awaiting
+  triage" signal.
 
 Note what stays absent **by design**: there is no drag-to-move. Humans never move
 work — the orchestrator is the single writer and the human's only levers are the
