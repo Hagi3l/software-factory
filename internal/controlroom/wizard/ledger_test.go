@@ -227,6 +227,40 @@ func TestCutLedgerBlock(t *testing.T) {
 	}
 }
 
+// TestParseLedgerTolerantShapes proves the parser populates the ledger from the realistic ways
+// a capable-but-imperfect model mis-shapes the block (the "decisions never appear" failure):
+// a one-key wrapper object, a single fork object emitted without the array, a trailing comma,
+// and unicode smart quotes all yield items, while a genuinely-empty array, an unknown wrapper
+// key, and non-JSON still degrade to nil (so a prior ledger is never clobbered or fabricated).
+func TestParseLedgerTolerantShapes(t *testing.T) {
+	const fork = `{"question":"Which datastore?","status":"open"}`
+	populates := map[string]string{
+		"wrapper_ledger": "P.\n```ledger\n{\"ledger\":[" + fork + "]}\n```",
+		"wrapper_items":  "P.\n```ledger\n{\"items\":[" + fork + "]}\n```",
+		"wrapper_forks":  "P.\n```ledger\n{\"forks\":[" + fork + "]}\n```",
+		"single_object":  "P.\n```ledger\n" + fork + "\n```",
+		"trailing_comma": "P.\n```ledger\n[" + fork + ",]\n```",
+		"smart_quotes":   "P.\n```ledger\n[{“question”:“Which datastore?”,“status”:“open”}]\n```",
+	}
+	for name, reply := range populates {
+		items, _ := parseLedger(reply)
+		if len(items) != 1 || items[0].Question != "Which datastore?" {
+			t.Errorf("%s: items = %+v, want 1 fork with the question parsed", name, items)
+		}
+	}
+
+	staysNil := map[string]string{
+		"empty_array":    "P.\n```ledger\n[]\n```",
+		"unknown_wrapper": "P.\n```ledger\n{\"weird\":[" + fork + "]}\n```",
+		"not_json":       "P.\n```ledger\nnot json at all\n```",
+	}
+	for name, reply := range staysNil {
+		if items, _ := parseLedger(reply); items != nil {
+			t.Errorf("%s: items = %+v, want nil (must not fabricate or clobber)", name, items)
+		}
+	}
+}
+
 // trim is a tiny local helper so the test asserts on the JSON payload ignoring surrounding
 // whitespace the split intentionally leaves intact.
 func trim(s string) string {

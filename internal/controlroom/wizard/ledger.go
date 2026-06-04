@@ -2,6 +2,7 @@ package wizard
 
 import (
 	"encoding/json"
+	"regexp"
 	"strings"
 )
 
@@ -78,8 +79,8 @@ func parseLedger(reply string) ([]LedgerItem, string) {
 		return nil, reply
 	}
 
-	var wire []ledgerWire
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &wire); err != nil {
+	wire := decodeLedgerWire(raw)
+	if wire == nil {
 		return nil, prose
 	}
 
@@ -111,6 +112,60 @@ func parseLedger(reply string) ([]LedgerItem, string) {
 		return nil, prose
 	}
 	return items, prose
+}
+
+// trailingCommaRE matches a comma that is the last token before a closing ] or } (the
+// JS-ism `[…,]` / `{…,}` that strict encoding/json rejects but capable models still emit).
+var trailingCommaRE = regexp.MustCompile(`,(\s*[}\]])`)
+
+// decodeLedgerWire decodes the raw fenced block into ledger wire items, tolerating the
+// realistic ways a model mis-shapes the protocol while keeping strict JSON semantics. The
+// persona asks for a bare JSON array, but capable models routinely (a) wrap it in a one-key
+// object (`{"ledger":[…]}`, `{"items":[…]}`, …), (b) emit a single object when there is one
+// fork, (c) leave a trailing comma, or (d) "prettify" structural quotes into unicode smart
+// quotes. Each of these previously parsed to zero items, leaving the alignment-ledger panel
+// (and therefore the APPROVE path) silently empty. We normalize the cheap, unambiguous cases
+// and try the shapes in order of specificity. Returns nil when nothing yields a usable array
+// — the caller then leaves the prior ledger untouched (degrade-gracefully, never clobber).
+func decodeLedgerWire(raw string) []ledgerWire {
+	s := strings.TrimSpace(raw)
+	// Normalize unicode smart quotes a model may emit instead of ASCII " and ', then drop a
+	// trailing comma before a closing bracket. Both are safe no-ops on already-valid JSON.
+	s = strings.NewReplacer(
+		"“", `"`, "”", `"`, // “ ” → "
+		"‘", "'", "’", "'", // ‘ ’ → '
+	).Replace(s)
+	s = trailingCommaRE.ReplaceAllString(s, "$1")
+
+	// 1. Canonical: a bare array. This is the only shape the persona documents, so try it first
+	//    and let an already-compliant model take the fast path with no guessing.
+	var arr []ledgerWire
+	if err := json.Unmarshal([]byte(s), &arr); err == nil {
+		return arr
+	}
+
+	// 2. A one-key wrapper object whose value is the array. Restricted to known wrapper keys so
+	//    we never mistake a single fork object (which also unmarshals into a map) for a wrapper.
+	var wrap map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(s), &wrap); err == nil {
+		for _, key := range []string{"ledger", "items", "forks", "decisions", "entries"} {
+			if v, ok := wrap[key]; ok {
+				if err := json.Unmarshal(v, &arr); err == nil && len(arr) > 0 {
+					return arr
+				}
+			}
+		}
+	}
+
+	// 3. A single fork object emitted without the enclosing array. Only accept it when it
+	//    actually carries a question, so an unrecognized wrapper object (decoded leniently into
+	//    an empty ledgerWire) does not masquerade as one empty fork.
+	var one ledgerWire
+	if err := json.Unmarshal([]byte(s), &one); err == nil && strings.TrimSpace(one.Question) != "" {
+		return []ledgerWire{one}
+	}
+
+	return nil
 }
 
 // cutLedgerBlock splits a reply at the LAST ```ledger fence — see cutFencedBlock for the
