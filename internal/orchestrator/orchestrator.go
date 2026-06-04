@@ -222,13 +222,28 @@ func New(opts Options, bd Beads, g Gate, merger Merger, nc *nats.Conn, js jetstr
 	return o, nil
 }
 
+// streamOptions derives the JetStream stream knobs (replication factor, result
+// retention) from the infra overlay so the orchestrator's idempotent SetupStreams call
+// reconciles the streams to the SAME definition the composition root created them with —
+// not back to the zero-value defaults (see messaging.SetupStreams). Nil-safe: a test
+// orchestrator built without an Infra overlay falls back to the bootstrap defaults.
+func (o *Orchestrator) streamOptions() messaging.StreamOptions {
+	if c := o.opts.Config; c != nil && c.Infra != nil {
+		return messaging.StreamOptions{
+			Replicas:     c.Infra.NATS.JetStream.Replicas,
+			ResultMaxAge: time.Duration(c.Infra.NATS.JetStream.MaxAge),
+		}
+	}
+	return messaging.StreamOptions{}
+}
+
 // Run starts the reconciliation loop and blocks until ctx is canceled. It ensures the
 // streams and the Result consumer exist (idempotent — safe on every startup, matching
 // the crash-and-resume model), then runs two concurrent loops: an event-driven Result
 // consumer, and a ticker that schedules ready work and sweeps stranded leases. It
 // returns the first non-shutdown error either loop reports.
 func (o *Orchestrator) Run(ctx context.Context) error {
-	if err := messaging.SetupStreams(ctx, o.js); err != nil {
+	if err := messaging.SetupStreams(ctx, o.js, o.streamOptions()); err != nil {
 		return err
 	}
 	cons, err := messaging.EnsureResultConsumer(ctx, o.js)

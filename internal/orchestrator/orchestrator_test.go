@@ -421,7 +421,7 @@ func newOrch(t *testing.T, cfg *config.Config, bd Beads, g Gate, m Merger) (*Orc
 	if err != nil {
 		t.Fatalf("jetstream: %v", err)
 	}
-	if err := messaging.SetupStreams(context.Background(), js); err != nil {
+	if err := messaging.SetupStreams(context.Background(), js, messaging.StreamOptions{}); err != nil {
 		t.Fatalf("setup streams: %v", err)
 	}
 	o, err := New(Options{Config: cfg, Repo: "/repo", Limits: config.SandboxLimits{CPU: 1, Mem: "1Gi", Wall: config.Duration(time.Minute)}}, bd, g, m, nc, js)

@@ -17,10 +17,32 @@ const (
 	StreamApprovals = "HARNESS_APPROVALS"
 )
 
-// resultMaxAge bounds how long Result envelopes are retained for the orchestrator
-// to consume and for observability/replay. Concrete retention is an OPEN question
-// in specs/messaging.md; this is a sensible bootstrap default, not a contract.
-const resultMaxAge = 7 * 24 * time.Hour
+// defaultResultMaxAge bounds how long Result envelopes are retained for the
+// orchestrator to consume and for observability/replay when the infra overlay does
+// not override it. A week comfortably covers the consume-and-replay window; a
+// distributed deployment tunes it via nats.jetstream.max_age (see StreamOptions).
+const defaultResultMaxAge = 7 * 24 * time.Hour
+
+// StreamOptions carries the environment-varying JetStream knobs the messaging package
+// applies to every stream definition. They come from the infra overlay
+// (config.JetStreamConfig, surfaced as nats.jetstream) and resolve the messaging.md
+// "concrete stream definitions" OPEN: the subjects and retention *policy* are fixed by
+// the harness's semantics (below), while the replication factor and the result
+// stream's retention window genuinely vary by deployment. The zero value keeps the
+// built-in bootstrap defaults, so a single-process dev run that omits these knobs
+// behaves exactly as before.
+type StreamOptions struct {
+	// Replicas is the JetStream replication factor applied to every stream. 0 or 1 is a
+	// single replica (the only option on the in-process embedded server); >1 needs an
+	// external cluster of at least that size (validated in config — replicas>1 requires
+	// nats.url). More replicas trade write latency for surviving a node loss.
+	Replicas int
+	// ResultMaxAge overrides how long the result stream retains envelopes. 0 keeps
+	// defaultResultMaxAge. The work, dlq, and approvals streams are deliberately NOT
+	// age-bounded (work is consume-once; dlq and approvals must survive until a human
+	// acts), so this knob applies only to the replay/observability result stream.
+	ResultMaxAge time.Duration
+}
 
 // JetStream opens the JetStream API over a connection.
 func JetStream(nc *nats.Conn) (jetstream.JetStream, error) {
@@ -31,14 +53,26 @@ func JetStream(nc *nats.Conn) (jetstream.JetStream, error) {
 	return js, nil
 }
 
-// streamConfigs returns the three streams the harness depends on. The retention
-// choices encode the spec's semantics:
+// streamConfigs returns the four streams the harness depends on, with opts applied.
+// The retention choices encode the spec's semantics:
 //   - work uses WorkQueue retention so each assignment is consumed exactly once and
 //     the consumer ack doubles as the lease (AckWait → redelivery on a dead runner).
-//   - result and dlq use Limits retention so messages persist — results for the
-//     orchestrator to consume and for replay, dlq for human triage. DLQ has no
-//     max-age: it must survive until a human handles it.
-func streamConfigs() []jetstream.StreamConfig {
+//   - result, dlq, and approvals use Limits retention so messages persist — results
+//     for the orchestrator to consume and for replay, dlq for human triage, approvals
+//     until consumed. DLQ and approvals have no max-age: they must survive until a
+//     human handles them. Only the result stream is age-bounded.
+//
+// opts.Replicas applies uniformly (every stream survives the same node loss); a value
+// <1 normalizes to 1, the single-replica embedded/dev case.
+func streamConfigs(opts StreamOptions) []jetstream.StreamConfig {
+	replicas := opts.Replicas
+	if replicas < 1 {
+		replicas = 1
+	}
+	resultMaxAge := opts.ResultMaxAge
+	if resultMaxAge <= 0 {
+		resultMaxAge = defaultResultMaxAge
+	}
 	return []jetstream.StreamConfig{
 		{
 			Name:        StreamWork,
@@ -46,6 +80,7 @@ func streamConfigs() []jetstream.StreamConfig {
 			Subjects:    []string{WorkStreamSubjects},
 			Retention:   jetstream.WorkQueuePolicy,
 			Storage:     jetstream.FileStorage,
+			Replicas:    replicas,
 		},
 		{
 			Name:        StreamResult,
@@ -54,6 +89,7 @@ func streamConfigs() []jetstream.StreamConfig {
 			Retention:   jetstream.LimitsPolicy,
 			Storage:     jetstream.FileStorage,
 			MaxAge:      resultMaxAge,
+			Replicas:    replicas,
 		},
 		{
 			Name:        StreamDLQ,
@@ -61,6 +97,7 @@ func streamConfigs() []jetstream.StreamConfig {
 			Subjects:    []string{SubjectDLQ},
 			Retention:   jetstream.LimitsPolicy,
 			Storage:     jetstream.FileStorage,
+			Replicas:    replicas,
 		},
 		{
 			Name:        StreamApprovals,
@@ -68,16 +105,21 @@ func streamConfigs() []jetstream.StreamConfig {
 			Subjects:    []string{SubjectApprovals},
 			Retention:   jetstream.LimitsPolicy,
 			Storage:     jetstream.FileStorage,
+			Replicas:    replicas,
 		},
 	}
 }
 
-// SetupStreams creates or updates the work, result, and dead-letter streams. It is
-// idempotent — safe to call on every startup, matching the orchestrator's
-// crash-and-resume model where startup steps are re-run (see
-// specs/components/orchestrator.md).
-func SetupStreams(ctx context.Context, js jetstream.JetStream) error {
-	for _, cfg := range streamConfigs() {
+// SetupStreams creates or updates the work, result, dead-letter, and approvals streams
+// with the deployment's StreamOptions applied. It is idempotent — safe to call on every
+// startup, matching the orchestrator's crash-and-resume model where startup steps are
+// re-run (see specs/components/orchestrator.md). Every caller in one deployment must
+// pass the SAME options: CreateOrUpdateStream reconciles an existing stream to the
+// config it is handed, so a second caller passing zero-value options would silently
+// reset replicas/max-age back to the defaults (hence the orchestrator threads the same
+// infra-derived options the composition root does).
+func SetupStreams(ctx context.Context, js jetstream.JetStream, opts StreamOptions) error {
+	for _, cfg := range streamConfigs(opts) {
 		if _, err := js.CreateOrUpdateStream(ctx, cfg); err != nil {
 			return fmt.Errorf("messaging: ensure stream %s: %w", cfg.Name, err)
 		}

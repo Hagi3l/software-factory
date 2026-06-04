@@ -453,6 +453,64 @@ func TestValidateArtifactsRejectsMisconfigured(t *testing.T) {
 	}
 }
 
+// The NATS endpoint + JetStream knobs are validated at the startup gate so a distributed
+// (external-cluster) misconfiguration fails loud at `harness validate` rather than as an
+// opaque connect/stream error mid-run. Empty url = the embedded in-process server (the
+// dev/bootstrap default); a set url is an external cluster (T5.8). See specs/messaging.md.
+func TestValidateNATSValidForms(t *testing.T) {
+	cases := []NATSConfig{
+		{}, // empty url + zero knobs → embedded, single replica
+		{JetStream: JetStreamConfig{Replicas: 1, MaxAge: Duration(1)}},                 // embedded, explicit single replica
+		{URL: "nats://host:4222", JetStream: JetStreamConfig{Replicas: 3}},             // external cluster, 3 replicas
+		{URL: "nats://a:4222,nats://b:4222", JetStream: JetStreamConfig{Replicas: 2}},  // cluster list
+		{URL: "host:4222"},                                                            // bare host:port
+		{URL: "tls://host:4222"},                                                       // TLS transport
+		{URL: "nats://host"},                                                           // scheme without port (defaults to 4222)
+	}
+	for _, n := range cases {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.NATS = n
+		if err := c.Validate(); err != nil {
+			t.Errorf("nats %+v: Validate returned %v, want nil", n, err)
+		}
+	}
+}
+
+func TestValidateNATSRejects(t *testing.T) {
+	cases := []struct {
+		n    NATSConfig
+		want string
+	}{
+		{NATSConfig{JetStream: JetStreamConfig{Replicas: -1}}, "nats.jetstream.replicas"},        // negative replicas
+		{NATSConfig{JetStream: JetStreamConfig{Replicas: 3}}, "requires an external cluster"},    // >1 replica but embedded (no url)
+		{NATSConfig{URL: "ftp://host:4222"}, "nats.url endpoint"},                                // wrong scheme
+		{NATSConfig{URL: "localhost"}, "nats.url endpoint"},                                      // bare host, no port
+		{NATSConfig{URL: "nats://good:4222,bad"}, "nats.url endpoint"},                           // one bad endpoint in the list
+		{NATSConfig{JetStream: JetStreamConfig{MaxAge: Duration(-1)}}, "nats.jetstream.max_age"}, // negative retention
+	}
+	for _, tc := range cases {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.NATS = tc.n
+		mustContain(t, problems(t, c), tc.want)
+	}
+}
+
+// validNATSEndpoint is the per-endpoint grammar each comma-separated cluster url is checked against.
+func TestValidNATSEndpoint(t *testing.T) {
+	for _, ep := range []string{"nats://host:4222", "nats://host", "tls://h:1", "ws://h:1", "wss://h:1", "host:4222", "127.0.0.1:4222", "[::1]:4222"} {
+		if !validNATSEndpoint(ep) {
+			t.Errorf("validNATSEndpoint(%q) = false, want true", ep)
+		}
+	}
+	for _, ep := range []string{"", "localhost", "ftp://h:1", "://h:1", "nats://", "nats://:4222", "host:"} {
+		if validNATSEndpoint(ep) {
+			t.Errorf("validNATSEndpoint(%q) = true, want false", ep)
+		}
+	}
+}
+
 func TestValidateEmptyDAG(t *testing.T) {
 	c := validConfig()
 	c.Souls = nil

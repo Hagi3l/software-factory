@@ -43,10 +43,13 @@ harness.control.*            core NATS — orchestrator control/health
   [bootstrap.md](bootstrap.md)). Like results they are JetStream-durable and consumed
   only by the single-writer orchestrator, which records the decision against the issue's
   current candidate — a human never writes beads directly during a run, so an approval is
-  a *proposal* validated and applied exactly like an agent Result. In the bootstrap the
-  embedded NATS is in-process only; to let a separate `harness approve` process reach it,
-  `harness run --nats-addr <host:port>` opens an opt-in local TCP listener (a single-host
-  convenience, not the distributed cluster — that is T5.8).
+  a *proposal* validated and applied exactly like an agent Result. The embedded in-process
+  NATS (empty `nats.url`) is the single-process default; a separate `harness approve`
+  process reaches it via the opt-in local TCP listener `harness run --nats-addr
+  <host:port>` opens. Pointing `nats.url` at an external cluster instead is the
+  distributed deployment — the orchestrator and runners take the same connection
+  unchanged (location transparency), and `harness approve` connects to that cluster
+  directly.
 - **Agent events** (`agent.<id>.events`) are best-effort observability: the
   [control room](control-room.md) tails them and pushes to browsers over SSE, and
   they are also emitted as [OpenTelemetry](observability.md) spans. Losing one is
@@ -116,10 +119,37 @@ properties intact: the only NATS citizens are trusted (orchestrator, runners).
 
 ---
 
+## Stream definitions
+
+The four JetStream streams. Their **subjects and retention *policy*** are fixed by the
+harness's semantics; the **replication factor** and the **result retention window** are
+the only knobs that vary by deployment, surfaced on the infra overlay as
+`nats.jetstream.replicas` / `nats.jetstream.max_age` (see
+[configuration.md](configuration.md)). Every component that ensures the streams threads
+the *same* knobs, since `CreateOrUpdateStream` reconciles an existing stream to whatever
+config it is handed.
+
+| Stream | Subjects | Retention | Age bound |
+|--------|----------|-----------|-----------|
+| `HARNESS_WORK` | `harness.work.>` | **WorkQueue** — each assignment consumed exactly once; the consumer ack is the lease | none (consume-once) |
+| `HARNESS_RESULT` | `harness.result.>` | **Limits** — durable for the orchestrator to consume + replay | `max_age` (default 7d) |
+| `HARNESS_DLQ` | `harness.dlq` | **Limits** — durable until a human triages | **none** (must survive) |
+| `HARNESS_APPROVALS` | `harness.approvals` | **Limits** — durable until the orchestrator consumes | **none** (must survive) |
+
+- **Replicas** apply uniformly to every stream: 1 on the single in-process embedded
+  server (the dev/bootstrap default), `>1` only on an external cluster of at least that
+  size (config validation rejects `>1` with no `nats.url`). More replicas trade write
+  latency for surviving a node loss.
+- **Only the result stream is age-bounded.** Work is consume-once (WorkQueue retention
+  reclaims an acked message), and the dead-letter and approval streams must survive until
+  a human acts, so neither is given a `max_age`.
+- **Consumers** are durable pull/push consumers, all `AckExplicit` (the ack is the lease,
+  so an at-least-once redelivery on a dead consumer is recovered): one shared `work-<role>`
+  per role that runners compete on, and the orchestrator's single `orchestrator-results`
+  and `orchestrator-approvals`.
+
 ## OPEN questions
 
-- Concrete stream definitions (retention, replicas, max-age) and consumer configs
-  — TBD at implementation.
 - Whether to use a **NATS KV** bucket for orchestrator leader-election / locks if
   HA is pursued — see [components/orchestrator.md](components/orchestrator.md).
 - Subject-level multi-tenancy if multiple projects share a NATS cluster — TBD.

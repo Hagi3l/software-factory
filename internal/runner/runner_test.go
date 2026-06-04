@@ -155,7 +155,7 @@ func newRunner(t *testing.T, b *fakeBackend, inv Invoker) (*Runner, *nats.Conn) 
 	if err != nil {
 		t.Fatalf("jetstream: %v", err)
 	}
-	if err := messaging.SetupStreams(context.Background(), js); err != nil {
+	if err := messaging.SetupStreams(context.Background(), js, messaging.StreamOptions{}); err != nil {
 		t.Fatalf("setup streams: %v", err)
 	}
 

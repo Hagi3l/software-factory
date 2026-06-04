@@ -1180,7 +1180,39 @@ them); only the *order of attention* changes.
 - [ ] **T5.5** *(optional)* gVisor backend (medium-trust). ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.6 Vetted package mirror/proxy** — route package fetches through a pinning/scanning/logging proxy on the broker allowlist; a read-through cache amortizes downloads without weakening egress control. ([security.md](specs/security.md), [components/runner.md](specs/components/runner.md))
 - [ ] **T5.7 Scoped short-lived secret minting** — the runner mints a per-task git token scoped to push *only* the task branch, injected for the invocation lifetime and dying with the sandbox (replaces the bootstrap local-repo push). ([components/runner.md](specs/components/runner.md), [security.md](specs/security.md))
-- [ ] **T5.8 Distributed NATS** — an external cluster with concrete JetStream stream defs (retention / replicas / max-age — the messaging.md OPEN) and runners across hosts, swapped in for the embedded in-process server. ([messaging.md](specs/messaging.md))
+- [x] **T5.8 Distributed NATS** — *done.* The code seam for an external NATS cluster, plus the concrete
+  JetStream stream definitions that were the **messaging.md OPEN**. **Latent bug closed:** the infra overlay
+  already declared `nats.url`, `nats.jetstream.replicas`, and `nats.jetstream.max_age`, but the code **ignored
+  all three** — it always started the embedded in-process server (`DontListen`) and hardcoded `streamConfigs`
+  (replicas absent ⇒ 1, result max-age 7d), so the dev `url: nats://localhost:4222` was a no-op lie and the
+  knobs did nothing. **(1) Concrete, config-driven stream defs:** new **`messaging.StreamOptions{Replicas,
+  ResultMaxAge}`** (the only deployment-varying knobs; subjects + retention *policy* stay fixed by harness
+  semantics). `streamConfigs(opts)` now applies `Replicas` **uniformly to all four streams** (normalizing <1→1)
+  and `ResultMaxAge` to the **result stream only** (work is consume-once; dlq/approvals must survive until a
+  human acts, so they stay unbounded; 0→`defaultResultMaxAge` 7d). `SetupStreams(ctx, js, opts)` gained the
+  options arg — **every caller in one deployment must pass the SAME options** because `CreateOrUpdateStream`
+  reconciles a stream to whatever config it's handed, so the orchestrator's idempotent every-startup re-call
+  threads the SAME infra-derived options (new `Orchestrator.streamOptions()`, nil-safe off `opts.Config.Infra`)
+  rather than silently resetting replicas/max-age back to defaults. **(2) External-cluster connection:** new
+  **`messaging.Connect(url, opts...)`** dials an external server (the location-transparency swap-in for the
+  embedded one). `buildRunComponents` now **branches on `cfg.Infra.NATS.URL`**: empty ⇒ embedded in-process
+  (the dev/bootstrap default, optionally exposed via `--nats-addr`); set ⇒ `Connect` to that cluster, **no
+  embedded server started** and `--nats-addr` ignored (warned). Either path yields the same `*nats.Conn` the
+  orchestrator/runner take unchanged. **(3) Semantics decision** — `nats.url` empty = embedded, set = external
+  (honors the dev overlay's own documented intent: "the same code distributes later by pointing `url` at an
+  external cluster"); **no new config field**. Fixed the dev overlay's misleading `url: nats://localhost:4222`
+  → `url: ""` (it was always embedded/`DontListen`). **(4) Validation** — new `validateNATS`: each
+  comma-separated `nats.url` endpoint must be a `nats://`/`tls://`/`ws[s]://` URL or bare `host:port`
+  (`validNATSEndpoint`); `replicas ≥ 0`; **`replicas > 1` requires a `url`** (the single embedded server is
+  single-replica — a guaranteed boot failure otherwise); `max_age ≥ 0`. **Verifiable in dev; the only remainder
+  is ops** (standing up a real multi-host cluster + per-host runners is deployment, like T5.3's registry-push /
+  T5.2's KVM remainders — not code). Tests: `streamConfigs` option mapping + zero-default fallback;
+  `SetupStreams` applies the result max-age override + idempotent re-apply; `Connect` to an external server
+  (full stream + work round-trip over TCP) + unreachable-dial error; `validateNATS` valid/reject table +
+  `validNATSEndpoint` grammar; `buildRunComponents` external-NATS path (connects to a separate server, both
+  loops run + shut down clean). `make check` green (lint 0, **837 pass / 2 skip**). Specs/docs: messaging.md
+  OPEN replaced with a concrete "Stream definitions" section (table + replicas/max-age knobs + consumer
+  configs); configuration.md NATS field reference; dev overlay comments. ([messaging.md](specs/messaging.md), [configuration.md](specs/configuration.md))
 - [x] **T5.9 S3/MinIO artifact backend** — *done.* The distributed-deployment artifact store: a second
   `artifact.Store` implementation over plain S3 (`internal/artifact/s3.go`, `S3Store`) so runners on many
   hosts and the control room share one bucket, the same Store contract the files backend serves on one host.

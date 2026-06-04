@@ -110,6 +110,23 @@ func NewEmbeddedServer(cfg ServerConfig) (*EmbeddedServer, error) {
 	return &EmbeddedServer{ns: ns, storeDir: storeDir, removeStore: removeStore}, nil
 }
 
+// Connect dials an EXTERNAL NATS server at url (the distributed deployment, T5.8) —
+// the swap-in for the embedded in-process server when the infra overlay points
+// nats.url at a cluster instead of leaving it empty. It is the location-transparency
+// seam: the orchestrator and runner take the returned *nats.Conn unchanged, so the
+// only thing that differs between a single-process dev run and a distributed cluster
+// is whether the composition root started an EmbeddedServer or dialed here. The url is
+// a standard nats URL (nats://host:port, comma-separated for a cluster); credentials,
+// if any, ride nats.Option (never config — like every other secret). A failed dial is
+// the common "is the cluster up / reachable?" error and is wrapped plainly.
+func Connect(url string, opts ...nats.Option) (*nats.Conn, error) {
+	nc, err := nats.Connect(url, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("messaging: connect to external nats at %s: %w", url, err)
+	}
+	return nc, nil
+}
+
 // Connect opens an in-process client connection to the embedded server. Callers may
 // pass extra options (connection name, error handlers, etc.).
 func (s *EmbeddedServer) Connect(opts ...nats.Option) (*nats.Conn, error) {

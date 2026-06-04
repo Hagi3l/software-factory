@@ -166,8 +166,8 @@ sandbox:
     go-toolchain:
       image: harness/go-toolchain@sha256:…   # docker/gvisor: `image`; firecracker: `rootfs`
 nats:
-  url: nats://localhost:4222 # in-process embedded in dev; external cluster later
-  jetstream: { replicas: 1, max_age: 168h }
+  url: ""                    # "" = embedded in-process server (dev); set = external cluster (T5.8)
+  jetstream: { replicas: 1, max_age: 168h }   # replicas: per-stream replication; max_age: result retention
 broker:
   allowlist: [llm-api, nats, git]   # the only egress the sandbox is granted
 artifacts:
@@ -202,6 +202,17 @@ models:
   at a digest-pinned image/rootfs. Pin by digest (`@sha256:…`) so provenance records the
   exact toolchain bytes. `harness validate` fails if any `soul.sandbox` has no entry here
   for the active backend.
+- **`nats`** points the run at its messaging substrate. An **empty `url`** runs the
+  **embedded in-process NATS server** (the dev/bootstrap shape; expose it on a TCP
+  listener for `harness approve` with `harness run --nats-addr host:port`). A **set
+  `url`** (e.g. `nats://nats-1:4222,nats://nats-2:4222`) connects to that **external
+  cluster** instead — the distributed deployment (T5.8), same code and no rebuild
+  (location transparency); the embedded server is not started and `--nats-addr` is
+  ignored. `jetstream.replicas` is the per-stream replication factor (1 on the single
+  embedded server; `>1` needs an external cluster of at least that size — `harness
+  validate` rejects `>1` with no `url`), and `jetstream.max_age` bounds the **result
+  stream's** retention (the work, dead-letter, and approvals streams are deliberately
+  unbounded — work is consume-once, the others must survive until a human acts).
 - **`artifacts`** selects the content-addressed store. `files` (the dev default) keeps
   evidence under `path` on one host. `s3` is the distributed backend (AWS S3 or any
   S3-compatible service, e.g. MinIO) so runners on many hosts and the control room share

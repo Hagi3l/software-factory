@@ -124,12 +124,12 @@ func TestSetupStreamsIdempotent(t *testing.T) {
 	js := startTestServer(t)
 	ctx := context.Background()
 
-	if err := SetupStreams(ctx, js); err != nil {
+	if err := SetupStreams(ctx, js, StreamOptions{}); err != nil {
 		t.Fatalf("SetupStreams: %v", err)
 	}
 	// The orchestrator calls SetupStreams on every start, so a second call must
 	// succeed without error.
-	if err := SetupStreams(ctx, js); err != nil {
+	if err := SetupStreams(ctx, js, StreamOptions{}); err != nil {
 		t.Fatalf("SetupStreams (2nd call): %v", err)
 	}
 
@@ -157,7 +157,7 @@ func TestSetupStreamsIdempotent(t *testing.T) {
 func TestWorkQueueRoundTrip(t *testing.T) {
 	js := startTestServer(t)
 	ctx := context.Background()
-	if err := SetupStreams(ctx, js); err != nil {
+	if err := SetupStreams(ctx, js, StreamOptions{}); err != nil {
 		t.Fatalf("SetupStreams: %v", err)
 	}
 
@@ -187,7 +187,7 @@ func TestWorkQueueRoundTrip(t *testing.T) {
 func TestResultConsumer(t *testing.T) {
 	js := startTestServer(t)
 	ctx := context.Background()
-	if err := SetupStreams(ctx, js); err != nil {
+	if err := SetupStreams(ctx, js, StreamOptions{}); err != nil {
 		t.Fatalf("SetupStreams: %v", err)
 	}
 

@@ -9,7 +9,9 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+	"time"
 
+	"github.com/nats-io/nats.go"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/Loxstomper/harness/internal/agent"
@@ -164,20 +166,39 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		}
 	}()
 
-	// Embedded NATS + JetStream. The store dir lives under the repo so JetStream
-	// state survives a restart (the crash-and-resume model), rather than a temp dir.
-	storeDir := filepath.Join(repo, ".harness", "jetstream")
-	if mkErr := os.MkdirAll(storeDir, 0o750); mkErr != nil {
-		return nil, mkErr
-	}
-	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{Name: "harness", StoreDir: storeDir, ClientAddr: opts.natsAddr})
-	if err != nil {
-		return nil, err
-	}
-	releases = append(releases, srv.Shutdown)
-	nc, err := srv.Connect()
-	if err != nil {
-		return nil, err
+	// NATS + JetStream. Two deployment shapes, selected by the infra overlay's nats.url:
+	//   - empty → an embedded in-process server (the bootstrap/dev default): this process
+	//     hosts NATS, optionally exposed on a TCP listener via --nats-addr so a separate
+	//     `harness approve` can reach it.
+	//   - set   → connect to that EXTERNAL cluster (distributed, T5.8); no embedded server
+	//     is started, so --nats-addr has nothing to expose and is ignored.
+	// Either way the orchestrator and runner take the same *nats.Conn (location
+	// transparency); only the composition root differs.
+	var nc *nats.Conn
+	if url := cfg.Infra.NATS.URL; url == "" {
+		// The store dir lives under the repo so JetStream state survives a restart (the
+		// crash-and-resume model), rather than a temp dir.
+		storeDir := filepath.Join(repo, ".harness", "jetstream")
+		if mkErr := os.MkdirAll(storeDir, 0o750); mkErr != nil {
+			return nil, mkErr
+		}
+		srv, serr := messaging.NewEmbeddedServer(messaging.ServerConfig{Name: "harness", StoreDir: storeDir, ClientAddr: opts.natsAddr})
+		if serr != nil {
+			return nil, serr
+		}
+		releases = append(releases, srv.Shutdown)
+		nc, err = srv.Connect()
+		if err != nil {
+			return nil, err
+		}
+	} else {
+		if opts.natsAddr != "" {
+			log.Warn("harness run: --nats-addr ignored because nats.url points at an external cluster", "nats_url", url)
+		}
+		nc, err = messaging.Connect(url, nats.Name("harness"))
+		if err != nil {
+			return nil, err
+		}
 	}
 	releases = append(releases, nc.Close)
 	js, err := messaging.JetStream(nc)
@@ -185,9 +206,13 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		return nil, err
 	}
 	// Create the streams up front so neither loop races the other on startup (the
-	// runner's consumer needs the work stream to exist; the orchestrator also calls
-	// this, idempotently).
-	if ssErr := messaging.SetupStreams(context.Background(), js); ssErr != nil {
+	// runner's consumer needs the work stream to exist; the orchestrator also calls this,
+	// idempotently, with the SAME options). Replicas/max-age come from the infra overlay.
+	streamOpts := messaging.StreamOptions{
+		Replicas:     cfg.Infra.NATS.JetStream.Replicas,
+		ResultMaxAge: time.Duration(cfg.Infra.NATS.JetStream.MaxAge),
+	}
+	if ssErr := messaging.SetupStreams(context.Background(), js, streamOpts); ssErr != nil {
 		return nil, ssErr
 	}
 

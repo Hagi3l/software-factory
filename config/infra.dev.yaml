@@ -21,7 +21,16 @@ sandbox:
     go-toolchain:
       image: harness/go-toolchain:dev
 nats:
-  url: nats://localhost:4222
+  # url empty -> the in-process embedded NATS server (the bootstrap/dev shape; expose it on a
+  # TCP listener for `harness approve` with `harness run --nats-addr host:port`). Point url at
+  # an external cluster (e.g. nats://nats-1:4222,nats://nats-2:4222) to run distributed (T5.8)
+  # — same code, no rebuild (location transparency). When url is set the embedded server is
+  # NOT started and --nats-addr is ignored.
+  url: ""
+  # replicas is the JetStream replication factor applied to every stream; 1 is the only valid
+  # value on the single embedded server, >1 needs an external cluster of at least that size.
+  # max_age bounds how long the result stream retains envelopes for the orchestrator to
+  # consume + replay (the work/dlq/approvals streams are deliberately unbounded).
   jetstream: { replicas: 1, max_age: 168h }
 broker:
   allowlist: [llm-api, nats, git]

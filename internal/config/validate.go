@@ -94,6 +94,7 @@ func (c *Config) Validate() error {
 	} else {
 		c.validateModels(add)
 		c.validateSandbox(add)
+		c.validateNATS(add)
 		c.validateOTel(add)
 		c.validateArtifacts(add)
 	}
@@ -548,6 +549,66 @@ func (c *Config) validateSandbox(add func(string, ...any)) {
 // *behavior* — duplicated as a bare literal here only to avoid pulling the heavy OTel SDK
 // (telemetry's transitive deps) into this foundational config package just for one string.
 const otelEndpointStdout = "stdout"
+
+// validateNATS checks the messaging endpoint and JetStream knobs the infra overlay
+// surfaces (nats.url, nats.jetstream). Like the other infra checks it catches an
+// environment-specific typo loud and early rather than as an opaque connect/stream
+// failure mid-run. The url selects the deployment shape: empty = the embedded
+// in-process server (the bootstrap/dev default, location transparency); set = an
+// external cluster the run dials instead (distributed, T5.8). See specs/messaging.md,
+// specs/configuration.md.
+func (c *Config) validateNATS(add func(string, ...any)) {
+	n := c.Infra.NATS
+	// When set, every comma-separated endpoint must be a dialable nats URL or host:port.
+	if n.URL != "" {
+		for _, ep := range strings.Split(n.URL, ",") {
+			ep = strings.TrimSpace(ep)
+			if !validNATSEndpoint(ep) {
+				add("nats.url endpoint %q must be a nats:// URL or host:port (leave nats.url empty for the embedded in-process server)", ep)
+			}
+		}
+	}
+	js := n.JetStream
+	if js.Replicas < 0 {
+		add("nats.jetstream.replicas must be >= 0 (0 or 1 = a single replica)")
+	}
+	// >1 replica needs an external cluster of at least that size; the embedded in-process
+	// server is single-replica, so replicas>1 with no nats.url is a guaranteed boot failure.
+	if js.Replicas > 1 && n.URL == "" {
+		add("nats.jetstream.replicas %d requires an external cluster (set nats.url); the embedded in-process server is single-replica", js.Replicas)
+	}
+	if js.MaxAge < 0 {
+		add("nats.jetstream.max_age must not be negative")
+	}
+}
+
+// validNATSEndpoint accepts the two forms a nats endpoint takes: a scheme URL
+// (nats://host[:port], or tls://, ws://, wss:// for TLS/websocket transports) carrying a
+// non-empty host, or a bare host:port. A port is optional after a scheme (nats defaults
+// to 4222), required in the bare form so a stray "host" is not mistaken for an endpoint.
+func validNATSEndpoint(ep string) bool {
+	if ep == "" {
+		return false
+	}
+	if i := strings.Index(ep, "://"); i >= 0 {
+		scheme, rest := ep[:i], ep[i+3:]
+		switch scheme {
+		case "nats", "tls", "ws", "wss":
+		default:
+			return false
+		}
+		if rest == "" {
+			return false
+		}
+		if strings.Contains(rest, ":") {
+			host, port, err := net.SplitHostPort(rest)
+			return err == nil && host != "" && port != ""
+		}
+		return true
+	}
+	host, port, err := net.SplitHostPort(ep)
+	return err == nil && host != "" && port != ""
+}
 
 // validateOTel checks the telemetry export endpoint is one telemetry.Setup can act on:
 // "" (export off), "stdout" (the offline stdout exporter), or a host:port OTLP/gRPC
