@@ -1181,7 +1181,39 @@ them); only the *order of attention* changes.
 - [ ] **T5.6 Vetted package mirror/proxy** — route package fetches through a pinning/scanning/logging proxy on the broker allowlist; a read-through cache amortizes downloads without weakening egress control. ([security.md](specs/security.md), [components/runner.md](specs/components/runner.md))
 - [ ] **T5.7 Scoped short-lived secret minting** — the runner mints a per-task git token scoped to push *only* the task branch, injected for the invocation lifetime and dying with the sandbox (replaces the bootstrap local-repo push). ([components/runner.md](specs/components/runner.md), [security.md](specs/security.md))
 - [ ] **T5.8 Distributed NATS** — an external cluster with concrete JetStream stream defs (retention / replicas / max-age — the messaging.md OPEN) and runners across hosts, swapped in for the embedded in-process server. ([messaging.md](specs/messaging.md))
-- [ ] **T5.9 S3/MinIO artifact backend** — an `artifact.Store` implementation for distributed deployments (config `bucket`), shared across hosts and the control room. ([components/artifact-store.md](specs/components/artifact-store.md))
+- [x] **T5.9 S3/MinIO artifact backend** — *done.* The distributed-deployment artifact store: a second
+  `artifact.Store` implementation over plain S3 (`internal/artifact/s3.go`, `S3Store`) so runners on many
+  hosts and the control room share one bucket, the same Store contract the files backend serves on one host.
+  Speaks plain S3 via **minio-go v7.2.0**, so it serves AWS S3 and any S3-compatible service (MinIO is the
+  dev test target) identically. **Single-source address layout:** extracted the files backend's hash
+  validation + sharding into a shared **`storeKey(hash)`** (`store.go`) returning `sha256/<ab>/<rest>` — both
+  backends now derive object paths/keys through it, so their content-address layout *and* their rejection of
+  a malformed (untrusted) hash can never drift; `FilesStore.pathFor` delegates to it. **S3Store:** `Put`
+  buffers content to a temp file while hashing (the key IS the hash, unknown until fully read, and minio needs
+  the exact size up front — a temp file also keeps a multi-MB transcript off the heap, mirroring the files
+  backend), StatObjects for idempotent dedup, then PutObject; `Get` StatObjects first so a missing key is
+  `ErrNotFound` *here* (minio's GetObject defers the request, which would otherwise hide not-found behind the
+  reader); `Has` maps NoSuchKey→false. `isNotFound` maps S3 NoSuchKey/NoSuchBucket/404 to the `os.ErrNotExist`
+  analog. **Network-free constructor** (`NewS3Store`): `minio.New` only builds a client (dials lazily), safe
+  in the network-free composition root like the OTLP exporter — a missing bucket/unreachable endpoint surfaces
+  on the first best-effort harvest, not at boot. Endpoint accepts an optional `http://`/`https://` scheme
+  (http = plaintext dev MinIO; bare host = TLS); empty endpoint derives `s3.<region>.amazonaws.com`.
+  **Credentials from the environment** (`credentials.NewEnvAWS`: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/
+  `AWS_SESSION_TOKEN`), never config — the model-API-key posture. **Config:** `ArtifactsConfig` gains
+  `Bucket`/`Endpoint`/`Region`; `artifact.Open`'s s3 case now constructs the store (was a "not implemented"
+  stub); new **`config.validateArtifacts`** (wired into `Validate`) catches an s3 backend with no
+  bucket or no endpoint/region at the `harness validate` gate before a store is built (the files path stays an
+  Open-time check). **Verified end-to-end against real MinIO in Docker:** `TestS3StoreIntegration` boots a
+  throwaway `minio/minio` container on a free loopback port, creates the bucket, builds the store via the
+  production `Open` path (creds from env), and drives the full contract — content round-trip, dedup
+  (same bytes→same key, no re-upload), distinct content, `ErrNotFound`, malformed-hash rejection (the
+  traversal guard fires before any S3 call), and a 5 MiB streamed upload — skipping cleanly when Docker/the
+  image is unavailable. Plus `Open`-path unit tests (s3 opens with endpoint or region; fails with neither / no
+  bucket) and `validateArtifacts` table tests. Deps: minio-go + transitive (go.mod/go.sum, `go mod tidy`).
+  `go build`/`go vet`/`golangci-lint`/`gosec` clean; full unit suite green. Docs: `docs/configuration.md`
+  (artifacts bullet + commented s3 example) + spec `artifact-store.md` (config example, plain-S3/shared-layout/
+  env-creds/bucket-prerequisite notes). The store is pluggable by config — dev runs `files`, production runs
+  `s3`, no code change. ([components/artifact-store.md](specs/components/artifact-store.md))
 - [ ] **T5.10 Provenance signing + key custody** — sign commits/artifacts with the harness identity and verify on read. *(OPEN, security.md.)* ([security.md](specs/security.md))
 - [ ] **T5.11** *(optional)* Warm sandbox pools + HA orchestrator via NATS-KV leader election. *(OPEN.)* ([components/runner.md](specs/components/runner.md), [components/orchestrator.md](specs/components/orchestrator.md))
 - [ ] **T5.2 Firecracker sandbox backend** ***(lowest priority — see the Phase 5 prioritization note above; deliberately last)*** — a KVM-microVM backend implementing the `Backend`/`Sandbox` interface: rootfs seeding, vsock I/O (T5.1, done), resource limits incl. disk, deterministic teardown. The production isolation target. **Blocked on hardware, not on code:** needs KVM (bare-metal or nested virt) that the dev environment lacks, so it cannot be built-and-verified here — do it only once such hardware is available, after the rest of Phase 5 + Phase 6 (all of which the Docker backend supports for dev/human-reviewed runs). Kept as ID T5.2 (referenced elsewhere) despite its end-of-list position. (needs T5.1) ([components/sandbox.md](specs/components/sandbox.md))

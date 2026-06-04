@@ -2,9 +2,12 @@ package artifact
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
+	"strings"
 
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/core"
@@ -64,8 +67,31 @@ func Open(cfg config.ArtifactsConfig) (Store, error) {
 		}
 		return NewFilesStore(cfg.Path)
 	case BackendS3:
-		return nil, fmt.Errorf("artifact: s3 backend is not implemented yet (Phase 5)")
+		return NewS3Store(cfg)
 	default:
 		return nil, fmt.Errorf("artifact: unknown backend %q (want %q or %q)", cfg.Backend, BackendFiles, BackendS3)
 	}
+}
+
+// storeKey validates a content hash and returns its store-relative key,
+// "<algo>/<ab>/<rest>" with forward slashes — the layout every backend shares (a path
+// under the files root, an object key under the S3 bucket), sharded by the first
+// digest byte so no single directory/prefix accumulates millions of entries. The
+// strict shape check (the algorithm prefix plus exactly a SHA-256's worth of hex) is
+// also the traversal guard: a hash arrives in an agent-produced Result and is therefore
+// untrusted, so anything that is not pure hex (no '/', no '..') is rejected before it
+// ever names a path or key. It is the single source of truth for both backends so their
+// address layout — and their rejection of a malformed hash — can never drift.
+func storeKey(hash string) (string, error) {
+	digest, ok := strings.CutPrefix(hash, HashPrefix)
+	if !ok {
+		return "", fmt.Errorf("artifact: malformed hash %q (want %s<hex>)", hash, HashPrefix)
+	}
+	if len(digest) != sha256.Size*2 {
+		return "", fmt.Errorf("artifact: malformed hash %q (wrong digest length)", hash)
+	}
+	if _, err := hex.DecodeString(digest); err != nil {
+		return "", fmt.Errorf("artifact: malformed hash %q (not hex)", hash)
+	}
+	return HashAlgorithm + "/" + digest[:2] + "/" + digest[2:], nil
 }

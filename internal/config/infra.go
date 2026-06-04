@@ -107,10 +107,17 @@ type BrokerConfig struct {
 	Allowlist []string `yaml:"allowlist"` // e.g. [llm-api, nats, package-mirror, git]
 }
 
-// ArtifactsConfig selects the content-addressed artifact store backend.
+// ArtifactsConfig selects the content-addressed artifact store backend. The files
+// backend fits the single-host dev story; the s3 backend is for distributed
+// deployments where runners on many hosts and the control room share one bucket.
+// Credentials are NEVER in config — like model API keys, the s3 backend reads them
+// from the environment (AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN).
 type ArtifactsConfig struct {
-	Backend string `yaml:"backend"`        // "files" (dev) | "s3" (distributed)
-	Path    string `yaml:"path,omitempty"` // filesystem root for the files backend
+	Backend  string `yaml:"backend"`            // "files" (dev) | "s3" (distributed)
+	Path     string `yaml:"path,omitempty"`     // filesystem root for the files backend
+	Bucket   string `yaml:"bucket,omitempty"`   // object bucket for the s3 backend
+	Endpoint string `yaml:"endpoint,omitempty"` // s3 endpoint host[:port], optional scheme (MinIO/non-AWS); empty = AWS regional endpoint
+	Region   string `yaml:"region,omitempty"`   // s3 region (required when endpoint is empty)
 }
 
 // OTelConfig configures trace/metric export. An empty Endpoint disables export.

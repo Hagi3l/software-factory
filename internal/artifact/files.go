@@ -9,7 +9,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/Loxstomper/harness/internal/core"
 )
@@ -135,21 +134,13 @@ func (s *FilesStore) Has(ctx context.Context, hash string) (bool, error) {
 	return true, nil
 }
 
-// pathFor maps a content hash to its on-disk location. It validates the hash shape
-// strictly — the algorithm prefix plus exactly a SHA-256's worth of hex — which is
-// also the path-traversal guard: a hash arrives in an agent-produced Result and is
-// therefore untrusted, so anything that is not pure hex (no '/', no '..') is
-// rejected before it reaches the filesystem.
+// pathFor maps a content hash to its on-disk location under the store root, using the
+// shared storeKey for the (strict, traversal-guarding) hash validation and sharded
+// layout so the files and S3 backends address content identically.
 func (s *FilesStore) pathFor(hash string) (string, error) {
-	digest, ok := strings.CutPrefix(hash, HashPrefix)
-	if !ok {
-		return "", fmt.Errorf("artifact: malformed hash %q (want %s<hex>)", hash, HashPrefix)
+	key, err := storeKey(hash)
+	if err != nil {
+		return "", err
 	}
-	if len(digest) != sha256.Size*2 {
-		return "", fmt.Errorf("artifact: malformed hash %q (wrong digest length)", hash)
-	}
-	if _, err := hex.DecodeString(digest); err != nil {
-		return "", fmt.Errorf("artifact: malformed hash %q (not hex)", hash)
-	}
-	return filepath.Join(s.root, HashAlgorithm, digest[:2], digest[2:]), nil
+	return filepath.Join(s.root, filepath.FromSlash(key)), nil
 }

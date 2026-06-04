@@ -69,13 +69,21 @@ Like the [sandbox](sandbox.md), the backend is an interface chosen by config:
 artifacts:
   backend: files          # files | s3
   path: ./.harness/artifacts        # files backend
-  # bucket: harness-artifacts       # s3/minio backend
+  # backend: s3                      # s3/minio backend:
+  # bucket: harness-artifacts        #   the shared object bucket (must already exist)
+  # endpoint: minio.internal:9000    #   MinIO/non-AWS host[:port] (http:// = plaintext dev)
+  # region: us-east-1                #   required when endpoint is empty (derives the AWS endpoint)
 ```
 
 - **files** — content-addressed local files. Simplest; fits the single-binary,
   single-host dev story.
 - **s3 / minio** — for distributed deployments where runners on many hosts and the
-  control room must share storage.
+  control room must share storage. Speaks plain S3, so it serves AWS S3 and any
+  S3-compatible service (MinIO) identically. Objects use the same sharded
+  content-address layout (`sha256/<ab>/<rest>`) the files backend does, so a hash means
+  the same thing on either backend. Credentials come from the environment, never config
+  (the same posture as model API keys); the bucket is an operator prerequisite — the
+  backend reads and writes it but never creates it.
 
 Same pluggability principle as the sandbox: dev runs local, production runs
 distributed, no code change.

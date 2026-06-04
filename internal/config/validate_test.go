@@ -415,6 +415,44 @@ func TestValidateOTelEndpointRejectsMalformed(t *testing.T) {
 	}
 }
 
+// The artifact store backend is validated at the startup gate so a distributed (s3)
+// deployment with a missing bucket/endpoint fails loud at `harness validate` rather than
+// silently dropping every harvested artifact at run time. The files default needs no
+// extra config here (its path is checked when the store opens).
+func TestValidateArtifactsValidForms(t *testing.T) {
+	cases := []ArtifactsConfig{
+		{}, // empty default → files
+		{Backend: "files", Path: "./.harness/artifacts"},     // explicit files
+		{Backend: "s3", Bucket: "b", Region: "us-east-1"},    // AWS via region
+		{Backend: "s3", Bucket: "b", Endpoint: "minio:9000"}, // MinIO via endpoint
+	}
+	for _, a := range cases {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.Artifacts = a
+		if err := c.Validate(); err != nil {
+			t.Errorf("artifacts %+v: Validate returned %v, want nil", a, err)
+		}
+	}
+}
+
+func TestValidateArtifactsRejectsMisconfigured(t *testing.T) {
+	cases := []struct {
+		a    ArtifactsConfig
+		want string
+	}{
+		{ArtifactsConfig{Backend: "s3", Region: "us-east-1"}, "artifacts.bucket"},               // no bucket
+		{ArtifactsConfig{Backend: "s3", Bucket: "b"}, "artifacts.endpoint or artifacts.region"}, // no endpoint+region
+		{ArtifactsConfig{Backend: "carrier-pigeon"}, "artifacts.backend"},                       // unknown backend
+	}
+	for _, tc := range cases {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.Artifacts = tc.a
+		mustContain(t, problems(t, c), tc.want)
+	}
+}
+
 func TestValidateEmptyDAG(t *testing.T) {
 	c := validConfig()
 	c.Souls = nil

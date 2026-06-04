@@ -95,6 +95,7 @@ func (c *Config) Validate() error {
 		c.validateModels(add)
 		c.validateSandbox(add)
 		c.validateOTel(add)
+		c.validateArtifacts(add)
 	}
 
 	if len(problems) == 0 {
@@ -568,6 +569,43 @@ func (c *Config) validateOTel(add func(string, ...any)) {
 			add("otel.endpoint %q must be empty (off), %q, or a host:port OTLP/gRPC collector address",
 				ep, otelEndpointStdout)
 		}
+	}
+}
+
+// Artifact store backend identifiers. These mirror artifact.BackendFiles/BackendS3,
+// duplicated as bare literals here only because the artifact package imports config
+// (so config cannot import it back without a cycle) — the same posture validateOTel
+// takes with the "stdout" sentinel. The artifact package's Open is the authoritative
+// constructor-time check; this validation catches a misconfigured s3 backend at the
+// startup gate (harness validate) before a store is ever built.
+const (
+	artifactBackendFiles = "files"
+	artifactBackendS3    = "s3"
+)
+
+// validateArtifacts checks the artifact store backend is known and that an s3 backend
+// names a bucket and a reachable endpoint/region. The files backend's path requirement
+// is enforced when the store is opened (artifact.Open also resolves a relative path
+// against the repo), so it is deliberately not duplicated here — config validation is
+// about catching environment-specific typos loud and early, and the s3 knobs are the
+// ones that only exist for a distributed deployment. See specs/components/artifact-store.md.
+func (c *Config) validateArtifacts(add func(string, ...any)) {
+	a := c.Infra.Artifacts
+	switch a.Backend {
+	case "", artifactBackendFiles:
+		// files (and the empty default): path is checked at Open time.
+	case artifactBackendS3:
+		if strings.TrimSpace(a.Bucket) == "" {
+			add("artifacts.bucket is required for the %q backend", artifactBackendS3)
+		}
+		// minio needs a concrete endpoint to dial; with no explicit endpoint the backend
+		// derives the AWS regional one (s3.<region>.amazonaws.com), so a region is required
+		// in that case. A MinIO/non-AWS deployment sets endpoint instead.
+		if strings.TrimSpace(a.Endpoint) == "" && strings.TrimSpace(a.Region) == "" {
+			add("artifacts.endpoint or artifacts.region is required for the %q backend", artifactBackendS3)
+		}
+	default:
+		add("artifacts.backend %q is unknown (want %q or %q)", a.Backend, artifactBackendFiles, artifactBackendS3)
 	}
 }
 

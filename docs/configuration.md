@@ -171,8 +171,12 @@ nats:
 broker:
   allowlist: [llm-api, nats, git]   # the only egress the sandbox is granted
 artifacts:
-  backend: files             # files in dev; S3/MinIO in Phase 5
-  path: ./.harness/artifacts
+  backend: files             # files (single-host dev) | s3 (distributed: S3/MinIO)
+  path: ./.harness/artifacts # files backend root (relative paths resolve against the repo)
+  # backend: s3              # for s3, set bucket + (endpoint | region); creds come from the env
+  # bucket: harness-artifacts
+  # endpoint: minio.internal:9000   # MinIO/non-AWS host[:port]; prefix http:// for plaintext dev
+  # region: us-east-1               # required when endpoint is empty (derives the AWS endpoint)
 otel:
   endpoint: localhost:4317   # "" = off, "stdout" = offline dev, host:port = OTLP/gRPC
 models:
@@ -198,6 +202,15 @@ models:
   at a digest-pinned image/rootfs. Pin by digest (`@sha256:…`) so provenance records the
   exact toolchain bytes. `harness validate` fails if any `soul.sandbox` has no entry here
   for the active backend.
+- **`artifacts`** selects the content-addressed store. `files` (the dev default) keeps
+  evidence under `path` on one host. `s3` is the distributed backend (AWS S3 or any
+  S3-compatible service, e.g. MinIO) so runners on many hosts and the control room share
+  one `bucket`; set an `endpoint` (host[:port], optional `http://`/`https://` scheme — a
+  bare host implies TLS) for MinIO/non-AWS, or a `region` to derive the AWS endpoint.
+  Credentials are **never** in config — like model API keys, the s3 backend reads them
+  from the environment (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` /
+  `AWS_SESSION_TOKEN`). The bucket must already exist; the backend never creates it.
+  `harness validate` fails an `s3` config that names no bucket or no endpoint/region.
 - **`otel.endpoint`** defaults to off; `stdout` is for offline dev, a `host:port` is
   OTLP/gRPC to an external collector (a Phase 5 deployment step).
 
