@@ -5,7 +5,7 @@
 # vault-toolchain sandbox. Model resolves via infra.dev.yaml; key from the environment.
 name:    vault-test-author
 role:    test-author
-model:   "deepseek/deepseek-v4"
+model:   "deepseek/deepseek-v4-flash"
 persona: souls/prompts/test-author.md
 tools:   [fs, shell, git]
 sandbox: vault-toolchain

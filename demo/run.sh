@@ -72,7 +72,10 @@ git -C "$SITE" init -q -b main
 git -C "$SITE" add .
 git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
   commit -qm 'seed: Acme landing page spec'
-( cd "$SITE" && "$BD" init --prefix harness >/dev/null )
+# --non-interactive: bd init drops into a wizard when stdin is a tty (the normal case
+# when you run this script by hand). Its stdout is hidden below, so the prompt would be
+# invisible and bd would hang forever waiting on stdin. Force the non-interactive path.
+( cd "$SITE" && "$BD" init --prefix harness --non-interactive >/dev/null )
 
 # ---- validate, seed, run ---------------------------------------------------------------
 say "Validating demo config"

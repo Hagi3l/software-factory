@@ -51,7 +51,7 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
 - **Docker** running (the sandbox backend).
 - An **OpenRouter API key** in `OPENAI_API_KEY` (the openai-compat adapter and the
   requirements-planner send it as the bearer token). Default model is
-  `deepseek/deepseek-v4`; override with `MODEL=` (must support function calling — the agent
+  `deepseek/deepseek-v4-flash`; override with `MODEL=` (must support function calling — the agent
   loop drives the model through structured tool calls). A full-DAG run on real Go is
   demanding, so prefer a capable model.
 - **beads** (`bd`) on your `PATH` (or pass `BD=/path/to/bd`).

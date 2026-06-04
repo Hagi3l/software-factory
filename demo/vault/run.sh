@@ -23,7 +23,7 @@
 set -euo pipefail
 
 # ---- knobs (override via env) ----------------------------------------------------------
-DEFAULT_MODEL='deepseek/deepseek-v4'
+DEFAULT_MODEL='deepseek/deepseek-v4-flash'
 DEFAULT_ENDPOINT='https://openrouter.ai/api/v1'
 MODEL="${MODEL:-$DEFAULT_MODEL}"
 MODEL_ENDPOINT="${MODEL_ENDPOINT:-$DEFAULT_ENDPOINT}"
@@ -86,7 +86,10 @@ git -C "$SITE" init -q -b main
 git -C "$SITE" add .
 git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
   commit -qm 'seed: established secrets vault (auth + secrets + audit + dashboard)'
-( cd "$SITE" && "$BD" init --prefix harness >/dev/null )
+# --non-interactive: bd init drops into a wizard when stdin is a tty (the normal case
+# when you run this script by hand). Its stdout is hidden below, so the prompt would be
+# invisible and bd would hang forever waiting on stdin. Force the non-interactive path.
+( cd "$SITE" && "$BD" init --prefix harness --non-interactive >/dev/null )
 
 cleanup() { [ -n "${KEEP_SITE:-}" ] || rm -rf "$SITE"; }
 trap cleanup EXIT

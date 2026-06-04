@@ -6,7 +6,7 @@
 # are validated, not trusted. Model resolves via infra.dev.yaml; key from the environment.
 name:    vault-planner
 role:    planner
-model:   "deepseek/deepseek-v4"
+model:   "deepseek/deepseek-v4-flash"
 persona: souls/prompts/planner.md
 tools:   [fs, shell, git]
 sandbox: vault-toolchain

@@ -38,7 +38,7 @@ models:
   # calling — the agent loop drives it through structured tool calls. A full-DAG run on real
   # Go is demanding, so default to a capable model (override with MODEL= for a cheaper/other
   # slug). cost is the per-million-token price feeding the policy.budget USD accounting.
-  "deepseek/deepseek-v4":
+  "deepseek/deepseek-v4-flash":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
     cost: { input_per_mtok: 0.28, output_per_mtok: 0.88 }

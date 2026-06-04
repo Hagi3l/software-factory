@@ -33,7 +33,7 @@ spec_depth: 1
 # not the runner/broker) and resolves its model through infra.dev.yaml's `models` registry;
 # the API key comes from the environment. Omitting this block disables the wizard.
 requirements_planner:
-  model:      "deepseek/deepseek-v4"
+  model:      "deepseek/deepseek-v4-flash"
   persona:    souls/prompts/requirements-planner.md
   max_tokens: 4096
 
