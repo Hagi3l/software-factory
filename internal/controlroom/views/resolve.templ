@@ -53,7 +53,7 @@ templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messa
 					hx-swap="innerHTML"
 					class="flex min-h-64 flex-col gap-3 rounded-lg border border-border bg-surface p-4"
 				>
-					@WizardTranscript(msgs)
+					@WizardTranscript(msgs, false)
 				</div>
 				<form
 					hx-post="/create/message"

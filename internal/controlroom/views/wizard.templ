@@ -59,7 +59,7 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 					hx-swap="innerHTML"
 					class="flex min-h-64 flex-col gap-3 rounded-lg border border-border bg-surface p-4"
 				>
-					@WizardTranscript(msgs)
+					@WizardTranscript(msgs, false)
 				</div>
 				<form
 					hx-post="/create/message"
@@ -94,7 +94,13 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 // /create/message (so the human's just-sent message appears at once). Because the live
 // `delta` target is re-rendered empty on every re-fetch, a completed turn cleanly finalizes
 // the streamed reply into a proper bubble and resets the live line for the next turn.
-templ WizardTranscript(msgs []wizard.Message) {
+//
+// busy reports whether a reply turn is in flight but has not yet streamed a token: in that
+// window the live target shows a typing indicator instead of nothing, filling the model's
+// first-token latency. The first `delta` event swaps #wizard-live's content, replacing the
+// indicator with the streamed reply; the terminal `turn` re-fetch renders with busy=false,
+// clearing it.
+templ WizardTranscript(msgs []wizard.Message, busy bool) {
 	if len(msgs) == 0 {
 		<p class="text-sm text-muted">No messages yet — say what you'd like built to begin.</p>
 	} else {
@@ -103,9 +109,29 @@ templ WizardTranscript(msgs []wizard.Message) {
 		}
 	}
 	// The streaming target: assistant `delta` events replace its content as the reply is
-	// generated. Empty (between turns) it renders nothing; whitespace-pre-wrap preserves the
-	// model's line breaks while it streams.
-	<div id="wizard-live" sse-swap="delta" class="whitespace-pre-wrap text-sm leading-relaxed text-fg"></div>
+	// generated. While a turn is in flight but no token has arrived yet, it holds the typing
+	// indicator; the first `delta` overwrites it. Whitespace-pre-wrap preserves the model's
+	// line breaks while it streams.
+	<div id="wizard-live" sse-swap="delta" class="whitespace-pre-wrap text-sm leading-relaxed text-fg">
+		if busy {
+			@wizardTyping()
+		}
+	</div>
+}
+
+// wizardTyping is the "planner is thinking…" indicator shown in the live target during the
+// first-token latency window: three pulsing dots in a left-aligned bubble matching the
+// planner's reply style, so the wait reads as the planner composing. The staggered
+// animation-delay offsets give the dots a wave. It carries no text, so it never collides with
+// the streamed prose that replaces it on the first `delta`.
+templ wizardTyping() {
+	<div class="flex justify-start">
+		<div class="flex items-center gap-1.5 rounded-lg bg-canvas px-3 py-2.5" aria-label="The requirements planner is thinking" role="status">
+			<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-muted"></span>
+			<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-muted [animation-delay:200ms]"></span>
+			<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-muted [animation-delay:400ms]"></span>
+		</div>
+	</div>
 }
 
 // wizardBubble renders one finalized turn — the human's prompt aligned right, the planner's

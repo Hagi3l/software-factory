@@ -805,7 +805,7 @@ func (s *Server) handleCreateMessages(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
 		return
 	}
-	s.render(w, r, views.WizardTranscript(sess.Messages()))
+	s.render(w, r, views.WizardTranscript(sess.Messages(), sess.Busy()))
 }
 
 // handleCreateMessage records the human's message and kicks off the planner's reply, then
@@ -828,7 +828,7 @@ func (s *Server) handleCreateMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess.Send(r.FormValue("text"))
-	s.render(w, r, views.WizardTranscript(sess.Messages()))
+	s.render(w, r, views.WizardTranscript(sess.Messages(), sess.Busy()))
 }
 
 // handleCreateLedger returns just the alignment-ledger panel fragment (T4.13) — the htmx swap
@@ -871,7 +871,7 @@ func (s *Server) handleCreateLedgerAnswer(w http.ResponseWriter, r *http.Request
 		return
 	}
 	sess.Answer(parseForkAnswers(r, len(sess.Ledger())))
-	s.render(w, r, views.WizardTranscript(sess.Messages()))
+	s.render(w, r, views.WizardTranscript(sess.Messages(), sess.Busy()))
 }
 
 // parseForkAnswers collects the per-fork answer inputs from a batch submit into []ForkAnswer,
