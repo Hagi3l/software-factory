@@ -50,10 +50,15 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
 
 - **Docker** running (the sandbox backend).
 - An **OpenRouter API key** in `OPENAI_API_KEY` (the openai-compat adapter and the
-  requirements-planner send it as the bearer token). Default model is
+  requirements-planner send it as the bearer token). The autonomous souls default to
   `deepseek/deepseek-v4-flash`; override with `MODEL=` (must support function calling — the agent
   loop drives the model through structured tool calls). A full-DAG run on real Go is
-  demanding, so prefer a capable model.
+  demanding, so prefer a capable model. The **requirements-planner** (the Create-Task
+  wizard) is pinned separately to the stronger `deepseek/deepseek-v4-pro` and is *not*
+  affected by `MODEL=`: it is the one human-in-the-loop conversation and must reliably
+  follow the `ledger`/`draft` output protocol that drives the alignment ledger UI, which
+  the cheaper flash tier does not do dependably. To change it, edit `requirements_planner.model`
+  in `config/harness.yaml`.
 - **beads** (`bd`) on your `PATH` (or pass `BD=/path/to/bd`).
 - Go + `make` (to build the `harness` binary).
 

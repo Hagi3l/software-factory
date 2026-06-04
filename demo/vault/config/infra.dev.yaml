@@ -32,13 +32,24 @@ artifacts:
 otel:
   endpoint: ""        # tracing off for the demo ("stdout" to see spans, host:port for OTLP)
 models:
-  # The OpenRouter model slug, sent verbatim as the request's model field; every soul and
-  # the requirements-planner reference this same registry key. run.sh substitutes this (and
-  # the endpoint) when you set MODEL= / MODEL_ENDPOINT=. The model MUST support function
-  # calling — the agent loop drives it through structured tool calls. A full-DAG run on real
-  # Go is demanding, so default to a capable model (override with MODEL= for a cheaper/other
-  # slug). cost is the per-million-token price feeding the policy.budget USD accounting.
+  # The OpenRouter model slug, sent verbatim as the request's model field; every soul
+  # references this registry key (the requirements-planner uses the -pro entry below).
+  # run.sh substitutes this (and the endpoint) when you set MODEL= / MODEL_ENDPOINT=. The
+  # model MUST support function calling — the agent loop drives it through structured tool
+  # calls. A full-DAG run on real Go is demanding, so default to a capable model (override
+  # with MODEL= for a cheaper/other slug). cost is the per-million-token price feeding the
+  # policy.budget USD accounting.
   "deepseek/deepseek-v4-flash":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
     cost: { input_per_mtok: 0.28, output_per_mtok: 0.88 }
+  # The requirements-planner (the Create-Task wizard) runs on the stronger -pro tier: it is
+  # the single human-in-the-loop conversation and the entire correctness lever, and it must
+  # reliably follow the fenced ```ledger / ```draft output protocol that drives the alignment
+  # ledger UI — a job the cheaper flash tier does not do dependably. Pinned separately so a
+  # MODEL= override (which only rewrites the flash slug) swaps the autonomous souls without
+  # downgrading the planner. cost is an estimate — set it to the real OpenRouter price.
+  "deepseek/deepseek-v4-pro":
+    provider: openai-compat
+    endpoint: https://openrouter.ai/api/v1
+    cost: { input_per_mtok: 0.55, output_per_mtok: 2.19 }

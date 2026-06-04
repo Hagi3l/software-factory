@@ -66,9 +66,10 @@ CONFIG_DIR="$DEMO_DIR/config"
 if [ "$MODEL" != "$DEFAULT_MODEL" ] || [ "$MODEL_ENDPOINT" != "$DEFAULT_ENDPOINT" ]; then
   CONFIG_DIR="$(mktemp -d -t harness-vault-cfg-XXXXXX)/config"
   cp -r "$DEMO_DIR/config" "$CONFIG_DIR"
-  # The model name is the registry key in infra.dev.yaml, the requirements_planner model,
-  # AND the `model:` field in every soul; substitute all so they stay consistent
-  # (validation cross-checks them).
+  # The model name is the flash registry key in infra.dev.yaml AND the `model:` field in
+  # every soul; substitute both so they stay consistent (validation cross-checks them). The
+  # requirements_planner is pinned to the separate -pro registry key and is intentionally
+  # NOT rewritten, so a MODEL= override swaps the souls without downgrading the planner.
   for f in "$CONFIG_DIR/infra.dev.yaml" "$CONFIG_DIR/harness.yaml" "$CONFIG_DIR/souls/"*.yaml; do
     sed -i.bak -e "s|$DEFAULT_MODEL|$MODEL|g" -e "s|$DEFAULT_ENDPOINT|$MODEL_ENDPOINT|g" "$f"
     rm -f "$f.bak"
