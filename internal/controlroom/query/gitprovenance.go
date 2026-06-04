@@ -26,9 +26,10 @@ const (
 // inverse of the same core.Provenance.Trailer the orchestrator renders — one format, no
 // drift.
 type GitProvenance struct {
-	repo string
-	ref  string
-	run  func(ctx context.Context, args []string) ([]byte, error)
+	repo           string
+	ref            string
+	allowedSigners string // path to the allowed-signers file for verify-on-read; "" disables signature checking (T5.10)
+	run            func(ctx context.Context, args []string) ([]byte, error)
 }
 
 // GitOption configures a GitProvenance reader.
@@ -37,6 +38,16 @@ type GitOption func(*GitProvenance)
 // WithRef sets the git ref whose history is read (default "refs/heads/main"). main is where
 // integration commits land, so it is the provenance of record.
 func WithRef(ref string) GitOption { return func(g *GitProvenance) { g.ref = ref } }
+
+// WithAllowedSigners turns on verify-on-read (T5.10): each merged commit's SSH signature
+// is verified against the allowed-signers file at path (principal -> harness public key),
+// and the verdict surfaces as MergedCommit.Signature. An empty path leaves verification
+// off — every commit reads as SignatureUnchecked — so the caller can pass the configured
+// path unconditionally. The file is public (it holds only public keys), unlike the private
+// signing key the orchestrator holds.
+func WithAllowedSigners(path string) GitOption {
+	return func(g *GitProvenance) { g.allowedSigners = path }
+}
 
 // NewGitProvenance builds a reader over the repo at the given path.
 func NewGitProvenance(repo string, opts ...GitOption) *GitProvenance {
@@ -62,8 +73,20 @@ func (g *GitProvenance) Recent(ctx context.Context, limit int) ([]MergedCommit, 
 	if !g.refExists(ctx) {
 		return nil, nil
 	}
-	out, err := g.run(ctx, []string{"log", g.ref,
-		"--format=%H" + fieldSep + "%B" + recordSep, "-n", fmt.Sprint(limit)})
+	// When verify-on-read is configured, fold git's %G? signature verdict into the SAME
+	// log call (no extra per-commit git invocation): the -c overrides point git at the
+	// allowed-signers file, and an extra %G? field carries the per-commit code. The field
+	// is omitted entirely when no allowed-signers file is set, so unsigned deployments run
+	// the exact original query and every commit reads as SignatureUnchecked.
+	verify := g.allowedSigners != ""
+	var args []string
+	format := "%H" + fieldSep + "%B" + recordSep
+	if verify {
+		args = append(args, "-c", "gpg.format=ssh", "-c", "gpg.ssh.allowedSignersFile="+g.allowedSigners)
+		format = "%H" + fieldSep + "%G?" + fieldSep + "%B" + recordSep
+	}
+	args = append(args, "log", g.ref, "--format="+format, "-n", fmt.Sprint(limit))
+	out, err := g.run(ctx, args)
 	if err != nil {
 		return nil, fmt.Errorf("query: git log %s: %w", g.ref, err)
 	}
@@ -73,7 +96,7 @@ func (g *GitProvenance) Recent(ctx context.Context, limit int) ([]MergedCommit, 
 		if rec == "" {
 			continue
 		}
-		hash, body, ok := strings.Cut(rec, fieldSep)
+		hash, sig, body, ok := splitLogRecord(rec, verify)
 		if !ok {
 			continue
 		}
@@ -81,9 +104,26 @@ func (g *GitProvenance) Recent(ctx context.Context, limit int) ([]MergedCommit, 
 		if !found {
 			continue
 		}
-		commits = append(commits, MergedCommit{Commit: strings.TrimSpace(hash), Provenance: prov})
+		commits = append(commits, MergedCommit{Commit: strings.TrimSpace(hash), Provenance: prov, Signature: sig})
 	}
 	return commits, nil
+}
+
+// splitLogRecord splits one git-log record into its hash, signature status, and body. With
+// verify off the record is hash<fieldSep>body and sig is SignatureUnchecked; with verify on
+// it is hash<fieldSep>%G?<fieldSep>body and the middle field is mapped to a SignatureStatus.
+// The body is taken as the final segment so a fieldSep that somehow appears in it cannot
+// shift the parse (it cannot in practice — fieldSep is ASCII US — but SplitN keeps it safe).
+func splitLogRecord(rec string, verify bool) (hash string, sig SignatureStatus, body string, ok bool) {
+	if !verify {
+		h, b, found := strings.Cut(rec, fieldSep)
+		return h, SignatureUnchecked, b, found
+	}
+	parts := strings.SplitN(rec, fieldSep, 3)
+	if len(parts) != 3 {
+		return "", SignatureUnchecked, "", false
+	}
+	return parts[0], signatureStatusFromGitCode(parts[1]), parts[2], true
 }
 
 // commitForIssue finds the integration commit that landed the given issue, returning its

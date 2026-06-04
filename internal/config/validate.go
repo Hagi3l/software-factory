@@ -97,6 +97,7 @@ func (c *Config) Validate() error {
 		c.validateNATS(add)
 		c.validateOTel(add)
 		c.validateArtifacts(add)
+		c.validateSigning(add)
 	}
 
 	if len(problems) == 0 {
@@ -667,6 +668,21 @@ func (c *Config) validateArtifacts(add func(string, ...any)) {
 		}
 	default:
 		add("artifacts.backend %q is unknown (want %q or %q)", a.Backend, artifactBackendFiles, artifactBackendS3)
+	}
+}
+
+// validateSigning checks the provenance-signing block (T5.10, specs/security.md). Only
+// the run-time-breaking shape fault is gated here: signing turned on with no key is a
+// guaranteed merge failure (every integration commit would try to sign with nothing),
+// so it must fail at the startup gate rather than at the first merge. File existence is
+// deliberately NOT checked — the private key is a runtime-provisioned secret (the
+// API-key posture), and a missing/unreadable key fails loudly when the merger first runs
+// git (fail-closed). AllowedSigners is an independent verify-on-read capability with no
+// shape constraint of its own.
+func (c *Config) validateSigning(add func(string, ...any)) {
+	s := c.Infra.Signing
+	if s.Enabled && strings.TrimSpace(s.Key) == "" {
+		add("signing.enabled is true but signing.key (the SSH private signing key path) is empty")
 	}
 }
 

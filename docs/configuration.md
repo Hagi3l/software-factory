@@ -179,6 +179,10 @@ artifacts:
   # region: us-east-1               # required when endpoint is empty (derives the AWS endpoint)
 otel:
   endpoint: localhost:4317   # "" = off, "stdout" = offline dev, host:port = OTLP/gRPC
+signing:                     # provenance-commit signing (T5.10); omit/disable to leave commits unsigned
+  # enabled: true
+  # key: /run/secrets/harness_ed25519        # SSH private signing key (the harness identity); a runtime secret
+  # allowed_signers: /etc/harness/allowed_signers   # principal -> harness public key, for verify-on-read
 models:
   claude-opus-4-8:
     provider: anthropic
@@ -224,6 +228,18 @@ models:
   `harness validate` fails an `s3` config that names no bucket or no endpoint/region.
 - **`otel.endpoint`** defaults to off; `stdout` is for offline dev, a `host:port` is
   OTLP/gRPC to an external collector (a Phase 5 deployment step).
+- **`signing`** turns on cryptographic signing of the harness-authored provenance commit
+  (SSH signing, `gpg.format=ssh`; see [security.md](../specs/security.md)). With
+  `enabled: true` and a `key` (path to the harness's SSH **private** signing key) the
+  orchestrator signs every integration commit, so `main`'s tip is provably the harness's,
+  not just labeled with its name. The key is a **runtime-provisioned secret** like an API
+  key — referenced by path, never committed or baked into an image; its existence is *not*
+  checked at `harness validate` (a missing key fails loudly on the first merge).
+  `allowed_signers` (a public file mapping the `harness@localhost` principal to the public
+  key) drives **verify-on-read**: the control room's provenance view shows each merged
+  commit's signature verdict (signed / unsigned / unverified). Omitting the block, or
+  leaving `enabled` false, leaves commits unsigned — the unchanged dev default.
+  `harness validate` rejects `enabled: true` with no `key`.
 
 ### Using a local model (no API key)
 

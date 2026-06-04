@@ -120,6 +120,80 @@ func TestGitMergerWritesProvenanceCommit(t *testing.T) {
 	}
 }
 
+// TestGitMergerSignsProvenanceCommit asserts that, with a signing key configured, the
+// fast-forward provenance commit-tree call carries the SSH-signing flags and the -S request
+// (T5.10) — and that without one it does not. The unit level checks the exact git argv the
+// merger builds; the real signature round-trip is the integration test.
+func TestGitMergerSignsProvenanceCommit(t *testing.T) {
+	reply := func(args []string) (string, error) {
+		if isGrep(args) {
+			return "", nil
+		}
+		if x, y, ok := isAncestor(args); ok && x == "refs/heads/main" && y == "candidate/iss-1" {
+			return "", nil // fast-forward-able
+		}
+		if hasArg(args, "commit-tree") {
+			return "prov999", nil
+		}
+		switch args[0] {
+		case "rev-parse":
+			if strings.HasSuffix(args[len(args)-1], "^{tree}") {
+				return "tree123", nil
+			}
+			if args[len(args)-1] == "refs/heads/main" {
+				return "mainhead", nil
+			}
+			return "abc123", nil
+		case "update-ref":
+			return "", nil
+		}
+		return "", errors.New("unexpected")
+	}
+
+	// Signed: the key configured → signing flags present.
+	m, calls := scriptedGit(reply)
+	m.signingKey = "/keys/harness_ed25519"
+	if _, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, nil); err != nil {
+		t.Fatalf("Merge (signed): %v", err)
+	}
+	ct := commitTreeCall(t, *calls)
+	if !hasSeq(ct, "-c", "gpg.format=ssh") {
+		t.Errorf("signed commit-tree missing gpg.format=ssh; got %v", ct)
+	}
+	if !hasSeq(ct, "-c", "user.signingkey=/keys/harness_ed25519") {
+		t.Errorf("signed commit-tree missing user.signingkey; got %v", ct)
+	}
+	if !hasSeq(ct, "commit-tree", "-S") {
+		t.Errorf("signed commit-tree missing -S (sign request) right after commit-tree; got %v", ct)
+	}
+	// The identity is still forced and the tree/parent/message are intact alongside signing.
+	if !hasSeq(ct, "-c", "user.name="+provenanceCommitterName) || !hasArg(ct, "tree123") || !hasSeq(ct, "-p", "abc123") {
+		t.Errorf("signed commit-tree dropped identity/tree/parent; got %v", ct)
+	}
+
+	// Unsigned: no key → no signing flags, no -S.
+	m2, calls2 := scriptedGit(reply)
+	if _, err := m2.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, nil); err != nil {
+		t.Fatalf("Merge (unsigned): %v", err)
+	}
+	ct2 := commitTreeCall(t, *calls2)
+	if hasArg(ct2, "gpg.format=ssh") || hasArg(ct2, "-S") || strings.Contains(strings.Join(ct2, " "), "user.signingkey") {
+		t.Errorf("unsigned commit-tree unexpectedly carries signing flags; got %v", ct2)
+	}
+}
+
+// commitTreeCall returns the single commit-tree invocation from the recorded calls.
+func commitTreeCall(t *testing.T, calls [][]string) []string {
+	t.Helper()
+	for _, c := range calls {
+		if hasArg(c, "commit-tree") {
+			return c
+		}
+	}
+	t.Fatalf("no commit-tree call; calls = %v", calls)
+	return nil
+}
+
 // TestGitMergerRebasesWhenBaseMoved drives the merge-queue case: main has moved under the
 // candidate (another branch merged first), so the candidate is rebased onto the current
 // main in a scratch worktree and the provenance commit is written on the rebased tip.

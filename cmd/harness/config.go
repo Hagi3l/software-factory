@@ -146,6 +146,17 @@ func budgetCaps(cfg *config.Config) query.BudgetCaps {
 	}
 }
 
+// signingKey returns the SSH private-key path the provenance commit should be signed with,
+// or "" when signing is not configured/active (T5.10, specs/security.md). Passing "" to
+// orchestrator.WithSigningKey is a no-op, so the merger writes the same unsigned commit it
+// always has when no key is set.
+func signingKey(cfg *config.Config) string {
+	if cfg.Infra == nil || !cfg.Infra.Signing.Active() {
+		return ""
+	}
+	return cfg.Infra.Signing.Key
+}
+
 // roleIsAgentStage reports whether role is fulfilled by an agent stage in the DAG.
 func roleIsAgentStage(cfg *config.Config, role string) bool {
 	if cfg.Harness == nil {

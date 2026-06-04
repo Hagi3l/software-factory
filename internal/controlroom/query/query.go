@@ -392,9 +392,47 @@ func (r *Reader) link(ctx context.Context, label, kind, hash string) ArtifactLin
 
 // MergedCommit is one integration commit with its parsed provenance, for the provenance
 // view's "trace a merged commit back to issue→soul→model→prompt→evidence" timeline.
+// Signature is the verify-on-read verdict (T5.10): whether main's tip commit carries a
+// valid harness signature, so the human auditing provenance sees not just what produced a
+// change but that the trusted layer cryptographically vouches for the record.
 type MergedCommit struct {
 	Commit     string
 	Provenance core.Provenance
+	Signature  SignatureStatus
+}
+
+// SignatureStatus is the result of verifying a merged commit's signature against the
+// configured allowed-signers file (T5.10, specs/security.md). It mirrors git's %G?
+// pretty-format codes, collapsed to the four states the provenance view distinguishes.
+type SignatureStatus string
+
+const (
+	// SignatureUnchecked: verification was not attempted (no allowed-signers file
+	// configured on the reader). The default — signing is an opt-in deployment posture.
+	SignatureUnchecked SignatureStatus = ""
+	// SignatureVerified: git %G? = G — a good signature by a key present in the
+	// allowed-signers file (the harness identity). The trusted, attributable state.
+	SignatureVerified SignatureStatus = "verified"
+	// SignatureUnsigned: git %G? = N — the commit carries no signature (an unsigned
+	// deployment, or a pre-signing commit in history).
+	SignatureUnsigned SignatureStatus = "unsigned"
+	// SignatureUntrusted: git %G? is anything else (U/B/E/X/Y/R) — signed, but not by a
+	// key the allowed-signers file recognizes, or a bad/uncheckable signature. Surfaced
+	// distinctly because it is the one state that should alarm: a commit signed by an
+	// unknown key is more suspicious than an unsigned one.
+	SignatureUntrusted SignatureStatus = "untrusted"
+)
+
+// signatureStatusFromGitCode maps git's %G? pretty-format code to a SignatureStatus.
+func signatureStatusFromGitCode(code string) SignatureStatus {
+	switch strings.TrimSpace(code) {
+	case "G":
+		return SignatureVerified
+	case "N", "":
+		return SignatureUnsigned
+	default: // U (unknown validity), B (bad), E (cannot check), X/Y/R (expired/revoked)
+		return SignatureUntrusted
+	}
 }
 
 // RecentProvenance returns the most recent integration commits with parsed provenance,

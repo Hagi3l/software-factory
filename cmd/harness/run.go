@@ -300,7 +300,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		reader := query.NewReader(
 			beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)),
 			store,
-			query.NewGitProvenance(repo),
+			query.NewGitProvenance(repo, query.WithAllowedSigners(cfg.Infra.Signing.AllowedSigners)),
 		)
 		// The requirements-planner wizard (T4.12), when configured. It is trusted and
 		// non-sandboxed — a direct model.Adapter conversation, no broker/sandbox/NATS — so it
@@ -414,7 +414,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		Limits:    cfg.Infra.Sandbox.Limits,
 		Logger:    log,
 		Telemetry: tel,
-	}, beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)), gateRunner, orchestrator.NewGitMerger(""), nc, js)
+	}, beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)), gateRunner, orchestrator.NewGitMerger("", orchestrator.WithSigningKey(signingKey(cfg))), nc, js)
 	if err != nil {
 		return nil, err
 	}

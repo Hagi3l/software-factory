@@ -190,3 +190,108 @@ func TestGitMergerIntegration(t *testing.T) {
 		t.Errorf("main moved on a redundant re-merge: %s != %s", got, cB)
 	}
 }
+
+// TestGitMergerSignsProvenanceCommitIntegration drives the real git binary + ssh-keygen to
+// prove the end-to-end signing path (T5.10): a merger built WithSigningKey produces an
+// integration commit that git verifies (%G? = G) against an allowed-signers file mapping the
+// harness principal to its public key, while a merger with no key leaves an unsigned commit
+// (%G? = N). This is the cryptographic half of "the audit trail is the accountability" — main's
+// tip is provably the harness's, not merely labeled with its name (specs/security.md).
+func TestGitMergerSignsProvenanceCommitIntegration(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH; skipping signing integration test")
+	}
+	if _, err := exec.LookPath("ssh-keygen"); err != nil {
+		t.Skip("ssh-keygen not on PATH; skipping signing integration test")
+	}
+	repo := t.TempDir()
+	keyDir := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(cmd.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	git("init", "-q")
+	git("checkout", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(repo, "base.txt"), []byte("base\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	base := git("rev-parse", "main")
+	mkCandidate := func(branch, file string) {
+		git("checkout", "-q", "-b", branch, base)
+		if err := os.WriteFile(filepath.Join(repo, file), []byte("x\n"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		git("add", "-A")
+		git("commit", "-q", "-m", branch+" work")
+	}
+	mkCandidate("candidate/iss-1", "a.txt")
+	mkCandidate("candidate/iss-2", "b.txt")
+	git("checkout", "-q", "--detach", base)
+
+	// Generate the harness SSH signing identity. The key comment is irrelevant; the
+	// allowed-signers principal must match the committer email the merger stamps.
+	keyPath := filepath.Join(keyDir, "harness_ed25519")
+	if out, err := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "harness", "-f", keyPath, "-q").CombinedOutput(); err != nil {
+		t.Fatalf("ssh-keygen: %v\n%s", err, out)
+	}
+	pub, err := os.ReadFile(keyPath + ".pub")
+	if err != nil {
+		t.Fatal(err)
+	}
+	allowed := filepath.Join(keyDir, "allowed_signers")
+	if err := os.WriteFile(allowed, []byte(provenanceCommitterEmail+" "+string(pub)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	prov := func(id string) core.Provenance {
+		return core.Provenance{Soul: "implementor-go", Model: "claude-opus-4-7", Issue: id, PromptSHA: "sha256:9af", Verified: []string{"build"}}
+	}
+	// %G? against the allowed-signers file: G = good + recognized principal, N = unsigned.
+	gflag := func(commit string) string {
+		cmd := exec.Command("git", "-C", repo,
+			"-c", "gpg.format=ssh", "-c", "gpg.ssh.allowedSignersFile="+allowed,
+			"show", "--no-patch", "--format=%G?", commit)
+		out, err := cmd.Output()
+		if err != nil {
+			t.Fatalf("git show %%G?: %v", err)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	// Signed merger: the integration commit verifies.
+	signed := NewGitMerger("", WithSigningKey(keyPath))
+	cSigned, err := signed.Merge(context.Background(), repo, "candidate/iss-1", prov("iss-1"), nil, nil)
+	if err != nil {
+		t.Fatalf("signed merge: %v", err)
+	}
+	if g := gflag(cSigned); g != "G" {
+		t.Errorf("signed commit %%G? = %q, want \"G\" (good signature, recognized principal)", g)
+	}
+	// And `git verify-commit` (the canonical check) succeeds against the allowed-signers file.
+	vc := exec.Command("git", "-C", repo,
+		"-c", "gpg.format=ssh", "-c", "gpg.ssh.allowedSignersFile="+allowed,
+		"verify-commit", cSigned)
+	if out, err := vc.CombinedOutput(); err != nil {
+		t.Errorf("git verify-commit on the signed integration commit failed: %v\n%s", err, out)
+	}
+
+	// Unsigned merger: the integration commit carries no signature.
+	unsigned := NewGitMerger("")
+	cUnsigned, err := unsigned.Merge(context.Background(), repo, "candidate/iss-2", prov("iss-2"), nil, nil)
+	if err != nil {
+		t.Fatalf("unsigned merge: %v", err)
+	}
+	if g := gflag(cUnsigned); g != "N" {
+		t.Errorf("unsigned commit %%G? = %q, want \"N\" (no signature)", g)
+	}
+}

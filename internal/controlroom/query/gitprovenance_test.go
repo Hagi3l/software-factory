@@ -65,6 +65,104 @@ func TestRecentParsesProvenanceCommits(t *testing.T) {
 	}
 }
 
+// signatureStatusFromGitCode maps git %G? codes; the view distinguishes verified / unsigned
+// / untrusted (T5.10).
+func TestSignatureStatusFromGitCode(t *testing.T) {
+	cases := map[string]SignatureStatus{
+		"G": SignatureVerified,
+		"N": SignatureUnsigned,
+		"":  SignatureUnsigned,
+		"U": SignatureUntrusted, // good signature, key not in allowed-signers
+		"B": SignatureUntrusted, // bad signature
+		"E": SignatureUntrusted, // cannot check
+		"X": SignatureUntrusted, // expired
+	}
+	for code, want := range cases {
+		if got := signatureStatusFromGitCode(code); got != want {
+			t.Errorf("signatureStatusFromGitCode(%q) = %q, want %q", code, got, want)
+		}
+	}
+}
+
+// With no allowed-signers file configured, Recent runs the original 2-field query and every
+// commit reads as SignatureUnchecked — an unsigned deployment's provenance view is unchanged.
+func TestRecentLeavesSignatureUncheckedWithoutAllowedSigners(t *testing.T) {
+	p := core.Provenance{Issue: "h-1", Soul: "s", Model: "m"}
+	logOut := "c1" + fieldSep + p.CommitMessage() + "\n" + recordSep
+	var loggedArgs []string
+	g := newStubReader(func(_ context.Context, args []string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "rev-parse" {
+			return []byte("deadbeef\n"), nil
+		}
+		if len(args) > 0 && args[0] == "log" {
+			loggedArgs = args
+			return []byte(logOut), nil
+		}
+		return nil, errors.New("unexpected")
+	})
+	got, err := g.Recent(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if len(got) != 1 || got[0].Signature != SignatureUnchecked {
+		t.Fatalf("got %+v, want one commit with SignatureUnchecked", got)
+	}
+	if strings.Contains(strings.Join(loggedArgs, " "), "%G?") || strings.Contains(strings.Join(loggedArgs, " "), "gpg.format") {
+		t.Errorf("unsigned read should not request signature verification; args = %v", loggedArgs)
+	}
+}
+
+// With an allowed-signers file configured, Recent folds %G? into the SAME log call (with the
+// gpg.format=ssh + allowedSignersFile -c overrides) and maps each commit's code to a status.
+func TestRecentVerifiesSignaturesWithAllowedSigners(t *testing.T) {
+	p1 := core.Provenance{Issue: "h-1", Soul: "s", Model: "m"}
+	p2 := core.Provenance{Issue: "h-2", Soul: "s", Model: "m"}
+	p3 := core.Provenance{Issue: "h-3", Soul: "s", Model: "m"}
+	// git --format=%H<US>%G?<US>%B<RS> output for three commits: verified, unsigned, untrusted.
+	logOut := "c1" + fieldSep + "G" + fieldSep + p1.CommitMessage() + "\n" + recordSep +
+		"\nc2" + fieldSep + "N" + fieldSep + p2.CommitMessage() + "\n" + recordSep +
+		"\nc3" + fieldSep + "U" + fieldSep + p3.CommitMessage() + "\n" + recordSep
+	var loggedArgs []string
+	g := newStubReader(func(_ context.Context, args []string) ([]byte, error) {
+		if len(args) > 0 && args[0] == "rev-parse" {
+			return []byte("deadbeef\n"), nil
+		}
+		// the -c overrides precede the log subcommand
+		for _, a := range args {
+			if a == "log" {
+				loggedArgs = args
+				return []byte(logOut), nil
+			}
+		}
+		return nil, errors.New("unexpected")
+	})
+	g.allowedSigners = "/etc/harness/allowed_signers"
+
+	got, err := g.Recent(context.Background(), 10)
+	if err != nil {
+		t.Fatalf("Recent: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("got %d commits, want 3: %+v", len(got), got)
+	}
+	want := []SignatureStatus{SignatureVerified, SignatureUnsigned, SignatureUntrusted}
+	for i, w := range want {
+		if got[i].Signature != w {
+			t.Errorf("commit[%d] (%s) signature = %q, want %q", i, got[i].Commit, got[i].Signature, w)
+		}
+	}
+	if got[0].Commit != "c1" || got[0].Provenance.Issue != "h-1" {
+		t.Errorf("commit[0] = %+v, want c1/h-1", got[0])
+	}
+	joined := strings.Join(loggedArgs, " ")
+	if !strings.Contains(joined, "%G?") {
+		t.Errorf("verified read did not request %%G? column; args = %v", loggedArgs)
+	}
+	if !strings.Contains(joined, "gpg.ssh.allowedSignersFile=/etc/harness/allowed_signers") {
+		t.Errorf("verified read did not pass the allowed-signers file; args = %v", loggedArgs)
+	}
+}
+
 func TestRecentSkipsNonProvenanceCommits(t *testing.T) {
 	good := core.Provenance{Issue: "h-1", Soul: "s", Model: "m"}
 	logOut := "c0" + fieldSep + "chore: tidy up\n\njust a normal commit\n" + recordSep +

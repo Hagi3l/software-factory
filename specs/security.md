@@ -146,18 +146,51 @@ the traceability hash, and the transcript hash are all such pointers, so a recor
 silently altered. A check whose evidence failed to persist degrades to a bare `<name>`, and
 a change with no `author-tests` stage in its lineage carries `Traceability: (none)` (and an
 invocation whose transcript could not be harvested carries `Transcript: (none)`) —
-self-describing, like a missing `Prompt-SHA`, never a dropped verdict. Commits/artifacts
-should be signed with the harness's identity.
+self-describing, like a missing `Prompt-SHA`, never a dropped verdict.
 
 So the trailer can be vouched for by the trusted layer, the tip of `main` is always
 a **harness-authored provenance commit** sitting on top of the verified candidate,
 never the agent's own commit fast-forwarded into place. See
 [integration.md](integration.md).
 
+### Signing the provenance commit
+
+The trailer is only as trustworthy as the commit carrying it: a plaintext trailer on an
+unsigned commit is forgeable by anyone with write access to the integration repo. So the
+harness-authored provenance commit is **cryptographically signed with the harness's own
+identity**, and **verified on read**. This is what makes "the audit trail is the
+accountability" real rather than aspirational — `main`'s tip is a commit only the harness
+could have produced.
+
+- **Scheme: git-native SSH signing** (`gpg.format=ssh`). No GPG keyring or external daemon;
+  verification is a public-key check against an **allowed-signers file** (principal → harness
+  public key) that anyone may hold. Only the trusted provenance commit is signed — the
+  agent's own candidate commits beneath it are untrusted by construction and never signed.
+- **Key custody.** The private signing key is the harness identity; it follows the same
+  posture as model API keys — a **runtime-provisioned secret**, referenced by path in config,
+  **never committed to the repo or baked into a sandbox image**. In single-host/dev it is an
+  operator-supplied key file; in production it is delivered by a secret manager / ssh-agent to
+  the orchestrator host (the deployment remainder). Generated code can never capture it: it
+  lives only on the trusted orchestrator, never inside a sandbox.
+- **Verify on read.** The [control room](control-room.md) verifies each merged commit's
+  signature against the allowed-signers file and surfaces the verdict (signed / unsigned /
+  unverified) on the provenance view, so a human auditing the chain sees not just *what*
+  produced a change but that the trusted layer vouches for the record. A signature by an
+  unrecognized key is flagged distinctly — it is more suspicious than an unsigned commit.
+- **Artifacts need no separate signature.** Every artifact the trailer cites (prompt,
+  transcript, gate evidence, traceability map) is **content-addressed** — its hash *is* its
+  integrity proof — and those hashes live inside the signed commit message. Signing the
+  commit therefore transitively authenticates every cited artifact; a second artifact-signing
+  mechanism would be a redundant source of truth.
+
 ---
 
 ## OPEN questions
 
-- Signing scheme / key custody for provenance trailers — TBD.
+- ~~Signing scheme / key custody for provenance trailers — TBD.~~ **Decided:** git-native
+  **SSH signing** of the harness-authored provenance commit, verified on read against an
+  allowed-signers file; the private key is a runtime-provisioned secret on the trusted
+  orchestrator (never committed/baked), production custody via secret-manager/ssh-agent is
+  the deployment remainder. See "Signing the provenance commit" above.
 - Whether spec content itself should be treated as an injection surface and
   sanitized before entering an agent's context — likely yes; mechanism TBD.

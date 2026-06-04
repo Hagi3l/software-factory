@@ -37,7 +37,8 @@ good autonomous implementation) — a later validation concern, never an enginee
   roster and **T4.27 is done — Phase 4 is fully complete**; **Phase 6 (agent semantic tooling — the
   LSP-backed tool surface) is now fully complete (T6.1–T6.3)**. The only remaining *engineering* of new
   substrate is Phase 5 (production isolation & distribution) — and within it the Firecracker backend
-  (T5.2) is hardware-blocked and deliberately last; the live Phase-5 work is T5.5/T5.6/T5.7/T5.10/T5.11.
+  (T5.2) is hardware-blocked and deliberately last; the live Phase-5 work is T5.5/T5.6/T5.7/T5.11 (T5.10
+  provenance signing is now done).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -1247,7 +1248,41 @@ them); only the *order of attention* changes.
   (artifacts bullet + commented s3 example) + spec `artifact-store.md` (config example, plain-S3/shared-layout/
   env-creds/bucket-prerequisite notes). The store is pluggable by config — dev runs `files`, production runs
   `s3`, no code change. ([components/artifact-store.md](specs/components/artifact-store.md))
-- [ ] **T5.10 Provenance signing + key custody** — sign commits/artifacts with the harness identity and verify on read. *(OPEN, security.md.)* ([security.md](specs/security.md))
+- [x] **T5.10 Provenance signing + key custody** — *done.* Closes the security.md OPEN ("Signing scheme /
+  key custody for provenance trailers — TBD"). The harness-authored provenance commit (the trusted commit
+  on main, the *only* place a trailer the trusted layer vouches for can live) is now **SSH-signed with the
+  harness identity and verified on read**, so "the audit trail is the accountability" is cryptographic, not a
+  forgeable plaintext trailer. **Scheme decision: git-native SSH signing** (`gpg.format=ssh`) — no GPG
+  keyring/daemon, verification is a public-key check against an **allowed-signers file** anyone can hold;
+  chosen over GPG/Sigstore for zero new runtime deps (git+ssh-keygen, already present) and offline
+  verifiability. **Sign side (single chokepoint):** the merger's lone `commit-tree` call
+  (`internal/orchestrator/merge.go`) gains `-c gpg.format=ssh -c user.signingkey=<key>` + `-S` when a key is
+  configured; `gitMerger.signingKey` is set via new **`NewGitMerger(bin, ...MergerOption)` / `WithSigningKey`**
+  (variadic, so the existing `NewGitMerger("")` test/seam call sites are unchanged, and an empty key is a no-op
+  so callers pass it unconditionally). Only the trusted top commit is signed — the agent's candidate commits
+  beneath it are never signed (untrusted by construction); the rebase replay is left unsigned. **Verify side:**
+  `query.GitProvenance` gains **`WithAllowedSigners(path)`**; when set, `Recent` folds git's **`%G?`** verdict
+  into the SAME `git log` call (the `-c` overrides + an extra `%G?` field — no per-commit git invocation) and
+  maps the code to a new **`query.SignatureStatus`** (`G`→verified, `N`→unsigned, `U`/`B`/`E`/…→untrusted) on
+  `MergedCommit.Signature`. The provenance view renders a tinted badge (signed / unsigned / unverified;
+  **unverified** = signed by an unrecognized key, flagged distinctly as the one alarming state); unchecked (no
+  allowed-signers configured) renders no badge, so an unsigned deployment's view is unchanged. **Config:** new
+  **`config.SigningConfig{Enabled,Key,AllowedSigners}`** on `Infra` + `Active()` (enabled && key); `validateSigning`
+  gates only the run-breaking shape (`enabled` with no `key`) — the key is a **runtime-provisioned secret**
+  (API-key posture: referenced by path, never committed/baked, existence NOT stat-checked at validate time; a
+  missing key fails loudly on first merge). **Key custody:** dev = an operator-supplied key file (disabled by
+  default in `infra.dev.yaml`, commented example); production = secret-manager/ssh-agent delivery to the
+  orchestrator host — the deployment remainder, like T5.8's cluster / T5.9's bucket. **Artifacts need no separate
+  signing:** every artifact the trailer cites is content-addressed and the hashes live in the signed commit, so
+  the signature transitively authenticates them (single source of truth, no parallel mechanism). **Wiring:**
+  `cmd/harness` threads `signingKey(cfg)` into the merger and `cfg.Infra.Signing.AllowedSigners` into the reader.
+  **Verified end-to-end against real git + ssh-keygen** (`TestGitMergerSignsProvenanceCommitIntegration`: signed
+  merge → `%G?`=G + `git verify-commit` passes; unsigned merge → `%G?`=N), plus fast unit tests (the exact
+  signing argv the merger builds; `%G?`→status mapping; `Recent` folds verification in only when configured;
+  validateSigning/Active table; the view badge across all four states). `make check` green (lint 0, **904 pass /
+  2 skip**). Specs/docs: security.md OPEN resolved + new "Signing the provenance commit" section, integration.md
+  (signed provenance commit), configuration.md + control-room.md + specs/control-room.md (signing block + signature
+  badge). TCB-touching (orchestrator merge path), human-reviewed. ([security.md](specs/security.md), [integration.md](specs/integration.md), [configuration.md](specs/configuration.md), [control-room.md](specs/control-room.md))
 - [ ] **T5.11** *(optional)* Warm sandbox pools + HA orchestrator via NATS-KV leader election. *(OPEN.)* ([components/runner.md](specs/components/runner.md), [components/orchestrator.md](specs/components/orchestrator.md))
 - [ ] **T5.2 Firecracker sandbox backend** ***(lowest priority — see the Phase 5 prioritization note above; deliberately last)*** — a KVM-microVM backend implementing the `Backend`/`Sandbox` interface: rootfs seeding, vsock I/O (T5.1, done), resource limits incl. disk, deterministic teardown. The production isolation target. **Blocked on hardware, not on code:** needs KVM (bare-metal or nested virt) that the dev environment lacks, so it cannot be built-and-verified here — do it only once such hardware is available, after the rest of Phase 5 + Phase 6 (all of which the Docker backend supports for dev/human-reviewed runs). Kept as ID T5.2 (referenced elsewhere) despite its end-of-list position. (needs T5.1) ([components/sandbox.md](specs/components/sandbox.md))
 

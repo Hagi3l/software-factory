@@ -8,7 +8,10 @@ import (
 // harness identity stamped on the trusted provenance commit. Generated code is authored
 // by the untrusted agent; the integration commit that lands it on main is authored by
 // the trusted layer, so it carries the harness's own identity rather than any agent's.
-// Signing this identity with a real key is an OPEN question (see specs/security.md).
+// When a signing key is configured the merger SSH-signs this commit with the harness's
+// key (config.SigningConfig, T5.10), so the identity is cryptographically vouched for and
+// not merely a label; the email here is the principal an allowed-signers file maps to the
+// harness public key for verify-on-read (see specs/security.md, internal/orchestrator/merge.go).
 const (
 	provenanceCommitterName  = "harness"
 	provenanceCommitterEmail = "harness@localhost"

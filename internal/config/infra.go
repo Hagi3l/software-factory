@@ -17,6 +17,7 @@ type Infra struct {
 	Broker    BrokerConfig             `yaml:"broker"`
 	Artifacts ArtifactsConfig          `yaml:"artifacts"`
 	OTel      OTelConfig               `yaml:"otel"`
+	Signing   SigningConfig            `yaml:"signing,omitempty"`
 	Models    map[string]ModelProvider `yaml:"models"`
 }
 
@@ -124,6 +125,37 @@ type ArtifactsConfig struct {
 type OTelConfig struct {
 	Endpoint string `yaml:"endpoint,omitempty"`
 }
+
+// SigningConfig configures provenance-commit signing and verification (T5.10,
+// specs/security.md). The trusted layer authors a provenance commit on top of every
+// verified candidate (specs/integration.md); signing it with the harness's own SSH
+// identity is what makes "the audit trail is the accountability" cryptographic rather
+// than a forgeable plaintext trailer — main's tip becomes a commit only the harness
+// could have produced.
+//
+// The scheme is git-native SSH signing (gpg.format=ssh): no GPG keyring or external
+// daemon, verification is a public-key check against an allowed-signers file that
+// anyone can hold. Key custody follows the API-key posture — the private key is a
+// runtime-provisioned SECRET referenced by path here, NEVER committed or baked into an
+// image; in dev it is an operator-supplied key file, in production it is delivered by a
+// secret manager / ssh-agent to the orchestrator host (the deployment remainder, like
+// the NATS cluster of T5.8 or the S3 bucket of T5.9). The path's existence is therefore
+// not checked at config time (the secret may be mounted only at run time on the signing
+// host) — a missing/unreadable key fails loudly on the first merge attempt (fail-closed).
+//
+// Key signs the provenance commit (orchestrator side); AllowedSigners verifies it on
+// read (control-room side). They are independent capabilities: a control-room-only host
+// configures AllowedSigners alone to verify without ever signing.
+type SigningConfig struct {
+	Enabled        bool   `yaml:"enabled,omitempty"`         // turn provenance signing on (requires Key)
+	Key            string `yaml:"key,omitempty"`             // path to the SSH private signing key (the harness identity)
+	AllowedSigners string `yaml:"allowed_signers,omitempty"` // path to the allowed-signers file (principal -> public key) used to verify on read
+}
+
+// Active reports whether provenance signing should happen: it is enabled and a key path
+// is configured. The merger signs the integration commit only when Active; otherwise it
+// writes the same unsigned commit as before (so a deployment with no key is unchanged).
+func (s SigningConfig) Active() bool { return s.Enabled && s.Key != "" }
 
 // ModelProvider maps a model name (declared by core.Soul.Model) to its provider
 // adapter and, for OpenAI-compatible backends, an endpoint. API keys are NEVER in

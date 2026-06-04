@@ -453,6 +453,60 @@ func TestValidateArtifactsRejectsMisconfigured(t *testing.T) {
 	}
 }
 
+// Provenance signing (T5.10): only the run-time-breaking shape is gated — signing turned
+// on with no key. The key/allowed-signers paths are NOT existence-checked (the key is a
+// runtime-provisioned secret, the API-key posture), so a configured-but-absent file is not
+// a validation failure. See specs/security.md, internal/config/infra.go.
+func TestValidateSigningValidForms(t *testing.T) {
+	cases := []SigningConfig{
+		{},                                                          // unset → off, the default
+		{Enabled: false, Key: "/keys/harness"},                      // key present but disabled → off, fine
+		{Enabled: true, Key: "/keys/harness"},                       // signing on with a key
+		{Enabled: true, Key: "/keys/harness", AllowedSigners: "/a"}, // sign + verify-on-read
+		{AllowedSigners: "/allowed_signers"},                        // verify-only host (no signing)
+	}
+	for _, s := range cases {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.Signing = s
+		if err := c.Validate(); err != nil {
+			t.Errorf("signing %+v: Validate returned %v, want nil", s, err)
+		}
+	}
+}
+
+func TestValidateSigningRejectsEnabledWithoutKey(t *testing.T) {
+	for _, s := range []SigningConfig{
+		{Enabled: true},                          // no key at all
+		{Enabled: true, Key: "   "},              // whitespace-only key
+		{Enabled: true, AllowedSigners: "/only"}, // allowed-signers without a signing key
+	} {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.Signing = s
+		mustContain(t, problems(t, c), "signing.key")
+	}
+}
+
+// Active gates whether the merger signs: enabled AND a key. Either missing means the
+// unsigned path (the same commit the merger always wrote).
+func TestSigningConfigActive(t *testing.T) {
+	cases := []struct {
+		s    SigningConfig
+		want bool
+	}{
+		{SigningConfig{}, false},
+		{SigningConfig{Enabled: true}, false},
+		{SigningConfig{Key: "/k"}, false},
+		{SigningConfig{Enabled: true, Key: "/k"}, true},
+	}
+	for _, tc := range cases {
+		if got := tc.s.Active(); got != tc.want {
+			t.Errorf("Active(%+v) = %v, want %v", tc.s, got, tc.want)
+		}
+	}
+}
+
 // The NATS endpoint + JetStream knobs are validated at the startup gate so a distributed
 // (external-cluster) misconfiguration fails loud at `harness validate` rather than as an
 // opaque connect/stream error mid-run. Empty url = the embedded in-process server (the

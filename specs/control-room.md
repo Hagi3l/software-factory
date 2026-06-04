@@ -42,7 +42,7 @@ of the build (`go generate`), not the runtime.
 | **Merge queue** | the [serialized merge train](integration.md) in flight: each `integrate` candidate's step (`queued`/`rebasing`/`re-gating`/`conflicted`) | NATS [`merge-state`](messaging.md) (SSE) + beads |
 | **Dead-letter queue** | escalations needing a human — *the action surface* | beads + artifact store |
 | **Budgets** | token/$/wall-clock burn vs. caps, per epic/issue | beads + OTel metrics |
-| **Provenance** | trace any merged commit back to issue→soul→model→prompt→evidence | git + artifact store |
+| **Provenance** | trace any merged commit back to issue→soul→model→prompt→evidence, with each commit's [signature verdict](security.md) (signed / unsigned / unverified) when signing is configured | git + artifact store |
 | **Config** | the declared factory at rest: role-flow pipeline, gate checks, the resolved soul roster, policy, and redacted infra — read-only | validated config (in-process) |
 
 ### Rendering

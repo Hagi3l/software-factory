@@ -131,6 +131,10 @@ orchestrator creates a **provenance commit on top of the verified candidate** �
 same tree (no file changes), parent = candidate tip, authored by the harness
 identity, message = the trailer — then advances `main` to it. So `main`'s tip is
 always a trusted, attributable commit and the candidate history stays intact below.
+When a signing key is configured the orchestrator **SSH-signs** this commit with the
+harness identity (verified on read; see [security.md](security.md) "Signing the
+provenance commit"), so `main`'s tip is not merely labeled with the harness's name but
+cryptographically provable to be its work.
 This stays within fast-forward semantics (`main` must be an ancestor of the
 candidate; a non-fast-forward is still refused — that is what the rebase in step 2
 is for), and it is idempotent: a redelivered accept re-detects the candidate as an

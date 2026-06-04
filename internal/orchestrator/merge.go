@@ -64,8 +64,9 @@ type MergeProgress func(state string)
 // grades before main advances (specs/integration.md step 3): the merger publishes the
 // rebased result under a temporary ref and hands it to the caller's ReGate.
 type gitMerger struct {
-	bin string
-	run gitRunFunc // seam for tests; defaults to exec
+	bin        string
+	signingKey string     // path to the SSH private key the provenance commit is signed with; "" = unsigned (T5.10)
+	run        gitRunFunc // seam for tests; defaults to exec
 }
 
 // gitRunFunc runs a git subcommand in dir (passed as -C dir) and returns trimmed stdout.
@@ -74,13 +75,29 @@ type gitMerger struct {
 // worktree for the rebase itself.
 type gitRunFunc func(ctx context.Context, dir string, args ...string) (string, error)
 
+// MergerOption configures the default git-backed Merger.
+type MergerOption func(*gitMerger)
+
+// WithSigningKey makes the merger SSH-sign every provenance commit it writes with the
+// harness identity key at keyPath (gpg.format=ssh). An empty path is a no-op, so the
+// caller can pass the configured key unconditionally and signing simply stays off when
+// none is set (T5.10, specs/security.md). The key is the harness's private SSH key; only
+// the trusted provenance commit on top of the candidate is signed — the agent's own
+// candidate commits below it are never signed (they are untrusted by construction).
+func WithSigningKey(keyPath string) MergerOption {
+	return func(m *gitMerger) { m.signingKey = keyPath }
+}
+
 // NewGitMerger builds the default git-backed Merger. bin is the git executable (default
-// "git", resolved on PATH).
-func NewGitMerger(bin string) Merger {
+// "git", resolved on PATH). Options configure signing (WithSigningKey).
+func NewGitMerger(bin string, opts ...MergerOption) Merger {
 	if bin == "" {
 		bin = "git"
 	}
 	m := &gitMerger{bin: bin}
+	for _, o := range opts {
+		o(m)
+	}
 	m.run = m.exec
 	return m
 }
@@ -195,11 +212,22 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov core.Prove
 	}
 	// commit-tree writes a commit with the rebased tree and the rebased tip as its sole
 	// parent. Identity is forced via -c so the integration commit is the harness's, not
-	// whatever git config the host carries.
-	commit, err := m.run(ctx, repo,
-		"-c", "user.name="+provenanceCommitterName,
-		"-c", "user.email="+provenanceCommitterEmail,
-		"commit-tree", tree, "-p", landed, "-m", prov.CommitMessage())
+	// whatever git config the host carries; when a signing key is configured the same
+	// command SSH-signs the commit, so main's tip is cryptographically attributable to the
+	// harness, not merely labeled with its name (T5.10, specs/security.md).
+	args := []string{
+		"-c", "user.name=" + provenanceCommitterName,
+		"-c", "user.email=" + provenanceCommitterEmail,
+	}
+	commitArgs := []string{"commit-tree", tree, "-p", landed, "-m", prov.CommitMessage()}
+	if m.signingKey != "" {
+		// gpg.format=ssh + user.signingkey point git at the harness SSH key; -S (a commit-tree
+		// flag, so it precedes the tree) requests the signature. Forced via -c, like the
+		// identity, so the host's own git config cannot redirect signing to a different key.
+		args = append(args, "-c", "gpg.format=ssh", "-c", "user.signingkey="+m.signingKey)
+		commitArgs = []string{"commit-tree", "-S", tree, "-p", landed, "-m", prov.CommitMessage()}
+	}
+	commit, err := m.run(ctx, repo, append(args, commitArgs...)...)
 	if err != nil {
 		return "", fmt.Errorf("orchestrator: write provenance commit for %q: %w", ref, err)
 	}

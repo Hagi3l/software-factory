@@ -142,3 +142,45 @@ func TestProvenanceRendersChain(t *testing.T) {
 		t.Errorf("/provenance/items should be a bare fragment, not a full page")
 	}
 }
+
+// TestProvenanceRendersSignatureBadge proves verify-on-read surfaces in the view (T5.10): a
+// verified commit shows "signed", an untrusted one "unverified", an unsigned one "unsigned",
+// and an unchecked one (no allowed-signers configured) shows no badge — so an unsigned
+// deployment's view is unchanged.
+func TestProvenanceRendersSignatureBadge(t *testing.T) {
+	cases := []struct {
+		status   query.SignatureStatus
+		wantText string
+		absent   bool
+	}{
+		{query.SignatureVerified, "signed", false},
+		{query.SignatureUntrusted, "unverified", false},
+		{query.SignatureUnsigned, "unsigned", false},
+		{query.SignatureUnchecked, "", true},
+	}
+	for _, tc := range cases {
+		prov := recentProv{commits: []query.MergedCommit{{
+			Commit:     "deadbeefcafe1234",
+			Provenance: core.Provenance{Issue: "h-1", Soul: "implementor", Model: "m"},
+			Signature:  tc.status,
+		}}}
+		s := New(Options{Reader: query.NewReader(&fakeIssues{}, fakeArts{}, prov)})
+		ts := httptest.NewServer(s.Handler())
+		body := get(t, ts, "/provenance/items").body
+		ts.Close()
+
+		has := strings.Contains(body, ">"+tc.wantText+"<")
+		if tc.absent {
+			// No badge: none of the three badge labels should appear.
+			for _, label := range []string{">signed<", ">unverified<", ">unsigned<"} {
+				if strings.Contains(body, label) {
+					t.Errorf("status %q: unexpected badge %q in body", tc.status, label)
+				}
+			}
+			continue
+		}
+		if !has {
+			t.Errorf("status %q: missing badge text %q; body:\n%s", tc.status, tc.wantText, body)
+		}
+	}
+}
