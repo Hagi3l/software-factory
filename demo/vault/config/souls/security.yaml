@@ -1,0 +1,19 @@
+# Security/QA reviewer — fulfills the `qa` role. A *different* soul than the implementor
+# (producer != verifier): handed the implementor's candidate as its base, it subjects it to
+# the spec-independent defence-in-depth pass — SAST (gosec), known-vulnerability scan
+# (govulncheck), dependency/licence policy (license-scan) — hardening what it can without
+# ever weakening the inherited acceptance tests. It is NOT the gate: the authoritative gate
+# re-runs every postcondition in a clean sandbox, so this soul never self-certifies; a
+# rejected candidate routes back to `implement`. Especially apt for a secrets vault, where
+# the scanners re-audit the crypto/auth code. Runs in the vault-toolchain sandbox. Model
+# resolves via infra.dev.yaml; key from the environment.
+#
+# N-version note: the demo registers a single model, so producer and verifier share a model
+# family — `harness validate` emits a non-fatal advisory. Point this soul at a different
+# provider/family (a config edit, never code) to harden once a second model is wired.
+name:    vault-security
+role:    security
+model:   "deepseek/deepseek-v4"
+persona: souls/prompts/security.md
+tools:   [fs, shell, git]
+sandbox: vault-toolchain

@@ -1,0 +1,15 @@
+# Merge-conflict resolver — fulfills the `resolve` role. The orchestrator dispatches it only
+# on a merge-queue conflict: a candidate that already passed qa cannot be cleanly rebased
+# onto the current main because a sibling work item landed first and they textually collide
+# (common when sibling children of one feature touch the same files). Handed the conflicting
+# candidate as its base, it rebases onto main, resolves the conflicts while preserving
+# behaviour, and submits a new candidate. It is NOT the merge — it only proposes; the gate
+# re-runs the full qa suite on the resolved tree (producer != verifier) before the trusted
+# layer writes to main. Runs in the vault-toolchain sandbox. Model resolves via
+# infra.dev.yaml; key from the environment.
+name:    vault-merge-resolver
+role:    merge-resolver
+model:   "deepseek/deepseek-v4"
+persona: souls/prompts/merge-resolver.md
+tools:   [fs, shell, git]
+sandbox: vault-toolchain

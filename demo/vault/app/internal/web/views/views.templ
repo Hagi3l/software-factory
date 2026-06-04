@@ -1,0 +1,236 @@
+// Package views holds the vault's templ components. View-model types live here so the
+// templates never import the store directly — handlers map rows into these.
+package views
+
+// Secret is the presentation view of a stored secret (never carries the plaintext).
+type Secret struct {
+	ID      int64
+	Name    string
+	Tag     string
+	Updated string
+	Expires string // "" = never
+	Expired bool
+}
+
+// Audit is the presentation view of one audit-log entry.
+type Audit struct {
+	Action string
+	Target string
+	At     string
+}
+
+// Stats summarizes the vault for the dashboard cards.
+type Stats struct {
+	Total    int
+	Expiring int
+	LastSeen string
+}
+
+templ Layout(title string) {
+	<!DOCTYPE html>
+	<html lang="en" class="h-full bg-slate-950">
+		<head>
+			<meta charset="utf-8"/>
+			<meta name="viewport" content="width=device-width, initial-scale=1"/>
+			<title>{ title } · Vault</title>
+			<link rel="stylesheet" href="/static/app.css"/>
+			<script src="/static/htmx.min.js"></script>
+			<script defer src="/static/alpine.min.js"></script>
+		</head>
+		<body class="h-full text-slate-100 antialiased">
+			{ children... }
+		</body>
+	</html>
+}
+
+templ shell(active string) {
+	<header class="border-b border-slate-800 bg-slate-900/60">
+		<div class="mx-auto flex max-w-5xl items-center justify-between px-6 py-4">
+			<a href="/vault" class="flex items-center gap-2 font-semibold tracking-tight">
+				<span class="text-emerald-400">🔐</span> Vault
+			</a>
+			<form method="post" action="/logout">
+				<button class="text-sm text-slate-400 hover:text-slate-200">Sign out</button>
+			</form>
+		</div>
+	</header>
+}
+
+templ SetupPage() {
+	@Layout("Set up") {
+		<main class="flex min-h-full items-center justify-center px-6">
+			<form method="post" action="/setup" class="w-full max-w-sm space-y-4 rounded-xl border border-slate-800 bg-slate-900/60 p-8">
+				<h1 class="text-lg font-semibold">Create your vault</h1>
+				<p class="text-sm text-slate-400">Choose a master password. It derives the encryption key and is never stored.</p>
+				<input name="password" type="password" required minlength="8" placeholder="Master password" autofocus
+					class="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"/>
+				<button class="w-full rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">Create vault</button>
+			</form>
+		</main>
+	}
+}
+
+templ LoginPage(errMsg string) {
+	@Layout("Sign in") {
+		<main class="flex min-h-full items-center justify-center px-6">
+			<form method="post" action="/login" class="w-full max-w-sm space-y-4 rounded-xl border border-slate-800 bg-slate-900/60 p-8">
+				<h1 class="text-lg font-semibold">Unlock your vault</h1>
+				if errMsg != "" {
+					<p class="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-400">{ errMsg }</p>
+				}
+				<input name="password" type="password" required placeholder="Master password" autofocus
+					class="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"/>
+				<button class="w-full rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">Unlock</button>
+			</form>
+		</main>
+	}
+}
+
+templ VaultPage(secrets []Secret, audit []Audit, query string, stats Stats) {
+	@Layout("Vault") {
+		@shell("vault")
+		<main class="mx-auto max-w-5xl space-y-8 px-6 py-8">
+			@statCards(stats)
+			<section class="grid gap-8 lg:grid-cols-3">
+				<div class="lg:col-span-2 space-y-4">
+					<div class="flex items-center justify-between gap-4">
+						<input
+							type="search"
+							name="q"
+							value={ query }
+							placeholder="Search by name or tag…"
+							hx-get="/vault/search"
+							hx-trigger="input changed delay:200ms, search"
+							hx-target="#secret-list"
+							hx-swap="innerHTML"
+							class="w-64 rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"/>
+						<a href="/secrets/new" class="rounded-md bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500">New secret</a>
+					</div>
+					<div id="secret-list" class="divide-y divide-slate-800 rounded-xl border border-slate-800">
+						@SecretList(secrets)
+					</div>
+				</div>
+				<aside class="space-y-3">
+					<h2 class="text-sm font-semibold text-slate-300">Recent activity</h2>
+					<div class="rounded-xl border border-slate-800">
+						@AuditList(audit)
+					</div>
+				</aside>
+			</section>
+		</main>
+	}
+}
+
+templ statCards(s Stats) {
+	<section class="grid gap-4 sm:grid-cols-3">
+		@statCard("Secrets", itoa(s.Total), "text-slate-100")
+		@statCard("Expiring soon", itoa(s.Expiring), "text-amber-400")
+		@statCard("Last activity", s.LastSeen, "text-slate-300")
+	</section>
+}
+
+templ statCard(label, value, valueClass string) {
+	<div class="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+		<div class="text-xs uppercase tracking-wide text-slate-500">{ label }</div>
+		<div class={ "mt-1 text-2xl font-semibold", valueClass }>{ value }</div>
+	</div>
+}
+
+templ SecretList(secrets []Secret) {
+	if len(secrets) == 0 {
+		<p class="px-4 py-6 text-sm text-slate-500">No secrets yet.</p>
+	} else {
+		for _, sec := range secrets {
+			@SecretRow(sec)
+		}
+	}
+}
+
+templ SecretRow(sec Secret) {
+	<div id={ "secret-" + itoa64(sec.ID) } class="flex items-center justify-between gap-4 px-4 py-3">
+		<div class="min-w-0">
+			<div class="flex items-center gap-2">
+				<span class="truncate font-medium">{ sec.Name }</span>
+				if sec.Tag != "" {
+					<span class="rounded bg-slate-800 px-2 py-0.5 text-xs text-slate-400">{ sec.Tag }</span>
+				}
+				if sec.Expired {
+					<span class="rounded bg-red-500/15 px-2 py-0.5 text-xs text-red-400">expired</span>
+				} else if sec.Expires != "" {
+					<span class="text-xs text-amber-400">expires { sec.Expires }</span>
+				}
+			</div>
+			<div class="text-xs text-slate-500">updated { sec.Updated }</div>
+		</div>
+		<div class="flex shrink-0 items-center gap-2 text-sm">
+			<button
+				hx-get={ "/secrets/" + itoa64(sec.ID) + "/reveal" }
+				hx-target={ "#reveal-" + itoa64(sec.ID) }
+				hx-swap="innerHTML"
+				class="rounded-md border border-slate-700 px-2 py-1 text-slate-300 hover:border-emerald-500 hover:text-emerald-400">Reveal</button>
+			<a href={ templ.SafeURL("/secrets/" + itoa64(sec.ID) + "/edit") } class="rounded-md border border-slate-700 px-2 py-1 text-slate-300 hover:text-slate-100">Edit</a>
+			<button
+				hx-delete={ "/secrets/" + itoa64(sec.ID) }
+				hx-target={ "#secret-" + itoa64(sec.ID) }
+				hx-swap="outerHTML"
+				hx-confirm="Delete this secret?"
+				class="rounded-md border border-slate-700 px-2 py-1 text-red-400 hover:border-red-500">Delete</button>
+			<span id={ "reveal-" + itoa64(sec.ID) } class="font-mono text-xs text-emerald-300"></span>
+		</div>
+	</div>
+}
+
+// RevealValue is the htmx fragment swapped in when a secret is revealed.
+templ RevealValue(value string) {
+	<span class="select-all font-mono text-xs text-emerald-300">{ value }</span>
+}
+
+templ SecretForm(title string, s Secret, errMsg string) {
+	@Layout(title) {
+		@shell("vault")
+		<main class="mx-auto max-w-xl px-6 py-8">
+			<h1 class="mb-6 text-lg font-semibold">{ title }</h1>
+			<form method="post" action={ formAction(s.ID) } class="space-y-4 rounded-xl border border-slate-800 bg-slate-900/60 p-6">
+				if errMsg != "" {
+					<p class="rounded-md bg-red-500/10 px-3 py-2 text-sm text-red-400">{ errMsg }</p>
+				}
+				@field("Name", "name", "text", s.Name)
+				@field("Tag", "tag", "text", s.Tag)
+				@field("Value", "value", "text", "")
+				@field("Expires (YYYY-MM-DD, optional)", "expires", "text", s.Expires)
+				<div class="flex items-center gap-3">
+					<button class="rounded-md bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500">Save</button>
+					<a href="/vault" class="text-sm text-slate-400 hover:text-slate-200">Cancel</a>
+				</div>
+			</form>
+		</main>
+	}
+}
+
+templ field(label, name, typ, value string) {
+	<label class="block space-y-1">
+		<span class="text-sm text-slate-300">{ label }</span>
+		<input name={ name } type={ typ } value={ value }
+			class="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none"/>
+	</label>
+}
+
+templ AuditList(entries []Audit) {
+	if len(entries) == 0 {
+		<p class="px-4 py-4 text-sm text-slate-500">No activity yet.</p>
+	} else {
+		<ul class="divide-y divide-slate-800 text-sm">
+			for _, e := range entries {
+				<li class="flex items-center justify-between px-4 py-2">
+					<span class="text-slate-300">
+						{ e.Action }
+						if e.Target != "" {
+							<span class="text-slate-500">· { e.Target }</span>
+						}
+					</span>
+					<span class="text-xs text-slate-500">{ e.At }</span>
+				</li>
+			}
+		</ul>
+	}
+}

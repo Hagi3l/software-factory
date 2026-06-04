@@ -1,0 +1,44 @@
+# Vault demo infrastructure overlay (env: dev) — points the harness at a REMOTE model
+# served by OpenRouter through its OpenAI-compatible endpoint. See demo/vault/README.md.
+#
+# The model call is made by the runner on the HOST (the trusted side holds the adapter +
+# the API key), NOT from inside the sandbox — the agent only emits a canonical request and
+# the runner calls OpenRouter. So `openrouter.ai` is reached from the host and the sandbox
+# stays zero-network. run.sh requires OPENAI_API_KEY to hold your OpenRouter key (the
+# openai-compat adapter sends it as the bearer token). The requirements-planner (the wizard)
+# reaches the same endpoint host-side via the canonical model layer.
+sandbox:
+  backend: docker
+  egress:  broker-only
+  # `wall` bounds the WHOLE invocation including time the runner waits on inference. A full
+  # Go build + the gate scanners take real time, so keep it generous on demo hardware.
+  limits:  { cpu: 4, mem: 4Gi, wall: 30m }
+  # Resolves the logical profile each soul names (soul.sandbox: vault-toolchain) to the
+  # concrete image the docker backend boots. run.sh builds it locally tagged
+  # `vault-toolchain` (from demo/vault/Dockerfile), so the profile maps to that bare tag.
+  profiles:
+    vault-toolchain:
+      image: vault-toolchain
+nats:
+  # empty url -> in-process embedded NATS (the dev shape). The live SSE feed and the wizard
+  # are co-located in `harness run --serve-addr`.
+  url: ""
+  jetstream: { replicas: 1, max_age: 168h }
+broker:
+  allowlist: [llm-api, nats, git]
+artifacts:
+  backend: files
+  path: ./.harness/artifacts
+otel:
+  endpoint: ""        # tracing off for the demo ("stdout" to see spans, host:port for OTLP)
+models:
+  # The OpenRouter model slug, sent verbatim as the request's model field; every soul and
+  # the requirements-planner reference this same registry key. run.sh substitutes this (and
+  # the endpoint) when you set MODEL= / MODEL_ENDPOINT=. The model MUST support function
+  # calling — the agent loop drives it through structured tool calls. A full-DAG run on real
+  # Go is demanding, so default to a capable model (override with MODEL= for a cheaper/other
+  # slug). cost is the per-million-token price feeding the policy.budget USD accounting.
+  "deepseek/deepseek-v4":
+    provider: openai-compat
+    endpoint: https://openrouter.ai/api/v1
+    cost: { input_per_mtok: 0.28, output_per_mtok: 0.88 }

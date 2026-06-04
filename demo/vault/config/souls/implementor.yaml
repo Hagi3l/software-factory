@@ -1,0 +1,11 @@
+# Implementor — fulfills the `implement` role. Its worktree already holds the failing tests
+# the test-author wrote; its job is to implement the feature in the vault app so they pass,
+# following the app's conventions (see specs/README.md). A different soul than the
+# test-author (producer != verifier). Runs in the vault-toolchain sandbox. Model resolves
+# via infra.dev.yaml; key from the environment.
+name:    vault-implementor
+role:    implementor
+model:   "deepseek/deepseek-v4"
+persona: souls/prompts/implementor.md
+tools:   [fs, shell, git]
+sandbox: vault-toolchain

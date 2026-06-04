@@ -1,0 +1,11 @@
+# Test author — fulfills the `author-tests` role. Turns a child work item's spec into
+# FAILING Go tests against the existing vault code, then submits for independent
+# verification. A *different* soul than the implementor (producer != verifier): it never
+# sees the implementation, and a separate soul makes its tests pass. Runs in the
+# vault-toolchain sandbox. Model resolves via infra.dev.yaml; key from the environment.
+name:    vault-test-author
+role:    test-author
+model:   "deepseek/deepseek-v4"
+persona: souls/prompts/test-author.md
+tools:   [fs, shell, git]
+sandbox: vault-toolchain
