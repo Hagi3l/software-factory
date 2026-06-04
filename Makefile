@@ -90,22 +90,29 @@ test-e2e-docker:
 # The `qa` stage's postconditions (config/harness.yaml) resolve to these targets; the
 # gate runs them in a clean verification sandbox (exit 0 = pass; non-zero = findings or
 # a tool error => fail, closed). They are NOT part of `make check` — they need tools
-# (gosec, govulncheck, go-licenses, gremlins) and reference data baked into the qa role's
-# sandbox image so they run offline under the zero-network invariant (T5.3/T5.6). Run
-# them on a host only with those tools installed.
+# (golangci-lint, gosec, govulncheck, go-licenses, gremlins) and reference data (the
+# offline vuln DB) that are baked into the go-toolchain sandbox image (T5.3,
+# deploy/go-toolchain.Dockerfile) so they run offline under the zero-network invariant.
+# Run them on a host only with those tools installed.
 
 ## gosec: SAST scan of all packages (qa gate). A finding or tool error fails closed.
 gosec:
 	gosec ./...
 
 ## govulncheck: known-vulnerability scan (qa gate). In-sandbox this reads an offline
-## vulnerability database baked into the role image (no network); see T5.6.
+## vulnerability database baked into the role image (no network): the go-toolchain
+## image sets GOVULNDB=file:///opt/harness/vulndb (T5.3), which this target passes via
+## `-db`. On a host with GOVULNDB unset it falls back to govulncheck's online default.
 govulncheck:
-	govulncheck ./...
+	govulncheck $(if $(strip $(GOVULNDB)),-db $(GOVULNDB),) ./...
 
 ## license-scan: dependency/licence policy (qa gate). Rejects disallowed licences.
+## --ignore the harness's own module: go-licenses classifies the local packages too,
+## but this internal repo carries no LICENSE file, so without the ignore it fails on
+## its own "Unknown license type" rather than on a dependency's licence (the policy
+## the gate actually enforces). Scoping to third-party deps keeps the check meaningful.
 license-scan:
-	go-licenses check ./...
+	go-licenses check --ignore github.com/Loxstomper/harness ./...
 
 ## mutation: print the mutation score (0..1) the `mutation>=0.8` gate grades. The gate
 ## reads the trailing numeric token of stdout, so emit only the score last and fail

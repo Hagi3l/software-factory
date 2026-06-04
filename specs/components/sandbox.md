@@ -106,13 +106,18 @@ The agent's [semantic tools](agent.md#semantic-tools-lsp-backed) (`find_symbol`,
 profile carries. So "Go has gopls, TS has tsserver" is an image fact, not a tool fact,
 and the canonical tool surface never grows per language.
 
-To keep the semantic tools image-agnostic, each profile exposes its server at a **fixed
-launch convention** (a known path/command — e.g. a `language-server` symlink — that the
-tool invokes over the local channel), rather than the tool hard-coding a server per
-language. The session is launched **lazily** on the first semantic call and torn down
-deterministically with the sandbox, like any other in-sandbox state. The image digest
-already pinned in provenance therefore pins the *language-server version* too, so
-semantic results are reproducible.
+To keep the semantic tools image-agnostic, each profile exposes its servers through a
+**fixed launch convention**: a `languageId`→launch-command **manifest** baked into the
+image at a known path (`/etc/harness/language-servers.json`), rather than the tool
+hard-coding a server per language. The tool reads the manifest, resolves the file under
+the cursor to a `languageId` (by extension), and launches that entry's command over the
+local channel. The session is launched **lazily** on the first semantic call and torn
+down deterministically with the sandbox, like any other in-sandbox state. The manifest
+is baked from the *same* file the harness embeds and validates (`lsmanifest`), so the
+format the tools resolve and the file the image carries cannot drift. The image digest
+already pinned in provenance therefore pins the *language-server version* and its manifest
+too, so semantic results are reproducible. (Demo scope ships the `go`→`gopls` entry only;
+`.templ`/`.css` ride the text floor.)
 
 ---
 
@@ -161,10 +166,14 @@ Note the deliberate separation enforced by **producer ≠ verifier**:
 
 ## OPEN questions
 
-- **Image build & publish pipeline** — how each role image is built from its
-  `deploy/*.Dockerfile`, scanned, and published with the pinned digest the `profiles`
-  registry references (Phase 5 / T5.x). The *resolution* of a profile name to that
-  artifact is decided ([above](#profile--image-resolution)); what stays open is the
-  supply chain that produces the artifact.
+- **Image publish & digest pinning** — the *composition* of each role image is now
+  defined (T5.3): a per-profile `deploy/*.Dockerfile` bakes the toolchain, the module
+  cache (offline build), the gate tooling (golangci-lint, gosec, govulncheck + an
+  offline vuln-DB snapshot, go-licenses, gremlins), and the per-language server +
+  manifest. What stays open is the *publish* half — scanning each built image and
+  pushing it to a registry under the **pinned digest** the `profiles` registry
+  references — which needs registry infrastructure the dev environment lacks (the dev
+  overlay resolves the local `harness/go-toolchain:dev` tag; production pins
+  `…@sha256:…`).
 - **Caching** package downloads across invocations without weakening the egress
   control (e.g. a read-through vetted mirror) — TBD; see [runner.md](runner.md).

@@ -134,8 +134,10 @@ reject routes a fresh fix attempt (or dead-letters when retries are spent). See
 - **`/events` returns 503** — you're on a standalone `harness serve`. Use `harness run
   --serve-addr` so the feed has a live NATS source.
 - **qa lint/scanner checks fail closed** — the golangci-lint/gosec/govulncheck/license/mutation
-  tooling isn't yet baked into the sandbox image (that's Phase 5, T5.3/T5.6). The gate is
-  wired but those checks fail until the rootfs carries the tools offline.
+  tooling and the offline vuln DB are baked into the `go-toolchain` sandbox image (T5.3,
+  `deploy/go-toolchain.Dockerfile`). If these checks fail for lack of tooling, the resolved
+  profile image is stale or unbuilt — rebuild it (`docker build -f deploy/go-toolchain.Dockerfile
+  -t go-toolchain .`) so the gate runs them offline under the zero-network invariant.
 - **`make check` times out** — a known infra flake under full-suite parallel NATS load;
   re-run, or run the single package in isolation. See `IMPLEMENTATION_PLAN.md`.
 </content>

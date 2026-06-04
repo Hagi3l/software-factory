@@ -145,13 +145,14 @@ dag:
 # makes config the single source of truth the gate resolves against; see
 # specs/configuration.md.
 #
-# Offline note: the qa scanners, the linter, and the mutation tool must be baked into the
-# `security` role's sandbox image so they run under the zero-network invariant — govulncheck
-# in particular needs an offline vulnerability database (golangci-lint is a pure static
-# analyser and needs only its binary). The kernel go-toolchain image does not yet carry
-# them; that rootfs composition is T5.3/T5.6 (see deploy/go-toolchain.Dockerfile). Until
-# then the qa gate is wired and dispatched but its lint/scanner/mutation checks fail closed
-# for lack of tooling.
+# Offline note: the qa scanners, the linter, and the mutation tool run under the
+# zero-network invariant, so they are baked into the go-toolchain sandbox image (T5.3,
+# deploy/go-toolchain.Dockerfile): golangci-lint, gosec, go-licenses, and gremlins are
+# binary-only static analysers / test drivers; govulncheck additionally reads an offline
+# copy of the Go vulnerability database baked under /opt/harness/vulndb (the image sets
+# GOVULNDB, which `make govulncheck` passes via `-db`). The image digest pinned in
+# provenance therefore also pins the gate-tool and vuln-DB versions a verdict was graded
+# against. The qa gate is fully live once that image is the resolved profile artifact.
 checks:
   tests-pass:    make test-unit
   golangci-lint: make lint

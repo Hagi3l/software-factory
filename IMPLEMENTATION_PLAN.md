@@ -1104,7 +1104,50 @@ them); only the *order of attention* changes.
   vsock** (`docker.go` requires unix) — vsock is wired by the Firecracker backend (**T5.2**), which constructs
   the `Endpoint{Network:"vsock"}` the runner currently hardcodes as unix. `go vet`/`golangci-lint` clean,
   `go test -race ./internal/broker/` green. (unblocks T5.2) ([messaging.md](specs/messaging.md), [components/runner.md](specs/components/runner.md))
-- [ ] **T5.3 Rootfs / base-image composition** — per-role toolchain images with the module/package cache baked in for offline (zero-network) builds. Each image also bakes: **(a) the gate tooling** the zero-network gate runs — `golangci-lint` (T2.14), `gosec`, `govulncheck` (+ its offline vuln DB), `license-scan`, the mutation tool — so the qa/resolve checks stop failing-closed for lack of tooling (flagged in `config/harness.yaml`'s offline note); and **(b) the per-language language server** (`gopls` in `go-toolchain`, `tsserver` in a future `ts-toolchain`) at a fixed launch convention, plus the `languageId`→server **manifest** the Phase-6 semantic tools resolve (T6.1). The image digest already pinned in provenance therefore also pins the gate-tool and language-server versions. *(OPEN in sandbox.md.)* ([components/sandbox.md](specs/components/sandbox.md))
+- [x] **T5.3 Rootfs / base-image composition** — *done.* The `go-toolchain` image
+  (`deploy/go-toolchain.Dockerfile`) now bakes everything the zero-network gate and the Phase-6
+  semantic tools need, **built and verified offline here** (Docker daemon present; `docker build` →
+  `docker run --network none`). **(a) Gate tooling:** `golangci-lint` v2.5.0 (T2.14), `gosec` v2.22.9,
+  `govulncheck` v1.1.4, `go-licenses` v1.6.0, `gremlins` v0.5.0 — all `go install`ed at build time
+  (network at build, never at run), version-pinned for reproducibility, landing on `/go/bin`. The
+  **offline Go vuln DB** is mirrored into `/opt/harness/vulndb` (v1 layout: 3 index files + all **3147**
+  `ID/*.json`, parallelized via `xargs -P 16`); the image sets `GOVULNDB=file:///opt/harness/vulndb`,
+  which the **`make govulncheck`** target now passes via `-db` (`$(if $(strip $(GOVULNDB)),-db
+  $(GOVULNDB),)` — falls back to the online default off-image). **Proven:** `make govulncheck` runs
+  `--network none` against the baked DB → "No vulnerabilities found" (and correctly counts 13 vulns in
+  required-but-uncalled modules); `make lint` → 0 issues; `make license-scan` → exit 0. **(b) Language
+  server + manifest:** `gopls` v0.20.0 on PATH; the **`languageId`→server manifest** at the fixed launch
+  convention `/etc/harness/language-servers.json`. **Single source of truth:** new leaf package
+  **`internal/sandbox/lsmanifest`** (stdlib-only) defines the format (`Manifest`/`Server`,
+  `Parse`+validate with `DisallowUnknownFields`, `ResolveExtension`/`ResolveLanguageID`, `ManifestPath`
+  const) and **embeds** `language-servers.json`; the Dockerfile `COPY`s the *same* file into the image,
+  so the format the Phase-6 tools resolve and the file the image carries cannot drift. Demo scope ships
+  the `go`→`gopls` entry only (`.templ`/`.css` ride the text floor, per Phase-6 note). **This unblocks
+  T6.1** (the in-sandbox session manager resolves servers from `lsmanifest.ManifestPath`). **Real bug
+  found & fixed:** with the tooling now actually running, `go-licenses check ./...` failed on the
+  harness's *own* packages ("Unknown license type" — the repo has no LICENSE file); the `license-scan`
+  target now `--ignore github.com/Loxstomper/harness` so it enforces the policy that matters (third-party
+  dependency licences) rather than failing on the internal module. Specs/docs updated: sandbox.md
+  ("Per-language language server" gets the concrete manifest convention; the OPEN narrows from "build &
+  publish" to **publish & digest-pinning** — composition is now defined, only registry push + `@sha256`
+  pinning remains, which needs registry infra dev lacks), `config/harness.yaml` offline note,
+  `docs/getting-started.md` troubleshooting, Makefile qa-gate comments. No image rebuild needed for the
+  Makefile/manifest-consumer changes (the Makefile travels in the seeded worktree). The e2e Docker test
+  (`HARNESS_E2E_IMAGE`/`go-toolchain` tag) is unaffected. `go vet`/`golangci-lint` clean on the new
+  package; `lsmanifest` tests green (embedded-valid, resolve-by-ext/id, parse-rejects table).
+  ([components/sandbox.md](specs/components/sandbox.md))
+- [ ] **T5.3a Harness kernel must pass its own `gosec` gate (self-host readiness)** — newly surfaced by
+  T5.3: now that `gosec` actually runs, `make gosec ./...` reports **26 findings** in the harness kernel —
+  8×G301 / 5×G306 (dir/file perms 0750/0600 on artifact + worktree dirs), 6×G304 (file inclusion via
+  variable — the artifact store / config readers, by design), 6×G204 (subprocess with variable args — the
+  orchestrator/runner shell out to git/docker/bd by design), 1×G115 (int→uint32, likely the vsock port
+  conversion, already range-validated). These are **pre-existing latents** (gosec was never installed
+  before T5.3), and they do **not** block anything today — the harness kernel is built by hand and
+  human-reviewed, not gated by its own `qa` stage. But **switching on self-hosting requires the kernel to
+  pass the same gate it runs on candidates**: triage each finding to either a justified `#nosec Gxxx`
+  annotation (the by-design subprocess/path cases) or a real fix (tighten the 0750/0600 perms; confirm the
+  G115 bound), and add a `gosec` exclusions config if a blanket rule suppression is cleaner. Not in T5.3's
+  image-composition scope; filed so it isn't mistaken for a regression. ([verification.md](specs/verification.md), [security.md](specs/security.md))
 - [ ] **T5.4 Sandbox seeded-worktree ownership** *(carried from Phase 1)* — **drop the current workaround:** the bootstrap `go-toolchain` image relies on `git config --global --add safe.directory '*'` to tolerate the seeded worktree being owned by the host uid (the Docker backend seeds via `docker cp host/. container:workdir`, preserving host ownership; no `chown` today). Replace it by having the Docker backend `chown` the seeded worktree to the container user (and the Firecracker backend seed correct ownership), so the `safe.directory` / VCS-stamping crutch can be removed. ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.5** *(optional)* gVisor backend (medium-trust). ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.6 Vetted package mirror/proxy** — route package fetches through a pinning/scanning/logging proxy on the broker allowlist; a read-through cache amortizes downloads without weakening egress control. ([security.md](specs/security.md), [components/runner.md](specs/components/runner.md))
