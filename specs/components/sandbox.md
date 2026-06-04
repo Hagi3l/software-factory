@@ -97,6 +97,23 @@ metadata) is **baked into the profile image**, never fetched — the same offlin
 the build relies on. What stays open is caching *fresh* package downloads across
 invocations without weakening egress (below).
 
+### Per-language language server
+
+The profile image is also where the **language server** lives — `gopls` in
+`go-toolchain`, `tsserver` in `ts-toolchain`, etc. — alongside the toolchain it serves.
+The agent's [semantic tools](agent.md#semantic-tools-lsp-backed) (`find_symbol`,
+`references`, `rename`, …) are language-*neutral*; the *backing server* is whatever the
+profile carries. So "Go has gopls, TS has tsserver" is an image fact, not a tool fact,
+and the canonical tool surface never grows per language.
+
+To keep the semantic tools image-agnostic, each profile exposes its server at a **fixed
+launch convention** (a known path/command — e.g. a `language-server` symlink — that the
+tool invokes over the local channel), rather than the tool hard-coding a server per
+language. The session is launched **lazily** on the first semantic call and torn down
+deterministically with the sandbox, like any other in-sandbox state. The image digest
+already pinned in provenance therefore pins the *language-server version* too, so
+semantic results are reproducible.
+
 ---
 
 ## A non-isolating local backend (testing only)

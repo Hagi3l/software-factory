@@ -123,8 +123,14 @@ Tools are defined canonically (name, description, JSON-schema params); the
 [provider adapters](../models.md) translate them into each model's function-calling
 format. They split along the trust boundary:
 
-- **Workspace** (run *in* the sandbox, on the worktree): `read_file`, `write_file`,
-  `edit_file`, `list_dir`, `search`, `run` (build/test/lint).
+- **Workspace** (run *in* the sandbox, on the worktree) — two intents:
+  - *Comprehension (read):* `find_symbol` (locate a symbol project-wide by name, no
+    path), `references`, `definition`, `implementation` (impls of an interface, and
+    the reverse), `hover` (type/signature), `diagnostics` (structured compile/type
+    errors), plus the text floor `read_file`, `list_dir`, `search` (text/regex).
+  - *Transformation (write):* `rename` (semantic, project-wide), `code_action` (apply
+    the server's own fix — organise imports, add import, quickfix, extract), plus the
+    text floor `edit_file`, `write_file`, `run` (build/test/lint/fmt).
 - **Lifecycle** (control the invocation, produce the Result): `submit` (candidate
   ready), `submit_plan` (a decomposition is ready — ends a planning task with the
   proposed children and **no** candidate branch), `escalate` (raise
@@ -142,6 +148,36 @@ format. They split along the trust boundary:
 A role's behaviour comes from its **persona + which tools are enabled**, not from a
 different loop: planner, test-author, implementor, and security agents all run the
 same loop.
+
+### Semantic tools (LSP-backed)
+
+The comprehension and transformation tools are **intent-first**: the agent states
+*what* it wants (find this symbol, rename this), and the trusted tool layer picks
+*how* — never the untrusted agent. Each resolves **LSP-first** against a language
+server, with text as a floor. This makes "prefer semantic, fall back to grep/sed" a
+structural property, not a persona nudge — the agent cannot pick the wrong mechanism
+because it never picks the mechanism.
+
+- **Language-neutral surface, per-language backing.** The tool contract is identical
+  across languages; only the backing server differs — `gopls` in a `go-toolchain`
+  sandbox, `tsserver` in `ts-toolchain`. The server lives in the profile image, reached
+  over a fixed launch convention (see [sandbox.md](sandbox.md#per-language-language-server)).
+  This is the same canonical-interface / thin-adapter split the [model layer](../models.md)
+  uses — *provider adapter : model :: language server : semantic tool* — so the canonical
+  tool list stays small and stable while language specificity lives in the image.
+- **Reads degrade silently, writes degrade loudly.** A read (`references`,
+  `find_symbol`) with no available server falls back to grep, results **labelled
+  unverified**. A write must not degrade silently: a `rename` that quietly became a
+  `sed` would corrupt string literals, comments, and substrings undetected, so on
+  missing semantic support it **refuses, or text-renames with an explicit precision
+  warning** (match count, files, comment/string hits).
+- **Lazy session, kept in sync.** The server starts on the first semantic call and
+  lives for the rest of the invocation; `edit_file`/`write_file` notify it of every
+  change so `diagnostics`/`references` never read stale text. It is torn down with the
+  sandbox.
+- **Mechanism is recorded.** Whether a transformation ran semantically or via the text
+  floor is stamped into the Result's evidence — provenance the gate and traceability
+  map can weigh (a text-fallback rename warrants more suspicion than a semantic one).
 
 ---
 
