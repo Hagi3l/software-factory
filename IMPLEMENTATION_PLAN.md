@@ -1060,6 +1060,22 @@ components/artifact-store.md, glossary.md).
 Replaces the bootstrap stand-ins (Docker, in-process NATS, local-repo push, files
 store) with the production stack.
 
+**Prioritization (decided 2026-06-04): the Firecracker backend (T5.2) is the *lowest*
+priority of Phase 5 — moved to the end of the list below.** Every other Phase-5 task
+(and all of Phase 6) is buildable and testable in this dev environment: the vsock
+transport landed against a real loopback (T5.1), the base images, package mirror,
+scoped secrets, distributed NATS, S3 store, and signing are ordinary Go/infra work, and
+Docker remains a satisfactory `Backend` for development and human-reviewed runs.
+Firecracker alone needs **KVM / bare-metal-or-nested-virt hardware that this environment
+does not provide**, so it can be neither exercised nor verified here — building it now
+would mean shipping an untested microVM backend ahead of the substrate that *is*
+verifiable. Nothing depends on it: T5.1 is the only piece Firecracker *needed*, the
+remaining tasks target the transport/security/distribution layer the Docker backend also
+uses, and Phase 6 is explicitly Firecracker-independent. So the build order is now
+**T5.1 (done) → the rest of Phase 5 + Phase 6 → T5.2 last**, switched on when capable
+isolation hardware is available. The tasks keep their original IDs (other tasks reference
+them); only the *order of attention* changes.
+
 - [x] **T5.1 vsock broker transport** — *done.* The broker now speaks its one-request-per-connection
   protocol over **AF_VSOCK** as well as unix — the transport a Firecracker microVM needs (a microVM has no
   shared filesystem to bind-mount a unix socket into, so vsock is its only route in/out). **The seam was
@@ -1088,7 +1104,6 @@ store) with the production stack.
   vsock** (`docker.go` requires unix) — vsock is wired by the Firecracker backend (**T5.2**), which constructs
   the `Endpoint{Network:"vsock"}` the runner currently hardcodes as unix. `go vet`/`golangci-lint` clean,
   `go test -race ./internal/broker/` green. (unblocks T5.2) ([messaging.md](specs/messaging.md), [components/runner.md](specs/components/runner.md))
-- [ ] **T5.2 Firecracker sandbox backend** — a KVM-microVM backend implementing the `Backend`/`Sandbox` interface: rootfs seeding, vsock I/O (T5.1), resource limits incl. disk, deterministic teardown. The production isolation target. (needs T5.1) ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.3 Rootfs / base-image composition** — per-role toolchain images with the module/package cache baked in for offline (zero-network) builds. Each image also bakes: **(a) the gate tooling** the zero-network gate runs — `golangci-lint` (T2.14), `gosec`, `govulncheck` (+ its offline vuln DB), `license-scan`, the mutation tool — so the qa/resolve checks stop failing-closed for lack of tooling (flagged in `config/harness.yaml`'s offline note); and **(b) the per-language language server** (`gopls` in `go-toolchain`, `tsserver` in a future `ts-toolchain`) at a fixed launch convention, plus the `languageId`→server **manifest** the Phase-6 semantic tools resolve (T6.1). The image digest already pinned in provenance therefore also pins the gate-tool and language-server versions. *(OPEN in sandbox.md.)* ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.4 Sandbox seeded-worktree ownership** *(carried from Phase 1)* — **drop the current workaround:** the bootstrap `go-toolchain` image relies on `git config --global --add safe.directory '*'` to tolerate the seeded worktree being owned by the host uid (the Docker backend seeds via `docker cp host/. container:workdir`, preserving host ownership; no `chown` today). Replace it by having the Docker backend `chown` the seeded worktree to the container user (and the Firecracker backend seed correct ownership), so the `safe.directory` / VCS-stamping crutch can be removed. ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.5** *(optional)* gVisor backend (medium-trust). ([components/sandbox.md](specs/components/sandbox.md))
@@ -1098,6 +1113,7 @@ store) with the production stack.
 - [ ] **T5.9 S3/MinIO artifact backend** — an `artifact.Store` implementation for distributed deployments (config `bucket`), shared across hosts and the control room. ([components/artifact-store.md](specs/components/artifact-store.md))
 - [ ] **T5.10 Provenance signing + key custody** — sign commits/artifacts with the harness identity and verify on read. *(OPEN, security.md.)* ([security.md](specs/security.md))
 - [ ] **T5.11** *(optional)* Warm sandbox pools + HA orchestrator via NATS-KV leader election. *(OPEN.)* ([components/runner.md](specs/components/runner.md), [components/orchestrator.md](specs/components/orchestrator.md))
+- [ ] **T5.2 Firecracker sandbox backend** ***(lowest priority — see the Phase 5 prioritization note above; deliberately last)*** — a KVM-microVM backend implementing the `Backend`/`Sandbox` interface: rootfs seeding, vsock I/O (T5.1, done), resource limits incl. disk, deterministic teardown. The production isolation target. **Blocked on hardware, not on code:** needs KVM (bare-metal or nested virt) that the dev environment lacks, so it cannot be built-and-verified here — do it only once such hardware is available, after the rest of Phase 5 + Phase 6 (all of which the Docker backend supports for dev/human-reviewed runs). Kept as ID T5.2 (referenced elsewhere) despite its end-of-list position. (needs T5.1) ([components/sandbox.md](specs/components/sandbox.md))
 
 ## Phase 6 — Agent semantic tooling (LSP)
 
