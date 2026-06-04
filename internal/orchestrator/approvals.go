@@ -225,7 +225,7 @@ func (o *Orchestrator) rejectParked(ctx context.Context, issue core.Issue, stage
 // it reports only the candidate's own changes since the merge base, not files main moved
 // underneath it. It is the default for Orchestrator.diffFiles; tests inject a fake.
 func gitChangedFiles(ctx context.Context, repo, base, ref string) ([]string, error) {
-	cmd := exec.CommandContext(ctx, "git", "-C", repo, "diff", "--name-only", base+"..."+ref)
+	cmd := exec.CommandContext(ctx, "git", "-C", repo, "diff", "--name-only", base+"..."+ref) // #nosec G204 -- fixed git binary; base/ref are orchestrator-controlled refs, not untrusted input.
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("git diff %s...%s: %w", base, ref, err)

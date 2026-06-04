@@ -167,7 +167,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// Embedded NATS + JetStream. The store dir lives under the repo so JetStream
 	// state survives a restart (the crash-and-resume model), rather than a temp dir.
 	storeDir := filepath.Join(repo, ".harness", "jetstream")
-	if mkErr := os.MkdirAll(storeDir, 0o755); mkErr != nil {
+	if mkErr := os.MkdirAll(storeDir, 0o750); mkErr != nil {
 		return nil, mkErr
 	}
 	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{Name: "harness", StoreDir: storeDir, ClientAddr: opts.natsAddr})

@@ -41,10 +41,10 @@ func (s *wizardSeeder) Resolve(ctx context.Context, req wizard.ResolveRequest) (
 	for _, sp := range req.Specs {
 		clean, _ := s.cleanSpecPath(sp.Path) // validated above
 		full := filepath.Join(s.repo, filepath.FromSlash(clean))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
 			return wizard.ResolveResult{}, fmt.Errorf("create spec dir for %q: %w", clean, err)
 		}
-		if err := os.WriteFile(full, []byte(sp.Content), 0o644); err != nil {
+		if err := os.WriteFile(full, []byte(sp.Content), 0o600); err != nil {
 			return wizard.ResolveResult{}, fmt.Errorf("write spec %q: %w", clean, err)
 		}
 		written = append(written, clean)
@@ -63,10 +63,10 @@ func (s *wizardSeeder) Resolve(ctx context.Context, req wizard.ResolveRequest) (
 	// 3. write the decisions sidecar (the "why" behind the refinement; git history is the log).
 	sidecar := decisionsSidecarPath(req.Specs)
 	sidecarFull := filepath.Join(s.repo, filepath.FromSlash(sidecar))
-	if err := os.MkdirAll(filepath.Dir(sidecarFull), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(sidecarFull), 0o750); err != nil {
 		return wizard.ResolveResult{}, fmt.Errorf("create decisions dir: %w", err)
 	}
-	if err := os.WriteFile(sidecarFull, []byte(decisionsSidecar(req.Summary, req.Decisions, transcriptRef)), 0o644); err != nil {
+	if err := os.WriteFile(sidecarFull, []byte(decisionsSidecar(req.Summary, req.Decisions, transcriptRef)), 0o600); err != nil {
 		return wizard.ResolveResult{}, fmt.Errorf("write decisions sidecar: %w", err)
 	}
 	written = append(written, sidecar)

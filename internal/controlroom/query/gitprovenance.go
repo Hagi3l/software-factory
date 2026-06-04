@@ -164,7 +164,7 @@ func (g *GitProvenance) refExists(ctx context.Context) bool {
 // execGit runs git in the reader's repo. -C scopes git to the repo without changing the
 // process working directory, so concurrent readers over different repos do not interfere.
 func (g *GitProvenance) execGit(ctx context.Context, args []string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", g.repo}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", g.repo}, args...)...) // #nosec G204 -- fixed git binary, repo-scoped read; args are trusted, query-layer-built.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

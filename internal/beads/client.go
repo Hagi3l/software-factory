@@ -389,7 +389,7 @@ func decodeIssues(data []byte) ([]core.Issue, error) {
 // stdout and advisory warnings to stderr, so only stdout is parsed; stderr is folded
 // into the error message on failure to make a bd error legible.
 func (c *Client) execRun(ctx context.Context, args []string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, c.bin, args...)
+	cmd := exec.CommandContext(ctx, c.bin, args...) // #nosec G204 -- c.bin is the configured bd binary; args are orchestrator-built, not untrusted agent input.
 	cmd.Dir = c.dir
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout

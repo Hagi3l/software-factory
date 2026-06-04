@@ -119,6 +119,8 @@ func writeFrame(w io.Writer, v any) error {
 		return fmt.Errorf("broker: frame too large: %d bytes (max %d)", len(b), maxFrameSize)
 	}
 	var hdr [4]byte
+	// #nosec G115 -- len(b) is bounded by the maxFrameSize check above (64 MiB), far
+	// below math.MaxUint32, so this conversion cannot overflow or truncate.
 	binary.BigEndian.PutUint32(hdr[:], uint32(len(b)))
 	if _, err := w.Write(hdr[:]); err != nil {
 		return fmt.Errorf("broker: write frame header: %w", err)

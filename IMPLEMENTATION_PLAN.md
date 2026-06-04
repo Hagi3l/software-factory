@@ -1136,18 +1136,24 @@ them); only the *order of attention* changes.
   (`HARNESS_E2E_IMAGE`/`go-toolchain` tag) is unaffected. `go vet`/`golangci-lint` clean on the new
   package; `lsmanifest` tests green (embedded-valid, resolve-by-ext/id, parse-rejects table).
   ([components/sandbox.md](specs/components/sandbox.md))
-- [ ] **T5.3a Harness kernel must pass its own `gosec` gate (self-host readiness)** — newly surfaced by
-  T5.3: now that `gosec` actually runs, `make gosec ./...` reports **26 findings** in the harness kernel —
-  8×G301 / 5×G306 (dir/file perms 0750/0600 on artifact + worktree dirs), 6×G304 (file inclusion via
-  variable — the artifact store / config readers, by design), 6×G204 (subprocess with variable args — the
-  orchestrator/runner shell out to git/docker/bd by design), 1×G115 (int→uint32, likely the vsock port
-  conversion, already range-validated). These are **pre-existing latents** (gosec was never installed
-  before T5.3), and they do **not** block anything today — the harness kernel is built by hand and
-  human-reviewed, not gated by its own `qa` stage. But **switching on self-hosting requires the kernel to
-  pass the same gate it runs on candidates**: triage each finding to either a justified `#nosec Gxxx`
-  annotation (the by-design subprocess/path cases) or a real fix (tighten the 0750/0600 perms; confirm the
-  G115 bound), and add a `gosec` exclusions config if a blanket rule suppression is cleaner. Not in T5.3's
-  image-composition scope; filed so it isn't mistaken for a regression. ([verification.md](specs/verification.md), [security.md](specs/security.md))
+- [x] **T5.3a Harness kernel passes its own `gosec` gate (self-host readiness)** — *done.* The kernel now
+  passes `gosec ./...` clean (**0 findings**, 13 justified `#nosec`), so switching on self-hosting no longer
+  trips the kernel on the same SAST gate it runs on candidates. The 26 latents T5.3 surfaced were triaged by
+  cause, not blanket-suppressed: **real fixes** — 8×G301 dirs `0o755`→`0o750` and 5×G306 files `0o644`→`0o600`
+  (artifact store root/shard dirs, jetstream store dir, seed/wizard spec + decisions-sidecar writes; least-
+  privilege, and git stores no perms beyond the exec bit so the committed result is unaffected); **justified
+  inline `#nosec`** — 6×G204 (the git/bd subprocess helpers in beads/orchestrator/runner/query/wizard: fixed
+  binary, `-C`-scoped, trusted harness-built arg lists, never agent input) and 6×G304 (the trusted-path readers:
+  artifact `os.Open` off a content-address, operator-supplied config/infra/souls/persona paths, and the
+  `spec.go` reader already confined under `rootAbs` by the `filepath.Rel` check above), plus 1×G115 in
+  `broker/protocol.go` (the `uint32(len(b))` frame-length cast is bounded by the `maxFrameSize` 64 MiB check
+  immediately above, far below `math.MaxUint32`). **Inline annotations, not a config-wide exclusion, by design**
+  — they keep the gate live for *new* G204/G304/G115 occurrences and document the per-site reasoning (gosec
+  reports `nosec: 13`, all rule-scoped). No test asserted the old modes (the fixtures that write `0o644`/`0o755`
+  create their own scratch files); `make check` green (lint 0, **816 pass / 2 skip**). No CLI/config/route/view
+  change ⇒ no `docs/` change. **gosec install note:** the host needs `gosec` on PATH to run the gate locally —
+  `go install github.com/securego/gosec/v2/cmd/gosec@v2.22.9` (the version T5.3 bakes into the role image);
+  in a real run the gate runs it from the baked image, offline. ([verification.md](specs/verification.md), [security.md](specs/security.md))
 - [ ] **T5.4 Sandbox seeded-worktree ownership** *(carried from Phase 1)* — **drop the current workaround:** the bootstrap `go-toolchain` image relies on `git config --global --add safe.directory '*'` to tolerate the seeded worktree being owned by the host uid (the Docker backend seeds via `docker cp host/. container:workdir`, preserving host ownership; no `chown` today). Replace it by having the Docker backend `chown` the seeded worktree to the container user (and the Firecracker backend seed correct ownership), so the `safe.directory` / VCS-stamping crutch can be removed. ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.5** *(optional)* gVisor backend (medium-trust). ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.6 Vetted package mirror/proxy** — route package fetches through a pinning/scanning/logging proxy on the broker allowlist; a read-through cache amortizes downloads without weakening egress control. ([security.md](specs/security.md), [components/runner.md](specs/components/runner.md))

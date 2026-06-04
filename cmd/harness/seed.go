@@ -120,7 +120,7 @@ func ensureSpec(path, title, desc string) error {
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return err
 	}
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
 		return err
 	}
 	var b strings.Builder
@@ -130,5 +130,5 @@ func ensureSpec(path, title, desc string) error {
 	} else {
 		b.WriteString("_Author the requirement here._\n")
 	}
-	return os.WriteFile(path, []byte(b.String()), 0o644)
+	return os.WriteFile(path, []byte(b.String()), 0o600)
 }

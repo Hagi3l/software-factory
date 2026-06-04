@@ -421,7 +421,7 @@ func pushBundleToRepo(ctx context.Context, repo, branch string, bundle []byte) (
 // runGit runs a git subcommand in repo and returns its combined output. Combined output
 // (not just stdout) is returned so a failure carries git's stderr diagnostics.
 func runGit(ctx context.Context, repo string, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...)
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...) // #nosec G204 -- fixed git binary, repo-scoped; args are runner-controlled, not untrusted agent input.
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

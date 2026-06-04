@@ -25,7 +25,7 @@ func LoadSouls(dir string) ([]core.Soul, error) {
 
 	souls := make([]core.Soul, 0, len(matches))
 	for _, path := range matches {
-		data, err := os.ReadFile(path)
+		data, err := os.ReadFile(path) // #nosec G304 -- path comes from a Glob over the operator-supplied souls dir, not untrusted input.
 		if err != nil {
 			return nil, fmt.Errorf("config: read soul file %s: %w", path, err)
 		}

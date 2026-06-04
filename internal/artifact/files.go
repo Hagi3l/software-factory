@@ -29,7 +29,7 @@ func NewFilesStore(path string) (*FilesStore, error) {
 	if path == "" {
 		return nil, errors.New("artifact: files store requires a non-empty path")
 	}
-	if err := os.MkdirAll(path, 0o755); err != nil {
+	if err := os.MkdirAll(path, 0o750); err != nil {
 		return nil, fmt.Errorf("artifact: create store root %s: %w", path, err)
 	}
 	abs, err := filepath.Abs(path)
@@ -80,7 +80,7 @@ func (s *FilesStore) Put(ctx context.Context, kind string, content io.Reader) (c
 	if err != nil {
 		return core.ArtifactRef{}, err
 	}
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(dest), 0o750); err != nil {
 		return core.ArtifactRef{}, fmt.Errorf("artifact: create shard dir: %w", err)
 	}
 	if _, err := os.Stat(dest); err == nil {
@@ -107,7 +107,7 @@ func (s *FilesStore) Get(ctx context.Context, hash string) (io.ReadCloser, error
 	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(dest)
+	f, err := os.Open(dest) // #nosec G304 -- dest is derived from a content-address hash via pathFor, never caller-supplied.
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, hash)

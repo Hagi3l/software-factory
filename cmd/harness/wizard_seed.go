@@ -69,7 +69,7 @@ func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
 // (e.g. a bare commit sha from rev-parse).
 func gitRunner(repo string) func(ctx context.Context, args ...string) (string, error) {
 	return func(ctx context.Context, args ...string) (string, error) {
-		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...)
+		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...) // #nosec G204 -- fixed git binary, repo-scoped; args are trusted, harness-built (not agent input).
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -89,10 +89,10 @@ func (s *wizardSeeder) Seed(ctx context.Context, req wizard.SeedRequest) (wizard
 	for _, sp := range req.Specs {
 		clean, _ := s.cleanSpecPath(sp.Path) // validated above
 		full := filepath.Join(s.repo, filepath.FromSlash(clean))
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(full), 0o750); err != nil {
 			return wizard.SeedResult{}, fmt.Errorf("create spec dir for %q: %w", clean, err)
 		}
-		if err := os.WriteFile(full, []byte(sp.Content), 0o644); err != nil {
+		if err := os.WriteFile(full, []byte(sp.Content), 0o600); err != nil {
 			return wizard.SeedResult{}, fmt.Errorf("write spec %q: %w", clean, err)
 		}
 		written = append(written, clean)
@@ -112,10 +112,10 @@ func (s *wizardSeeder) Seed(ctx context.Context, req wizard.SeedRequest) (wizard
 	// 3. write the decisions sidecar.
 	sidecar := decisionsSidecarPath(req.Specs)
 	sidecarFull := filepath.Join(s.repo, filepath.FromSlash(sidecar))
-	if err := os.MkdirAll(filepath.Dir(sidecarFull), 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(sidecarFull), 0o750); err != nil {
 		return wizard.SeedResult{}, fmt.Errorf("create decisions dir: %w", err)
 	}
-	if err := os.WriteFile(sidecarFull, []byte(decisionsSidecar(req.Summary, req.Decisions, transcriptRef)), 0o644); err != nil {
+	if err := os.WriteFile(sidecarFull, []byte(decisionsSidecar(req.Summary, req.Decisions, transcriptRef)), 0o600); err != nil {
 		return wizard.SeedResult{}, fmt.Errorf("write decisions sidecar: %w", err)
 	}
 	written = append(written, sidecar)

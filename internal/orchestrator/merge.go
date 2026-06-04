@@ -280,7 +280,7 @@ func integrationRef(issueID string) string {
 
 func (m *gitMerger) exec(ctx context.Context, dir string, args ...string) (string, error) {
 	full := append([]string{"-C", dir}, args...)
-	cmd := exec.CommandContext(ctx, m.bin, full...)
+	cmd := exec.CommandContext(ctx, m.bin, full...) // #nosec G204 -- m.bin is the configured git binary; full is the trusted, merge-path-built arg list.
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr

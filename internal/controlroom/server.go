@@ -570,7 +570,7 @@ func (s *Server) handlePersona(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is resolved from the in-config soul roster (see personaPathFor), never a raw request value.
 	if err != nil {
 		s.log.Error("controlroom: persona read failed", "path", path, "err", err)
 		s.render(w, r, views.PersonaError("Could not read persona file: "+err.Error()))

@@ -179,7 +179,7 @@ type Budget struct {
 // are errors) but does not check DAG legality — that is harness validate's job (see
 // specs/configuration.md). A missing file, malformed YAML, or unknown key fails here.
 func LoadHarness(path string) (*Harness, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is an operator-supplied config location, not untrusted agent input.
 	if err != nil {
 		return nil, fmt.Errorf("config: read harness file %s: %w", path, err)
 	}

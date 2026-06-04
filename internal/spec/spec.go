@@ -142,7 +142,7 @@ func walk(root, ref string, depth int) (order []string, contents map[string]stri
 			continue
 		}
 
-		data, rerr := os.ReadFile(abs)
+		data, rerr := os.ReadFile(abs) // #nosec G304 -- abs is confined under rootAbs by the filepath.Rel check immediately above.
 		if rerr != nil {
 			if cur.rel == refClean {
 				return nil, nil, fmt.Errorf("spec: read referenced file %q: %w", ref, rerr)

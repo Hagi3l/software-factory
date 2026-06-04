@@ -170,7 +170,7 @@ const (
 // here; cross-references (e.g. a soul.Model with no registry entry) are validate's
 // job.
 func LoadInfra(path string) (*Infra, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- path is an operator-supplied config location, not untrusted agent input.
 	if err != nil {
 		return nil, fmt.Errorf("config: read infra file %s: %w", path, err)
 	}
