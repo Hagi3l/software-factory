@@ -422,6 +422,24 @@ func (s *Session) run() {
 	items, _ := parseLedger(reply)
 	draft, hasDraft := parseDraft(reply)
 
+	// Diagnostic for the "ledger panel never populates" failure: the parse discards the raw
+	// block, so when items come back nil we have no way to tell whether the planner skipped the
+	// protocol, emitted an unterminated/mis-shaped block, or produced JSON whose field names do
+	// not match the wire shape. Surface exactly that from the logs so a non-compliant model is
+	// diagnosable from a single run. The planner is trusted, so logging its raw output is fine;
+	// the snippet is length-capped to keep the line readable.
+	if items == nil {
+		if _, raw, ok := cutLedgerBlock(reply); ok {
+			s.log.Warn("wizard: ledger fence present but parsed to zero items (check JSON shape/field names)",
+				"session", s.ID, "raw_block", logSnippet(raw, 1000))
+		} else {
+			s.log.Warn("wizard: reply carried no parseable ledger block",
+				"session", s.ID, "has_ledger_fence", strings.Contains(reply, ledgerFence), "reply_tail", logSnippet(reply, 500))
+		}
+	} else {
+		s.log.Debug("wizard: ledger parsed", "session", s.ID, "items", len(items))
+	}
+
 	s.mu.Lock()
 	s.messages = append(s.messages, model.Message{Role: model.RoleAssistant, Text: prose})
 	if items != nil {
@@ -443,6 +461,18 @@ func (s *Session) run() {
 	if hasDraft {
 		s.hub.Broadcast(live.Event{Name: eventDraft, Data: ""})
 	}
+}
+
+// logSnippet returns s trimmed and truncated to max runes for a single readable log line,
+// collapsing nothing but appending an ellipsis marker when it had to cut. Rune-safe so a
+// multibyte tail is never sliced mid-character.
+func logSnippet(s string, max int) string {
+	s = strings.TrimSpace(s)
+	if utf8.RuneCountInString(s) <= max {
+		return s
+	}
+	r := []rune(s)
+	return string(r[:max]) + "…(truncated)"
 }
 
 // newID returns an unguessable session id. Crypto-random rather than a counter so a session
