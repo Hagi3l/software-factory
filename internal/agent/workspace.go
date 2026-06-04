@@ -26,14 +26,33 @@ const maxToolOutput = 32 << 10
 // A tool that merely failed (file missing, tests red, bad arguments) reports that via
 // Outcome.IsError so the model can react and retry; only a sandbox that cannot run a
 // command at all is a fatal error that ends the invocation (the runner redelivers).
-func WorkspaceTools(sb sandbox.Sandbox) []Tool {
+//
+// The edit tools (write_file/edit_file) notify n after a successful write so an LSP
+// session stays in sync with the worktree (Phase 6, T6.1): coupling the edits to the
+// session is by design, not a bolt-on, so diagnostics/references never read stale text.
+// n may be nil (no semantic layer), in which case edits notify nobody.
+func WorkspaceTools(sb sandbox.Sandbox, notifier editNotifier) []Tool {
 	return []Tool{
 		readFileTool(sb),
-		writeFileTool(sb),
-		editFileTool(sb),
+		writeFileTool(sb, notifier),
+		editFileTool(sb, notifier),
 		listDirTool(sb),
 		searchTool(sb),
 		runTool(sb),
+	}
+}
+
+// editNotifier is told of every successful worktree edit so a running language-server
+// session can be re-synced (didChange). It is the seam between the text-floor edit tools
+// and the semantic session manager (*Sessions); a nil notifier disables the coupling.
+// NotifyEdit is best-effort — it must never fail an edit — so it returns nothing.
+type editNotifier interface {
+	NotifyEdit(ctx context.Context, relPath, content string)
+}
+
+func notifyEdit(ctx context.Context, n editNotifier, relPath, content string) {
+	if n != nil {
+		n.NotifyEdit(ctx, relPath, content)
 	}
 }
 
@@ -65,7 +84,7 @@ func readFileTool(sb sandbox.Sandbox) Tool {
 	}
 }
 
-func writeFileTool(sb sandbox.Sandbox) Tool {
+func writeFileTool(sb sandbox.Sandbox, notifier editNotifier) Tool {
 	return funcTool{
 		def: model.ToolDef{
 			Name:        "write_file",
@@ -95,12 +114,13 @@ func writeFileTool(sb sandbox.Sandbox) Tool {
 			} else if out != nil {
 				return *out, nil
 			}
+			notifyEdit(ctx, notifier, a.Path, a.Content)
 			return Outcome{Content: fmt.Sprintf("wrote %s (%d bytes)", a.Path, len(a.Content))}, nil
 		},
 	}
 }
 
-func editFileTool(sb sandbox.Sandbox) Tool {
+func editFileTool(sb sandbox.Sandbox, notifier editNotifier) Tool {
 	return funcTool{
 		def: model.ToolDef{
 			Name: "edit_file",
@@ -164,6 +184,7 @@ func editFileTool(sb sandbox.Sandbox) Tool {
 			} else if out != nil {
 				return *out, nil
 			}
+			notifyEdit(ctx, notifier, a.Path, updated)
 			return Outcome{Content: fmt.Sprintf("edited %s (%d replacement(s))", a.Path, replacements)}, nil
 		},
 	}

@@ -1266,14 +1266,51 @@ testable in dev against a `go-toolchain` image carrying `gopls`; **does not depe
 and `.css` ride the text floor (templ compiles to `_templ.go`, which gopls already sees; tailwind
 is a build step, not a navigable language).
 
-- [ ] **T6.1 Per-language LSP session manager** — an in-sandbox component owning one language-server
-  session per invocation. **Lazy launch** on the first semantic call; resolve the server via the
-  image's `languageId`→command **manifest** (fixed launch convention / symlink, T5.3) so the tool
-  stays image-agnostic; **keep the session in sync** by notifying it (`didOpen`/`didChange`/`didSave`)
-  on every `edit_file`/`write_file`, so `diagnostics`/`references` never read stale text — this
-  couples the existing workspace edit tools to the session by design, not as a bolt-on; **tear down
-  with the sandbox** like any in-sandbox state. No language is hard-coded in the tool layer. (needs
-  T5.3 for the in-image server; dev-testable with a `go-toolchain`+`gopls` image) ([components/agent.md](specs/components/agent.md), [components/sandbox.md](specs/components/sandbox.md))
+- [x] **T6.1 Per-language LSP session manager** — *done.* The warm, per-invocation language-server
+  session manager that the comprehension/transformation tools (T6.2/T6.3) will query, **verified end-to-end
+  against real gopls** in the `go-toolchain` image. Three layers, cleanly split:
+  **(1) Streaming sandbox primitive** — a new **optional** capability `sandbox.SessionOpener`
+  (`OpenSession(ctx, Command) (SessionStream, error)` + `Workdir()`), the streamed sibling of `Exec`: a
+  long-lived in-sandbox process with stdin/stdout attached, so a stdio LSP server runs for the whole
+  invocation instead of cold-starting per call. It is *not* a new boundary hole — the server still runs
+  **inside** the sandbox, host never reaches in (the property `Exec` already has). Docker implements it via
+  `docker exec -i` with pipes (`realDockerSession`/`dockerSession`, stderr drained to a capped buffer; the
+  process is bound to its own cancel, NOT the launch ctx, so it lives until `Close` or the wall-clock
+  watchdog reaps the container; `OpenSession` refuses past the wall budget like `Exec`). It is **optional**
+  by design (a separate interface, not a `Sandbox` method) so no test fake or future backend is forced to
+  implement it — a sandbox without it leaves semantic tools degrading to the text floor. **(2) `internal/lsp`**
+  — a stdlib-only JSON-RPC 2.0 client over LSP `Content-Length` framing: one reader goroutine demuxes
+  responses (by id) from notifications (`publishDiagnostics` cached + waiter-signaled) and **answers
+  server→client requests with defaults** (`workspace/configuration` → array of nulls, else null) so gopls
+  never stalls. Typed methods: initialize/initialized, didOpen/didChange/didSave, definition, references,
+  implementation, hover, documentSymbol, workspace/symbol, rename, codeAction, diagnostics, shutdown/exit —
+  each normalizing the wire's shape variants (Location|Location[]|LocationLink[]; hierarchical
+  DocumentSymbol[] vs flat SymbolInformation[]; the three Hover content forms; `changes` vs
+  `documentChanges`). Generic and sandbox-unaware — *provider adapter : model :: language server : semantic
+  tool*. **(3) `agent.Sessions`** — the manager owning the sandbox/worktree specifics: reads the **image's**
+  baked manifest via `Exec cat /etc/harness/language-servers.json` (`lsmanifest.Parse`, so the file the image
+  carries drives resolution, not an embedded copy), **lazy-launches** one server per `languageId` on the
+  first semantic call (`gopls serve`), `initialize`s with `rootUri`/`file://` URIs built from `Workdir`,
+  `didOpen`s a file with current disk content before a query, and exposes the full op set (Definition/
+  References/Implementation/Hover/DocumentSymbol/WorkspaceSymbol/Diagnostics/Rename/CodeAction) the T6.2/T6.3
+  tools wrap. **Edit coupling (by design, not a bolt-on):** `WorkspaceTools(sb, notifier)` now threads an
+  `editNotifier`; `write_file`/`edit_file` call `Sessions.NotifyEdit` after a successful write, which
+  `didChange`s a *running* session (best-effort, never fails an edit). It deliberately does **not** launch on
+  an edit — lazy launch is the first *semantic* call; a server launched later reads fresh disk at `didOpen`,
+  so a pre-launch edit needs no notification. `ErrNoSemanticSession` is the uniform degrade signal (no opener
+  / no manifest / no entry). **Lifecycle:** `ToolSource` now returns a `cleanup func()` the loop defers;
+  `run.go` builds a `Sessions` per invocation and returns `sessions.Close` (orderly `shutdown`/`exit` then
+  stream close), the sandbox teardown being the backstop. **Tests:** `internal/lsp` (handshake, every query
+  shape, async diagnostics, server-request reply, transport-death fail-fast; `-race`); `agent` sessions
+  (degrade-without-opener, no-manifest, unknown-ext, lazy-launch-once, didOpen-on-query, edit→didChange +
+  new-file→didOpen, notify-before-launch-is-noop, diagnostics, idempotent Close — all over an in-memory
+  scripted server, `-race`); sandbox (`OpenSession` arg-shape, post-wall rejection, real `docker exec -i cat`
+  round-trip); and **`TestSessionsRealGopls`** (skips unless docker+git+`go-toolchain:latest`): launches real
+  gopls, asserts documentSymbol finds `greet`+`main`, diagnostics round-trips, and **after `NotifyEdit` a
+  fresh documentSymbol sees the newly-added `extra` — proving the sync coupling against a real server**.
+  `make check` green (lint 0, **859 pass / 2 skip**). No CLI/config/route/view change ⇒ no `docs/` change.
+  **Unblocks T6.2/T6.3** (the tools are now thin wrappers over `Sessions` + the text-floor fallback policy).
+  ([components/agent.md](specs/components/agent.md), [components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T6.2 Comprehension (read) semantic tools** — `find_symbol` (project-wide symbol by name, no
   path), `references`, `definition`, `implementation`, `hover`, `diagnostics`, over the T6.1 session,
   each a canonical tool the [model layer](specs/models.md) exposes. **Intent-first; reads degrade

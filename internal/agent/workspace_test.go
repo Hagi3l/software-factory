@@ -37,7 +37,7 @@ func (s *scriptedSandbox) commands() []sandbox.Command {
 // toolByName finds a workspace tool for assertions.
 func toolByName(t *testing.T, sb sandbox.Sandbox, name string) Tool {
 	t.Helper()
-	for _, tl := range WorkspaceTools(sb) {
+	for _, tl := range WorkspaceTools(sb, nil) {
 		if tl.Def().Name == name {
 			return tl
 		}
@@ -60,7 +60,7 @@ func TestWorkspaceToolSet(t *testing.T) {
 		return sandbox.ExecResult{}, nil
 	}}
 	got := map[string]bool{}
-	for _, tl := range WorkspaceTools(sb) {
+	for _, tl := range WorkspaceTools(sb, nil) {
 		got[tl.Def().Name] = true
 		if !json.Valid(tl.Def().Params) {
 			t.Errorf("tool %s has invalid JSON schema params", tl.Def().Name)

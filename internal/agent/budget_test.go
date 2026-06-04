@@ -41,7 +41,7 @@ func TestBudgetFromPolicyZeroBudget(t *testing.T) {
 		t.Errorf("BudgetFromPolicy(zero) = %+v, want zero Budget (uncapped tokens)", got)
 	}
 	// New must still turn the uncapped budget into a terminating loop.
-	if l := New(func(Invocation) ([]Tool, error) { return nil, nil }, got, nil); l.budget.MaxTurns != DefaultMaxTurns {
+	if l := New(func(Invocation) ([]Tool, func(), error) { return nil, nil, nil }, got, nil); l.budget.MaxTurns != DefaultMaxTurns {
 		t.Errorf("New defaulted MaxTurns = %d, want DefaultMaxTurns=%d", l.budget.MaxTurns, DefaultMaxTurns)
 	}
 }

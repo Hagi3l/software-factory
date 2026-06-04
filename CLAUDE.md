@@ -136,3 +136,9 @@ adapter, selected via an `openai-compat` model entry whose endpoint is patched t
 `cmd/harness/spine_e2e_test.go`, compiled only under test) is injected through the
 `runOptions.backend` seam in `buildRunComponents`. The Docker e2e variant is behind
 `//go:build docker_e2e` (`make test-e2e-docker`).
+
+The LSP session-manager tests that exercise a **real gopls** (`agent.TestSessionsRealGopls`)
+and the streamed-session round-trip (`sandbox.TestDockerSessionRoundTrip`) are not
+build-tagged — they **skip** unless `docker`+`git` are present, and the gopls one also
+needs the `go-toolchain:latest` image (build from `deploy/go-toolchain.Dockerfile`); they
+run in this dev box and stay inert elsewhere.

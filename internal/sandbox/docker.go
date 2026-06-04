@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path"
@@ -62,6 +63,12 @@ const (
 // against canned output without a Docker daemon.
 type dockerRunFunc func(ctx context.Context, stdin []byte, args ...string) (stdout, stderr []byte, exitCode int, err error)
 
+// dockerSessionFunc launches a long-lived `docker exec` and hands back its live
+// streams (the streaming sibling of dockerRunFunc). The args are the full `docker`
+// argv (starting "exec", "-i", ...). It is a seam so OpenSession's arg-shaping can be
+// unit-tested without a Docker daemon, mirroring dockerRunFunc.
+type dockerSessionFunc func(ctx context.Context, args ...string) (SessionStream, error)
+
 // DockerBackend provisions sandboxes as Docker containers by shelling out to the
 // `docker` CLI. Docker shares the host kernel, so it is local-dev-only (see
 // specs/components/sandbox.md); it satisfies the same microVM-shaped Backend
@@ -71,6 +78,10 @@ type dockerRunFunc func(ctx context.Context, stdin []byte, args ...string) (stdo
 type DockerBackend struct {
 	bin string
 	run dockerRunFunc
+	// session opens a long-lived `docker exec` with attached stdin/stdout streams (the
+	// in-sandbox transport for an LSP language server). A seam over the real
+	// docker-exec-with-pipes, defaulted in NewDockerBackend; tests inject a fake.
+	session dockerSessionFunc
 	// prepareWorktree materializes a writable git worktree at the brief's base ref on
 	// the host and returns its directory plus a cleanup func. The contents are copied
 	// into the container with `docker cp`; the host copy is removed afterward. It is a
@@ -96,6 +107,9 @@ func NewDockerBackend(opts ...DockerOption) *DockerBackend {
 	}
 	if b.run == nil {
 		b.run = execDocker(b.bin)
+	}
+	if b.session == nil {
+		b.session = realDockerSession(b.bin)
 	}
 	if b.prepareWorktree == nil {
 		b.prepareWorktree = defaultPrepareWorktree
@@ -172,7 +186,7 @@ func (b *DockerBackend) Provision(ctx context.Context, spec Spec) (Sandbox, erro
 		return nil, errors.New("sandbox: docker run returned no container id")
 	}
 
-	sb := &dockerSandbox{id: id, run: b.run, workdir: containerWorkdir, done: make(chan struct{})}
+	sb := &dockerSandbox{id: id, run: b.run, newSession: b.session, workdir: containerWorkdir, done: make(chan struct{})}
 
 	hostDir, cleanup, err := b.prepareWorktree(ctx, spec.Workspace)
 	if err != nil {
@@ -223,16 +237,20 @@ func (b *DockerBackend) dockerOK(ctx context.Context, stdin []byte, args ...stri
 // dockerSandbox is one live container handle. It carries no business state beyond
 // what teardown and wall-enforcement need.
 type dockerSandbox struct {
-	id      string
-	run     dockerRunFunc
-	workdir string
+	id         string
+	run        dockerRunFunc
+	newSession dockerSessionFunc
+	workdir    string
 
 	deadline time.Time // wall-clock deadline; zero means unset (never, in practice)
 	once     sync.Once
 	done     chan struct{} // closed exactly once by Teardown to stop the watchdog
 }
 
-var _ Sandbox = (*dockerSandbox)(nil)
+var (
+	_ Sandbox       = (*dockerSandbox)(nil)
+	_ SessionOpener = (*dockerSandbox)(nil)
+)
 
 func (s *dockerSandbox) ID() string { return s.id }
 
@@ -292,6 +310,39 @@ func (s *dockerSandbox) Exec(ctx context.Context, cmd Command) (ExecResult, erro
 	return ExecResult{ExitCode: code, Stdout: stdout, Stderr: stderr}, nil
 }
 
+// Workdir is the absolute in-container path of the seeded worktree — the LSP session
+// manager needs it to build `file://` URIs and the initialize rootUri.
+func (s *dockerSandbox) Workdir() string { return s.workdir }
+
+// OpenSession launches a long-lived process inside the container with its stdin/stdout
+// attached as streams (`docker exec -i`), for an in-sandbox LSP language server. Unlike
+// Exec it does not wait for the process or apply a per-call deadline: the session lives
+// until its Close, or until the container watchdog reaps the whole sandbox at the
+// wall-clock budget (which kills the process and breaks the stream). It still refuses to
+// start once the wall budget is already spent, so a session can never begin past the
+// deadline.
+func (s *dockerSandbox) OpenSession(ctx context.Context, cmd Command) (SessionStream, error) {
+	if !s.deadline.IsZero() && time.Now().After(s.deadline) {
+		return nil, fmt.Errorf("sandbox %s: wall-clock budget exhausted", s.id)
+	}
+	workdir := s.workdir
+	if cmd.Dir != "" {
+		workdir = path.Join(s.workdir, cmd.Dir)
+	}
+	args := []string{"exec", "-i", "-w", workdir}
+	for _, e := range cmd.Env {
+		args = append(args, "-e", e)
+	}
+	args = append(args, s.id, cmd.Path)
+	args = append(args, cmd.Args...)
+
+	sess, err := s.newSession(ctx, args...)
+	if err != nil {
+		return nil, fmt.Errorf("sandbox %s: open session %s: %w", s.id, cmd.Path, err)
+	}
+	return sess, nil
+}
+
 // Teardown force-removes the container and stops the watchdog. It is idempotent
 // (guarded by sync.Once) and safe on a partially-provisioned sandbox: a sandbox with
 // no id (container never created) just stops the watchdog and returns. `docker rm
@@ -340,6 +391,101 @@ func execDocker(bin string) dockerRunFunc {
 		}
 		return stdout.Bytes(), stderr.Bytes(), 0, nil
 	}
+}
+
+// realDockerSession is the production dockerSessionFunc: it Starts `docker exec -i …`
+// with pipes for stdin/stdout, draining stderr into a bounded buffer so the language
+// server never blocks on a full pipe. The process is bound to its own cancelable
+// context (NOT the launch ctx, whose job is only to bound the Start) so it lives until
+// the returned session's Close, mirroring the contract OpenSession documents.
+func realDockerSession(bin string) dockerSessionFunc {
+	return func(ctx context.Context, args ...string) (SessionStream, error) {
+		procCtx, cancel := context.WithCancel(context.Background())
+		cmd := exec.CommandContext(procCtx, bin, args...)
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("stdin pipe: %w", err)
+		}
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			cancel()
+			return nil, fmt.Errorf("stdout pipe: %w", err)
+		}
+		stderr := &cappedBuffer{cap: 16 << 10}
+		cmd.Stderr = stderr
+		if err := cmd.Start(); err != nil {
+			cancel()
+			return nil, fmt.Errorf("start: %w", err)
+		}
+		// Honor a launch ctx that was already canceled: tear the just-started process
+		// down rather than leaking it (Start itself does not consult ctx).
+		if err := ctx.Err(); err != nil {
+			cancel()
+			_ = cmd.Wait()
+			return nil, err
+		}
+		return &dockerSession{cmd: cmd, stdin: stdin, stdout: stdout, stderr: stderr, cancel: cancel}, nil
+	}
+}
+
+// dockerSession is one live `docker exec -i` process and its streams. Close kills the
+// process and reaps it; the streams are the LSP transport in between.
+type dockerSession struct {
+	cmd    *exec.Cmd
+	stdin  io.WriteCloser
+	stdout io.Reader
+	stderr *cappedBuffer
+	cancel context.CancelFunc
+	once   sync.Once
+}
+
+var _ SessionStream = (*dockerSession)(nil)
+
+func (s *dockerSession) Stdin() io.WriteCloser { return s.stdin }
+func (s *dockerSession) Stdout() io.Reader     { return s.stdout }
+
+// Stderr returns whatever the process wrote to stderr so far (bounded). It is not part
+// of the SessionStream contract — it exists for diagnostics when a session's language
+// server misbehaves, reachable via a concrete type assertion.
+func (s *dockerSession) Stderr() string { return s.stderr.String() }
+
+// Close kills the process and waits for it to be reaped. Idempotent. The Wait error
+// after a kill (signal: killed) is expected, so it is swallowed — Close is best-effort
+// teardown, and the sandbox watchdog is the backstop.
+func (s *dockerSession) Close() error {
+	s.once.Do(func() {
+		_ = s.stdin.Close()
+		s.cancel()
+		_ = s.cmd.Wait()
+	})
+	return nil
+}
+
+// cappedBuffer is a mutex-guarded buffer that keeps only the last `cap` bytes written
+// (a ring-ish tail). os/exec writes to it from its stderr-copier goroutine while a test
+// may read via String, so it must be concurrency-safe; the cap keeps a chatty server's
+// stderr from growing without bound.
+type cappedBuffer struct {
+	mu  sync.Mutex
+	buf []byte
+	cap int
+}
+
+func (b *cappedBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.buf = append(b.buf, p...)
+	if len(b.buf) > b.cap {
+		b.buf = b.buf[len(b.buf)-b.cap:]
+	}
+	return len(p), nil
+}
+
+func (b *cappedBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return string(b.buf)
 }
 
 // defaultPrepareWorktree clones the repo and checks out the base ref into a temp

@@ -119,6 +119,17 @@ already pinned in provenance therefore pins the *language-server version* and it
 too, so semantic results are reproducible. (Demo scope ships the `go`→`gopls` entry only;
 `.templ`/`.css` ride the text floor.)
 
+The session manager runs the server as a **streamed process** — a long-lived child with
+its stdin/stdout attached, so it stays warm across many queries and speaks JSON-RPC for
+the whole invocation rather than cold-starting per call. This is a *streamed Exec*, not a
+new hole in the boundary: the server still runs **inside** the sandbox and the host never
+reaches in (the same property `Exec` has). Backends expose it as an **optional capability**
+(`SessionOpener`); a backend without it — or a sandbox profile carrying no manifest — leaves
+the manager inert, so every semantic read degrades to the text floor exactly as
+[agent.md](agent.md#semantic-tools-lsp-backed) requires. The manager is also what couples
+the edit tools to the session: every `edit_file`/`write_file` notifies it (`didChange`), so
+a warm server never reads stale text.
+
 ---
 
 ## A non-isolating local backend (testing only)

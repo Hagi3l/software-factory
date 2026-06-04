@@ -60,7 +60,12 @@ type Invocation struct {
 // ToolSource builds the tool set for one invocation. It is the seam plan T1.14
 // (workspace tools) and T1.15 (lifecycle tools) fill; the loop calls it once per run
 // with the live Invocation. Returning an error fails the invocation.
-type ToolSource func(inv Invocation) ([]Tool, error)
+//
+// It also returns a cleanup func (may be nil) the loop defers until the invocation
+// returns — the hook for per-invocation tool resources that outlive a single tool call,
+// such as the warm LSP session manager (Phase 6, T6.1), which shuts its language servers
+// down cleanly rather than waiting for the sandbox teardown to kill them.
+type ToolSource func(inv Invocation) (tools []Tool, cleanup func(), err error)
 
 // BrokerClient is the subset of the broker the lifecycle tools use: push the candidate
 // branch (only the task branch is accepted by the runner) and publish progress events.

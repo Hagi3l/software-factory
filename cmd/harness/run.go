@@ -368,10 +368,17 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// The agent inner loop is the runner's Invoker. Its ToolSource composes the
 	// in-sandbox workspace tools with the lifecycle tools (submit/escalate/
 	// request_subtask) per invocation. Budget is derived from the per-issue policy.
-	toolSource := func(inv agent.Invocation) ([]agent.Tool, error) {
-		tools := agent.WorkspaceTools(inv.Sandbox)
+	//
+	// A per-invocation LSP session manager (Phase 6, T6.1) backs the edit tools so a
+	// warm language server stays in sync with the worktree; the semantic comprehension/
+	// transformation tools (T6.2/T6.3) query it. It is closed via the returned cleanup
+	// when the invocation ends. A sandbox without streamed-session support leaves it
+	// inert (edits no-op, queries degrade to the text floor).
+	toolSource := func(inv agent.Invocation) ([]agent.Tool, func(), error) {
+		sessions := agent.NewSessions(inv.Sandbox, log)
+		tools := agent.WorkspaceTools(inv.Sandbox, sessions)
 		tools = append(tools, agent.LifecycleTools(inv.Brief, inv.Broker)...)
-		return tools, nil
+		return tools, sessions.Close, nil
 	}
 	loop := agent.New(toolSource, agent.BudgetFromPolicy(cfg.Harness.Policy), log)
 

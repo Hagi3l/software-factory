@@ -1,8 +1,10 @@
 package sandbox
 
 import (
+	"bufio"
 	"context"
 	"errors"
+	"io"
 	"net"
 	"os"
 	"os/exec"
@@ -554,5 +556,123 @@ func mustExec(t *testing.T, sb Sandbox, what string, cmd Command, wantSubstr str
 	}
 	if !strings.Contains(string(res.Stdout), wantSubstr) {
 		t.Errorf("Exec for %q: stdout %q does not contain %q", what, res.Stdout, wantSubstr)
+	}
+}
+
+// --- T6.1: streaming sessions (OpenSession) ---
+
+// fakeSessionStream is a no-op SessionStream for the arg-shape unit test.
+type fakeSessionStream struct{}
+
+func (fakeSessionStream) Stdin() io.WriteCloser { return nopWriteCloser{} }
+func (fakeSessionStream) Stdout() io.Reader     { return strings.NewReader("") }
+func (fakeSessionStream) Close() error          { return nil }
+
+type nopWriteCloser struct{}
+
+func (nopWriteCloser) Write(p []byte) (int, error) { return len(p), nil }
+func (nopWriteCloser) Close() error                { return nil }
+
+// OpenSession builds the `docker exec -i` argv the way Exec builds its `docker exec` —
+// asserted here with the session seam so no daemon is needed.
+func TestOpenSessionArgShapes(t *testing.T) {
+	b, _ := recordingBackend(t, "/tmp/seed")
+	var sessionArgs []string
+	b.session = func(_ context.Context, args ...string) (SessionStream, error) {
+		sessionArgs = args
+		return fakeSessionStream{}, nil
+	}
+
+	sb, err := b.Provision(context.Background(), unitSpec(t))
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	opener, ok := sb.(SessionOpener)
+	if !ok {
+		t.Fatal("docker sandbox does not implement SessionOpener")
+	}
+	if opener.Workdir() != containerWorkdir {
+		t.Errorf("Workdir = %q, want %q", opener.Workdir(), containerWorkdir)
+	}
+
+	stream, err := opener.OpenSession(context.Background(), Command{
+		Path: "gopls", Args: []string{"serve"}, Env: []string{"GOFLAGS=-mod=mod"},
+	})
+	if err != nil {
+		t.Fatalf("OpenSession: %v", err)
+	}
+	defer stream.Close()
+
+	want := []string{"exec", "-i", "-w", "/workspace", "-e", "GOFLAGS=-mod=mod", "container-abc", "gopls", "serve"}
+	if strings.Join(sessionArgs, "\x00") != strings.Join(want, "\x00") {
+		t.Errorf("session args = %v, want %v", sessionArgs, want)
+	}
+}
+
+// A session cannot be opened once the wall-clock budget is spent (mirrors Exec).
+func TestOpenSessionRejectedAfterWall(t *testing.T) {
+	b, _ := recordingBackend(t, "/tmp/seed")
+	called := false
+	b.session = func(_ context.Context, _ ...string) (SessionStream, error) {
+		called = true
+		return fakeSessionStream{}, nil
+	}
+	sb, err := b.Provision(context.Background(), unitSpec(t))
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	ds := sb.(*dockerSandbox)
+	ds.deadline = time.Now().Add(-time.Second) // budget already spent
+	if _, err := ds.OpenSession(context.Background(), Command{Path: "gopls"}); err == nil {
+		t.Fatal("OpenSession started a session past the wall-clock budget")
+	}
+	if called {
+		t.Error("session seam was invoked despite an exhausted budget")
+	}
+}
+
+// TestDockerSessionRoundTrip drives a real `docker exec -i` streamed session: `cat`
+// echoes stdin to stdout, proving the persistent stdin/stdout transport the LSP session
+// manager rides on works end to end (the production path realDockerSession takes).
+func TestDockerSessionRoundTrip(t *testing.T) {
+	requireDockerAndGit(t)
+
+	sockDir := t.TempDir()
+	sock := filepath.Join(sockDir, "broker.sock")
+	ln, err := net.Listen("unix", sock)
+	if err != nil {
+		t.Fatalf("listen on broker socket: %v", err)
+	}
+	defer ln.Close()
+
+	spec := Spec{
+		Profile:   "busybox:latest",
+		Workspace: Workspace{Repo: seedRepo(t), BaseRef: "main"},
+		Limits:    config.SandboxLimits{CPU: 1, Mem: "64Mi", Wall: config.Duration(2 * time.Minute)},
+		Broker:    Endpoint{Network: "unix", Address: sock},
+	}
+
+	be := NewDockerBackend()
+	sb, err := be.Provision(context.Background(), spec)
+	if err != nil {
+		t.Fatalf("Provision: %v", err)
+	}
+	defer func() { _ = sb.Teardown(context.Background()) }()
+
+	stream, err := sb.(SessionOpener).OpenSession(context.Background(), Command{Path: "cat"})
+	if err != nil {
+		t.Fatalf("OpenSession: %v", err)
+	}
+	defer stream.Close()
+
+	if _, err := io.WriteString(stream.Stdin(), "ping\n"); err != nil {
+		t.Fatalf("write to session stdin: %v", err)
+	}
+	line, err := bufio.NewReader(stream.Stdout()).ReadString('\n')
+	if err != nil {
+		t.Fatalf("read from session stdout: %v", err)
+	}
+	if strings.TrimSpace(line) != "ping" {
+		t.Errorf("session echo = %q, want ping", line)
 	}
 }

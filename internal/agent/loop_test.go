@@ -97,7 +97,7 @@ func (fakeSandbox) Teardown(context.Context) error { return nil }
 // read and the real socket dial.
 func newLoop(t *testing.T, budget Budget, conn *fakeConn, tools ...Tool) *Loop {
 	t.Helper()
-	l := New(func(Invocation) ([]Tool, error) { return tools, nil }, budget, nil)
+	l := New(func(Invocation) ([]Tool, func(), error) { return tools, nil, nil }, budget, nil)
 	l.readPersona = func(string) ([]byte, error) { return []byte("you are a helpful implementor"), nil }
 	l.connect = func(sandbox.Endpoint) brokerConn { return conn }
 	return l
@@ -349,7 +349,7 @@ func TestPersonaErrors(t *testing.T) {
 // A ToolSource error is fatal.
 func TestToolSourceErrorIsFatal(t *testing.T) {
 	conn := &fakeConn{responses: []model.Response{{Stop: model.StopEndTurn}}}
-	l := New(func(Invocation) ([]Tool, error) { return nil, errors.New("bad tools") }, Budget{}, nil)
+	l := New(func(Invocation) ([]Tool, func(), error) { return nil, nil, errors.New("bad tools") }, Budget{}, nil)
 	l.readPersona = func(string) ([]byte, error) { return []byte("p"), nil }
 	l.connect = func(sandbox.Endpoint) brokerConn { return conn }
 	if _, err := run(t, l, testBrief()); err == nil {
