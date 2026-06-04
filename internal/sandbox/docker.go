@@ -41,6 +41,16 @@ const (
 	// exit code. Exec surfaces this as a Go error so callers can tell "could not run
 	// the command" from "command ran and failed" (see Sandbox.Exec).
 	dockerCLIError = 125
+
+	// chownWorktreeCmd re-owns the seeded worktree to the container's exec user after
+	// `docker cp` (which preserves the host uid/gid on every copied file). Run via
+	// `sh -c` so `$(id -u)`/`$(id -g)` resolve to whoever Exec runs as — "the container
+	// user" literally, with no uid hard-coded — and chown the tree to that owner. The
+	// default exec user is root (the toolchain image declares no USER), which holds
+	// CAP_CHOWN, so the chown succeeds and the worktree owner then matches the process
+	// that runs git/`go build`. This removes git's dubious-ownership trip (exit 128)
+	// at its cause, replacing the image's blanket `safe.directory '*'` crutch (T5.4).
+	chownWorktreeCmd = `chown -R "$(id -u):$(id -g)" ` + containerWorkdir
 )
 
 // dockerRunFunc runs one `docker` subcommand and returns its stdout, stderr, the
@@ -177,6 +187,17 @@ func (b *DockerBackend) Provision(ctx context.Context, spec Spec) (Sandbox, erro
 	if _, err := b.dockerOK(ctx, nil, "cp", hostDir+"/.", id+":"+containerWorkdir); err != nil {
 		_ = sb.Teardown(context.Background())
 		return nil, fmt.Errorf("sandbox: seed worktree: %w", err)
+	}
+
+	// `docker cp` preserves the host uid/gid on the copied tree, so the seeded worktree
+	// (and its .git) is owned by whoever ran the harness, not by the container's exec
+	// user. git's dubious-ownership guard then refuses to operate on it, silently
+	// breaking `go build`'s VCS stamping and the in-sandbox candidate commit. Chowning
+	// the tree to the container user fixes the owner mismatch at its cause, so the image
+	// no longer needs the blanket `safe.directory '*'` crutch (T5.4, chownWorktreeCmd).
+	if _, err := b.dockerOK(ctx, nil, "exec", id, "sh", "-c", chownWorktreeCmd); err != nil {
+		_ = sb.Teardown(context.Background())
+		return nil, fmt.Errorf("sandbox: chown seeded worktree: %w", err)
 	}
 
 	// Wall-clock is the termination guarantee (see specs/workflow.md). Docker has no

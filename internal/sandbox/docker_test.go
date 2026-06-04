@@ -105,8 +105,8 @@ func TestProvisionArgShapes(t *testing.T) {
 	if sb.ID() != "container-abc" {
 		t.Errorf("ID = %q, want container-abc", sb.ID())
 	}
-	if len(*calls) != 2 {
-		t.Fatalf("got %d docker calls, want 2 (run, cp): %v", len(*calls), *calls)
+	if len(*calls) != 3 {
+		t.Fatalf("got %d docker calls, want 3 (run, cp, chown): %v", len(*calls), *calls)
 	}
 
 	run := strings.Join((*calls)[0], " ")
@@ -128,6 +128,14 @@ func TestProvisionArgShapes(t *testing.T) {
 	cp := strings.Join((*calls)[1], " ")
 	if want := "cp /tmp/seed/. container-abc:/workspace"; cp != want {
 		t.Errorf("cp args = %q, want %q", cp, want)
+	}
+
+	// The seeded worktree is re-owned to the container's exec user (T5.4) so git's
+	// dubious-ownership guard never fires — replacing the image's safe.directory crutch.
+	chown := (*calls)[2]
+	wantChown := []string{"exec", "container-abc", "sh", "-c", chownWorktreeCmd}
+	if strings.Join(chown, "\x00") != strings.Join(wantChown, "\x00") {
+		t.Errorf("chown args = %v, want %v", chown, wantChown)
 	}
 }
 
@@ -217,6 +225,37 @@ func TestProvisionSeedFailureTearsDown(t *testing.T) {
 	}
 	if calls[2][1] != "-f" || calls[2][2] != "container-abc" {
 		t.Errorf("teardown args = %v, want [rm -f container-abc]", calls[2])
+	}
+}
+
+// A failed worktree chown (the T5.4 ownership fix) must also tear the container back
+// down — a worktree git refuses to operate on is no use, so the provision fails closed.
+func TestProvisionChownFailureTearsDown(t *testing.T) {
+	var calls [][]string
+	b := NewDockerBackend()
+	b.prepareWorktree = func(_ context.Context, _ Workspace) (string, func(), error) {
+		return "/tmp/seed", func() {}, nil
+	}
+	b.run = func(_ context.Context, _ []byte, args ...string) ([]byte, []byte, int, error) {
+		calls = append(calls, args)
+		switch args[0] {
+		case "run":
+			return []byte("container-abc\n"), nil, 0, nil
+		case "exec":
+			return nil, []byte("chown: operation not permitted"), 1, nil
+		default: // cp, rm
+			return nil, nil, 0, nil
+		}
+	}
+	if _, err := b.Provision(context.Background(), unitSpec(t)); err == nil {
+		t.Fatal("Provision did not fail when the worktree chown failed")
+	}
+	// Expect run, cp, exec(chown, failed), then rm (cleanup).
+	if len(calls) != 4 || calls[3][0] != "rm" {
+		t.Fatalf("expected run, cp, exec, rm; got %v", calls)
+	}
+	if calls[3][1] != "-f" || calls[3][2] != "container-abc" {
+		t.Errorf("teardown args = %v, want [rm -f container-abc]", calls[3])
 	}
 }
 
@@ -452,6 +491,12 @@ func TestDockerSandboxIntegration(t *testing.T) {
 	// The worktree is seeded at the base ref, with a writable .git (full clone).
 	mustExec(t, sb, "the seeded file is present", Command{Path: "cat", Args: []string{"hello.txt"}}, "seeded")
 	mustExec(t, sb, "the worktree has a .git", Command{Path: "sh", Args: []string{"-c", "test -d /workspace/.git && echo ok"}}, "ok")
+
+	// T5.4: the seeded worktree is re-owned to the container's exec user (uid 0, the
+	// toolchain image's default), not the host uid `docker cp` would otherwise leave —
+	// so git's dubious-ownership guard never fires without the safe.directory crutch.
+	mustExec(t, sb, "the worktree is owned by the container user",
+		Command{Path: "sh", Args: []string{"-c", `test "$(stat -c %u /workspace/.git)" = "$(id -u)" && echo ok`}}, "ok")
 
 	// The worktree is writable.
 	mustExec(t, sb, "the worktree is writable", Command{Path: "sh", Args: []string{"-c", "echo x > newfile && cat newfile"}}, "x")

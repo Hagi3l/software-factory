@@ -12,11 +12,12 @@
 #     sandbox runs with NO network (the zero-network invariant) — `go build`/`go test`
 #     must resolve every dependency offline from this cache. A task that adds a new
 #     dependency therefore needs the image rebuilt (or a vetted mirror — T5.6).
-#   - safe.directory '*': the runner seeds the worktree via `docker cp`, which
-#     preserves the host uid on `.git` while the container runs as root. Without this,
-#     git's dubious-ownership guard fails (exit 128) and breaks `go build`'s default
-#     VCS stamping — which silently fails the gate. (T5.4 replaces this crutch.)
 #   - A default git identity so the agent can commit its candidate branch in-sandbox.
+#
+# No `safe.directory '*'` crutch: the Docker backend now chowns the seeded worktree to
+# the container's exec user after `docker cp` (which would otherwise leave it owned by
+# the host uid, tripping git's dubious-ownership guard and breaking VCS stamping). The
+# owner matches the process by construction, so the blanket override is gone (T5.4).
 #
 # Gate tooling (T5.3) — the `qa`/`resolve` stages (config/harness.yaml) run these
 # offline in this image, so they are baked in (binaries land in /go/bin, on PATH):
@@ -45,8 +46,7 @@ RUN apt-get update \
 
 RUN git config --global user.email "agent@harness.local" \
  && git config --global user.name "harness agent" \
- && git config --global init.defaultBranch main \
- && git config --global --add safe.directory '*'
+ && git config --global init.defaultBranch main
 
 # Gate-tool + language-server binaries (need network at build; never at run). Pinned
 # to a tag so a rebuild is reproducible; bump deliberately. They install into /go/bin.

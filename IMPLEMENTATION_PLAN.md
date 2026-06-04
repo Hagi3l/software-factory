@@ -1154,7 +1154,29 @@ them); only the *order of attention* changes.
   change ⇒ no `docs/` change. **gosec install note:** the host needs `gosec` on PATH to run the gate locally —
   `go install github.com/securego/gosec/v2/cmd/gosec@v2.22.9` (the version T5.3 bakes into the role image);
   in a real run the gate runs it from the baked image, offline. ([verification.md](specs/verification.md), [security.md](specs/security.md))
-- [ ] **T5.4 Sandbox seeded-worktree ownership** *(carried from Phase 1)* — **drop the current workaround:** the bootstrap `go-toolchain` image relies on `git config --global --add safe.directory '*'` to tolerate the seeded worktree being owned by the host uid (the Docker backend seeds via `docker cp host/. container:workdir`, preserving host ownership; no `chown` today). Replace it by having the Docker backend `chown` the seeded worktree to the container user (and the Firecracker backend seed correct ownership), so the `safe.directory` / VCS-stamping crutch can be removed. ([components/sandbox.md](specs/components/sandbox.md))
+- [x] **T5.4 Sandbox seeded-worktree ownership** *(carried from Phase 1)* — *done.* Dropped the
+  `git config --global --add safe.directory '*'` crutch by fixing the ownership mismatch at its cause.
+  **Backend change (`internal/sandbox/docker.go`):** after the `docker cp host/. container:/workspace`
+  seed — which preserves the **host** uid/gid on every copied file while the container's exec user is
+  root — `Provision` now runs one `docker exec <id> sh -c chownWorktreeCmd`, where
+  **`chownWorktreeCmd = chown -R "$(id -u):$(id -g)" /workspace`**. The `$(id -u)/$(id -g)` form chowns the
+  tree to **whoever Exec runs as** ("the container user" literally, no uid hard-coded — robust if the image
+  later declares a non-root `USER`); the default exec user is root (CAP_CHOWN), so the chown succeeds and the
+  worktree owner then matches the process that runs git/`go build`, so git's dubious-ownership guard (exit
+  128, which silently broke VCS stamping + the in-sandbox candidate commit) never fires. A failed chown tears
+  the container down like a failed seed (fails closed). **Dockerfile (`deploy/go-toolchain.Dockerfile`):**
+  removed the `&& git config --global --add safe.directory '*'` line + rewrote the comment block to explain the
+  backend now owns this. **Transition-safe:** the chown is in the harness binary (runs regardless of image),
+  so it's harmless against the old image (chowning to root is redundant there) and the *fix* against the rebuilt
+  one — no lockstep deploy needed. **Verified end-to-end against real Docker:** the busybox integration test
+  (`TestDockerSandboxIntegration`) now asserts `.git` is owned by the container's exec user post-provision; a
+  manual go-toolchain reproduction with the global `safe.directory` stripped proved `git status` fails (exit
+  128) *before* the chown and `git status` + `git rev-parse HEAD` succeed *after* it (`.git` 1000→0). Unit
+  tests: `TestProvisionArgShapes` now asserts the 3rd call is the chown `exec`; new
+  `TestProvisionChownFailureTearsDown` (run, cp, exec-fail, rm). `go vet`/`golangci-lint` clean (0 issues),
+  `go build ./...` green, `go test ./internal/sandbox/` green (incl. real-Docker integration). The Firecracker
+  half (seed correct ownership) lands with **T5.2** (hardware-blocked). No CLI/config/route/view change ⇒ no
+  `docs/` change. ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.5** *(optional)* gVisor backend (medium-trust). ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.6 Vetted package mirror/proxy** — route package fetches through a pinning/scanning/logging proxy on the broker allowlist; a read-through cache amortizes downloads without weakening egress control. ([security.md](specs/security.md), [components/runner.md](specs/components/runner.md))
 - [ ] **T5.7 Scoped short-lived secret minting** — the runner mints a per-task git token scoped to push *only* the task branch, injected for the invocation lifetime and dying with the sandbox (replaces the bootstrap local-repo push). ([components/runner.md](specs/components/runner.md), [security.md](specs/security.md))
