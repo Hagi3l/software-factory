@@ -34,9 +34,13 @@
 #
 # `qa` is the spec-independent defence-in-depth stage, run by the `security` soul — a
 # *different* soul than the implementor (producer != verifier). Its gate re-runs the
-# acceptance tests plus a mutation-adequacy metric and three spec-independent scanners
-# (gosec SAST, govulncheck known-vulnerabilities, license-scan dependency/licence policy)
-# in the clean verification sandbox. mutation>=0.8 is the kernel default mutation
+# acceptance tests, a static lint (golangci-lint), a mutation-adequacy metric, and three
+# spec-independent scanners (gosec SAST, govulncheck known-vulnerabilities, license-scan
+# dependency/licence policy) in the clean verification sandbox. The lint is the SAME `make
+# lint` the implementor runs in-loop for fast feedback — one command, run by the agent for
+# speed and re-run by the gate for trust (a producer self-check grants zero trust; only the
+# gate's re-run advances the transition; see specs/verification.md "Producer self-checks are
+# feedback, not grades"). mutation>=0.8 is the kernel default mutation
 # threshold (see specs/verification.md). A rejected qa candidate routes `on_failure` back
 # to `implement` — a fresh fix attempt — so a finding is fixed by the implementor and
 # re-gated, not merged. `integrate` is a trusted-merge executed inline by the orchestrator
@@ -90,7 +94,7 @@ dag:
   qa:
     role: security
     precondition: blockers-closed
-    postcondition: [tests-pass, "mutation>=0.8", gosec, govulncheck, license-scan]
+    postcondition: [tests-pass, golangci-lint, "mutation>=0.8", gosec, govulncheck, license-scan]
     on_failure: implement
     produces: [integrate]
   integrate:
@@ -119,7 +123,7 @@ dag:
     role: merge-resolver
     kind: resolve
     precondition: blockers-closed
-    postcondition: [tests-pass, "mutation>=0.8", gosec, govulncheck, license-scan]
+    postcondition: [tests-pass, golangci-lint, "mutation>=0.8", gosec, govulncheck, license-scan]
     on_failure: resolve
     produces: [integrate]
 
@@ -128,8 +132,9 @@ dag:
 # tool error => fail, closed). These are the harness's own make targets, so "how the
 # harness runs its QA" lives in one reviewable place (the Makefile) — `make test-unit`
 # compiles every package (a build break also fails the gate) and runs the unit suite;
-# `make gosec`/`govulncheck`/`license-scan` are the spec-independent scanners; `make
-# mutation` prints the mutation score the `mutation>=0.8` comparison grades (the gate
+# `make lint` runs golangci-lint (configured by .golangci.yml, which travels in the
+# worktree); `make gosec`/`govulncheck`/`license-scan` are the spec-independent scanners;
+# `make mutation` prints the mutation score the `mutation>=0.8` comparison grades (the gate
 # reads the trailing numeric token of stdout and fails closed if it cannot).
 #
 # The reserved proofs `tests-red` (author-tests) and `tests-red-then-green` (implement)
@@ -140,18 +145,20 @@ dag:
 # makes config the single source of truth the gate resolves against; see
 # specs/configuration.md.
 #
-# Offline note: the qa scanners and the mutation tool must be baked into the `security`
-# role's sandbox image so they run under the zero-network invariant — govulncheck in
-# particular needs an offline vulnerability database. The kernel go-toolchain image does
-# not yet carry them; that rootfs composition is T5.3/T5.6 (see
-# deploy/go-toolchain.Dockerfile). Until then the qa gate is wired and dispatched but its
-# scanner/mutation checks fail closed for lack of tooling.
+# Offline note: the qa scanners, the linter, and the mutation tool must be baked into the
+# `security` role's sandbox image so they run under the zero-network invariant — govulncheck
+# in particular needs an offline vulnerability database (golangci-lint is a pure static
+# analyser and needs only its binary). The kernel go-toolchain image does not yet carry
+# them; that rootfs composition is T5.3/T5.6 (see deploy/go-toolchain.Dockerfile). Until
+# then the qa gate is wired and dispatched but its lint/scanner/mutation checks fail closed
+# for lack of tooling.
 checks:
-  tests-pass:   make test-unit
-  gosec:        make gosec
-  govulncheck:  make govulncheck
-  license-scan: make license-scan
-  mutation:     make mutation
+  tests-pass:    make test-unit
+  golangci-lint: make lint
+  gosec:         make gosec
+  govulncheck:   make govulncheck
+  license-scan:  make license-scan
+  mutation:      make mutation
 
 policy:
   max_retries: 3

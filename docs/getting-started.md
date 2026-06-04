@@ -133,9 +133,9 @@ reject routes a fresh fix attempt (or dead-letters when retries are spent). See
   gate refuses to run on a bad config by design.
 - **`/events` returns 503** — you're on a standalone `harness serve`. Use `harness run
   --serve-addr` so the feed has a live NATS source.
-- **qa scanner checks fail closed** — the gosec/govulncheck/license/mutation tooling
-  isn't yet baked into the sandbox image (that's Phase 5, T5.3/T5.6). The gate is wired
-  but those checks fail until the rootfs carries the tools offline.
+- **qa lint/scanner checks fail closed** — the golangci-lint/gosec/govulncheck/license/mutation
+  tooling isn't yet baked into the sandbox image (that's Phase 5, T5.3/T5.6). The gate is
+  wired but those checks fail until the rootfs carries the tools offline.
 - **`make check` times out** — a known infra flake under full-suite parallel NATS load;
   re-run, or run the single package in isolation. See `IMPLEMENTATION_PLAN.md`.
 </content>

@@ -32,7 +32,13 @@ spec problem — escalate rather than edit it.
    from red to green. Read the failures and fix the *implementation*. The gate re-runs
    the tests in a fresh sandbox, so code that only compiles in your head will be
    rejected.
-4. Capture the *why* in comments and commit messages — tests and implementation
+4. Lint before you finish. Run `make lint` (golangci-lint) — or `make check`, which
+   runs vet + lint + the unit suite together — and fix what it reports. **The qa gate
+   runs the *same* `make lint`**, so a lint failure you leave behind is not a warning,
+   it is a rejected candidate that costs a whole fresh qa attempt. Catching it here is
+   far cheaper than bouncing the gate. (Your local run earns no trust — the gate re-runs
+   it independently — it just spares you the round-trip.)
+5. Capture the *why* in comments and commit messages — tests and implementation
    importance — not a restatement of the *what*.
 
 ## Finishing

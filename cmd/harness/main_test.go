@@ -131,7 +131,7 @@ func TestShippedQAStageWired(t *testing.T) {
 	if !reflect.DeepEqual(qa.Produces, []string{"integrate"}) {
 		t.Errorf("qa.produces = %v, want [integrate]", qa.Produces)
 	}
-	wantPost := []string{"tests-pass", "mutation>=0.8", "gosec", "govulncheck", "license-scan"}
+	wantPost := []string{"tests-pass", "golangci-lint", "mutation>=0.8", "gosec", "govulncheck", "license-scan"}
 	if !reflect.DeepEqual(qa.Postcondition, wantPost) {
 		t.Errorf("qa.postcondition = %v, want %v", qa.Postcondition, wantPost)
 	}

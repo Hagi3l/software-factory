@@ -20,7 +20,7 @@ requirements ─► plan ─► author-tests ─► implement ─► qa ─► i
 | `plan` | plan | `planner` | Reads the seed + spec, decomposes into concrete child work items with dependency edges. Not sandbox-gated — it writes no candidate, only proposals the orchestrator validates. |
 | `author-tests` | agent | `test-author` | Writes the **failing** acceptance tests from the spec. Its `tests-red` gate proves they genuinely fail with no implementation present. |
 | `implement` | agent | `implementor` | Makes those tests pass. Its `tests-red-then-green` gate proves the tests fail on the base and pass on the candidate — real implementation, not vacuous tests. |
-| `qa` | agent | `security` | Spec-independent defence-in-depth: re-runs the tests plus a mutation-adequacy metric and three scanners (gosec, govulncheck, license-scan) in a clean sandbox. A different soul than the implementor. |
+| `qa` | agent | `security` | Spec-independent defence-in-depth: re-runs the tests, a static lint (golangci-lint), a mutation-adequacy metric, and three scanners (gosec, govulncheck, license-scan) in a clean sandbox. A different soul than the implementor. |
 | `integrate` | trusted-merge | — | The orchestrator merges the candidate to `main` inline. In trusted-dev mode, parked for human approval first. |
 | `resolve` | resolve | `merge-resolver` | Not in the linear flow. Spawned only when a verified candidate can't cleanly rebase onto a since-advanced `main`. Rebases, resolves conflicts, re-runs the full qa gate, and re-enters the merge queue. |
 

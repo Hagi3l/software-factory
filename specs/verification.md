@@ -85,6 +85,32 @@ producer — keyed on family/provider, not just an identical model id. The warni
 natural home is `harness validate` (so yaml-only users see it); a control-room
 tooltip is a complementary surface once a souls/config view exists.
 
+### Producer self-checks are feedback, not grades
+
+Nothing stops — and the [implementor persona](components/agent.md) is expected to
+encourage — an agent running the gate's own checks *inside its own sandbox* before it
+calls `submit`: lint, build, and the acceptance tests are reachable through the `run`
+tool, and a candidate that fails them is far cheaper to fix in-loop than to bounce back
+through a whole `qa` round-trip (a fresh sandbox, the full check suite, possibly a
+retry-budget hit). Catching a trivially-fixable lint failure at the gate instead of at
+the keyboard is wasted compute, so self-checking is welcome.
+
+It grants **zero trust**. A producer self-check runs in the *untrusted* producing
+sandbox and is never read as a grade — the agent could skip it, misreport it, or run it
+against a tampered tree. Only the independent re-run in the fresh
+[verification sandbox](glossary.md#verification-sandbox) advances the transition. The
+self-check lowers the *expected cost* of clearing the gate; it never *is* the gate.
+This is the same `done` = *candidate ready, not accepted* boundary, seen from the
+producer's side: **the agent checks itself for speed; the transition logic checks it for
+trust.**
+
+To stop the two from drifting, the producer's self-check and the gate **resolve the same
+[check registry](configuration.md) command** — one `golangci-lint run`, one `tests-pass`
+— authored once and run in two places for two different reasons: fast feedback in the
+producer's sandbox, authoritative grading in the clean one. Because it is byte-for-byte
+the same command, "I linted it" and "the gate lints it" can never quietly mean different
+things.
+
 ---
 
 ## The trust mechanisms

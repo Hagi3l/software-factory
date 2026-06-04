@@ -55,11 +55,12 @@ in one reviewable place:
 
 ```yaml
 checks:
-  tests-pass:   make test-unit
-  gosec:        make gosec
-  govulncheck:  make govulncheck
-  license-scan: make license-scan
-  mutation:     make mutation
+  tests-pass:    make test-unit
+  golangci-lint: make lint
+  gosec:         make gosec
+  govulncheck:   make govulncheck
+  license-scan:  make license-scan
+  mutation:      make mutation
 ```
 
 A metric comparison like `mutation>=0.8` resolves the command registered under its
@@ -67,6 +68,12 @@ metric name and grades the trailing numeric token of stdout. The reserved proofs
 `tests-red` and `tests-red-then-green` have no command of their own — they reuse
 `tests-pass` run against the candidate and/or its base, so the acceptance tests stay a
 single source of truth.
+
+`golangci-lint` is an ordinary command check (graded on exit code) on the `qa` and
+`resolve` gates. It is the *same* `make lint` the implementor runs in-loop for fast
+feedback before it submits — one command, run by the agent for speed and re-run by the
+gate for trust (a producer self-check earns no trust; only the gate's independent re-run
+advances the transition — see [verification.md](../specs/verification.md)).
 
 ### `policy` — termination & autonomy
 
