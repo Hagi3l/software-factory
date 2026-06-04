@@ -5,6 +5,7 @@ go 1.26
 require (
 	github.com/a-h/templ v0.3.1001
 	github.com/anthropics/anthropic-sdk-go v1.45.0
+	github.com/mdlayher/vsock v1.3.0
 	github.com/nats-io/nats-server/v2 v2.14.1
 	github.com/nats-io/nats.go v1.52.0
 	github.com/openai/openai-go/v3 v3.37.0
@@ -35,6 +36,7 @@ require (
 	github.com/invopop/jsonschema v0.13.0 // indirect
 	github.com/klauspost/compress v1.18.6 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/mdlayher/socket v0.6.0 // indirect
 	github.com/minio/highwayhash v1.0.4 // indirect
 	github.com/nats-io/jwt/v2 v2.8.1 // indirect
 	github.com/nats-io/nkeys v0.4.15 // indirect

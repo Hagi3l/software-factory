@@ -32,10 +32,11 @@ good autonomous implementation) — a later validation concern, never an enginee
   0–1 are done (see Status); Phases 2–3 are done bar a few open items kept in full below.
   The verbose per-task findings were pruned once complete — that history lives in git,
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
-- **Open tasks (`- [ ]`) keep their full detail** — Phase 5, plus the handful of optional items
+- **Open tasks (`- [ ]`) keep their full detail** — Phases 5–6, plus the handful of optional items
   left in Phase 2 (T2.11/T2.12). T4.26 (Config view) closed the original Phase-4 view roster and
   **T4.27 (ledger batched-forks/discuss-defer/soft-gate) is now done — Phase 4 is fully complete**;
-  the only remaining *engineering* of new substrate is Phase 5 (production isolation & distribution).
+  the remaining *engineering* of new substrate is Phase 5 (production isolation & distribution) and
+  Phase 6 (agent semantic tooling — the LSP-backed tool surface added in the post-T4.27 spec pass).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -158,6 +159,26 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
   openai-compat note, provider-set intersection, resolve-is-not-a-verifier, shipped-config advisory. `make check`
   green (lint 0, 656 pass / 2 skip). **Deferred (filed, not blocking):** the complementary control-room tooltip
   still needs a souls/config view that does not exist yet. ([verification.md](specs/verification.md), [configuration.md](specs/configuration.md))
+- [x] **T2.14 `golangci-lint` gate check + the producer-self-check principle** — *done.* Adds static
+  lint to the `qa`/`resolve` gates and records the self-check-vs-trust boundary in the spec.
+  **Config-only on the gate side (no Go change):** `golangci-lint: make lint` joins the `checks`
+  registry and the check is appended to the `qa` and `resolve` postconditions — placed after
+  `tests-pass`, before the expensive `mutation` pass, so the fail-fast gate surfaces a cheap lint
+  failure first. Verified by tracing the gate that it is **fully generic** — postcondition
+  classification (`gate.Registry.Resolve`), execution (`runCheck`→`execCheck`, graded on exit code),
+  validation (`config.knownPostcondition`), and the provenance trailer / `gate-verdict` records all
+  treat `golangci-lint` identically to `gosec`; there is no hardcoded check-name enum anywhere, so the
+  design's "adding a check is a config edit" holds and **no implementation change was needed**.
+  **Feedback half:** the `implementor-go` persona now runs `make lint`/`make check` and fixes before
+  `submit`, so a lint nit is caught at the keyboard rather than bouncing a whole fresh qa attempt — the
+  *same* `make lint` the gate re-runs (one command, run by the agent for speed and by the gate for
+  trust; a producer self-check earns zero trust — only the gate's independent re-run in the clean
+  sandbox advances the transition). New spec section [verification.md](specs/verification.md) "Producer
+  self-checks are feedback, not grades"; docs updated (configuration.md, pipeline.md, getting-started.md).
+  `harness validate` passes (golangci-lint resolves to `make lint`). **Live-green awaits T5.3** — like
+  the other scanners, the check fails closed in a real run until `golangci-lint` is baked into the
+  `security` role's sandbox image (a pure static analyser, binary-only, no offline DB).
+  ([verification.md](specs/verification.md), [configuration.md](specs/configuration.md))
 
 ## Phase 3 — Full DAG, decomposition & merge queue
 
@@ -1039,9 +1060,36 @@ components/artifact-store.md, glossary.md).
 Replaces the bootstrap stand-ins (Docker, in-process NATS, local-repo push, files
 store) with the production stack.
 
-- [ ] **T5.1 vsock broker transport** — `broker.Listen`/`Serve` over vsock and a `sandbox.Endpoint` of `vsock`+`cid:port` (currently unix-only); the transport Firecracker needs. ([messaging.md](specs/messaging.md), [components/runner.md](specs/components/runner.md))
+- [x] **T5.1 vsock broker transport** — *done.* The broker now speaks its one-request-per-connection
+  protocol over **AF_VSOCK** as well as unix — the transport a Firecracker microVM needs (a microVM has no
+  shared filesystem to bind-mount a unix socket into, so vsock is its only route in/out). **The seam was
+  already clean** (`sandbox.Endpoint{Network,Address}` threaded runner→sandbox→agent; the agent's broker
+  `Client` dials generically), so this is purely additive at two switch points plus a new transport file —
+  no interface, runner, or agent-loop change. **New `internal/broker/transport.go`** owns the transport
+  interpretation: `parseVsockAddr` splits the `"<cid>:<port>"` convention the `Endpoint` documents (both
+  halves required, valid uint32 — unlike a unix path there's no lenient fallback, so a malformed address is
+  a hard error before any syscall); `listenVsock` binds via `vsock.Listen(port)` (the listener binds its own
+  machine's context id, so the cid half — which only the *dialer* needs, `Host=2` for a guest reaching its
+  host runner — is validated but unused on the listen side); `dialContext(network,address)` is the single
+  dial-side switch mirroring `Listen`'s, so adding a transport touches exactly these two functions;
+  `dialVsock` runs `vsock.Dial` (which has no ctx-aware form) in a goroutine and races the caller's ctx, so a
+  canceled invocation abandons a dial to a wedged/gone microVM instead of hanging (a late-landing conn is
+  closed, not leaked). **`broker.Listen`** gains the `vsock` case (the unix stale-socket cleanup stays
+  unix-only); **`broker.NewClient`** routes its default dial through `dialContext`. **Library:**
+  `github.com/mdlayher/vsock v1.3.0` (compiles on all OSes — `!linux` stubs return runtime errors — so the
+  package stays portable; the Docker dev/macOS builds are unaffected). **Tested with a real vsock loopback**
+  (this Linux dev host has `/dev/vsock` + the `vsock_loopback` module): `TestVsockIntegration` drives the
+  *actual* `Server`+`Client` over an AF_VSOCK connection at the `Local` cid (auto-assigned port read back from
+  `ln.Addr()`), proving completion/git-push/publish round-trip identically to unix — it `Skip`s where vsock is
+  unavailable, so it stays portable. Plus `parseVsockAddr` table (valid + 7 malformed forms, overflow,
+  negative), `dialContext` rejects non-unix/vsock, `dialVsock` returns promptly (no hang) on a canceled ctx,
+  and the `"<cid>:<port>"` Endpoint string round-trips. Updated `TestListenRejectsUnsupportedNetwork` (vsock is
+  no longer rejected; a *malformed* vsock address still is). The Docker backend deliberately **still rejects
+  vsock** (`docker.go` requires unix) — vsock is wired by the Firecracker backend (**T5.2**), which constructs
+  the `Endpoint{Network:"vsock"}` the runner currently hardcodes as unix. `go vet`/`golangci-lint` clean,
+  `go test -race ./internal/broker/` green. (unblocks T5.2) ([messaging.md](specs/messaging.md), [components/runner.md](specs/components/runner.md))
 - [ ] **T5.2 Firecracker sandbox backend** — a KVM-microVM backend implementing the `Backend`/`Sandbox` interface: rootfs seeding, vsock I/O (T5.1), resource limits incl. disk, deterministic teardown. The production isolation target. (needs T5.1) ([components/sandbox.md](specs/components/sandbox.md))
-- [ ] **T5.3 Rootfs / base-image composition** — per-role toolchain images with the module/package cache baked in for offline (zero-network) builds. *(OPEN in sandbox.md.)* ([components/sandbox.md](specs/components/sandbox.md))
+- [ ] **T5.3 Rootfs / base-image composition** — per-role toolchain images with the module/package cache baked in for offline (zero-network) builds. Each image also bakes: **(a) the gate tooling** the zero-network gate runs — `golangci-lint` (T2.14), `gosec`, `govulncheck` (+ its offline vuln DB), `license-scan`, the mutation tool — so the qa/resolve checks stop failing-closed for lack of tooling (flagged in `config/harness.yaml`'s offline note); and **(b) the per-language language server** (`gopls` in `go-toolchain`, `tsserver` in a future `ts-toolchain`) at a fixed launch convention, plus the `languageId`→server **manifest** the Phase-6 semantic tools resolve (T6.1). The image digest already pinned in provenance therefore also pins the gate-tool and language-server versions. *(OPEN in sandbox.md.)* ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.4 Sandbox seeded-worktree ownership** *(carried from Phase 1)* — **drop the current workaround:** the bootstrap `go-toolchain` image relies on `git config --global --add safe.directory '*'` to tolerate the seeded worktree being owned by the host uid (the Docker backend seeds via `docker cp host/. container:workdir`, preserving host ownership; no `chown` today). Replace it by having the Docker backend `chown` the seeded worktree to the container user (and the Firecracker backend seed correct ownership), so the `safe.directory` / VCS-stamping crutch can be removed. ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.5** *(optional)* gVisor backend (medium-trust). ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.6 Vetted package mirror/proxy** — route package fetches through a pinning/scanning/logging proxy on the broker allowlist; a read-through cache amortizes downloads without weakening egress control. ([security.md](specs/security.md), [components/runner.md](specs/components/runner.md))
@@ -1050,6 +1098,46 @@ store) with the production stack.
 - [ ] **T5.9 S3/MinIO artifact backend** — an `artifact.Store` implementation for distributed deployments (config `bucket`), shared across hosts and the control room. ([components/artifact-store.md](specs/components/artifact-store.md))
 - [ ] **T5.10 Provenance signing + key custody** — sign commits/artifacts with the harness identity and verify on read. *(OPEN, security.md.)* ([security.md](specs/security.md))
 - [ ] **T5.11** *(optional)* Warm sandbox pools + HA orchestrator via NATS-KV leader election. *(OPEN.)* ([components/runner.md](specs/components/runner.md), [components/orchestrator.md](specs/components/orchestrator.md))
+
+## Phase 6 — Agent semantic tooling (LSP)
+
+Replaces the agent's text-only `search`/`edit_file` floor with **intent-first, LSP-backed**
+comprehension and transformation tools: the agent states *what* it wants (find this symbol,
+rename this) and the trusted tool layer resolves it **LSP-first with a text fallback** — it
+never picks the mechanism, so "prefer semantic, fall back to grep/sed" is a structural property,
+not a persona nudge. The surface is **language-neutral**; the backing server is per-language,
+resolved from the sandbox image (T5.3) — the same canonical-interface / thin-adapter split the
+model layer uses (*provider adapter : model :: language server : semantic tool*). Buildable and
+testable in dev against a `go-toolchain` image carrying `gopls`; **does not depend on Firecracker**
+(T5.2). New spec contract: [components/agent.md](specs/components/agent.md) "Semantic tools
+(LSP-backed)" + [components/sandbox.md](specs/components/sandbox.md) "Per-language language server".
+**Demo scope (Go+htmx+templ+tailwind):** ship the `go` (gopls) `languageId` entry only — `.templ`
+and `.css` ride the text floor (templ compiles to `_templ.go`, which gopls already sees; tailwind
+is a build step, not a navigable language).
+
+- [ ] **T6.1 Per-language LSP session manager** — an in-sandbox component owning one language-server
+  session per invocation. **Lazy launch** on the first semantic call; resolve the server via the
+  image's `languageId`→command **manifest** (fixed launch convention / symlink, T5.3) so the tool
+  stays image-agnostic; **keep the session in sync** by notifying it (`didOpen`/`didChange`/`didSave`)
+  on every `edit_file`/`write_file`, so `diagnostics`/`references` never read stale text — this
+  couples the existing workspace edit tools to the session by design, not as a bolt-on; **tear down
+  with the sandbox** like any in-sandbox state. No language is hard-coded in the tool layer. (needs
+  T5.3 for the in-image server; dev-testable with a `go-toolchain`+`gopls` image) ([components/agent.md](specs/components/agent.md), [components/sandbox.md](specs/components/sandbox.md))
+- [ ] **T6.2 Comprehension (read) semantic tools** — `find_symbol` (project-wide symbol by name, no
+  path), `references`, `definition`, `implementation`, `hover`, `diagnostics`, over the T6.1 session,
+  each a canonical tool the [model layer](specs/models.md) exposes. **Intent-first; reads degrade
+  silently** — when no server resolves for a file, fall back to grep with results **labeled
+  "unverified"** so the model knows precision dropped (worst case = today's `search`). Keep
+  `search`/`read_file`/`list_dir` as the text floor with honest tool descriptions steering toward the
+  semantic tools. Ship the `go` entry for the demo. (needs T6.1) ([components/agent.md](specs/components/agent.md))
+- [ ] **T6.3 Transformation (write) semantic tools** — `rename` (project-wide) and `code_action` (the
+  server's own fixes — organize imports, quickfix, extract), each producing a `WorkspaceEdit` the tool
+  **applies to the worktree** and re-syncs into the T6.1 session. **Writes degrade loudly**: a `rename`
+  with no semantic support **refuses, or text-renames with an explicit precision warning** (match count,
+  files, comment/string hits) — never a silent `sed`, which would corrupt literals/comments undetected.
+  The **mechanism used (semantic vs text-floor) is recorded in the Result evidence**, so the gate and
+  traceability map can weigh a text-fallback rename more suspiciously than a semantic one. (needs T6.1)
+  ([components/agent.md](specs/components/agent.md))
 
 ---
 

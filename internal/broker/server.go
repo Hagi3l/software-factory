@@ -62,25 +62,26 @@ func NewServer(h Handler, opts ...ServerOption) *Server {
 
 // Listen binds the broker's local socket. It is split from Serve so a caller can bind
 // synchronously (and know the socket exists) before handing the listener to Serve in a
-// goroutine. Only the unix transport is supported today; vsock (the Firecracker
-// production transport) is plan Phase 5. For unix it first removes any stale socket
-// file, since the runner is the sole owner of this ephemeral per-invocation path.
+// goroutine. Two transports are supported: unix (the Docker stand-in) and vsock (the
+// Firecracker production channel — a microVM has no shared filesystem for a unix
+// socket; see transport.go). For unix it first removes any stale socket file, since
+// the runner is the sole owner of this ephemeral per-invocation path.
 func Listen(network, address string) (net.Listener, error) {
 	switch network {
 	case "unix":
 		if err := os.Remove(address); err != nil && !os.IsNotExist(err) {
 			return nil, fmt.Errorf("broker: clear stale socket %s: %w", address, err)
 		}
+		ln, err := net.Listen(network, address)
+		if err != nil {
+			return nil, fmt.Errorf("broker: listen %s %s: %w", network, address, err)
+		}
+		return ln, nil
 	case "vsock":
-		return nil, fmt.Errorf("broker: vsock transport not yet supported (Firecracker, plan Phase 5)")
+		return listenVsock(address)
 	default:
 		return nil, fmt.Errorf("broker: unsupported network %q", network)
 	}
-	ln, err := net.Listen(network, address)
-	if err != nil {
-		return nil, fmt.Errorf("broker: listen %s %s: %w", network, address, err)
-	}
-	return ln, nil
 }
 
 // Serve accepts connections on ln until ctx is canceled or ln is closed, handling each

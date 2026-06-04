@@ -23,15 +23,16 @@ type Client struct {
 }
 
 // NewClient builds a Client that dials the given local endpoint. For Docker the
-// endpoint is the unix socket bind-mounted into the sandbox; vsock (Firecracker) is
-// plan Phase 5. The dial happens per call, not at construction.
+// endpoint is the unix socket bind-mounted into the sandbox; for Firecracker it is the
+// AF_VSOCK channel ("<cid>:<port>"). dialContext (transport.go) interprets the network,
+// so the Client itself is transport-agnostic. The dial happens per call, not at
+// construction.
 func NewClient(network, address string) *Client {
 	return &Client{
 		network: network,
 		address: address,
 		dial: func(ctx context.Context) (net.Conn, error) {
-			var d net.Dialer
-			return d.DialContext(ctx, network, address)
+			return dialContext(ctx, network, address)
 		},
 	}
 }

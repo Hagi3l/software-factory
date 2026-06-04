@@ -267,10 +267,11 @@ func TestUnixSocketIntegration(t *testing.T) {
 }
 
 func TestListenRejectsUnsupportedNetwork(t *testing.T) {
-	if _, err := Listen("vsock", "1:2"); err == nil {
-		t.Error("expected vsock to be rejected (Firecracker, Phase 5)")
-	}
 	if _, err := Listen("tcp", "127.0.0.1:0"); err == nil {
-		t.Error("expected non-unix network to be rejected")
+		t.Error("expected non-unix/vsock network to be rejected")
+	}
+	// vsock with a malformed address is rejected before any socket syscall.
+	if _, err := Listen("vsock", "not-a-cid-port"); err == nil {
+		t.Error("expected malformed vsock address to be rejected")
 	}
 }
