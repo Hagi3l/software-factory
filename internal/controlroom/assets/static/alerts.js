@@ -15,14 +15,24 @@
     return;
   }
 
-  // Ask once on load. A browser that defers the prompt without a user gesture, or a user who
-  // dismisses/denies it, just leaves us inert — we never block the page on it.
+  // Ask once, on the first user gesture. Browsers (Firefox, and Chrome since 2020) reject
+  // requestPermission() outside a "short running user-generated event handler" — calling it on
+  // load logs a console warning and never prompts, so permission stays "default" and push never
+  // works. Defer the ask to the first pointer/key interaction (a one-shot capturing listener,
+  // self-removing) so the prompt is gesture-backed. A user who dismisses/denies, or a browser
+  // that still defers, just leaves us inert — we never block the page on it.
   if (Notification.permission === "default") {
-    try {
-      Notification.requestPermission();
-    } catch (e) {
-      // Older browsers expose the callback form only; ignore — we degrade to no push.
-    }
+    var askOnce = function () {
+      window.removeEventListener("pointerdown", askOnce, true);
+      window.removeEventListener("keydown", askOnce, true);
+      try {
+        Notification.requestPermission();
+      } catch (e) {
+        // Older browsers expose the callback form only; ignore — we degrade to no push.
+      }
+    };
+    window.addEventListener("pointerdown", askOnce, true);
+    window.addEventListener("keydown", askOnce, true);
   }
 
   var es = new EventSource("/events");
