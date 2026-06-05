@@ -366,7 +366,11 @@ func (s *Session) Send(userText string) (started bool) {
 	}
 	s.busy = true
 	s.messages = append(s.messages, model.Message{Role: model.RoleUser, Text: userText})
+	turn := len(s.messages)
 	s.mu.Unlock()
+
+	// TEMP debug: message IN. Remove with the matching markers in run().
+	s.log.Info("wizard/DEBUG: message in", "session", s.ID, "turn", turn, "chars", len(userText))
 
 	go s.run()
 	return true
@@ -389,9 +393,16 @@ func (s *Session) run() {
 	// self-heals on the next one — matching the hub's best-effort drop semantics.
 	var b strings.Builder
 	lastLen := 0
+	// TEMP debug: first-token latency. Remove with the matching markers.
+	start := time.Now()
+	sawFirst := false
 	onEvent := func(ev model.StreamEvent) {
 		if ev.TextDelta == "" {
 			return
+		}
+		if !sawFirst {
+			sawFirst = true
+			s.log.Info("wizard/DEBUG: first token", "session", s.ID, "after", time.Since(start).String())
 		}
 		b.WriteString(ev.TextDelta)
 		if n := utf8.RuneCountInString(b.String()); n-lastLen >= deltaFlushRunes {
@@ -402,11 +413,19 @@ func (s *Session) run() {
 		}
 	}
 
+	// TEMP debug: dispatching the model call. If you see this but never "model turn returned"
+	// below, the call is hung in the provider/network — not in any harness-side parsing.
+	s.log.Info("wizard/DEBUG: dispatching model turn", "session", s.ID, "messages", len(msgs), "max_tokens", s.maxTokens)
+
 	resp, err := s.adapter.Complete(ctx, model.Request{
 		System:    s.persona,
 		Messages:  msgs,
 		MaxTokens: s.maxTokens,
 	}, onEvent)
+
+	// TEMP debug: message OUT (the model call returned, success or error).
+	s.log.Info("wizard/DEBUG: model turn returned",
+		"session", s.ID, "elapsed", time.Since(start).String(), "reply_chars", len(resp.Text), "err", err)
 
 	reply := resp.Text
 	if err != nil {
