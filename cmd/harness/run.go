@@ -340,6 +340,13 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 				return nil, fmt.Errorf("read requirements planner persona: %w", rerr)
 			}
 			plannerOpts := []wizard.Option{wizard.WithMaxTokens(rp.MaxTokens), wizard.WithLogger(log)}
+			// Ground new Create sessions in the project's spec index (T4.28): read specs/README.md
+			// host-side (it is human-authored, trusted prose — no sandbox needed) so the planner
+			// opens oriented in what already exists and greets the human instead of a blank chat.
+			// Absent the file, the wizard stays a blank-slate conversation.
+			if readme, rerr := os.ReadFile(filepath.Join(repo, "specs", "README.md")); rerr == nil {
+				plannerOpts = append(plannerOpts, wizard.WithProjectIndex(string(readme)))
+			}
 			// Read-only codebase exploration (T4.28): when a sandbox profile is configured, give the
 			// planner the agent's read tools over a fresh read-only sandbox seeded from the repo, so
 			// it grounds specs + seed issues in the real code. baseRef defaults to the repo's current

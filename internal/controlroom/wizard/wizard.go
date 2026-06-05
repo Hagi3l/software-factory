@@ -100,8 +100,9 @@ type Planner struct {
 	persona     string
 	maxTokens   int
 	turnTimeout time.Duration
-	log         *slog.Logger
-	sandboxCfg  *sandboxConfig // read-only exploration template (T4.28); nil = tools disabled
+	log          *slog.Logger
+	sandboxCfg   *sandboxConfig // read-only exploration template (T4.28); nil = tools disabled
+	projectIndex string         // specs/README.md content for Create grounding (T4.28); "" = none
 
 	mu          sync.Mutex
 	sessions    map[string]*Session
@@ -173,10 +174,27 @@ func WithSandbox(backend sandbox.Backend, repo, profile, image, baseRef string, 
 	}
 }
 
+// maxProjectIndexRunes caps the spec index folded into the system prompt + greeting, so a large
+// README never bloats every turn's context. The index is short by design (it is an index); this
+// is a guard, not an expected limit.
+const maxProjectIndexRunes = 8000
+
+// WithProjectIndex grounds new Create sessions in the project's spec index (specs/README.md),
+// read host-side by the composition root and passed in here (the wizard package itself does no
+// filesystem I/O). When non-empty, each Create session opens with an orientation message in the
+// transcript and folds the index into the planner's system prompt, so its very first reply is
+// grounded in what already exists rather than assuming a blank slate. Empty (no specs/README.md)
+// leaves the wizard a blank-slate conversation exactly as before. Resolve sessions are unaffected
+// (they already carry their own escalation grounding).
+func WithProjectIndex(readme string) Option {
+	return func(p *Planner) { p.projectIndex = logSnippet(readme, maxProjectIndexRunes) }
+}
+
 // NewPlanner builds a requirements planner over a resolved model adapter and persona text.
-// The composition root resolves the configured model to an adapter (via the infra registry)
-// and reads the persona file, so this package depends on neither config nor the filesystem —
-// only the canonical model layer.
+// The composition root resolves the configured model to an adapter (via the infra registry),
+// reads the persona file, and (for T4.28) reads specs/README.md, passing each in as text — so
+// this package itself does no filesystem I/O. It references config types only as plain data
+// (SandboxLimits on the exploration template); the canonical model layer remains its core.
 func NewPlanner(adapter model.Adapter, persona string, opts ...Option) *Planner {
 	p := &Planner{
 		adapter:     adapter,
@@ -195,16 +213,63 @@ func NewPlanner(adapter model.Adapter, persona string, opts ...Option) *Planner 
 // New creates a fresh, empty conversation session and registers it. When the session cap is
 // reached the oldest session is evicted (best-effort working state — see defaultMaxSessions).
 func (p *Planner) New() *Session {
+	persona := p.persona
+	var opening []model.Message
+	// When grounded in a project's spec index, fold it into the system prompt (so the first reply
+	// is oriented) and seed an opening assistant message (so the human lands on a note about what
+	// is going on, not a blank chat). Both gate on the index being present, so an ungrounded
+	// wizard is byte-for-byte the prior blank-slate conversation.
+	if p.projectIndex != "" {
+		persona += projectGrounding(p.projectIndex)
+		opening = []model.Message{{Role: model.RoleAssistant, Text: createGreeting(p.sandboxCfg != nil)}}
+	}
 	return p.register(&Session{
 		ID:          newID(),
 		hub:         live.NewHub(),
 		adapter:     p.adapter,
-		persona:     p.persona,
+		persona:     persona,
 		maxTokens:   p.maxTokens,
 		turnTimeout: p.turnTimeout,
 		log:         p.log,
 		sandboxCfg:  p.sessionSandboxCfg(),
+		messages:    opening,
 	})
+}
+
+// projectGrounding folds the project's spec index into the system prompt so the planner starts a
+// Create session oriented in the existing project. It rides the system channel (background
+// context), so the transcript stays the human↔planner conversation while the model still reasons
+// against the index.
+func projectGrounding(index string) string {
+	var b strings.Builder
+	b.WriteString("\n\n## Project context (read at session start)\n\n")
+	b.WriteString("You are working in an EXISTING project, not a blank slate. Its spec index — ")
+	b.WriteString("`specs/README.md` — is reproduced below so you start oriented in what already ")
+	b.WriteString("exists. Use it to ground your questions and your draft; follow its links with ")
+	b.WriteString("your exploration tools when relevant. Do not assume the human has read it.\n\n")
+	b.WriteString("----- specs/README.md -----\n")
+	b.WriteString(index)
+	if !strings.HasSuffix(index, "\n") {
+		b.WriteByte('\n')
+	}
+	b.WriteString("----- end specs/README.md -----\n")
+	return b.String()
+}
+
+// createGreeting is the orientation message seeded into a grounded Create session's transcript,
+// so the human opens to a note on what is going on (the planner has read the project's spec index,
+// and — when exploration is enabled — can read the codebase as they go) rather than a blank chat.
+func createGreeting(canExplore bool) string {
+	var b strings.Builder
+	b.WriteString("Hi — I'm the requirements planner. I've reviewed this project's spec index ")
+	b.WriteString("(`specs/README.md`) to ground myself in what already exists")
+	if canExplore {
+		b.WriteString(", and I can read the codebase as we go")
+	}
+	b.WriteString(".\n\nTell me what you'd like built. I'll probe for examples, edge cases, what to ")
+	b.WriteString("reject, and what's out of scope — then draft the spec and seed issues for your ")
+	b.WriteString("approval. Nothing is written until you approve.")
+	return b.String()
 }
 
 // sessionSandboxCfg returns the per-session copy of the exploration template (T4.28) with the

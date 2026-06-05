@@ -230,6 +230,53 @@ func TestExploreEvictionTearsDown(t *testing.T) {
 	}
 }
 
+// TestCreateProjectGroundingSeedsGreeting proves a planner grounded in a project's spec index
+// (T4.28) opens a Create session with an orientation assistant message in the transcript — so the
+// human lands on a note about what is going on, and the model's first reply is grounded — and that
+// the greeting mentions codebase reading when exploration is also enabled.
+func TestCreateProjectGroundingSeedsGreeting(t *testing.T) {
+	srv := modeltest.NewServer(t, []modeltest.Turn{{Text: "reply"}})
+	be := &fakeBackend{}
+	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona",
+		wizard.WithProjectIndex("# Harness Specs\n\nStart at specs/README.md (index)."),
+		withSandboxOpt(t, be))
+	defer p.Shutdown(context.Background())
+
+	sess := p.New()
+	msgs := sess.Messages()
+	if len(msgs) != 1 || msgs[0].Role != "assistant" {
+		t.Fatalf("want exactly one seeded assistant greeting, got %+v", msgs)
+	}
+	if !strings.Contains(msgs[0].Text, "spec index") {
+		t.Errorf("greeting missing orientation text: %q", msgs[0].Text)
+	}
+	if !strings.Contains(msgs[0].Text, "read the codebase") {
+		t.Errorf("greeting should mention codebase reading when exploration is enabled: %q", msgs[0].Text)
+	}
+
+	// A turn must still complete with the seeded assistant message leading the history (the real
+	// adapter builds the request from a greeting-first transcript without error).
+	sub, cancel := sess.Hub().Subscribe()
+	defer cancel()
+	if !sess.Send("build X") {
+		t.Fatal("Send returned false")
+	}
+	awaitTurn(t, sub)
+	if got := sess.Messages(); len(got) != 3 {
+		t.Fatalf("want greeting + user + assistant = 3 messages, got %d: %+v", len(got), got)
+	}
+}
+
+// TestCreateNoGroundingWhenAbsent proves the grounding is opt-in: without a project index a Create
+// session starts empty (the blank-slate conversation), unchanged from before T4.28.
+func TestCreateNoGroundingWhenAbsent(t *testing.T) {
+	srv := modeltest.NewServer(t, []modeltest.Turn{{Text: "reply"}})
+	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona")
+	if msgs := p.New().Messages(); len(msgs) != 0 {
+		t.Errorf("want no seeded message without a project index, got %+v", msgs)
+	}
+}
+
 // awaitTurn blocks until the terminal `turn` SSE event arrives (the turn completed) or fails on
 // a deadline. Shared by the exploration tests.
 func awaitTurn(t *testing.T, sub <-chan live.Event) {

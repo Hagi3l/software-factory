@@ -99,7 +99,10 @@ is autonomous. It's a guided conversation, not a form:
 1. **Conversation** (`/create`) — a chat with the trusted requirements planner that
    streams its reply token-by-token over SSE. The persona probes for examples, edge
    cases, what to reject, and what's out of scope, converging on testable acceptance
-   criteria. If `requirements_planner.sandbox_profile` is configured (see
+   criteria. When the repo has a `specs/README.md`, a grounded session **opens with an
+   orientation message**: the planner has read the project's spec index host-side, so
+   its first reply is grounded in what already exists rather than a blank slate. If
+   `requirements_planner.sandbox_profile` is configured (see
    [configuration.md](configuration.md)), the planner can also **explore the existing
    codebase** read-only to ground its specs — a small status strip ("🔍 read_file …")
    shows each read while it looks. The reads run in a read-only, zero-network sandbox
