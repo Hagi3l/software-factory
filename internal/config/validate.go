@@ -469,6 +469,12 @@ func (c *Config) validateRequirementsPlanner(add func(string, ...any)) {
 	if rp.MaxTokens < 0 {
 		add("requirements_planner max_tokens is %d; it must be >= 0", rp.MaxTokens)
 	}
+	if rp.MaxToolTurns < 0 {
+		add("requirements_planner max_tool_turns is %d; it must be >= 0", rp.MaxToolTurns)
+	}
+	if rp.TurnTimeout < 0 {
+		add("requirements_planner turn_timeout is %s; it must be >= 0", rp.TurnTimeout.Duration())
+	}
 	// Read-only codebase exploration (T4.28): a configured sandbox_profile must resolve to a
 	// declared infra sandbox profile, exactly like a soul's sandbox. An unknown profile would
 	// otherwise only surface when the wizard first tries to provision its read-only sandbox.

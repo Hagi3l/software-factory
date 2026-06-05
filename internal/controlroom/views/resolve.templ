@@ -17,6 +17,7 @@ import (
 // returns the issue to the ready pool.
 templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Message, canResolve bool) {
 	@Layout("Harness — Resolve", "dlq") {
+		<script src="/static/wizard.js" defer></script>
 		<div class="mx-auto flex max-w-3xl flex-col gap-4">
 			<div>
 				<h1 class="text-xl font-semibold tracking-tight">Resolve</h1>
@@ -46,37 +47,7 @@ templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messa
 					@ResolvePanel(sessionID, wizard.Draft{}, canResolve, query.BlastRadius{})
 				</div>
 				<div id="wizard-result"></div>
-				<div
-					id="wizard-transcript"
-					hx-get={ "/create/messages/" + sessionID }
-					hx-trigger="sse:turn, every 8s"
-					hx-swap="innerHTML"
-					class="flex min-h-64 flex-col gap-3 rounded-lg border border-border bg-surface p-4"
-				>
-					@WizardTranscript(msgs, false)
-				</div>
-				<form
-					hx-post="/create/message"
-					hx-target="#wizard-transcript"
-					hx-swap="innerHTML"
-					hx-on::after-request="this.reset()"
-					class="flex flex-col gap-2"
-				>
-					<input type="hidden" name="session" value={ sessionID }/>
-					<textarea
-						name="text"
-						rows="3"
-						required
-						placeholder="Describe how the spec should be clarified, or answer the planner's question…"
-						class="w-full resize-y rounded-md border border-border-strong bg-surface p-3 text-sm text-fg placeholder:text-muted focus:border-border-strong focus:outline-none"
-					></textarea>
-					<div class="flex justify-end">
-						<button
-							type="submit"
-							class="rounded-md bg-accent-strong px-4 py-2 text-sm font-medium text-white transition hover:bg-accent"
-						>Send</button>
-					</div>
-				</form>
+				@wizardConversation(sessionID, "Describe how the spec should be clarified, or answer the planner's question…", msgs)
 			</div>
 		</div>
 	}

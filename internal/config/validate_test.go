@@ -415,6 +415,50 @@ func TestValidateOTelEndpointRejectsMalformed(t *testing.T) {
 	}
 }
 
+// The requirements-planner block is optional, but when present its tuning knobs must be
+// non-negative. max_tool_turns (read-only exploration round-trips per human turn) and
+// turn_timeout (per-turn wall-clock) join max_tokens as bounds the wizard reads; a negative
+// value is meaningless and would otherwise be silently coerced, so it is caught at the gate.
+func planner(t *testing.T) *RequirementsPlanner {
+	t.Helper()
+	f := filepath.Join(t.TempDir(), "requirements-planner.md")
+	if err := os.WriteFile(f, []byte("# planner\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	return &RequirementsPlanner{Model: "claude-opus-4-7", Persona: f}
+}
+
+func TestValidateRequirementsPlannerValidTuning(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	rp := planner(t)
+	rp.MaxTokens = 16384
+	rp.MaxToolTurns = 40
+	rp.TurnTimeout = Duration(10 * 60 * 1e9) // 10m
+	c.Harness.RequirementsPlanner = rp
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidateRequirementsPlannerNegativeMaxToolTurns(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	rp := planner(t)
+	rp.MaxToolTurns = -1
+	c.Harness.RequirementsPlanner = rp
+	mustContain(t, problems(t, c), "max_tool_turns")
+}
+
+func TestValidateRequirementsPlannerNegativeTurnTimeout(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	rp := planner(t)
+	rp.TurnTimeout = Duration(-1)
+	c.Harness.RequirementsPlanner = rp
+	mustContain(t, problems(t, c), "turn_timeout")
+}
+
 // The artifact store backend is validated at the startup gate so a distributed (s3)
 // deployment with a missing bucket/endpoint fails loud at `harness validate` rather than
 // silently dropping every harvested artifact at run time. The files default needs no

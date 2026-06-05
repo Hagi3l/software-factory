@@ -25,6 +25,7 @@ import (
 // issues created through the single-writer path. Everything past APPROVE is autonomous.
 templ CreatePage(sessionID string, msgs []wizard.Message) {
 	@Layout("Harness — Create Task", "create") {
+		<script src="/static/wizard.js" defer></script>
 		<div class="mx-auto flex max-w-3xl flex-col gap-4">
 			<div>
 				<h1 class="text-xl font-semibold tracking-tight">Create Task</h1>
@@ -52,40 +53,59 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 					@DraftPanel(sessionID, wizard.Draft{}, true)
 				</div>
 				<div id="wizard-result"></div>
-				<div
-					id="wizard-transcript"
-					hx-get={ "/create/messages/" + sessionID }
-					hx-trigger="sse:turn, every 8s"
-					hx-swap="innerHTML"
-					class="flex min-h-64 flex-col gap-3 rounded-lg border border-border bg-surface p-4"
-				>
-					@WizardTranscript(msgs, false)
-				</div>
-				<form
-					hx-post="/create/message"
-					hx-target="#wizard-transcript"
-					hx-swap="innerHTML"
-					hx-on::after-request="this.reset()"
-					class="flex flex-col gap-2"
-				>
-					<input type="hidden" name="session" value={ sessionID }/>
-					<textarea
-						name="text"
-						rows="3"
-						required
-						placeholder="Describe the change you want, or answer the planner's question…"
-						class="w-full resize-y rounded-md border border-border-strong bg-surface p-3 text-sm text-fg placeholder:text-muted focus:border-border-strong focus:outline-none"
-					></textarea>
-					<div class="flex justify-end">
-						<button
-							type="submit"
-							class="rounded-md bg-accent-strong px-4 py-2 text-sm font-medium text-white transition hover:bg-accent"
-						>Send</button>
-					</div>
-				</form>
+				@wizardConversation(sessionID, "Describe the change you want, or answer the planner's question…", msgs)
 			</div>
 		</div>
 	}
+}
+
+// wizardConversation is the shared transcript + composer for both wizard entry modes — Create
+// (CreatePage) and Resolve (ResolvePage), which are "the same wizard, two entry modes"
+// (specs/control-room.md "Create and Resolve are the same component"). Extracting it keeps the
+// chat ergonomics single-source so the two pages cannot drift.
+//
+// The transcript is a fixed-height scroll viewport (`h-[55vh] overflow-y-auto`): new turns scroll
+// it rather than growing the page, so the composer stays put. The wizardChat() Alpine component
+// (wizard.js) pins it to the latest turn as the reply streams — unless the human has scrolled up
+// to read history. The composer has no visible Send button: plain Enter sends (Shift+Enter inserts
+// a newline), with an sr-only submit kept for accessibility and as requestSubmit's submitter, and
+// a one-line keyboard hint. After a send the textarea is reset and refocused for the next turn.
+// placeholder differs per mode (eliciting new intent vs. clarifying a spec).
+templ wizardConversation(sessionID, placeholder string, msgs []wizard.Message) {
+	<div x-data="wizardChat()" class="flex flex-col gap-3">
+		<div
+			id="wizard-transcript"
+			x-init="watch($el)"
+			hx-get={ "/create/messages/" + sessionID }
+			hx-trigger="sse:turn, every 8s"
+			hx-swap="innerHTML"
+			class="flex h-[55vh] flex-col gap-3 overflow-y-auto rounded-lg border border-border bg-surface p-4"
+		>
+			@WizardTranscript(msgs, false, 0)
+		</div>
+		<form
+			hx-post="/create/message"
+			hx-target="#wizard-transcript"
+			hx-swap="innerHTML"
+			hx-on::after-request="this.reset(); this.querySelector('textarea').focus()"
+			class="flex flex-col gap-1.5"
+		>
+			<input type="hidden" name="session" value={ sessionID }/>
+			<textarea
+				name="text"
+				rows="3"
+				required
+				placeholder={ placeholder }
+				x-on:keydown.enter="send($event)"
+				class="w-full resize-y rounded-md border border-border-strong bg-surface p-3 text-sm text-fg placeholder:text-muted focus:border-border-strong focus:outline-none"
+			></textarea>
+			<button type="submit" class="sr-only">Send</button>
+			<p class="text-right text-xs text-muted">
+				<kbd class="rounded border border-border px-1 py-0.5 font-mono">Enter</kbd> to send ·
+				<kbd class="rounded border border-border px-1 py-0.5 font-mono">Shift</kbd>+<kbd class="rounded border border-border px-1 py-0.5 font-mono">Enter</kbd> inserts a newline
+			</p>
+		</form>
+	</div>
 }
 
 // WizardTranscript renders the conversation: every finalized message, then a live target
@@ -95,12 +115,12 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 // `delta` target is re-rendered empty on every re-fetch, a completed turn cleanly finalizes
 // the streamed reply into a proper bubble and resets the live line for the next turn.
 //
-// busy reports whether a reply turn is in flight but has not yet streamed a token: in that
-// window the live target shows a typing indicator instead of nothing, filling the model's
-// first-token latency. The first `delta` event swaps #wizard-live's content, replacing the
-// indicator with the streamed reply; the terminal `turn` re-fetch renders with busy=false,
-// clearing it.
-templ WizardTranscript(msgs []wizard.Message, busy bool) {
+// busy reports whether a reply turn is in flight; elapsed is how many seconds it has been
+// running (0 when idle), the anchor the activity line ticks up from. While a turn runs, a single
+// unified activity line (wizardActivity) names what the planner is doing and shows a live elapsed
+// clock — the "it's working, not hung" signal. The first `delta` event streams the reply into
+// #wizard-live; the terminal `turn` re-fetch renders with busy=false, clearing the activity line.
+templ WizardTranscript(msgs []wizard.Message, busy bool, elapsed int) {
 	if len(msgs) == 0 {
 		<p class="text-sm text-muted">No messages yet — say what you'd like built to begin.</p>
 	} else {
@@ -108,35 +128,40 @@ templ WizardTranscript(msgs []wizard.Message, busy bool) {
 			@wizardBubble(m)
 		}
 	}
-	// The exploration status strip (T4.28): while the planner reads the codebase in its
-	// read-only sandbox, each `tool` SSE event swaps in a one-line label ("read_file foo.go")
-	// so the human sees activity during a multi-step turn. It is empty (and hidden via
-	// empty:hidden) outside exploration, and re-rendered empty by the `turn` re-fetch — so it
-	// clears itself when the turn concludes. The ::before magnifier frames the swapped label.
-	<div id="wizard-explore" sse-swap="tool" class="flex items-center gap-2 rounded-md border border-border bg-canvas px-3 py-1.5 text-xs text-muted empty:hidden before:content-['🔍']"></div>
 	// The streaming target: assistant `delta` events replace its content as the reply is
-	// generated. While a turn is in flight but no token has arrived yet, it holds the typing
-	// indicator; the first `delta` overwrites it. Whitespace-pre-wrap preserves the model's
-	// line breaks while it streams.
-	<div id="wizard-live" sse-swap="delta" class="whitespace-pre-wrap text-sm leading-relaxed text-fg">
-		if busy {
-			@wizardTyping()
-		}
-	</div>
+	// generated. Whitespace-pre-wrap preserves the model's line breaks while it streams. It sits
+	// above the activity line so the streamed prose reads as the planner's reply, with the status
+	// pinned beneath it; the `turn` re-fetch finalizes the prose into a bubble and empties this.
+	<div id="wizard-live" sse-swap="delta" class="whitespace-pre-wrap text-sm leading-relaxed text-fg"></div>
+	// The unified activity line, shown only while a turn is in flight (T4.28 + feedback): three
+	// pulsing dots (the "alive" cue), a phase label, and a client-ticked elapsed clock. The label
+	// defaults to "Thinking…" and is overwritten by `tool` SSE events as the planner provisions
+	// its sandbox ("preparing the codebase sandbox…") or reads code ("read_file foo.go · 3 read"),
+	// so one line always says what is happening now. The terminal `turn` re-fetch renders
+	// busy=false, so the whole line disappears exactly when the turn concludes.
+	if busy {
+		@wizardActivity(elapsed)
+	}
 }
 
-// wizardTyping is the "planner is thinking…" indicator shown in the live target during the
-// first-token latency window: three pulsing dots in a left-aligned bubble matching the
-// planner's reply style, so the wait reads as the planner composing. The staggered
-// animation-delay offsets give the dots a wave. It carries no text, so it never collides with
-// the streamed prose that replaces it on the first `delta`.
-templ wizardTyping() {
-	<div class="flex justify-start">
-		<div class="flex items-center gap-1.5 rounded-lg bg-canvas px-3 py-2.5" aria-label="The requirements planner is thinking" role="status">
+// wizardActivity is the live "the planner is working" line: pulsing dots, a phase label fed by
+// `tool` SSE events (defaulting to "Thinking…"), and an elapsed timer the browser ticks from the
+// server-provided elapsed anchor (wizardElapsed in wizard.js) so a slow turn visibly counts up
+// without the server re-rendering each second. The #wizard-explore span is the `tool` swap
+// target; its default text shows until the first phase event arrives.
+templ wizardActivity(elapsed int) {
+	<div class="flex items-center gap-2 rounded-lg bg-canvas px-3 py-2.5 text-xs text-muted" role="status" aria-label="The requirements planner is working">
+		<span class="flex items-center gap-1.5">
 			<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-muted"></span>
 			<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-muted [animation-delay:200ms]"></span>
 			<span class="h-1.5 w-1.5 animate-pulse rounded-full bg-muted [animation-delay:400ms]"></span>
-		</div>
+		</span>
+		<span id="wizard-explore" sse-swap="tool" class="flex-1 truncate text-fg">Thinking…</span>
+		<span
+			x-data={ fmt.Sprintf("wizardElapsed(%d)", elapsed) }
+			x-text="label"
+			class="shrink-0 font-mono tabular-nums text-muted"
+		>0:00</span>
 	</div>
 }
 

@@ -77,11 +77,13 @@ const (
 	// few DOM swaps per reply while staying live. The final `turn` re-fetch always shows the
 	// exact full text, so a coalesced (slightly behind) live stream is harmless.
 	deltaFlushRunes = 12
-	// maxToolTurns bounds the read-only exploration round-trips within ONE human turn (T4.28):
-	// the model may call tools, see results, and call again, but only this many times before
-	// the turn must conclude with a prose reply. It is a termination guarantee against a model
-	// that loops on tool calls forever; the per-turn timeout bounds wall-clock independently.
-	maxToolTurns = 16
+	// defaultMaxToolTurns bounds the read-only exploration round-trips within ONE human turn
+	// (T4.28): the model may call tools, see results, and call again, but only this many times
+	// before the turn must conclude with a prose reply. It is a termination guarantee against a
+	// model that loops on tool calls forever; the per-turn timeout bounds wall-clock independently.
+	// It is the default; the requirements_planner config may raise it (WithMaxToolTurns) for a
+	// model that should explore a large codebase deeply.
+	defaultMaxToolTurns = 16
 )
 
 // Message is one presentation-layer turn of the conversation — the view renders these
@@ -96,10 +98,11 @@ type Message struct {
 // manages in-memory conversation sessions. One Planner serves the whole control room; each
 // human conversation is a Session. Safe for concurrent use.
 type Planner struct {
-	adapter     model.Adapter
-	persona     string
-	maxTokens   int
-	turnTimeout time.Duration
+	adapter      model.Adapter
+	persona      string
+	maxTokens    int
+	maxToolTurns int
+	turnTimeout  time.Duration
 	log          *slog.Logger
 	sandboxCfg   *sandboxConfig // read-only exploration template (T4.28); nil = tools disabled
 	projectIndex string         // specs/README.md content for Create grounding (T4.28); "" = none
@@ -118,6 +121,17 @@ func WithMaxTokens(n int) Option {
 	return func(p *Planner) {
 		if n > 0 {
 			p.maxTokens = n
+		}
+	}
+}
+
+// WithMaxToolTurns sets the cap on read-only exploration round-trips within one human turn
+// (0 = defaultMaxToolTurns). Raising it lets the planner read more of a large codebase before it
+// must conclude with a prose reply; the per-turn timeout still bounds wall-clock independently.
+func WithMaxToolTurns(n int) Option {
+	return func(p *Planner) {
+		if n > 0 {
+			p.maxToolTurns = n
 		}
 	}
 }
@@ -197,12 +211,13 @@ func WithProjectIndex(readme string) Option {
 // (SandboxLimits on the exploration template); the canonical model layer remains its core.
 func NewPlanner(adapter model.Adapter, persona string, opts ...Option) *Planner {
 	p := &Planner{
-		adapter:     adapter,
-		persona:     persona,
-		turnTimeout: defaultTurnTimeout,
-		log:         slog.New(slog.NewTextHandler(discard{}, nil)),
-		sessions:    make(map[string]*Session),
-		maxSessions: defaultMaxSessions,
+		adapter:      adapter,
+		persona:      persona,
+		maxToolTurns: defaultMaxToolTurns,
+		turnTimeout:  defaultTurnTimeout,
+		log:          slog.New(slog.NewTextHandler(discard{}, nil)),
+		sessions:     make(map[string]*Session),
+		maxSessions:  defaultMaxSessions,
 	}
 	for _, o := range opts {
 		o(p)
@@ -226,13 +241,14 @@ func (p *Planner) New() *Session {
 	return p.register(&Session{
 		ID:          newID(),
 		hub:         live.NewHub(),
-		adapter:     p.adapter,
-		persona:     persona,
-		maxTokens:   p.maxTokens,
-		turnTimeout: p.turnTimeout,
-		log:         p.log,
-		sandboxCfg:  p.sessionSandboxCfg(),
-		messages:    opening,
+		adapter:      p.adapter,
+		persona:      persona,
+		maxTokens:    p.maxTokens,
+		maxToolTurns: p.maxToolTurns,
+		turnTimeout:  p.turnTimeout,
+		log:          p.log,
+		sandboxCfg:   p.sessionSandboxCfg(),
+		messages:     opening,
 	})
 }
 
@@ -353,9 +369,10 @@ type Session struct {
 	hub         *live.Hub
 	adapter     model.Adapter
 	persona     string
-	maxTokens   int
-	turnTimeout time.Duration
-	log         *slog.Logger
+	maxTokens    int
+	maxToolTurns int
+	turnTimeout  time.Duration
+	log          *slog.Logger
 
 	// issueID is the dead-lettered issue a Resolve-mode session is unsticking (empty for a
 	// blank Create session). It is set server-side at mint by NewResolve and read back by the
@@ -371,11 +388,17 @@ type Session struct {
 	provMu     sync.Mutex
 	explorer   *explorer
 
-	mu       sync.Mutex
-	messages []model.Message
-	busy     bool
-	ledger   []LedgerItem // latest-wins alignment-ledger snapshot (T4.13), guarded by mu
-	draft    Draft        // latest-wins drafted spec + seed issues (T4.14), guarded by mu
+	mu          sync.Mutex
+	messages    []model.Message
+	busy        bool
+	turnStarted time.Time    // when the in-flight turn began (set in Send); anchors the live elapsed timer
+	ledger      []LedgerItem // latest-wins alignment-ledger snapshot (T4.13), guarded by mu
+	draft       Draft        // latest-wins drafted spec + seed issues (T4.14), guarded by mu
+
+	// readCount counts the read tool calls executed within the current turn, used only to label
+	// the live activity line ("reading the codebase · 3 read"). Touched solely by the turn
+	// goroutine (reset in run, incremented in dispatch), so it needs no lock.
+	readCount int
 }
 
 // ensureExplorer returns the session's live exploration stack, provisioning it lazily on first
@@ -569,6 +592,19 @@ func (s *Session) Busy() bool {
 	return s.busy
 }
 
+// TurnElapsed reports how many whole seconds the in-flight turn has been running, or 0 when no
+// turn is in flight. It anchors the live activity line's client-ticked elapsed timer: the view
+// renders this at fetch time and the browser ticks up from it, so a slow turn visibly progresses
+// (the "it's working, not hung" signal) without the server re-rendering each second.
+func (s *Session) TurnElapsed() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.busy {
+		return 0
+	}
+	return int(time.Since(s.turnStarted).Seconds())
+}
+
 // Send records the human's message and starts streaming the planner's reply in the
 // background, returning immediately. It returns started=false (recording nothing) when the
 // message is blank or a reply is already in flight, so the caller can leave the transcript
@@ -586,6 +622,7 @@ func (s *Session) Send(userText string) (started bool) {
 		return false
 	}
 	s.busy = true
+	s.turnStarted = time.Now()
 	s.messages = append(s.messages, model.Message{Role: model.RoleUser, Text: userText})
 	s.mu.Unlock()
 
@@ -602,6 +639,8 @@ func (s *Session) Send(userText string) (started bool) {
 func (s *Session) run() {
 	ctx, cancel := context.WithTimeout(context.Background(), s.turnTimeout)
 	defer cancel()
+
+	s.readCount = 0 // fresh per-turn count for the activity line's "N read" accumulation
 
 	s.mu.Lock()
 	msgs := slices.Clone(s.messages)
@@ -690,7 +729,7 @@ func (s *Session) run() {
 // exploration is disabled, so the loop concludes on the first turn exactly as the old single
 // adapter.Complete did. Bounded by maxToolTurns (and the caller's per-turn timeout).
 func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []model.ToolDef) (string, error) {
-	for turn := 1; turn <= maxToolTurns; turn++ {
+	for turn := 1; turn <= s.maxToolTurns; turn++ {
 		// Accumulate this turn's reply and re-broadcast the cumulative (HTML-escaped) prose as it
 		// grows, coalesced by deltaFlushRunes. A fresh builder per turn so an intermediate
 		// preamble is replaced by the final reply rather than concatenated. Cumulative (not
@@ -736,7 +775,7 @@ func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []mod
 			model.Message{Role: model.RoleAssistant, Text: resp.Text, ToolCalls: resp.ToolCalls},
 			model.Message{Role: model.RoleTool, ToolResults: s.dispatch(ctx, resp.ToolCalls)})
 	}
-	return "", fmt.Errorf("exploration did not converge within %d tool round-trips", maxToolTurns)
+	return "", fmt.Errorf("exploration did not converge within %d tool round-trips", s.maxToolTurns)
 }
 
 // dispatch executes the model's read-only tool calls against the session's exploration sandbox
@@ -750,7 +789,12 @@ func (s *Session) dispatch(ctx context.Context, calls []model.ToolCall) []model.
 	exp, err := s.ensureExplorer(ctx)
 	results := make([]model.ToolResult, 0, len(calls))
 	for _, tc := range calls {
-		s.hub.Broadcast(live.Event{Name: eventTool, Data: html.EscapeString(humanizeToolCall(tc))})
+		s.readCount++
+		// Label the live activity line with the read and a running per-turn count, so a
+		// multi-step exploration reads as accumulating progress ("read_file foo.go · 3 read")
+		// rather than a single line that merely flickers between files.
+		label := fmt.Sprintf("%s · %d read", humanizeToolCall(tc), s.readCount)
+		s.hub.Broadcast(live.Event{Name: eventTool, Data: html.EscapeString(label)})
 		switch {
 		case err != nil:
 			results = append(results, model.ToolResult{ToolCallID: tc.ID, Content: "could not access the codebase: " + err.Error(), IsError: true})

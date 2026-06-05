@@ -348,6 +348,19 @@ Alongside the conversation, a live **ledger** shows where you are — a lightly
 structured list the planner maintains and you steer. It is the shared "where are
 we" view a plain chat lacks — a *working aid*, not a durable object model.
 
+**The planner emits structured state as tool calls, not parsed prose.** Each turn the
+planner emits the complete ledger as the schema-validated arguments of an `update_ledger`
+tool call, and — once intent converges — proposes the [draft](#the-wizard--the-only-human-in-the-loop-surface)
+(spec + seed issues) via a `propose_draft` call. This is the same tool-calling mechanism the
+[model layer](models.md) is built on, and that the test author uses to record the
+[trace map](verification.md): the schema is enforced at the model boundary, so a malformed
+payload is rejected there rather than silently mis-parsed downstream. The control room renders
+the validated arguments; the planner's *text* reply is the prose the human reads, and the
+ledger/draft ride the **tool** channel — so the conversation stays clean and the structured
+output stays robust across models, with no free-text block for the server to scrape. These are
+**output** tool calls (pure structured state) and are distinct from the read-only exploration
+tools (genuine actions): emitting one never triggers another exploration round-trip.
+
 **Forks become chips.** When the planner surfaces a decision, it renders the
 options as selectable chips (with the tradeoff). Each fork offers the same three
 moves: **pick a chip** (it moves to *agreed*); **type free text** (the planner

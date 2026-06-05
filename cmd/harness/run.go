@@ -339,7 +339,12 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			if rerr != nil {
 				return nil, fmt.Errorf("read requirements planner persona: %w", rerr)
 			}
-			plannerOpts := []wizard.Option{wizard.WithMaxTokens(rp.MaxTokens), wizard.WithLogger(log)}
+			plannerOpts := []wizard.Option{
+				wizard.WithMaxTokens(rp.MaxTokens),
+				wizard.WithMaxToolTurns(rp.MaxToolTurns),
+				wizard.WithTurnTimeout(rp.TurnTimeout.Duration()),
+				wizard.WithLogger(log),
+			}
 			// Ground new Create sessions in the project's spec index (T4.28): read specs/README.md
 			// host-side (it is human-authored, trusted prose — no sandbox needed) so the planner
 			// opens oriented in what already exists and greets the human instead of a blank chat.

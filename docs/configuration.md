@@ -120,15 +120,26 @@ relevant contract rather than the whole `specs/` tree.
 requirements_planner:
   model:           claude-opus-4-8
   persona:         souls/prompts/requirements-planner.md
-  max_tokens:      4096
-  sandbox_profile: go-toolchain   # optional — enables read-only codebase exploration
-  base_ref:        main           # optional — branch the read-only checkout is seeded at
+  max_tokens:      16384           # optional — per-reply output ceiling (not the context window)
+  max_tool_turns:  40              # optional — read-only exploration round-trips per human turn
+  turn_timeout:    10m             # optional — wall-clock budget for one human turn
+  sandbox_profile: go-toolchain    # optional — enables read-only codebase exploration
+  base_ref:        main            # optional — branch the read-only checkout is seeded at
 ```
 
 The trusted LLM behind the Create-Task wizard — the one place a human is in the loop. Its
 conversation runs host-side (the model layer directly, not the runner/broker); its `model`
 resolves through the infra `models` registry like a soul's. Omitting this whole block disables
 the wizard.
+
+`max_tokens` (optional) bounds **one reply's output** — distinct from the model's input context
+window; size it to fit prose + the full alignment ledger + a complete draft (which inlines the
+spec markdown) without truncating, since a half-emitted ledger/draft block is dropped. `0` (or
+omitted) uses the adapter default. `max_tool_turns` (optional) caps the read-only exploration
+round-trips within a single human turn (default 16); raise it for a model that should explore a
+large codebase deeply. `turn_timeout` (optional, a Go duration like `10m`; default 5m) bounds one
+human turn's wall-clock — **raise it alongside `max_tool_turns`**, or a deep exploration the turn
+cap would allow is instead cut short by the clock and surfaces as an error to the human.
 
 `sandbox_profile` (optional) enables **read-only codebase exploration**: when set to a profile
 from the infra `sandbox.profiles` registry, the planner provisions a read-only, zero-network

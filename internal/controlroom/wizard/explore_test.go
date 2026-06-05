@@ -147,6 +147,41 @@ func TestExploreToolLoopGroundsAndParses(t *testing.T) {
 	}
 }
 
+// TestExploreMaxToolTurnsCapsLoop proves WithMaxToolTurns is the termination guarantee against a
+// model that loops on tool calls forever: with the cap set to 2, a model that calls a read tool on
+// every turn is dispatched exactly twice, then the turn concludes with an error note (rather than
+// looping unbounded). It also pins that the configured cap — not the default 16 — is what bounds
+// the loop, so the requirements_planner `max_tool_turns` knob is honored end to end.
+func TestExploreMaxToolTurnsCapsLoop(t *testing.T) {
+	// Two scripted turns, each a tool call and never a prose conclusion: the loop must stop on the
+	// cap, not on a converged reply.
+	toolTurn := modeltest.Turn{Text: "reading", ToolCalls: []modeltest.ToolCall{{ID: "c", Name: "read_file", Args: `{"path":"go.mod"}`}}}
+	srv := modeltest.NewServer(t, []modeltest.Turn{toolTurn, toolTurn})
+	be := &fakeBackend{}
+	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona",
+		wizard.WithTurnTimeout(10*time.Second), wizard.WithMaxToolTurns(2), withSandboxOpt(t, be))
+	defer p.Shutdown(context.Background())
+
+	sess := p.New()
+	sub, cancel := sess.Hub().Subscribe()
+	defer cancel()
+	if !sess.Send("build X") {
+		t.Fatal("Send returned false")
+	}
+	awaitTurn(t, sub)
+
+	if srv.Requests() != 2 {
+		t.Errorf("model requests = %d, want 2 (capped at max_tool_turns, not the default 16)", srv.Requests())
+	}
+	msgs := sess.Messages()
+	if len(msgs) != 2 || msgs[1].Role != "assistant" {
+		t.Fatalf("want [user, assistant error note], got %+v", msgs)
+	}
+	if !strings.Contains(msgs[1].Text, "did not converge within 2") {
+		t.Errorf("assistant note = %q, want the cap-exceeded error mentioning the configured cap", msgs[1].Text)
+	}
+}
+
 // TestExploreDisabledUnchanged proves a planner with NO sandbox option behaves exactly as a
 // pure-conversation planner: one model request, no tool loop, ledger/draft parse identically.
 func TestExploreDisabledUnchanged(t *testing.T) {

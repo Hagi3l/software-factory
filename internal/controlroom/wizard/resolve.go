@@ -38,12 +38,13 @@ func (p *Planner) NewResolve(seed ResolveSeed) *Session {
 	s := p.register(&Session{
 		ID:          newID(),
 		hub:         live.NewHub(),
-		adapter:     p.adapter,
-		persona:     p.persona + "\n\n" + resolveContext(seed),
-		maxTokens:   p.maxTokens,
-		turnTimeout: p.turnTimeout,
-		log:         p.log,
-		issueID:     seed.IssueID,
+		adapter:      p.adapter,
+		persona:      p.persona + "\n\n" + resolveContext(seed),
+		maxTokens:    p.maxTokens,
+		maxToolTurns: p.maxToolTurns,
+		turnTimeout:  p.turnTimeout,
+		log:          p.log,
+		issueID:      seed.IssueID,
 	})
 	// Open the conversation: the planner reads the grounding (system prompt) and the opener and
 	// replies with its first analysis. Send is a no-op if the opener is blank (it never is here).

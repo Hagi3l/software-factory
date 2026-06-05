@@ -160,6 +160,35 @@ func TestSendRejectsConcurrentTurn(t *testing.T) {
 	}
 }
 
+// TestTurnElapsedTracksInFlightTurn proves the live activity-line timer source: TurnElapsed is 0
+// when no turn is in flight (before the first send and after a turn completes) and counts up the
+// in-flight turn's whole seconds while busy. The view anchors the client-ticked "mm:ss" clock off
+// this, so a slow turn visibly progresses ("it's working, not hung") — the contract that matters
+// is the 0-when-idle / nonzero-while-running split.
+func TestTurnElapsedTracksInFlightTurn(t *testing.T) {
+	a := &fakeAdapter{release: make(chan struct{}), reply: "a reply long enough to stream"}
+	sess := wizard.NewPlanner(a, "persona").New()
+
+	if got := sess.TurnElapsed(); got != 0 {
+		t.Errorf("TurnElapsed before any send = %d, want 0", got)
+	}
+	if !sess.Send("first message") {
+		t.Fatal("Send returned false")
+	}
+	// The turn is blocked on the fake adapter's release; let just over a second pass so the elapsed
+	// counter is unambiguously nonzero, then assert it reflects the running turn.
+	time.Sleep(1100 * time.Millisecond)
+	if got := sess.TurnElapsed(); got < 1 {
+		t.Errorf("TurnElapsed while busy ~1.1s = %d, want >= 1", got)
+	}
+
+	close(a.release) // let the turn complete
+	waitFor(t, func() bool { return !sess.Busy() }, "turn did not complete")
+	if got := sess.TurnElapsed(); got != 0 {
+		t.Errorf("TurnElapsed after the turn completed = %d, want 0 (no turn in flight)", got)
+	}
+}
+
 // TestSendIgnoresBlank proves a blank or whitespace-only message is a no-op: it neither
 // records a turn nor dispatches the model, so an accidental empty submit does nothing.
 func TestSendIgnoresBlank(t *testing.T) {

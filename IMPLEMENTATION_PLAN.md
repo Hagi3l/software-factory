@@ -34,7 +34,9 @@ good autonomous implementation) — a later validation concern, never an enginee
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
 - **Open tasks (`- [ ]`) keep their full detail** — the remaining Phase 5 items, plus the handful of
   optional items left in Phase 2 (T2.11/T2.12). T4.26 (Config view) closed the original Phase-4 view
-  roster and **T4.27 is done — Phase 4 is fully complete**; **Phase 6 (agent semantic tooling — the
+  roster and **T4.27 is done — Phase 4's original scope is fully complete** (one open follow-up,
+**T4.29**, migrates the wizard's structured output from parsed fenced blocks to tool calls);
+**Phase 6 (agent semantic tooling — the
   LSP-backed tool surface) is now fully complete (T6.1–T6.3)**. The only remaining *engineering* of new
   substrate is Phase 5 (production isolation & distribution) — and within it the Firecracker backend
   (T5.2) is hardware-blocked and deliberately last; the live Phase-5 work is T5.5/T5.6/T5.7/T5.11 (T5.10
@@ -1056,6 +1058,61 @@ components/artifact-store.md, glossary.md).
   timeout is the documented NATS-teardown flake; runner passes in isolation in 0.08s). **Completes Phase 4.**
   (needs T4.13, T4.14; touches T4.15's sidecar consumer)
   ([control-room.md](specs/control-room.md), [specs-process.md](specs/specs-process.md))
+- [x] **T4.28b Configurable exploration depth + live "it's working" progress** — *done.* Two follow-ons to
+  T4.28's read-only codebase exploration, both needed before the wizard is usable for a *deep* exploration on a
+  real demo (the vault). **(1) Config knobs on `requirements_planner`:** the previously-hardcoded
+  `maxToolTurns` (read-only exploration round-trips per human turn) and the per-turn wall-clock timeout are now
+  config — new `RequirementsPlanner.MaxToolTurns int` + `TurnTimeout Duration` (`max_tool_turns`/`turn_timeout`
+  YAML), wired through `cmd/harness` via new `wizard.WithMaxToolTurns`/`WithTurnTimeout` options; `0` falls back
+  to the wizard defaults (`defaultMaxToolTurns=16`, 5m). **They must be raised together** — a high tool-turn cap
+  is moot if the clock cuts the turn short — documented on both the struct and in `docs/configuration.md`.
+  Validation (`validateRequirementsPlanner`) rejects negative values at the `harness validate` gate. **(2) Live
+  progress:** the activity line now shows a client-ticked elapsed `mm:ss` clock (new `Session.TurnElapsed()`
+  anchored off `turnStarted`, ticked browser-side by `wizardElapsed()` in the new `assets/static/wizard.js` so a
+  slow turn visibly counts up — the "working, not hung" signal — without per-second server renders) and a running
+  per-turn read counter (`Session.readCount`, surfaced in the `tool` status line as "… · N read"). The shared
+  `wizard.js` also carries the sticky auto-scroll + Enter-to-send composer ergonomics. **(3) Demo tuning:** the
+  vault `requirements_planner` is pointed at `deepseek-v4-flash` (1M context) with `max_tokens: 16384`,
+  `max_tool_turns: 40`, `turn_timeout: 10m` so it can read the vault codebase deeply; the persona gains a
+  "Grounding in the existing codebase" section (read-before-asserting, verify-links-by-reading) and stricter
+  JSON-emission rules for the ledger/draft blocks. **(4) Spec lead for T4.29:** `control-room.md` "The alignment
+  ledger" now asserts the planner emits structured state as **tool calls, not parsed prose** — a deliberate
+  spec-ahead-of-code assertion that **T4.29** (next) brings the implementation in line with. Tests: config
+  validation (valid tuning, negative `max_tool_turns`/`turn_timeout` rejected), `WithMaxToolTurns` caps the
+  exploration loop end to end (a tool-call-looping model is dispatched exactly N times then concludes with the
+  cap-exceeded error), and `TurnElapsed` is 0-when-idle / nonzero-while-running. `make check` green (lint 0,
+  **916 pass / 2 skip**). Docs: `docs/configuration.md` planner field reference. (needs T4.28)
+  ([control-room.md](specs/control-room.md), [configuration.md](specs/configuration.md))
+- [ ] **T4.29 Wizard structured output via tool calls (replace fenced blocks)** — **Non-TCB** (controlroom +
+  the trusted planner persona). Migrate the requirements planner's structured output — the alignment ledger
+  (T4.13/T4.27) and the draft (T4.14) — from **parsed fenced ` ```ledger `/` ```draft ` blocks** to
+  **schema-validated tool calls** (`update_ledger`, `propose_draft`), the mechanism the rest of the model layer
+  already uses (and that the test author uses for the `trace_test` map, verification.md). **Spec leads code:**
+  `control-room.md` "The alignment ledger" already asserts this design ("The planner emits structured state as
+  tool calls, not parsed prose"); this task brings the implementation in line, closing a deliberate
+  spec-ahead-of-code gap. **Why:** robustness — the schema is enforced at the model boundary, so the
+  "`fence present but did not parse`" failure class (real, and worse on a small model like deepseek-flash) is
+  rejected there instead of silently mis-parsed; and simplification — it **deletes** the bespoke parser
+  (`cutFencedBlock`/`cutLedgerBlock`/`displayProse` fence-stripping, `parseLedger`'s three-way lenient fallback,
+  the smart-quote normalization) and ~80 lines of JSON-protocol prose from the persona. **Design fulcrum —
+  output tools vs action tools:** `update_ledger`/`propose_draft` are *output* tools (pure structured state),
+  distinct from the read-only exploration *action* tools (T4.28). The `converse` loop continues to iterate **only**
+  on an exploration call; output-tool calls are harvested latest-wins (matching today's snapshot semantics) and
+  ride the terminal message, so they **never add a model round-trip** — the only bookkeeping is synthesizing
+  `ToolResult` acks so the next human turn's history is well-formed. **Streaming simplifies:** text content
+  becomes pure prose, so the `delta` broadcast no longer needs `displayProse()` to scrub fences. **Scope:** two
+  `model.ToolDef` schemas (encode the four-state enum; keep `normalizeStatus` as cheap belt-and-suspenders since
+  the schema enforces shape, not that a weak model respects the enum); the `converse` action-vs-output branch +
+  ack bookkeeping; `json.Unmarshal(call.Args, …)` into the existing `LedgerItem`/`Draft` structs; delete the dead
+  parser; rewrite the **`modeltest`** fixtures (the bulk of the effort) to script `tool_calls` in the OpenAI
+  streaming wire format instead of fenced-text replies. `tool_choice` stays **auto** (you cannot force a specific
+  tool *and* allow prose + exploration in one turn — the robustness win is schema-validated args, not forcing the
+  call). **De-risk first:** spike provider tool-calling reliability on **deepseek-flash via openai-compat
+  (OpenRouter)** before deleting the parser — if flash can't reliably call tools, that is itself evidence to keep
+  the guard-railed prompt path until back on a stronger model. **Docs:** no CLI/config/route change; the mechanism
+  is internal, so `docs/` likely needs no change (confirm the `docs/control-room.md` wizard section doesn't
+  describe the fenced blocks). (needs T4.13, T4.14, T4.27, T4.28) ([control-room.md](specs/control-room.md),
+  [models.md](specs/models.md), [verification.md](specs/verification.md))
 
 ## Phase 5 — Production isolation & distribution
 

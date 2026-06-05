@@ -47,7 +47,12 @@ type Harness struct {
 // infra model registry exactly like a soul's (the runner does not dispatch it, but the
 // composition root resolves the same registry to an adapter); Persona is the markdown
 // prompt that gives it its elicitation behavior, resolved against the config root like a
-// soul persona. MaxTokens bounds one reply turn (0 = the adapter default).
+// soul persona. MaxTokens bounds one reply turn's output (0 = the adapter default) — distinct
+// from the model's input context window. MaxToolTurns caps the read-only exploration round-trips
+// within one human turn (0 = the wizard default); raise it for a model that should explore a
+// large codebase deeply. TurnTimeout bounds one human turn's wall-clock (0 = the wizard default);
+// it must be raised alongside MaxToolTurns, since a deep exploration that the turn cap would allow
+// is otherwise cut short by the clock.
 //
 // SandboxProfile and BaseRef are optional and enable read-only codebase exploration
 // (T4.28): when SandboxProfile names a profile in the infra sandbox registry, the wizard
@@ -58,11 +63,13 @@ type Harness struct {
 // exactly as before (pure conversation). The conversation itself stays trusted and host-side;
 // only the model-chosen repo reads are sandbox-confined (see specs/control-room.md).
 type RequirementsPlanner struct {
-	Model          string `yaml:"model"`
-	Persona        string `yaml:"persona"`
-	MaxTokens      int    `yaml:"max_tokens,omitempty"`
-	SandboxProfile string `yaml:"sandbox_profile,omitempty"`
-	BaseRef        string `yaml:"base_ref,omitempty"`
+	Model          string   `yaml:"model"`
+	Persona        string   `yaml:"persona"`
+	MaxTokens      int      `yaml:"max_tokens,omitempty"`
+	MaxToolTurns   int      `yaml:"max_tool_turns,omitempty"`
+	TurnTimeout    Duration `yaml:"turn_timeout,omitempty"`
+	SandboxProfile string   `yaml:"sandbox_profile,omitempty"`
+	BaseRef        string   `yaml:"base_ref,omitempty"`
 }
 
 // Stage kinds for non-agent stages. An agent stage names a Role instead; a stage is
