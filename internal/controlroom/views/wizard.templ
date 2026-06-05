@@ -340,9 +340,32 @@ func ledgerStatusClass(status string) string {
 // output but still model-authored markdown, never rendered as markup.
 templ DraftPanel(session string, draft wizard.Draft, canApprove bool) {
 	if draft.Empty() {
-		<div class="rounded-lg border border-border bg-surface p-4 text-sm text-muted">
-			Drafted spec &amp; seed issues — these appear here, with an Approve button, once the
-			planner has converged enough to propose them.
+		<div class="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 text-sm text-muted">
+			<p>
+				Drafted spec &amp; seed issues — these appear here, with an Approve button, once the
+				planner proposes them. If you're happy with the discussion, ask it to draft now.
+			</p>
+			// Nudge the planner to draft (T4.14): the Approve gate only appears once the planner
+			// emits a ```draft block, and the model may not do so on its own. This funnels a canned
+			// "I'm ready — draft it" message through the same /create/message path as a typed reply,
+			// so the planner stays the single source of truth; its next turn proposes the draft.
+			<form
+				hx-post="/create/message"
+				hx-target="#wizard-transcript"
+				hx-swap="innerHTML"
+				class="flex justify-end"
+			>
+				<input type="hidden" name="session" value={ session }/>
+				<input
+					type="hidden"
+					name="text"
+					value="I'm happy with where this has landed — please draft the spec and seed issues now so I can review and approve."
+				/>
+				<button
+					type="submit"
+					class="rounded-md bg-accent-strong px-3 py-1.5 text-xs font-medium text-white transition hover:bg-accent"
+				>I'm ready — draft the spec</button>
+			</form>
 		</div>
 	} else {
 		<div class="flex flex-col gap-4 rounded-lg border border-st-ok/40 bg-surface p-4">

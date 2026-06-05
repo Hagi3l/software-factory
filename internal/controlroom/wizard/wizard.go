@@ -646,6 +646,19 @@ func (s *Session) run() {
 		s.log.Debug("wizard: ledger parsed", "session", s.ID, "items", len(items))
 	}
 
+	// Sibling diagnostic for the "I asked it to draft but no Approve button appeared" failure:
+	// the Approve gate only shows once parseDraft succeeds, so when a ```draft fence is present
+	// but rejected (bad JSON shape, missing required fields, an unterminated block), surface the
+	// raw block so a non-compliant model is diagnosable from one run rather than silently stuck.
+	if !hasDraft {
+		if _, raw, ok := cutFencedBlock(reply, draftFence); ok {
+			s.log.Warn("wizard: draft fence present but did not parse (check JSON shape/required fields)",
+				"session", s.ID, "raw_block", logSnippet(raw, 1000))
+		}
+	} else {
+		s.log.Debug("wizard: draft parsed", "session", s.ID, "specs", len(draft.Specs), "issues", len(draft.Issues))
+	}
+
 	s.mu.Lock()
 	s.messages = append(s.messages, model.Message{Role: model.RoleAssistant, Text: prose})
 	if items != nil {
