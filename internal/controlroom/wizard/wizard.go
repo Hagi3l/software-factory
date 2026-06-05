@@ -405,10 +405,18 @@ func (s *Session) ensureExplorer(ctx context.Context) (*explorer, error) {
 		return exp, nil
 	}
 
+	// Provisioning boots a Docker sandbox (clone + run + copy), which takes real seconds and
+	// happens before any tool can run — so surface it on both channels: a UI status line (the
+	// dots would otherwise sit frozen) and an info log (the terminal would otherwise be silent).
+	s.hub.Broadcast(live.Event{Name: eventTool, Data: html.EscapeString("preparing the codebase sandbox…")})
+	s.log.Info("wizard: provisioning exploration sandbox", "session", s.ID, "profile", cfg.profile, "base_ref", cfg.baseRef)
+	start := time.Now()
 	built, err := buildExplorer(ctx, *cfg)
 	if err != nil {
+		s.log.Error("wizard: exploration sandbox provisioning failed", "session", s.ID, "elapsed", time.Since(start).String(), "err", err)
 		return nil, err
 	}
+	s.log.Info("wizard: exploration sandbox ready", "session", s.ID, "elapsed", time.Since(start).String())
 	s.mu.Lock()
 	s.explorer = built
 	s.mu.Unlock()
@@ -689,6 +697,10 @@ func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []mod
 			}
 		}
 
+		// Log each model round-trip so a multi-step (and, with this model, multi-second) turn is
+		// never a silent terminal: you can see the call go out and how long it took to come back.
+		callStart := time.Now()
+		s.log.Info("wizard: model call", "session", s.ID, "round", turn, "messages", len(msgs), "tools", len(defs))
 		resp, err := s.adapter.Complete(ctx, model.Request{
 			System:    s.persona,
 			Messages:  msgs,
@@ -698,6 +710,8 @@ func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []mod
 		if err != nil {
 			return "", err
 		}
+		s.log.Info("wizard: model replied", "session", s.ID, "round", turn,
+			"elapsed", time.Since(callStart).String(), "tool_calls", len(resp.ToolCalls), "reply_chars", len(resp.Text))
 		if len(resp.ToolCalls) == 0 {
 			return resp.Text, nil // the final prose reply (carries the ledger/draft blocks)
 		}
