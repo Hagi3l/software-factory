@@ -33,7 +33,7 @@ BD="${BD:-bd}"
 IMAGE='vault-toolchain'       # sandbox profile named by the vault souls
 BASE_IMAGE='go-toolchain'     # the vault image bases on this kernel image
 JAEGER_NAME='harness-vault-jaeger'              # container name (JAEGER=1 only)
-JAEGER_IMAGE='jaegertracing/all-in-one:latest'  # single-binary OTLP collector + trace UI
+JAEGER_IMAGE='jaegertracing/all-in-one:1.76.0'  # single-binary OTLP collector + trace UI (pinned: v2 is a collector-based rewrite)
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"

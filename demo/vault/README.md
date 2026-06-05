@@ -101,6 +101,17 @@ Open <http://127.0.0.1:16686>, pick the **`harness`** service, and each invocati
 as a trace waterfall as the pipeline runs. The container is torn down on exit. (The default
 run leaves tracing off, as `infra.dev.yaml` ships.)
 
+Two things to expect:
+
+- **`failed to upload metrics: ... unknown service ...MetricsService`** in the harness log is
+  benign. The harness exports both traces and metrics to the one OTLP endpoint; Jaeger is a
+  *tracing* backend (its OTLP receiver implements traces only), so the periodic metrics push
+  is refused. Traces are unaffected — they still flow and render in the UI.
+- **The Jaeger UI looks wrong in dark mode.** Jaeger v1's UI is light-only with no theme
+  toggle; what you see is the *browser* auto-darkening a light-only site (Chrome's "Auto Dark
+  Mode" flag, or a Dark-Reader-style extension). Disable auto-dark for `127.0.0.1:16686` to
+  get the intended UI — there is no demo-side or server-side lever for this.
+
 ### A good feature to draft on stage
 
 A **one-time, single-use secret share link**: generate an expiring link that reveals one
