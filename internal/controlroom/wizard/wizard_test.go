@@ -261,17 +261,18 @@ func TestNewSessionsUniqueAndBounded(t *testing.T) {
 	}
 }
 
-// TestLedgerTurnParsesAndStreamsClean proves a turn whose scripted reply carries a trailing
-// ```ledger block: the parsed ledger is stored on the session, the recorded transcript holds
-// only the clean prose (no JSON), and the streamed delta never contains the fence — so the raw
-// ledger JSON never reaches the browser. It runs through the real adapter via modeltest.
+// TestLedgerTurnParsesAndStreamsClean proves a turn whose scripted reply emits the ledger as an
+// update_ledger TOOL CALL (T4.29): the harvested ledger is stored on the session, the recorded
+// transcript holds only the clean prose (the structured state rode the tool channel, never the
+// text), and the streamed delta carries only prose — the ledger JSON never reaches the browser as
+// text. It runs through the real adapter via modeltest.
 func TestLedgerTurnParsesAndStreamsClean(t *testing.T) {
-	const reply = "Here is where we stand.\n\n```ledger\n" +
-		`[{"question":"Which datastore?","status":"open","rationale":"Driven by query shape.",` +
+	const ledgerArgs = `{"items":[{"question":"Which datastore?","status":"open","rationale":"Driven by query shape.",` +
 		`"options":[{"label":"Postgres","tradeoff":"mature ops","selected":false},` +
-		`{"label":"SQLite","tradeoff":"single-node","selected":false}]}]` +
-		"\n```"
-	srv := modeltest.NewServer(t, []modeltest.Turn{{Text: reply}})
+		`{"label":"SQLite","tradeoff":"single-node","selected":false}]}]}`
+	srv := modeltest.NewServer(t, []modeltest.Turn{
+		{Text: "Here is where we stand.", ToolCalls: []modeltest.ToolCall{{ID: "l1", Name: "update_ledger", Args: ledgerArgs}}},
+	})
 	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
 	sess := p.New()
 
@@ -302,9 +303,9 @@ func TestLedgerTurnParsesAndStreamsClean(t *testing.T) {
 		}
 	}
 
-	// The streamed delta must never carry the fence or the raw JSON.
-	if strings.Contains(lastDelta, "ledger") || strings.Contains(lastDelta, "Postgres") || strings.Contains(lastDelta, "```") {
-		t.Errorf("delta leaked the ledger block: %q", lastDelta)
+	// The streamed delta carries only prose — the ledger args ride the tool channel, never text.
+	if lastDelta != "Here is where we stand." {
+		t.Errorf("delta = %q, want only the clean prose (ledger args must not stream as text)", lastDelta)
 	}
 
 	waitFor(t, func() bool { return !sess.Busy() }, "turn did not complete")
@@ -331,17 +332,16 @@ func TestLedgerTurnParsesAndStreamsClean(t *testing.T) {
 // free-text answer, and a "let's discuss" flag together), and dispatches a fresh planner turn.
 // Out-of-range / empty answers are skipped. The first turn seeds a multi-fork ledger.
 func TestAnswerBatchFunnelsThroughPlanner(t *testing.T) {
-	const seed = "Where we stand.\n```ledger\n" +
-		`[{"question":"Which datastore?","status":"open","options":[` +
+	const seedArgs = `{"items":[{"question":"Which datastore?","status":"open","options":[` +
 		`{"label":"Postgres","tradeoff":"mature ops","selected":false},` +
 		`{"label":"SQLite","tradeoff":"single-node","selected":false}]},` +
 		`{"question":"Auth in v1?","status":"open","options":[]},` +
-		`{"question":"Rate limiting?","status":"open","options":[]}]` +
-		"\n```"
-	const after = "Got it.\n```ledger\n" +
-		`[{"question":"Which datastore?","status":"agreed","options":[{"label":"Postgres","selected":true}]}]` +
-		"\n```"
-	srv := modeltest.NewServer(t, []modeltest.Turn{{Text: seed}, {Text: after}})
+		`{"question":"Rate limiting?","status":"open","options":[]}]}`
+	const afterArgs = `{"items":[{"question":"Which datastore?","status":"agreed","options":[{"label":"Postgres","selected":true}]}]}`
+	srv := modeltest.NewServer(t, []modeltest.Turn{
+		{Text: "Where we stand.", ToolCalls: []modeltest.ToolCall{{ID: "l1", Name: "update_ledger", Args: seedArgs}}},
+		{Text: "Got it.", ToolCalls: []modeltest.ToolCall{{ID: "l2", Name: "update_ledger", Args: afterArgs}}},
+	})
 	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
 	sess := p.New()
 
@@ -392,20 +392,24 @@ func TestAnswerBatchFunnelsThroughPlanner(t *testing.T) {
 	}
 }
 
-// TestDraftTurnParsesAndStreamsClean proves a turn whose reply carries a trailing ```draft block
-// (here alongside a ```ledger block): the parsed draft is stored on the session, a `draft` SSE
-// nudge fires, the transcript holds only the clean prose, and neither structured block leaks into
-// the streamed delta. It runs through the real adapter via modeltest.
+// TestDraftTurnParsesAndStreamsClean proves a turn whose reply emits BOTH output tool calls in one
+// response (update_ledger + propose_draft, T4.29): the harvested draft is stored on the session, a
+// `draft` SSE nudge fires, the transcript holds only the clean prose, and neither tool's args leak
+// into the streamed delta. Both output calls ride the one terminal turn — no extra round-trip. It
+// runs through the real adapter via modeltest.
 func TestDraftTurnParsesAndStreamsClean(t *testing.T) {
-	const reply = "I think this is ready to build.\n\n" +
-		"```ledger\n" + `[{"question":"Scope?","status":"agreed","rationale":"Export only."}]` + "\n```\n" +
-		"```draft\n" +
-		`{"summary":"CSV export","specs":[{"path":"specs/export.md","content":"# Export\n\nSpec body.\n"}],` +
-		`"issues":[{"title":"Add CSV export","body":"Build it.","spec":"specs/export.md"}]}` +
-		"\n```"
-	// NB: the \n inside the spec content above are literal backslash-n (raw string), so the
-	// embedded JSON is valid — a real newline inside a JSON string would not be.
-	srv := modeltest.NewServer(t, []modeltest.Turn{{Text: reply}})
+	const ledgerArgs = `{"items":[{"question":"Scope?","status":"agreed","rationale":"Export only."}]}`
+	const draftArgs = `{"summary":"CSV export","specs":[{"path":"specs/export.md","content":"# Export\n\nSpec body.\n"}],` +
+		`"issues":[{"title":"Add CSV export","body":"Build it.","spec":"specs/export.md"}]}`
+	// NB: the \n inside the spec content are literal backslash-n (raw string), so the embedded
+	// JSON is valid — a real newline inside a JSON string would not be. The tool channel carries
+	// this one-string-with-escaped-newlines cleanly, which is the point of the migration.
+	srv := modeltest.NewServer(t, []modeltest.Turn{
+		{Text: "I think this is ready to build.", ToolCalls: []modeltest.ToolCall{
+			{ID: "l1", Name: "update_ledger", Args: ledgerArgs},
+			{ID: "d1", Name: "propose_draft", Args: draftArgs},
+		}},
+	})
 	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
 	sess := p.New()
 
@@ -440,9 +444,9 @@ func TestDraftTurnParsesAndStreamsClean(t *testing.T) {
 		t.Error("turn nudge did not precede the draft nudge")
 	}
 
-	// Neither block may leak into the live stream.
-	if strings.Contains(lastDelta, "draft") || strings.Contains(lastDelta, "export.md") || strings.Contains(lastDelta, "```") {
-		t.Errorf("delta leaked a structured block: %q", lastDelta)
+	// Neither tool's args may leak into the live stream — the delta is pure prose.
+	if lastDelta != "I think this is ready to build." {
+		t.Errorf("delta = %q, want only the clean prose (tool args must not stream as text)", lastDelta)
 	}
 
 	waitFor(t, func() bool { return !sess.Busy() }, "turn did not complete")

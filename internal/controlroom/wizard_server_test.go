@@ -3,6 +3,7 @@ package controlroom
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -15,21 +16,35 @@ import (
 	"github.com/Loxstomper/harness/internal/model"
 )
 
-// scriptedAdapter is a trivial model.Adapter for the wizard server tests: it streams one
-// fixed reply. It keeps the handler tests free of a network round-trip while still driving
-// the real wizard conversation loop.
-type scriptedAdapter struct{ reply string }
-
-func (a scriptedAdapter) Complete(_ context.Context, _ model.Request, onEvent model.StreamHandler) (model.Response, error) {
-	if onEvent != nil {
-		onEvent(model.StreamEvent{TextDelta: a.reply})
-	}
-	return model.Response{Text: a.reply, Stop: model.StopEndTurn}, nil
+// scriptedAdapter is a trivial model.Adapter for the wizard server tests: it streams one fixed
+// prose reply and, optionally, emits the planner's OUTPUT tool calls (update_ledger/propose_draft,
+// T4.29) the same way a real model would. It keeps the handler tests free of a network round-trip
+// while still driving the real wizard conversation loop.
+type scriptedAdapter struct {
+	text  string
+	calls []model.ToolCall
 }
 
-func wizardServer(t *testing.T, reply string) (*httptest.Server, *wizard.Planner) {
+func (a scriptedAdapter) Complete(_ context.Context, _ model.Request, onEvent model.StreamHandler) (model.Response, error) {
+	if onEvent != nil && a.text != "" {
+		onEvent(model.StreamEvent{TextDelta: a.text})
+	}
+	return model.Response{Text: a.text, ToolCalls: a.calls, Stop: model.StopEndTurn}, nil
+}
+
+// ledgerCall / draftCall build the output tool calls the scripted planner "emits" — the
+// structured-state channel the wizard harvests (replacing the old fenced ```ledger/```draft text).
+func ledgerCall(args string) model.ToolCall {
+	return model.ToolCall{ID: "l1", Name: "update_ledger", Args: json.RawMessage(args)}
+}
+
+func draftCall(args string) model.ToolCall {
+	return model.ToolCall{ID: "d1", Name: "propose_draft", Args: json.RawMessage(args)}
+}
+
+func wizardServer(t *testing.T, a scriptedAdapter) (*httptest.Server, *wizard.Planner) {
 	t.Helper()
-	p := wizard.NewPlanner(scriptedAdapter{reply: reply}, "persona", wizard.WithTurnTimeout(5*time.Second))
+	p := wizard.NewPlanner(a, "persona", wizard.WithTurnTimeout(5*time.Second))
 	s := New(Options{Planner: p})
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
@@ -70,7 +85,7 @@ func TestCreateNotConfigured(t *testing.T) {
 // TestCreateRendersPageAndSession proves a wired wizard renders the conversation page with a
 // live SSE-connected transcript bound to a concrete session, and the empty-state prompt.
 func TestCreateRendersPageAndSession(t *testing.T) {
-	ts, _ := wizardServer(t, "a reply")
+	ts, _ := wizardServer(t, scriptedAdapter{text: "a reply"})
 
 	r := get(t, ts, "/create")
 	if r.status != http.StatusOK {
@@ -94,7 +109,7 @@ func TestCreateRendersPageAndSession(t *testing.T) {
 // the reply's `delta` and `turn` events to the connected browser.
 func TestCreateMessageRoundTrip(t *testing.T) {
 	const reply = "Should it reject <empty> rows? Give one example."
-	ts, p := wizardServer(t, reply)
+	ts, p := wizardServer(t, scriptedAdapter{text: reply})
 	sess := p.New()
 
 	// Open the session's SSE stream first so no event is missed.
@@ -170,12 +185,10 @@ func TestCreateMessageRoundTrip(t *testing.T) {
 // through the planner — the titled panel with the question and its option chips. An unknown
 // session 404s.
 func TestCreateLedgerRendersPanel(t *testing.T) {
-	const reply = "Where we stand.\n```ledger\n" +
-		`[{"question":"Which datastore?","status":"open","rationale":"Driven by query shape.",` +
+	const ledgerArgs = `{"items":[{"question":"Which datastore?","status":"open","rationale":"Driven by query shape.",` +
 		`"options":[{"label":"Postgres","tradeoff":"mature ops","selected":false},` +
-		`{"label":"SQLite","tradeoff":"single-node","selected":false}]}]` +
-		"\n```"
-	ts, p := wizardServer(t, reply)
+		`{"label":"SQLite","tradeoff":"single-node","selected":false}]}]}`
+	ts, p := wizardServer(t, scriptedAdapter{text: "Where we stand.", calls: []model.ToolCall{ledgerCall(ledgerArgs)}})
 	sess := p.New()
 
 	// Empty state before any turn.
@@ -222,12 +235,10 @@ func TestCreateLedgerRendersPanel(t *testing.T) {
 // answers through the planner (T4.27) — recording one enumerated user turn and returning the
 // transcript fragment — and that an unknown session 404s.
 func TestCreateLedgerAnswerRecordsTurn(t *testing.T) {
-	const reply = "Where we stand.\n```ledger\n" +
-		`[{"question":"Which datastore?","status":"open","options":[` +
+	const ledgerArgs = `{"items":[{"question":"Which datastore?","status":"open","options":[` +
 		`{"label":"Postgres","tradeoff":"mature ops","selected":false}]},` +
-		`{"question":"Auth in v1?","status":"open","options":[]}]` +
-		"\n```"
-	ts, p := wizardServer(t, reply)
+		`{"question":"Auth in v1?","status":"open","options":[]}]}`
+	ts, p := wizardServer(t, scriptedAdapter{text: "Where we stand.", calls: []model.ToolCall{ledgerCall(ledgerArgs)}})
 	sess := p.New()
 
 	// Seed the ledger so there are forks to answer.
@@ -279,35 +290,38 @@ func (f *fakeSeeder) Seed(_ context.Context, req wizard.SeedRequest) (wizard.See
 	return f.res, f.err
 }
 
-// draftReply is a scripted planner turn that proposes a spec + one seed issue (the JSON uses
-// raw-string \n so the embedded block is valid JSON).
-const draftReply = "Ready to build.\n```draft\n" +
-	`{"summary":"CSV export","specs":[{"path":"specs/export.md","content":"# Export\n\nBody.\n"}],` +
-	`"issues":[{"title":"Add CSV export","body":"Build it.","spec":"specs/export.md"}]}` +
-	"\n```"
+// draftArgs is a scripted propose_draft call's arguments — a spec + one seed issue (the JSON uses
+// raw-string \n so the embedded markdown content is a valid JSON string). draftAdapter is the
+// scripted planner turn that proposes it.
+const draftArgs = `{"summary":"CSV export","specs":[{"path":"specs/export.md","content":"# Export\n\nBody.\n"}],` +
+	`"issues":[{"title":"Add CSV export","body":"Build it.","spec":"specs/export.md"}]}`
 
-// discussReply carries both a draft and a ledger with an item the human flagged `discussing` —
+func draftAdapter() scriptedAdapter {
+	return scriptedAdapter{text: "Ready to build.", calls: []model.ToolCall{draftCall(draftArgs)}}
+}
+
+// discussAdapter emits both a draft and a ledger with an item the human flagged `discussing` —
 // the soft approval gate (T4.27) must refuse to commit while it stands.
-const discussReply = "Let's settle this.\n```ledger\n" +
-	`[{"question":"Which datastore?","status":"discussing","rationale":"Need the scale target."}]` +
-	"\n```\n```draft\n" +
-	`{"summary":"X","specs":[{"path":"specs/x.md","content":"# X\n\nB.\n"}],"issues":[{"title":"Do X","spec":"specs/x.md"}]}` +
-	"\n```"
+func discussAdapter() scriptedAdapter {
+	const ledgerArgs = `{"items":[{"question":"Which datastore?","status":"discussing","rationale":"Need the scale target."}]}`
+	const dArgs = `{"summary":"X","specs":[{"path":"specs/x.md","content":"# X\n\nB.\n"}],"issues":[{"title":"Do X","spec":"specs/x.md"}]}`
+	return scriptedAdapter{text: "Let's settle this.", calls: []model.ToolCall{ledgerCall(ledgerArgs), draftCall(dArgs)}}
+}
 
-// deferReply carries a draft and a ledger with one agreed + one still-open fork — approval must
+// deferAdapter emits a draft and a ledger with one agreed + one still-open fork — approval must
 // succeed, auto-deferring the open fork and recording both in the decisions handed to the Seeder.
-const deferReply = "Ready.\n```ledger\n" +
-	`[{"question":"Auth in v1?","status":"agreed","rationale":"Out of scope."},` +
-	`{"question":"Caching?","status":"open","rationale":"Punt to v2."}]` +
-	"\n```\n```draft\n" +
-	`{"summary":"X","specs":[{"path":"specs/x.md","content":"# X\n\nB.\n"}],"issues":[{"title":"Do X","spec":"specs/x.md"}]}` +
-	"\n```"
+func deferAdapter() scriptedAdapter {
+	const ledgerArgs = `{"items":[{"question":"Auth in v1?","status":"agreed","rationale":"Out of scope."},` +
+		`{"question":"Caching?","status":"open","rationale":"Punt to v2."}]}`
+	const dArgs = `{"summary":"X","specs":[{"path":"specs/x.md","content":"# X\n\nB.\n"}],"issues":[{"title":"Do X","spec":"specs/x.md"}]}`
+	return scriptedAdapter{text: "Ready.", calls: []model.ToolCall{ledgerCall(ledgerArgs), draftCall(dArgs)}}
+}
 
 // TestCreateDraftRendersPanel proves GET /create/draft/{session} renders the draft fragment: the
 // empty invitation before the planner proposes anything, and — after a draft-bearing turn — the
 // proposed spec, the seed issue, and the Approve button. An unknown session 404s.
 func TestCreateDraftRendersPanel(t *testing.T) {
-	p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona", wizard.WithTurnTimeout(5*time.Second))
+	p := wizard.NewPlanner(draftAdapter(), "persona", wizard.WithTurnTimeout(5*time.Second))
 	s := New(Options{Planner: p, Seeder: &fakeSeeder{}})
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
@@ -354,7 +368,7 @@ func TestCreateApproveSuccess(t *testing.T) {
 		Commit: "abc123def4567",
 		Issues: []wizard.SeededIssue{{ID: "harness-7", Title: "Add CSV export", Role: "planner"}},
 	}}
-	p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona", wizard.WithTurnTimeout(5*time.Second))
+	p := wizard.NewPlanner(draftAdapter(), "persona", wizard.WithTurnTimeout(5*time.Second))
 	s := New(Options{Planner: p, Seeder: seeder})
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
@@ -400,7 +414,7 @@ func TestCreateApproveSuccess(t *testing.T) {
 // 404s.
 func TestCreateApproveGuards(t *testing.T) {
 	t.Run("no seeder", func(t *testing.T) {
-		ts, p := wizardServer(t, draftReply) // wizardServer wires no Seeder
+		ts, p := wizardServer(t, draftAdapter()) // wizardServer wires no Seeder
 		sess := p.New()
 		pr, err := http.PostForm(ts.URL+"/create/approve", url.Values{"session": {sess.ID}})
 		if err != nil {
@@ -418,7 +432,7 @@ func TestCreateApproveGuards(t *testing.T) {
 
 	t.Run("empty draft", func(t *testing.T) {
 		seeder := &fakeSeeder{}
-		p := wizard.NewPlanner(scriptedAdapter{reply: "just chatting"}, "persona", wizard.WithTurnTimeout(5*time.Second))
+		p := wizard.NewPlanner(scriptedAdapter{text: "just chatting"}, "persona", wizard.WithTurnTimeout(5*time.Second))
 		s := New(Options{Planner: p, Seeder: seeder})
 		ts := httptest.NewServer(s.Handler())
 		t.Cleanup(ts.Close)
@@ -440,7 +454,7 @@ func TestCreateApproveGuards(t *testing.T) {
 
 	t.Run("seeder error", func(t *testing.T) {
 		seeder := &fakeSeeder{err: errSeed}
-		p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona", wizard.WithTurnTimeout(5*time.Second))
+		p := wizard.NewPlanner(draftAdapter(), "persona", wizard.WithTurnTimeout(5*time.Second))
 		s := New(Options{Planner: p, Seeder: seeder})
 		ts := httptest.NewServer(s.Handler())
 		t.Cleanup(ts.Close)
@@ -462,7 +476,7 @@ func TestCreateApproveGuards(t *testing.T) {
 	})
 
 	t.Run("unknown session", func(t *testing.T) {
-		p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona")
+		p := wizard.NewPlanner(draftAdapter(), "persona")
 		s := New(Options{Planner: p, Seeder: &fakeSeeder{}})
 		ts := httptest.NewServer(s.Handler())
 		t.Cleanup(ts.Close)
@@ -484,7 +498,7 @@ func TestCreateApproveGuards(t *testing.T) {
 func TestCreateApproveSoftGate(t *testing.T) {
 	t.Run("discussing blocks", func(t *testing.T) {
 		seeder := &fakeSeeder{}
-		p := wizard.NewPlanner(scriptedAdapter{reply: discussReply}, "persona", wizard.WithTurnTimeout(5*time.Second))
+		p := wizard.NewPlanner(discussAdapter(), "persona", wizard.WithTurnTimeout(5*time.Second))
 		s := New(Options{Planner: p, Seeder: seeder})
 		ts := httptest.NewServer(s.Handler())
 		t.Cleanup(ts.Close)
@@ -511,7 +525,7 @@ func TestCreateApproveSoftGate(t *testing.T) {
 
 	t.Run("auto-defers open", func(t *testing.T) {
 		seeder := &fakeSeeder{res: wizard.SeedResult{Commit: "abc1234"}}
-		p := wizard.NewPlanner(scriptedAdapter{reply: deferReply}, "persona", wizard.WithTurnTimeout(5*time.Second))
+		p := wizard.NewPlanner(deferAdapter(), "persona", wizard.WithTurnTimeout(5*time.Second))
 		s := New(Options{Planner: p, Seeder: seeder})
 		ts := httptest.NewServer(s.Handler())
 		t.Cleanup(ts.Close)

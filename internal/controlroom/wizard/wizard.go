@@ -646,65 +646,32 @@ func (s *Session) run() {
 	msgs := slices.Clone(s.messages)
 	s.mu.Unlock()
 
-	// Advertise the read-only exploration tools when this session has them enabled. The defs are
-	// static (no sandbox needed), so a conversation that never explores provisions nothing.
-	var defs []model.ToolDef
+	// The planner always carries its OUTPUT tools (update_ledger/propose_draft) — they are how it
+	// emits structured state (T4.29), whether or not it can explore. Read-only EXPLORATION action
+	// tools are added only when this session has a sandbox configured; without one the planner is a
+	// pure conversation that still emits a ledger/draft via the output tools.
+	defs := plannerOutputToolDefs()
 	if s.sandboxCfg != nil {
-		defs = readOnlyToolDefs()
+		defs = append(defs, readOnlyToolDefs()...)
 	}
 
-	reply, err := s.converse(ctx, msgs, defs)
+	turn, err := s.converse(ctx, msgs, defs)
+	prose := turn.prose
 	if err != nil {
 		s.log.Error("wizard: model turn failed", "session", s.ID, "err", err)
-		reply = fmt.Sprintf("The requirements planner hit an error and could not reply: %v\n\nPlease try again.", err)
-	}
-
-	// Strip the trailing structured blocks off the reply: the transcript records only the prose
-	// (displayProse cuts at the earliest of the ledger/draft fences), while the ledger (T4.13)
-	// and draft (T4.14) blocks are parsed independently for their latest-wins snapshots. A turn
-	// that emits neither leaves the prior snapshots untouched (parse returns false / nil).
-	prose := displayProse(reply)
-	items, _ := parseLedger(reply)
-	draft, hasDraft := parseDraft(reply)
-
-	// Diagnostic for the "ledger panel never populates" failure: the parse discards the raw
-	// block, so when items come back nil we have no way to tell whether the planner skipped the
-	// protocol, emitted an unterminated/mis-shaped block, or produced JSON whose field names do
-	// not match the wire shape. Surface exactly that from the logs so a non-compliant model is
-	// diagnosable from a single run. The planner is trusted, so logging its raw output is fine;
-	// the snippet is length-capped to keep the line readable.
-	if items == nil {
-		if _, raw, ok := cutLedgerBlock(reply); ok {
-			s.log.Warn("wizard: ledger fence present but parsed to zero items (check JSON shape/field names)",
-				"session", s.ID, "raw_block", logSnippet(raw, 1000))
-		} else {
-			s.log.Warn("wizard: reply carried no parseable ledger block",
-				"session", s.ID, "has_ledger_fence", strings.Contains(reply, ledgerFence), "reply_tail", logSnippet(reply, 500))
-		}
-	} else {
-		s.log.Debug("wizard: ledger parsed", "session", s.ID, "items", len(items))
-	}
-
-	// Sibling diagnostic for the "I asked it to draft but no Approve button appeared" failure:
-	// the Approve gate only shows once parseDraft succeeds, so when a ```draft fence is present
-	// but rejected (bad JSON shape, missing required fields, an unterminated block), surface the
-	// raw block so a non-compliant model is diagnosable from one run rather than silently stuck.
-	if !hasDraft {
-		if _, raw, ok := cutFencedBlock(reply, draftFence); ok {
-			s.log.Warn("wizard: draft fence present but did not parse (check JSON shape/required fields)",
-				"session", s.ID, "raw_block", logSnippet(raw, 1000))
-		}
-	} else {
-		s.log.Debug("wizard: draft parsed", "session", s.ID, "specs", len(draft.Specs), "issues", len(draft.Issues))
+		prose = fmt.Sprintf("The requirements planner hit an error and could not reply: %v\n\nPlease try again.", err)
 	}
 
 	s.mu.Lock()
+	// The text reply is pure prose now — the ledger/draft ride the tool channel — so it is
+	// recorded verbatim (no fence-stripping). A turn that emitted neither output tool leaves the
+	// prior snapshots untouched (ledgerSet/draftSet stay false).
 	s.messages = append(s.messages, model.Message{Role: model.RoleAssistant, Text: prose})
-	if items != nil {
-		s.ledger = items
+	if turn.ledgerSet {
+		s.ledger = turn.ledger
 	}
-	if hasDraft {
-		s.draft = draft
+	if turn.draftSet {
+		s.draft = turn.draft
 	}
 	s.busy = false
 	s.mu.Unlock()
@@ -713,22 +680,46 @@ func (s *Session) run() {
 	// resets the live delta target. Emitted last so the refetch sees the appended message; the
 	// ledger/draft nudges follow so their panels refresh only when this turn updated them.
 	s.hub.Broadcast(live.Event{Name: eventTurn, Data: ""})
-	if items != nil {
+	if turn.ledgerSet {
 		s.hub.Broadcast(live.Event{Name: eventLedger, Data: ""})
 	}
-	if hasDraft {
+	if turn.draftSet {
 		s.hub.Broadcast(live.Event{Name: eventDraft, Data: ""})
 	}
 }
 
-// converse runs the model to a prose conclusion for one human turn, executing read-only tool
-// calls in between. It returns the FINAL reply text (the turn that came back with no tool
-// calls); the intermediate tool-call turns are internal scaffolding and never surface in the
-// transcript. The final reply's prose streams to the hub as it arrives (coalesced `delta`
-// events); each exploration call broadcasts a `tool` status line. defs is empty when
-// exploration is disabled, so the loop concludes on the first turn exactly as the old single
-// adapter.Complete did. Bounded by maxToolTurns (and the caller's per-turn timeout).
-func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []model.ToolDef) (string, error) {
+// plannerTurn is what one human turn resolves to: the final prose reply plus the latest-wins
+// structured state harvested from the planner's output tool calls. ledgerSet/draftSet report
+// whether this turn updated each snapshot, so run() overwrites only what changed — a turn that
+// touched neither leaves the prior snapshots intact.
+type plannerTurn struct {
+	prose     string
+	ledger    []LedgerItem
+	ledgerSet bool
+	draft     Draft
+	draftSet  bool
+}
+
+// plannerOutputToolDefs returns the planner's OUTPUT tools — update_ledger and propose_draft —
+// the schema-validated channel it emits structured state on (T4.29, control-room.md "The
+// alignment ledger"). They are pure-output tools, distinct from the read-only exploration action
+// tools (readOnlyToolDefs): emitting one records state and never triggers a round-trip.
+func plannerOutputToolDefs() []model.ToolDef {
+	return []model.ToolDef{updateLedgerToolDef(), proposeDraftToolDef()}
+}
+
+// converse runs the model to a prose conclusion for one human turn. Two kinds of tool call flow
+// back. EXPLORATION (read-only action) calls — present only when the session has a sandbox — are
+// dispatched against it and their results fed back, driving another round-trip; that is what the
+// loop iterates on. OUTPUT calls (update_ledger/propose_draft) carry the structured state and are
+// harvested latest-wins; they NEVER add a round-trip — a call rides whatever turn it arrives on,
+// so a reply that emits only prose + output calls concludes immediately (T4.29). The turn ends on
+// the first response with no exploration call; that response's text is the prose the human reads
+// (intermediate exploration preambles are suppressed). The prose streams to the hub as it arrives
+// (coalesced `delta` events) and is pure now — no fence-stripping. Bounded by maxToolTurns (and
+// the caller's per-turn timeout).
+func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []model.ToolDef) (plannerTurn, error) {
+	var out plannerTurn
 	for turn := 1; turn <= s.maxToolTurns; turn++ {
 		// Accumulate this turn's reply and re-broadcast the cumulative (HTML-escaped) prose as it
 		// grows, coalesced by deltaFlushRunes. A fresh builder per turn so an intermediate
@@ -743,9 +734,7 @@ func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []mod
 			b.WriteString(ev.TextDelta)
 			if n := utf8.RuneCountInString(b.String()); n-lastLen >= deltaFlushRunes {
 				lastLen = n
-				// Stream only the prose: suppress the trailing ```ledger/```draft JSON blocks so
-				// their raw text never flashes in the live stream (the panels render them instead).
-				s.hub.Broadcast(live.Event{Name: eventDelta, Data: html.EscapeString(displayProse(b.String()))})
+				s.hub.Broadcast(live.Event{Name: eventDelta, Data: html.EscapeString(b.String())})
 			}
 		}
 
@@ -760,22 +749,74 @@ func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []mod
 			MaxTokens: s.maxTokens,
 		}, onEvent)
 		if err != nil {
-			return "", err
+			return out, err
 		}
 		s.log.Info("wizard: model replied", "session", s.ID, "round", turn,
 			"elapsed", time.Since(callStart).String(), "tool_calls", len(resp.ToolCalls), "reply_chars", len(resp.Text))
-		if len(resp.ToolCalls) == 0 {
-			return resp.Text, nil // the final prose reply (carries the ledger/draft blocks)
+
+		// Partition this round's calls: harvest the output calls (latest-wins) and ack them; queue
+		// the exploration calls. Output calls never force a round-trip, so a response carrying only
+		// output calls (or none) concludes the turn — its text is the prose.
+		var actionCalls []model.ToolCall
+		var outputAcks []model.ToolResult
+		for _, tc := range resp.ToolCalls {
+			switch tc.Name {
+			case toolUpdateLedger:
+				outputAcks = append(outputAcks, s.harvestLedger(&out, tc))
+			case toolProposeDraft:
+				outputAcks = append(outputAcks, s.harvestDraft(&out, tc))
+			default:
+				actionCalls = append(actionCalls, tc)
+			}
 		}
 
-		// Tool-call turn: record the model's request, dispatch the reads, feed the results back.
-		// Kept only in the local msgs slice fed to the model — never appended to s.messages.
-		// dispatch does not read msgs, so evaluating both messages in one append is order-safe.
+		if len(actionCalls) == 0 {
+			out.prose = resp.Text
+			return out, nil
+		}
+
+		// Exploration round: dispatch the reads and ack EVERY call (reads and output, so the
+		// follow-up request's tool-call history is well-formed), feed back, loop. Kept only in the
+		// local msgs slice — never appended to s.messages, so the cross-turn history stays clean
+		// prose. dispatch does not read msgs, so evaluating both messages in one append is safe.
+		results := append(s.dispatch(ctx, actionCalls), outputAcks...)
 		msgs = append(msgs,
 			model.Message{Role: model.RoleAssistant, Text: resp.Text, ToolCalls: resp.ToolCalls},
-			model.Message{Role: model.RoleTool, ToolResults: s.dispatch(ctx, resp.ToolCalls)})
+			model.Message{Role: model.RoleTool, ToolResults: results})
 	}
-	return "", fmt.Errorf("exploration did not converge within %d tool round-trips", s.maxToolTurns)
+	return out, fmt.Errorf("exploration did not converge within %d tool round-trips", s.maxToolTurns)
+}
+
+// harvestLedger decodes an update_ledger output call into the turn's latest-wins ledger snapshot
+// and returns the ack the model sees (consumed only when a concurrent exploration call forces a
+// follow-up). A decode failure or an empty ledger leaves the prior snapshot untouched (ledgerSet
+// stays false) — degrade gracefully, never clobber — and acks an error so the model can correct.
+func (s *Session) harvestLedger(out *plannerTurn, tc model.ToolCall) model.ToolResult {
+	items, err := parseLedgerArgs(tc.Args)
+	if err != nil {
+		s.log.Warn("wizard: update_ledger args did not decode", "session", s.ID, "err", err)
+		return model.ToolResult{ToolCallID: tc.ID, Content: "update_ledger arguments did not decode as JSON: " + err.Error(), IsError: true}
+	}
+	if len(items) == 0 {
+		return model.ToolResult{ToolCallID: tc.ID, Content: "update_ledger recorded no items (each fork needs a non-empty question)", IsError: true}
+	}
+	out.ledger, out.ledgerSet = items, true
+	s.log.Debug("wizard: ledger harvested", "session", s.ID, "items", len(items))
+	return model.ToolResult{ToolCallID: tc.ID, Content: fmt.Sprintf("ledger recorded (%d item(s))", len(items))}
+}
+
+// harvestDraft decodes a propose_draft output call into the turn's latest-wins draft snapshot and
+// returns the ack. A decode failure or an empty draft leaves the prior snapshot untouched and acks
+// an error, mirroring harvestLedger.
+func (s *Session) harvestDraft(out *plannerTurn, tc model.ToolCall) model.ToolResult {
+	d, err := parseDraftArgs(tc.Args)
+	if err != nil {
+		s.log.Warn("wizard: propose_draft args rejected", "session", s.ID, "err", err)
+		return model.ToolResult{ToolCallID: tc.ID, Content: "propose_draft arguments rejected: " + err.Error(), IsError: true}
+	}
+	out.draft, out.draftSet = d, true
+	s.log.Debug("wizard: draft harvested", "session", s.ID, "specs", len(d.Specs), "issues", len(d.Issues))
+	return model.ToolResult{ToolCallID: tc.ID, Content: fmt.Sprintf("draft recorded (%d spec(s), %d issue(s))", len(d.Specs), len(d.Issues))}
 }
 
 // dispatch executes the model's read-only tool calls against the session's exploration sandbox

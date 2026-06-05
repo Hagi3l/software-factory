@@ -34,9 +34,9 @@ good autonomous implementation) — a later validation concern, never an enginee
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
 - **Open tasks (`- [ ]`) keep their full detail** — the remaining Phase 5 items, plus the handful of
   optional items left in Phase 2 (T2.11/T2.12). T4.26 (Config view) closed the original Phase-4 view
-  roster and **T4.27 is done — Phase 4's original scope is fully complete** (one open follow-up,
-**T4.29**, migrates the wizard's structured output from parsed fenced blocks to tool calls);
-**Phase 6 (agent semantic tooling — the
+  roster and **T4.27 is done — Phase 4's original scope is fully complete** (and its one follow-up,
+**T4.29** — migrating the wizard's structured output from parsed fenced blocks to schema-validated
+tool calls — is now also done); **Phase 6 (agent semantic tooling — the
   LSP-backed tool surface) is now fully complete (T6.1–T6.3)**. The only remaining *engineering* of new
   substrate is Phase 5 (production isolation & distribution) — and within it the Firecracker backend
   (T5.2) is hardware-blocked and deliberately last; the live Phase-5 work is T5.5/T5.6/T5.7/T5.11 (T5.10
@@ -1083,36 +1083,37 @@ components/artifact-store.md, glossary.md).
   cap-exceeded error), and `TurnElapsed` is 0-when-idle / nonzero-while-running. `make check` green (lint 0,
   **916 pass / 2 skip**). Docs: `docs/configuration.md` planner field reference. (needs T4.28)
   ([control-room.md](specs/control-room.md), [configuration.md](specs/configuration.md))
-- [ ] **T4.29 Wizard structured output via tool calls (replace fenced blocks)** — **Non-TCB** (controlroom +
-  the trusted planner persona). Migrate the requirements planner's structured output — the alignment ledger
-  (T4.13/T4.27) and the draft (T4.14) — from **parsed fenced ` ```ledger `/` ```draft ` blocks** to
-  **schema-validated tool calls** (`update_ledger`, `propose_draft`), the mechanism the rest of the model layer
-  already uses (and that the test author uses for the `trace_test` map, verification.md). **Spec leads code:**
-  `control-room.md` "The alignment ledger" already asserts this design ("The planner emits structured state as
-  tool calls, not parsed prose"); this task brings the implementation in line, closing a deliberate
-  spec-ahead-of-code gap. **Why:** robustness — the schema is enforced at the model boundary, so the
-  "`fence present but did not parse`" failure class (real, and worse on a small model like deepseek-flash) is
-  rejected there instead of silently mis-parsed; and simplification — it **deletes** the bespoke parser
-  (`cutFencedBlock`/`cutLedgerBlock`/`displayProse` fence-stripping, `parseLedger`'s three-way lenient fallback,
-  the smart-quote normalization) and ~80 lines of JSON-protocol prose from the persona. **Design fulcrum —
-  output tools vs action tools:** `update_ledger`/`propose_draft` are *output* tools (pure structured state),
-  distinct from the read-only exploration *action* tools (T4.28). The `converse` loop continues to iterate **only**
-  on an exploration call; output-tool calls are harvested latest-wins (matching today's snapshot semantics) and
-  ride the terminal message, so they **never add a model round-trip** — the only bookkeeping is synthesizing
-  `ToolResult` acks so the next human turn's history is well-formed. **Streaming simplifies:** text content
-  becomes pure prose, so the `delta` broadcast no longer needs `displayProse()` to scrub fences. **Scope:** two
-  `model.ToolDef` schemas (encode the four-state enum; keep `normalizeStatus` as cheap belt-and-suspenders since
-  the schema enforces shape, not that a weak model respects the enum); the `converse` action-vs-output branch +
-  ack bookkeeping; `json.Unmarshal(call.Args, …)` into the existing `LedgerItem`/`Draft` structs; delete the dead
-  parser; rewrite the **`modeltest`** fixtures (the bulk of the effort) to script `tool_calls` in the OpenAI
-  streaming wire format instead of fenced-text replies. `tool_choice` stays **auto** (you cannot force a specific
-  tool *and* allow prose + exploration in one turn — the robustness win is schema-validated args, not forcing the
-  call). **De-risk first:** spike provider tool-calling reliability on **deepseek-flash via openai-compat
-  (OpenRouter)** before deleting the parser — if flash can't reliably call tools, that is itself evidence to keep
-  the guard-railed prompt path until back on a stronger model. **Docs:** no CLI/config/route change; the mechanism
-  is internal, so `docs/` likely needs no change (confirm the `docs/control-room.md` wizard section doesn't
-  describe the fenced blocks). (needs T4.13, T4.14, T4.27, T4.28) ([control-room.md](specs/control-room.md),
-  [models.md](specs/models.md), [verification.md](specs/verification.md))
+- [x] **T4.29 Wizard structured output via tool calls (replace fenced blocks)** — *done.* The requirements
+  planner's structured output — the alignment ledger (T4.13/T4.27) and the draft (T4.14) — now rides
+  **schema-validated tool calls** (`update_ledger`, `propose_draft`) instead of parsed fenced ` ```ledger `/
+  ` ```draft ` blocks, the same tool-calling mechanism the rest of the model layer uses (and the test author's
+  `trace_test` map). Brings the code in line with the `control-room.md` "The alignment ledger" assertion the
+  T4.28b spec edit added (spec-ahead-of-code gap closed). **Design fulcrum — output vs action tools:**
+  `update_ledger`/`propose_draft` are pure-**output** tools (`plannerOutputToolDefs`), always advertised (so a
+  pure-conversation planner still emits structured state), distinct from the read-only exploration **action**
+  tools. `converse` now partitions each response's calls: it harvests output calls **latest-wins** into a
+  `plannerTurn{prose,ledger,ledgerSet,draft,draftSet}` and **iterates only on action (exploration) calls** —
+  output calls **never add a round-trip** (a reply with only prose + output calls concludes immediately). When a
+  concurrent exploration call *does* force a follow-up, every call (reads **and** output) is acked so the
+  follow-up request's tool-call history is well-formed; `harvestLedger`/`harvestDraft` build those acks and a
+  decode failure / empty payload acks an error and leaves the prior snapshot intact (degrade-gracefully). **Code:**
+  deleted the bespoke fenced parser (`parseLedger`/`parseDraft`/`cutFencedBlock`/`cutLedgerBlock`/`displayProse`/
+  `decodeLedgerWire` + the three-way lenient fallback, smart-quote `Replacer`, and `trailingCommaRE`); replaced
+  with `updateLedgerToolDef`/`proposeDraftToolDef` (JSON-Schema `Params`, the four-state status **enum** encoded)
+  + `parseLedgerArgs`/`parseDraftArgs` (`json.Unmarshal` into the existing wire structs, factored
+  `ledgerItemsFromWire`/`draftFromWire`); `normalizeStatus` kept as belt-and-suspenders since the schema
+  constrains shape, not that a weak model respects the enum. **Streaming simplified:** text content is pure prose
+  now, so the `delta` broadcast streams `b.String()` directly — no `displayProse` fence-scrubbing — and the
+  stored transcript records the verbatim prose. **Personas:** all three requirements-planner personas (`config/`,
+  `demo/config/`, `demo/vault/`) rewritten to describe *calling* `update_ledger`/`propose_draft` rather than
+  emitting fenced JSON blocks (dropping the fence-ordering + strict-JSON-by-hand prose). **Tests:** ledger/draft
+  unit tests rewritten for `parseLedgerArgs`/`parseDraftArgs` (+ tool-def schema/enum well-formedness); the
+  `modeltest` fixtures in the wizard package **and** the controlroom server/resolve tests (`scriptedAdapter` now
+  carries `[]model.ToolCall`; `ledgerCall`/`draftCall`/`draftAdapter`/`discussAdapter`/`deferAdapter` helpers)
+  script `tool_calls` instead of fenced text. `make check` green (lint 0, **911 pass / 2 skip**); all three
+  configs validate. **Docs:** no CLI/config/route change — `docs/control-room.md` describes only user-facing
+  behavior (not the fenced blocks), so no doc change needed. (needs T4.13, T4.14, T4.27, T4.28)
+  ([control-room.md](specs/control-room.md), [models.md](specs/models.md), [verification.md](specs/verification.md))
 
 ## Phase 5 — Production isolation & distribution
 

@@ -76,18 +76,17 @@ list of every decision point (a "fork"), each in one of **four states** — `ope
 `discussing`, or `deferred` — with a one-line rationale and, for an unsettled fork, its options
 as selectable chips. **You** maintain it.
 
-At the **very end of every reply, after your prose**, emit a fenced ` ```ledger ` block
-containing a JSON array that is the **complete current ledger** — re-emit the whole thing
-every turn (latest wins; the system keeps only your most recent block). Each array element is:
+You maintain it by **calling the `update_ledger` tool** — that is its only channel. On a turn
+where the ledger changes, call `update_ledger` with the **complete current ledger** as the
+`items` argument (re-emit the whole thing, not a diff; latest call wins, the system keeps only
+your most recent one). Your text reply is the prose the human reads; the ledger rides the tool
+call, so **never paste the ledger JSON into your prose**. Each item in `items` looks like:
 
-```ledger
-[
-  {"question":"Which datastore?","status":"open","rationale":"Driven by query shape and ops familiarity.","options":[{"label":"Postgres","tradeoff":"relational, mature ops","selected":false},{"label":"SQLite","tradeoff":"zero-ops, single-node only","selected":false}]},
-  {"question":"Auth required for v1?","status":"agreed","rationale":"Out of scope for the first cut.","options":[]}
-]
+```json
+{"question":"Which datastore?","status":"open","rationale":"Driven by query shape and ops familiarity.","options":[{"label":"Postgres","tradeoff":"relational, mature ops","selected":false},{"label":"SQLite","tradeoff":"zero-ops, single-node only","selected":false}]}
 ```
 
-The four states:
+The four states (the `status` field):
 
 - `open` — the start state, not yet resolved.
 - `agreed` — decided (set the chosen option's `selected:true`).
@@ -98,10 +97,11 @@ The four states:
 
 Rules:
 
-- Every reply MUST contain prose **before** the block — never send the block alone.
-- Re-emit the **entire** ledger each turn, not a diff.
+- Always reply with prose to the human; call `update_ledger` alongside it, not instead of it.
+- Re-send the **entire** ledger each call, not a diff.
 - A non-fork settled point has empty `options` (`[]`); keep each `rationale` to one line.
-- The ` ```ledger ` block comes **after your prose** (and before any ` ```draft ` block).
+- `update_ledger` records state only — it does not end the conversation or trigger codebase
+  exploration. Call it whenever the ledger moves.
 
 **Surface forks in coherent, independent batches.** When several decisions are currently
 independent, post them all as `open` forks at once rather than one at a time — the human answers
@@ -128,10 +128,11 @@ moot** and drop it ("given your answer to Q1, Q3 falls away"). Then re-emit the 
 
 Once intent has genuinely converged — the acceptance criteria are testable and the open
 questions are resolved — propose the concrete deliverable so the human can **Approve** it.
-Emit it as a fenced ` ```draft ` JSON block, **after** your prose and the ` ```ledger ` block.
-Like the ledger, re-emit the **complete** draft every turn it changes (latest wins). The shape:
+Propose it by **calling the `propose_draft` tool**; re-call it (with the complete draft) every
+turn it changes (latest wins). Like the ledger, the draft rides the tool call — don't paste its
+JSON into your prose. The argument shape:
 
-```draft
+```json
 {
   "summary": "One-line description of the whole change (becomes the commit subject).",
   "specs": [
@@ -142,6 +143,9 @@ Like the ledger, re-emit the **complete** draft every turn it changes (latest wi
   ]
 }
 ```
+
+The whole spec markdown is one JSON string in `content` — escape newlines as `\n`; the tool
+schema carries it cleanly.
 
 Rules:
 
@@ -158,7 +162,9 @@ Rules:
   deliverable), not a fine-grained task list.
 - For inter-issue ordering, give an issue a `"key"` and reference it from another issue's
   `"depends_on": ["that-key"]`; otherwise omit both.
-- **Do not emit the draft until intent has converged.** A half-formed draft invites a premature
-  approve. While questions are open, keep to prose + the ledger; add the ` ```draft ` block only
-  when you would genuinely recommend approving it.
-- The ` ```draft ` block, when present, is the **last** thing in the reply — nothing after it.
+- **Do not propose the draft until intent has converged.** A half-formed draft invites a premature
+  approve. While questions are open, keep to prose + the ledger; call `propose_draft` only when you
+  would genuinely recommend approving it.
+- `propose_draft` records the proposal — it commits nothing (the human's **Approve** is the consent
+  gate) and does not end the conversation. You may call `update_ledger` and `propose_draft` in the
+  same turn.

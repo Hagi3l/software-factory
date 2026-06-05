@@ -2,8 +2,9 @@ package wizard
 
 import (
 	"encoding/json"
-	"regexp"
 	"strings"
+
+	"github.com/Loxstomper/harness/internal/model"
 )
 
 // The alignment ledger (T4.13/T4.27, specs/control-room.md "The alignment ledger") is a
@@ -14,10 +15,11 @@ import (
 // one-line rationale and, for an unsettled fork, the options under consideration. It is a working
 // aid, not a durable object model: nothing here is persisted (that is the consent-gated APPROVE
 // work). The planner is the single source of truth — it re-emits the COMPLETE ledger each turn as
-// a trailing fenced ```ledger JSON block appended after its prose, which the engine parses out
-// (parseLedger), stores on the session, and the view renders. Chip picks, free text, and
-// "let's discuss" flags all funnel back through Send (Answer) so the planner re-emits the ledger
-// reflecting them; there is no parallel client-side mutable model ("dumb ledger, smart planner").
+// the schema-validated arguments of an `update_ledger` tool call (T4.29: structured state rides
+// the tool channel, not parsed prose), which the engine harvests (parseLedgerArgs), stores on the
+// session, and the view renders. Chip picks, free text, and "let's discuss" flags all funnel back
+// through Send (Answer) so the planner re-emits the ledger reflecting them; there is no parallel
+// client-side mutable model ("dumb ledger, smart planner").
 type LedgerItem struct {
 	Question  string
 	Status    string // one of the ledgerStatus* states
@@ -49,14 +51,14 @@ const (
 	ledgerStatusAgreed     = "agreed"
 	ledgerStatusDiscussing = "discussing"
 	ledgerStatusDeferred   = "deferred"
-	// ledgerFence opens the trailing fenced block the planner appends. The closing fence is a
-	// bare ``` so the block can carry arbitrary JSON without colliding with the opener.
-	ledgerFence = "```ledger"
+	// toolUpdateLedger is the name of the output tool the planner calls to emit the complete
+	// ledger as schema-validated arguments (T4.29).
+	toolUpdateLedger = "update_ledger"
 )
 
-// ledgerWire is the JSON wire shape the planner emits inside the fenced block: an array of
-// these objects. It is decoded then normalized into the exported LedgerItem/LedgerOption — the
-// wire form is intentionally separate so the rendered types carry no json concerns.
+// ledgerWire is the JSON wire shape of one fork inside the update_ledger call's arguments. It is
+// decoded then normalized into the exported LedgerItem/LedgerOption — the wire form is
+// intentionally separate so the rendered types carry no json concerns.
 type ledgerWire struct {
 	Question  string `json:"question"`
 	Status    string `json:"status"`
@@ -68,22 +70,79 @@ type ledgerWire struct {
 	} `json:"options"`
 }
 
-// parseLedger extracts the trailing ```ledger fenced JSON block from a planner reply and
-// returns the parsed, normalized items plus the prose with that block removed. It degrades
-// gracefully: with no block, a malformed/empty block, or zero valid items it returns
-// (nil, prose) — so the conversation falls back to plain chat and a ledger-less turn never
-// errors and never clobbers a prior ledger (the caller only overwrites when items != nil).
-func parseLedger(reply string) ([]LedgerItem, string) {
-	prose, raw, ok := cutLedgerBlock(reply)
-	if !ok {
-		return nil, reply
-	}
+// updateLedgerArgs is the argument shape of the update_ledger output tool: the COMPLETE alignment
+// ledger as a JSON object with a single `items` array. A tool call's arguments are always a
+// top-level object, so — unlike the old fenced block, which a model emitted as a bare array, a
+// one-key wrapper, or a lone object interchangeably — the schema fixes the shape to {"items":[…]}
+// at the model boundary. That is the T4.29 robustness win: the lenient three-way shape-guessing
+// (and the smart-quote / trailing-comma normalization) the fenced-block decoder needed is gone.
+type updateLedgerArgs struct {
+	Items []ledgerWire `json:"items"`
+}
 
-	wire := decodeLedgerWire(raw)
-	if wire == nil {
-		return nil, prose
+// updateLedgerToolDef is the output-tool definition the planner calls to record the ledger. It is
+// a pure-output tool (it records structured state), distinct from the read-only exploration action
+// tools (readOnlyToolDefs): harvesting it never triggers another model round-trip — the call rides
+// whatever turn it arrives on. The status enum is encoded in the schema; normalizeStatus stays as
+// belt-and-suspenders since the schema constrains shape, not that a weak model respects the enum.
+func updateLedgerToolDef() model.ToolDef {
+	return model.ToolDef{
+		Name: toolUpdateLedger,
+		Description: "Record the COMPLETE current alignment ledger — every decision fork and its state. " +
+			"Re-emit the whole ledger each reply (latest wins; only your most recent call is kept). " +
+			"This records state only: it does not end the conversation or trigger codebase exploration.",
+		Params: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"items": {
+					"type": "array",
+					"description": "The complete ledger — every fork, re-sent in full each turn.",
+					"items": {
+						"type": "object",
+						"properties": {
+							"question": {"type": "string", "description": "The decision point, phrased as a question."},
+							"status": {"type": "string", "enum": ["open", "agreed", "discussing", "deferred"], "description": "open=not yet resolved; agreed=decided (mark the chosen option selected); discussing=human flagged it for deeper discussion (non-terminal); deferred=knowingly left for later (terminal)."},
+							"rationale": {"type": "string", "description": "One line: why."},
+							"options": {
+								"type": "array",
+								"description": "Selectable fork choices; empty for a settled non-fork point.",
+								"items": {
+									"type": "object",
+									"properties": {
+										"label": {"type": "string"},
+										"tradeoff": {"type": "string", "description": "The choice's consequence, in plain language."},
+										"selected": {"type": "boolean", "description": "true for the chosen option of an agreed fork."}
+									},
+									"required": ["label"]
+								}
+							}
+						},
+						"required": ["question", "status"]
+					}
+				}
+			},
+			"required": ["items"]
+		}`),
 	}
+}
 
+// parseLedgerArgs decodes an update_ledger call's arguments into normalized ledger items. It needs
+// no lenient shape-guessing: the schema fixes the wire shape, so a payload that does not decode is
+// an error here (acked back to the model) rather than a silently mis-parsed block — the failure
+// class T4.29 set out to eliminate. It still drops items with no question and options with no
+// label and normalizes the status enum. The returned slice may be empty (no valid items); the
+// caller treats that as "no update" so a prior ledger is never clobbered.
+func parseLedgerArgs(args json.RawMessage) ([]LedgerItem, error) {
+	var a updateLedgerArgs
+	if err := json.Unmarshal(args, &a); err != nil {
+		return nil, err
+	}
+	return ledgerItemsFromWire(a.Items), nil
+}
+
+// ledgerItemsFromWire normalizes decoded wire forks into rendered LedgerItems: trims fields,
+// normalizes the status enum, and drops a fork with no question or an option with no label.
+func ledgerItemsFromWire(wire []ledgerWire) []LedgerItem {
 	items := make([]LedgerItem, 0, len(wire))
 	for _, w := range wire {
 		q := strings.TrimSpace(w.Question)
@@ -108,109 +167,7 @@ func parseLedger(reply string) ([]LedgerItem, string) {
 		}
 		items = append(items, it)
 	}
-	if len(items) == 0 {
-		return nil, prose
-	}
-	return items, prose
-}
-
-// trailingCommaRE matches a comma that is the last token before a closing ] or } (the
-// JS-ism `[…,]` / `{…,}` that strict encoding/json rejects but capable models still emit).
-var trailingCommaRE = regexp.MustCompile(`,(\s*[}\]])`)
-
-// decodeLedgerWire decodes the raw fenced block into ledger wire items, tolerating the
-// realistic ways a model mis-shapes the protocol while keeping strict JSON semantics. The
-// persona asks for a bare JSON array, but capable models routinely (a) wrap it in a one-key
-// object (`{"ledger":[…]}`, `{"items":[…]}`, …), (b) emit a single object when there is one
-// fork, (c) leave a trailing comma, or (d) "prettify" structural quotes into unicode smart
-// quotes. Each of these previously parsed to zero items, leaving the alignment-ledger panel
-// (and therefore the APPROVE path) silently empty. We normalize the cheap, unambiguous cases
-// and try the shapes in order of specificity. Returns nil when nothing yields a usable array
-// — the caller then leaves the prior ledger untouched (degrade-gracefully, never clobber).
-func decodeLedgerWire(raw string) []ledgerWire {
-	s := strings.TrimSpace(raw)
-	// Normalize unicode smart quotes a model may emit instead of ASCII " and ', then drop a
-	// trailing comma before a closing bracket. Both are safe no-ops on already-valid JSON.
-	s = strings.NewReplacer(
-		"“", `"`, "”", `"`, // “ ” → "
-		"‘", "'", "’", "'", // ‘ ’ → '
-	).Replace(s)
-	s = trailingCommaRE.ReplaceAllString(s, "$1")
-
-	// 1. Canonical: a bare array. This is the only shape the persona documents, so try it first
-	//    and let an already-compliant model take the fast path with no guessing.
-	var arr []ledgerWire
-	if err := json.Unmarshal([]byte(s), &arr); err == nil {
-		return arr
-	}
-
-	// 2. A one-key wrapper object whose value is the array. Restricted to known wrapper keys so
-	//    we never mistake a single fork object (which also unmarshals into a map) for a wrapper.
-	var wrap map[string]json.RawMessage
-	if err := json.Unmarshal([]byte(s), &wrap); err == nil {
-		for _, key := range []string{"ledger", "items", "forks", "decisions", "entries"} {
-			if v, ok := wrap[key]; ok {
-				if err := json.Unmarshal(v, &arr); err == nil && len(arr) > 0 {
-					return arr
-				}
-			}
-		}
-	}
-
-	// 3. A single fork object emitted without the enclosing array. Only accept it when it
-	//    actually carries a question, so an unrecognized wrapper object (decoded leniently into
-	//    an empty ledgerWire) does not masquerade as one empty fork.
-	var one ledgerWire
-	if err := json.Unmarshal([]byte(s), &one); err == nil && strings.TrimSpace(one.Question) != "" {
-		return []ledgerWire{one}
-	}
-
-	return nil
-}
-
-// cutLedgerBlock splits a reply at the LAST ```ledger fence — see cutFencedBlock for the
-// framing rules.
-func cutLedgerBlock(reply string) (prose, raw string, ok bool) {
-	return cutFencedBlock(reply, ledgerFence)
-}
-
-// cutFencedBlock splits a reply at the LAST occurrence of fence (e.g. ```ledger or ```draft):
-// raw is the text between that fence and the next closing ``` after it; prose is the
-// right-trimmed text before the fence. ok is false when there is no opening fence or no closing
-// fence after it (an unterminated block is treated as absent so a mid-stream snapshot never
-// half-parses). The closing fence is a bare ``` so the block can carry arbitrary JSON without
-// colliding with the opener. The ledger and draft blocks use distinct openers and are extracted
-// independently, so their order in the reply does not matter.
-func cutFencedBlock(reply, fence string) (prose, raw string, ok bool) {
-	open := strings.LastIndex(reply, fence)
-	if open < 0 {
-		return "", "", false
-	}
-	rest := reply[open+len(fence):]
-	// The JSON starts after the newline that follows the opening fence (tolerate none).
-	if nl := strings.IndexByte(rest, '\n'); nl >= 0 {
-		rest = rest[nl+1:]
-	}
-	closeIdx := strings.Index(rest, "```")
-	if closeIdx < 0 {
-		return "", "", false
-	}
-	raw = rest[:closeIdx]
-	prose = strings.TrimRight(reply[:open], " \t\r\n")
-	return prose, raw, true
-}
-
-// displayProse returns the text before the EARLIEST structured-block fence (the ledger or the
-// draft block), right-trimmed, so neither accumulating JSON block ever flashes in the live
-// token stream or lands in the stored transcript. With no fence the reply is returned unchanged.
-func displayProse(reply string) string {
-	cut := len(reply)
-	for _, fence := range []string{ledgerFence, draftFence} {
-		if i := strings.Index(reply, fence); i >= 0 && i < cut {
-			cut = i
-		}
-	}
-	return strings.TrimRight(reply[:cut], " \t\r\n")
+	return items
 }
 
 // normalizeStatus maps the wire status to one of the four canonical ledger states (T4.27),

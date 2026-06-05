@@ -71,7 +71,7 @@ func TestResolveNotConfigured(t *testing.T) {
 	}
 
 	// Planner but no reader → not attached.
-	p := wizard.NewPlanner(scriptedAdapter{reply: "hi"}, "persona")
+	p := wizard.NewPlanner(scriptedAdapter{text: "hi"}, "persona")
 	s2 := New(Options{Planner: p})
 	ts2 := httptest.NewServer(s2.Handler())
 	t.Cleanup(ts2.Close)
@@ -84,7 +84,7 @@ func TestResolveNotConfigured(t *testing.T) {
 // governing spec slice, and the conversation wiring — reusing the per-session create endpoints for
 // the stream/transcript and the resolve-specific blast panel.
 func TestResolveRendersPage(t *testing.T) {
-	p := wizard.NewPlanner(scriptedAdapter{reply: "let's look at this"}, "persona")
+	p := wizard.NewPlanner(scriptedAdapter{text: "let's look at this"}, "persona")
 	reader := query.NewReader(&fakeIssues{all: []core.Issue{blockedIssue()}}, fakeArts{}, fakeProv{})
 	s := New(Options{Planner: p, Reader: reader, Resolver: &fakeResolver{}, Repo: resolveRepo(t), SpecDepth: 0})
 	ts := httptest.NewServer(s.Handler())
@@ -113,7 +113,7 @@ func TestResolveRendersPage(t *testing.T) {
 // in-flight work the edit would reissue (its slice includes the edited path). An unknown session
 // 404s.
 func TestResolveBlastPanel(t *testing.T) {
-	p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona")
+	p := wizard.NewPlanner(draftAdapter(), "persona")
 	reader := query.NewReader(&fakeIssues{all: []core.Issue{
 		blockedIssue(),
 		// an in-flight issue whose slice (specs/export.md) includes the edited path → reissued.
@@ -123,7 +123,7 @@ func TestResolveBlastPanel(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 
-	// NewResolve auto-opens a turn; the scripted draftReply gives the session a spec edit.
+	// NewResolve auto-opens a turn; the scripted draftAdapter gives the session a spec edit.
 	sess := p.NewResolve(wizard.ResolveSeed{IssueID: "harness-9", Spec: "specs/export.md"})
 	waitFor(t, func() bool { return !sess.Busy() && !sess.Draft().Empty() }, "resolve draft not produced")
 
@@ -153,7 +153,7 @@ func TestResolveBlastPanel(t *testing.T) {
 func TestResolveApprove(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		resolver := &fakeResolver{res: wizard.ResolveResult{Commit: "abc123def4567", ReopenedIssue: "harness-9"}}
-		p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona")
+		p := wizard.NewPlanner(draftAdapter(), "persona")
 		reader := query.NewReader(&fakeIssues{all: []core.Issue{blockedIssue()}}, fakeArts{}, fakeProv{})
 		s := New(Options{Planner: p, Reader: reader, Resolver: resolver, Repo: resolveRepo(t)})
 		ts := httptest.NewServer(s.Handler())
@@ -184,7 +184,7 @@ func TestResolveApprove(t *testing.T) {
 	})
 
 	t.Run("no resolver", func(t *testing.T) {
-		p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona")
+		p := wizard.NewPlanner(draftAdapter(), "persona")
 		reader := query.NewReader(&fakeIssues{all: []core.Issue{blockedIssue()}}, fakeArts{}, fakeProv{})
 		s := New(Options{Planner: p, Reader: reader, Repo: resolveRepo(t)}) // no Resolver
 		ts := httptest.NewServer(s.Handler())
@@ -201,7 +201,7 @@ func TestResolveApprove(t *testing.T) {
 	})
 
 	t.Run("unknown session", func(t *testing.T) {
-		p := wizard.NewPlanner(scriptedAdapter{reply: draftReply}, "persona")
+		p := wizard.NewPlanner(draftAdapter(), "persona")
 		s := New(Options{Planner: p, Resolver: &fakeResolver{}})
 		ts := httptest.NewServer(s.Handler())
 		t.Cleanup(ts.Close)

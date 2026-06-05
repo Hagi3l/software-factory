@@ -1,18 +1,19 @@
 package wizard
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
-// TestParseDraftExtractsBlock proves a well-formed trailing ```draft block is parsed into a
-// Draft: the summary, spec files (content preserved verbatim, including newlines), and seed
-// issues with their fields and dependency edges.
-func TestParseDraftExtractsBlock(t *testing.T) {
-	reply := "Here is what I propose.\n\n```draft\n" +
-		`{"summary":"Add CSV export","specs":[{"path":"specs/export.md","content":"# Export\n\nDetails.\n"}],` +
-		`"issues":[{"title":"Export orders","body":"Build it.","role":"planner","spec":"specs/export.md","key":"exp","depends_on":["other"]}]}` +
-		"\n```"
-	d, ok := parseDraft(reply)
-	if !ok {
-		t.Fatal("parseDraft returned ok=false for a well-formed block")
+// TestParseDraftArgs proves a well-formed propose_draft payload is decoded into a Draft: the
+// summary, spec files (content preserved verbatim, including newlines), and seed issues with
+// their fields and dependency edges.
+func TestParseDraftArgs(t *testing.T) {
+	args := json.RawMessage(`{"summary":"Add CSV export","specs":[{"path":"specs/export.md","content":"# Export\n\nDetails.\n"}],` +
+		`"issues":[{"title":"Export orders","body":"Build it.","role":"planner","spec":"specs/export.md","key":"exp","depends_on":["other"]}]}`)
+	d, err := parseDraftArgs(args)
+	if err != nil {
+		t.Fatalf("parseDraftArgs: %v", err)
 	}
 	if d.Summary != "Add CSV export" {
 		t.Errorf("summary = %q", d.Summary)
@@ -35,37 +36,33 @@ func TestParseDraftExtractsBlock(t *testing.T) {
 	}
 }
 
-// TestParseDraftDegrades proves the parser never errors and never returns a partial draft for a
-// missing, malformed, or empty block — so a draft-less turn falls back to plain chat and never
-// clobbers a prior draft (the caller overwrites only on ok).
-func TestParseDraftDegrades(t *testing.T) {
+// TestParseDraftArgsDegrades proves the parser returns an error (never a partial draft) for
+// malformed args or a draft proposing neither a spec nor an issue — the engine's signal to leave
+// a prior draft intact and ack the model rather than clobbering.
+func TestParseDraftArgsDegrades(t *testing.T) {
 	cases := map[string]string{
-		"no block":          "Just prose, no draft.",
-		"malformed json":    "Prose.\n```draft\n{not json}\n```",
-		"unterminated":      "Prose.\n```draft\n{\"summary\":\"x\"}",
-		"empty array":       "Prose.\n```draft\n{}\n```",
-		"no path no issues": "Prose.\n```draft\n{\"summary\":\"x\",\"specs\":[{\"content\":\"c\"}],\"issues\":[{}]}\n```",
+		"malformed json":    `{not json}`,
+		"empty object":      `{}`,
+		"no path no issues": `{"summary":"x","specs":[{"content":"c"}],"issues":[{}]}`,
 	}
-	for name, reply := range cases {
+	for name, args := range cases {
 		t.Run(name, func(t *testing.T) {
-			if d, ok := parseDraft(reply); ok {
-				t.Errorf("parseDraft returned ok=true for %s: %+v", name, d)
+			if d, err := parseDraftArgs(json.RawMessage(args)); err == nil {
+				t.Errorf("parseDraftArgs returned nil error for %s: %+v", name, d)
 			}
 		})
 	}
 }
 
-// TestParseDraftDropsIncompleteEntries proves a spec missing its path/content or an issue missing
-// its title is dropped, while valid siblings survive — a robust parse rather than an all-or-nothing
-// reject.
-func TestParseDraftDropsIncompleteEntries(t *testing.T) {
-	reply := "Prose.\n```draft\n" +
-		`{"summary":"s","specs":[{"path":"specs/a.md","content":"A"},{"path":"","content":"x"},{"path":"specs/b.md","content":""}],` +
-		`"issues":[{"title":"keep"},{"title":""}]}` +
-		"\n```"
-	d, ok := parseDraft(reply)
-	if !ok {
-		t.Fatal("ok=false")
+// TestParseDraftArgsDropsIncompleteEntries proves a spec missing its path/content or an issue
+// missing its title is dropped, while valid siblings survive — a robust parse rather than an
+// all-or-nothing reject.
+func TestParseDraftArgsDropsIncompleteEntries(t *testing.T) {
+	args := json.RawMessage(`{"summary":"s","specs":[{"path":"specs/a.md","content":"A"},{"path":"","content":"x"},{"path":"specs/b.md","content":""}],` +
+		`"issues":[{"title":"keep"},{"title":""}]}`)
+	d, err := parseDraftArgs(args)
+	if err != nil {
+		t.Fatalf("parseDraftArgs: %v", err)
 	}
 	if len(d.Specs) != 1 || d.Specs[0].Path != "specs/a.md" {
 		t.Errorf("incomplete specs not dropped: %+v", d.Specs)
@@ -75,19 +72,24 @@ func TestParseDraftDropsIncompleteEntries(t *testing.T) {
 	}
 }
 
-// TestDisplayProseCutsBothFences proves the live-stream prose is cut at the EARLIEST of the
-// ledger/draft fences, in either order, so neither accumulating JSON block ever flashes in the
-// token stream or lands in the stored transcript.
-func TestDisplayProseCutsBothFences(t *testing.T) {
-	ledgerFirst := "The prose.\n```ledger\n[]\n```\n```draft\n{}\n```"
-	draftFirst := "The prose.\n```draft\n{}\n```\n```ledger\n[]\n```"
-	for name, reply := range map[string]string{"ledger first": ledgerFirst, "draft first": draftFirst} {
-		if got := displayProse(reply); got != "The prose." {
-			t.Errorf("%s: displayProse = %q, want %q", name, got, "The prose.")
-		}
+// TestProposeDraftToolDef proves the output-tool definition is well-formed: the canonical name
+// and a Params blob that is valid JSON Schema with the three required top-level fields.
+func TestProposeDraftToolDef(t *testing.T) {
+	def := proposeDraftToolDef()
+	if def.Name != toolProposeDraft {
+		t.Errorf("name = %q, want %q", def.Name, toolProposeDraft)
 	}
-	if got := displayProse("no fences here"); got != "no fences here" {
-		t.Errorf("no-fence reply altered: %q", got)
+	var schema struct {
+		Properties map[string]any `json:"properties"`
+		Required   []string       `json:"required"`
+	}
+	if err := json.Unmarshal(def.Params, &schema); err != nil {
+		t.Fatalf("Params is not valid JSON: %v", err)
+	}
+	for _, key := range []string{"summary", "specs", "issues"} {
+		if _, ok := schema.Properties[key]; !ok {
+			t.Errorf("schema missing property %q", key)
+		}
 	}
 }
 

@@ -103,12 +103,12 @@ func withSandboxOpt(t *testing.T, be *fakeBackend) wizard.Option {
 // (fake) sandbox, only the FINAL prose lands in the transcript (the intermediate tool-call turn
 // is suppressed), and that final turn's ledger + draft parse as usual.
 func TestExploreToolLoopGroundsAndParses(t *testing.T) {
-	final := "Here is the plan.\n\n```ledger\n" +
-		`[{"question":"Datastore?","status":"open","rationale":"r","options":[]}]` + "\n```\n" +
-		"```draft\n" + `{"summary":"s","specs":[{"path":"specs/x.md","content":"# X\n"}],"issues":[{"title":"T","spec":"specs/x.md"}]}` + "\n```"
 	srv := modeltest.NewServer(t, []modeltest.Turn{
 		{Text: "Let me check the module.", ToolCalls: []modeltest.ToolCall{{ID: "c1", Name: "read_file", Args: `{"path":"go.mod"}`}}},
-		{Text: final},
+		{Text: "Here is the plan.", ToolCalls: []modeltest.ToolCall{
+			{ID: "l1", Name: "update_ledger", Args: `{"items":[{"question":"Datastore?","status":"open","rationale":"r","options":[]}]}`},
+			{ID: "d1", Name: "propose_draft", Args: `{"summary":"s","specs":[{"path":"specs/x.md","content":"# X\n"}],"issues":[{"title":"T","spec":"specs/x.md"}]}`},
+		}},
 	})
 	be := &fakeBackend{}
 	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona",
@@ -185,8 +185,9 @@ func TestExploreMaxToolTurnsCapsLoop(t *testing.T) {
 // TestExploreDisabledUnchanged proves a planner with NO sandbox option behaves exactly as a
 // pure-conversation planner: one model request, no tool loop, ledger/draft parse identically.
 func TestExploreDisabledUnchanged(t *testing.T) {
-	final := "Plain reply.\n```ledger\n" + `[{"question":"Q?","status":"open"}]` + "\n```"
-	srv := modeltest.NewServer(t, []modeltest.Turn{{Text: final}})
+	srv := modeltest.NewServer(t, []modeltest.Turn{
+		{Text: "Plain reply.", ToolCalls: []modeltest.ToolCall{{ID: "l1", Name: "update_ledger", Args: `{"items":[{"question":"Q?","status":"open"}]}`}}},
+	})
 	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
 	defer p.Shutdown(context.Background())
 
@@ -209,8 +210,9 @@ func TestExploreDisabledUnchanged(t *testing.T) {
 // TestExploreLazyNoProvision proves the advertise-cheap/provision-lazy refinement: a session
 // with exploration ENABLED that never triggers a tool call boots no sandbox at all.
 func TestExploreLazyNoProvision(t *testing.T) {
-	final := "Just chatting.\n```ledger\n" + `[{"question":"Q?","status":"open"}]` + "\n```"
-	srv := modeltest.NewServer(t, []modeltest.Turn{{Text: final}})
+	srv := modeltest.NewServer(t, []modeltest.Turn{
+		{Text: "Just chatting.", ToolCalls: []modeltest.ToolCall{{ID: "l1", Name: "update_ledger", Args: `{"items":[{"question":"Q?","status":"open"}]}`}}},
+	})
 	be := &fakeBackend{}
 	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona",
 		wizard.WithTurnTimeout(10*time.Second), withSandboxOpt(t, be))
@@ -234,7 +236,7 @@ func TestExploreLazyNoProvision(t *testing.T) {
 func TestExploreEvictionTearsDown(t *testing.T) {
 	srv := modeltest.NewServer(t, []modeltest.Turn{
 		{Text: "looking", ToolCalls: []modeltest.ToolCall{{ID: "c1", Name: "list_dir", Args: `{"path":"."}`}}},
-		{Text: "done.\n```ledger\n" + `[{"question":"Q?","status":"open"}]` + "\n```"},
+		{Text: "done.", ToolCalls: []modeltest.ToolCall{{ID: "l1", Name: "update_ledger", Args: `{"items":[{"question":"Q?","status":"open"}]}`}}},
 	})
 	be := &fakeBackend{}
 	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona",

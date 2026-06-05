@@ -1,19 +1,21 @@
 package wizard
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
-// TestParseLedgerExtractsBlock proves a well-formed trailing ```ledger block is parsed into
-// items and stripped from the prose: the returned prose is the text before the fence (right-
-// trimmed), and the items carry the normalized fields.
-func TestParseLedgerExtractsBlock(t *testing.T) {
-	reply := "Here is where we stand.\n\n```ledger\n" +
-		`[{"question":"Which datastore?","status":"open","rationale":"Driven by query shape.",` +
+// TestParseLedgerArgs proves a well-formed update_ledger payload is decoded into normalized
+// items: the {"items":[…]} object shape (a tool call's args are always a top-level object), with
+// each fork's fields and option chips carried through.
+func TestParseLedgerArgs(t *testing.T) {
+	args := json.RawMessage(`{"items":[` +
+		`{"question":"Which datastore?","status":"open","rationale":"Driven by query shape.",` +
 		`"options":[{"label":"Postgres","tradeoff":"mature ops","selected":true},` +
-		`{"label":"SQLite","tradeoff":"single-node","selected":false}]}]` +
-		"\n```"
-	items, prose := parseLedger(reply)
-	if prose != "Here is where we stand." {
-		t.Errorf("prose = %q, want the text before the fence", prose)
+		`{"label":"SQLite","tradeoff":"single-node","selected":false}]}]}`)
+	items, err := parseLedgerArgs(args)
+	if err != nil {
+		t.Fatalf("parseLedgerArgs: %v", err)
 	}
 	if len(items) != 1 {
 		t.Fatalf("items = %d, want 1", len(items))
@@ -33,42 +35,25 @@ func TestParseLedgerExtractsBlock(t *testing.T) {
 	}
 }
 
-// TestParseLedgerNoBlock proves a reply with no ```ledger block returns nil items and the
-// original reply unchanged — the conversation degrades to plain chat.
-func TestParseLedgerNoBlock(t *testing.T) {
-	reply := "Just a plain message with no ledger."
-	items, prose := parseLedger(reply)
-	if items != nil {
-		t.Errorf("items = %+v, want nil for a reply with no block", items)
-	}
-	if prose != reply {
-		t.Errorf("prose = %q, want the original reply unchanged", prose)
+// TestParseLedgerArgsMalformed proves args that do not decode as JSON return an error (which the
+// engine acks back to the model / logs) rather than a silent mis-parse — the failure class T4.29
+// moved to the schema boundary. The error is the caller's signal to leave the prior ledger intact.
+func TestParseLedgerArgsMalformed(t *testing.T) {
+	if _, err := parseLedgerArgs(json.RawMessage(`{not valid json]`)); err == nil {
+		t.Error("parseLedgerArgs returned nil error for malformed JSON")
 	}
 }
 
-// TestParseLedgerMalformedJSON proves a block with malformed JSON returns nil items but still
-// strips the block from the prose, so a bad snapshot neither errors nor leaks raw JSON.
-func TestParseLedgerMalformedJSON(t *testing.T) {
-	reply := "Prose part.\n\n```ledger\n{not valid json]\n```"
-	items, prose := parseLedger(reply)
-	if items != nil {
-		t.Errorf("items = %+v, want nil for malformed JSON", items)
-	}
-	if prose != "Prose part." {
-		t.Errorf("prose = %q, want the block stripped", prose)
-	}
-}
-
-// TestParseLedgerSkipsEmpty proves items with an empty question and options with an empty
-// label are skipped, and that a block yielding zero valid items returns (nil, prose).
-func TestParseLedgerSkipsEmpty(t *testing.T) {
-	reply := "P.\n```ledger\n" +
-		`[{"question":"  ","status":"open"},` +
-		`{"question":"Real?","status":"agreed","options":[{"label":""},{"label":"Keep"}]}]` +
-		"\n```"
-	items, prose := parseLedger(reply)
-	if prose != "P." {
-		t.Errorf("prose = %q", prose)
+// TestParseLedgerArgsSkipsEmpty proves items with an empty question and options with an empty
+// label are skipped, and a payload yielding zero valid items returns an empty (not errored) slice
+// — the engine treats that as "no update" so a prior ledger is never clobbered.
+func TestParseLedgerArgsSkipsEmpty(t *testing.T) {
+	args := json.RawMessage(`{"items":[` +
+		`{"question":"  ","status":"open"},` +
+		`{"question":"Real?","status":"agreed","options":[{"label":""},{"label":"Keep"}]}]}`)
+	items, err := parseLedgerArgs(args)
+	if err != nil {
+		t.Fatalf("parseLedgerArgs: %v", err)
 	}
 	if len(items) != 1 {
 		t.Fatalf("items = %d, want 1 (the empty-question item is skipped)", len(items))
@@ -80,26 +65,28 @@ func TestParseLedgerSkipsEmpty(t *testing.T) {
 		t.Errorf("options = %+v, want only the labeled one", items[0].Options)
 	}
 
-	// A block with only invalid items yields nil items but a stripped prose.
-	only := "Pre.\n```ledger\n" + `[{"question":""}]` + "\n```"
-	gotItems, gotProse := parseLedger(only)
-	if gotItems != nil {
-		t.Errorf("items = %+v, want nil when no valid items remain", gotItems)
+	// A payload with only invalid items decodes fine but yields zero items.
+	only, err := parseLedgerArgs(json.RawMessage(`{"items":[{"question":""}]}`))
+	if err != nil {
+		t.Fatalf("parseLedgerArgs (only-invalid): %v", err)
 	}
-	if gotProse != "Pre." {
-		t.Errorf("prose = %q, want the block stripped", gotProse)
+	if len(only) != 0 {
+		t.Errorf("items = %+v, want empty when no valid items remain", only)
 	}
 }
 
-// TestParseLedgerStatusNormalize proves status is normalized case-insensitively over the four
+// TestParseLedgerArgsStatusNormalize proves status is normalized case-insensitively over the four
 // states (T4.27): agreed/discussing/deferred map to themselves (any case), and an unknown or
-// blank value falls back to open.
-func TestParseLedgerStatusNormalize(t *testing.T) {
-	reply := "x\n```ledger\n" +
-		`[{"question":"a","status":"AGREED"},{"question":"b","status":"weird"},{"question":"c","status":""},` +
-		`{"question":"d","status":"Discussing"},{"question":"e","status":"DEFERRED"}]` +
-		"\n```"
-	items, _ := parseLedger(reply)
+// blank value falls back to open. The schema constrains the enum, but normalizeStatus stays as
+// belt-and-suspenders since the schema does not guarantee a weak model respects it.
+func TestParseLedgerArgsStatusNormalize(t *testing.T) {
+	args := json.RawMessage(`{"items":[` +
+		`{"question":"a","status":"AGREED"},{"question":"b","status":"weird"},{"question":"c","status":""},` +
+		`{"question":"d","status":"Discussing"},{"question":"e","status":"DEFERRED"}]}`)
+	items, err := parseLedgerArgs(args)
+	if err != nil {
+		t.Fatalf("parseLedgerArgs: %v", err)
+	}
 	if len(items) != 5 {
 		t.Fatalf("items = %d, want 5", len(items))
 	}
@@ -114,6 +101,46 @@ func TestParseLedgerStatusNormalize(t *testing.T) {
 	}
 	if items[4].Status != ledgerStatusDeferred {
 		t.Errorf("DEFERRED should normalize to deferred, got %q", items[4].Status)
+	}
+}
+
+// TestParseLedgerArgsMultipleItems proves several items round-trip in order.
+func TestParseLedgerArgsMultipleItems(t *testing.T) {
+	args := json.RawMessage(`{"items":[{"question":"q1","status":"open"},{"question":"q2","status":"agreed","rationale":"done"}]}`)
+	items, err := parseLedgerArgs(args)
+	if err != nil {
+		t.Fatalf("parseLedgerArgs: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("items = %d, want 2", len(items))
+	}
+	if items[0].Question != "q1" || items[1].Question != "q2" || items[1].Rationale != "done" {
+		t.Errorf("items out of order or wrong: %+v", items)
+	}
+}
+
+// TestUpdateLedgerToolDef proves the output-tool definition is well-formed: the canonical name,
+// and a Params blob that is valid JSON Schema encoding the four-state status enum (the schema is
+// what enforces shape at the model boundary, so it must parse and carry the enum).
+func TestUpdateLedgerToolDef(t *testing.T) {
+	def := updateLedgerToolDef()
+	if def.Name != toolUpdateLedger {
+		t.Errorf("name = %q, want %q", def.Name, toolUpdateLedger)
+	}
+	var schema map[string]any
+	if err := json.Unmarshal(def.Params, &schema); err != nil {
+		t.Fatalf("Params is not valid JSON: %v", err)
+	}
+	// Drill into items → properties → status → enum and confirm all four states are present.
+	enum := schema["properties"].(map[string]any)["items"].(map[string]any)["items"].(map[string]any)["properties"].(map[string]any)["status"].(map[string]any)["enum"].([]any)
+	want := map[string]bool{ledgerStatusOpen: true, ledgerStatusAgreed: true, ledgerStatusDiscussing: true, ledgerStatusDeferred: true}
+	if len(enum) != len(want) {
+		t.Fatalf("status enum = %v, want the four states", enum)
+	}
+	for _, v := range enum {
+		if !want[v.(string)] {
+			t.Errorf("unexpected enum value %q", v)
+		}
 	}
 }
 
@@ -178,101 +205,4 @@ func TestApprovalDecisions(t *testing.T) {
 	if converged[1].Status != ledgerStatusOpen {
 		t.Errorf("ApprovalDecisions mutated the source ledger: %+v", converged[1])
 	}
-}
-
-// TestParseLedgerMultipleItems proves several items round-trip in order.
-func TestParseLedgerMultipleItems(t *testing.T) {
-	reply := "ok\n```ledger\n" +
-		`[{"question":"q1","status":"open"},{"question":"q2","status":"agreed","rationale":"done"}]` +
-		"\n```"
-	items, _ := parseLedger(reply)
-	if len(items) != 2 {
-		t.Fatalf("items = %d, want 2", len(items))
-	}
-	if items[0].Question != "q1" || items[1].Question != "q2" || items[1].Rationale != "done" {
-		t.Errorf("items out of order or wrong: %+v", items)
-	}
-}
-
-// TestDisplayProse proves the live-stream prose is cut at the FIRST fence (so the JSON never
-// flashes mid-stream), and an unfenced reply is returned unchanged.
-func TestDisplayProse(t *testing.T) {
-	if got := displayProse("Hello there.\n```ledger\n[half written"); got != "Hello there." {
-		t.Errorf("displayProse cut wrong: %q", got)
-	}
-	if got := displayProse("No fence here"); got != "No fence here" {
-		t.Errorf("displayProse should return unfenced reply unchanged, got %q", got)
-	}
-}
-
-// TestCutLedgerBlock proves the low-level split: it finds the last fence, returns the JSON
-// between fences and the right-trimmed prose, and reports ok=false for missing fences.
-func TestCutLedgerBlock(t *testing.T) {
-	prose, raw, ok := cutLedgerBlock("Prose.\n\n```ledger\n[1,2,3]\n```")
-	if !ok {
-		t.Fatal("ok = false for a well-formed block")
-	}
-	if prose != "Prose." {
-		t.Errorf("prose = %q", prose)
-	}
-	if got := trim(raw); got != "[1,2,3]" {
-		t.Errorf("raw = %q, want the JSON between fences", got)
-	}
-
-	if _, _, ok := cutLedgerBlock("no fence at all"); ok {
-		t.Error("ok = true with no opening fence")
-	}
-	if _, _, ok := cutLedgerBlock("p\n```ledger\n[unterminated"); ok {
-		t.Error("ok = true with no closing fence")
-	}
-}
-
-// TestParseLedgerTolerantShapes proves the parser populates the ledger from the realistic ways
-// a capable-but-imperfect model mis-shapes the block (the "decisions never appear" failure):
-// a one-key wrapper object, a single fork object emitted without the array, a trailing comma,
-// and unicode smart quotes all yield items, while a genuinely-empty array, an unknown wrapper
-// key, and non-JSON still degrade to nil (so a prior ledger is never clobbered or fabricated).
-func TestParseLedgerTolerantShapes(t *testing.T) {
-	const fork = `{"question":"Which datastore?","status":"open"}`
-	populates := map[string]string{
-		"wrapper_ledger": "P.\n```ledger\n{\"ledger\":[" + fork + "]}\n```",
-		"wrapper_items":  "P.\n```ledger\n{\"items\":[" + fork + "]}\n```",
-		"wrapper_forks":  "P.\n```ledger\n{\"forks\":[" + fork + "]}\n```",
-		"single_object":  "P.\n```ledger\n" + fork + "\n```",
-		"trailing_comma": "P.\n```ledger\n[" + fork + ",]\n```",
-		"smart_quotes":   "P.\n```ledger\n[{“question”:“Which datastore?”,“status”:“open”}]\n```",
-	}
-	for name, reply := range populates {
-		items, _ := parseLedger(reply)
-		if len(items) != 1 || items[0].Question != "Which datastore?" {
-			t.Errorf("%s: items = %+v, want 1 fork with the question parsed", name, items)
-		}
-	}
-
-	staysNil := map[string]string{
-		"empty_array":    "P.\n```ledger\n[]\n```",
-		"unknown_wrapper": "P.\n```ledger\n{\"weird\":[" + fork + "]}\n```",
-		"not_json":       "P.\n```ledger\nnot json at all\n```",
-	}
-	for name, reply := range staysNil {
-		if items, _ := parseLedger(reply); items != nil {
-			t.Errorf("%s: items = %+v, want nil (must not fabricate or clobber)", name, items)
-		}
-	}
-}
-
-// trim is a tiny local helper so the test asserts on the JSON payload ignoring surrounding
-// whitespace the split intentionally leaves intact.
-func trim(s string) string {
-	for len(s) > 0 && (s[0] == ' ' || s[0] == '\n' || s[0] == '\t' || s[0] == '\r') {
-		s = s[1:]
-	}
-	for len(s) > 0 {
-		c := s[len(s)-1]
-		if c != ' ' && c != '\n' && c != '\t' && c != '\r' {
-			break
-		}
-		s = s[:len(s)-1]
-	}
-	return s
 }

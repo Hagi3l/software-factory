@@ -3,16 +3,20 @@ package wizard
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"slices"
 	"strings"
+
+	"github.com/Loxstomper/harness/internal/model"
 )
 
 // The draft (T4.14, specs/control-room.md "The wizard") is the second structured artifact
 // the requirements planner maintains alongside the conversation and the alignment ledger:
 // the concrete spec markdown + seed issues it proposes to write once intent has converged.
-// Like the ledger it is a latest-wins snapshot the planner re-emits each turn as a trailing
-// fenced ```draft JSON block after its prose; the engine parses it (parseDraft), stores it on
-// the Session, and the view renders it with an APPROVE button. Nothing here is written
+// Like the ledger it is a latest-wins snapshot the planner re-emits each turn as the
+// schema-validated arguments of a `propose_draft` tool call (T4.29); the engine harvests it
+// (parseDraftArgs), stores it on the Session, and the view renders it with an APPROVE button.
+// Nothing here is written
 // anywhere — the draft is purely what *would* be created. The consent boundary is the human
 // clicking APPROVE: only then does the trusted Seeder (implemented by the composition root,
 // where git/beads/the artifact store are in scope) commit the spec to git, write the
@@ -70,14 +74,12 @@ func (d Draft) clone() Draft {
 	return out
 }
 
-// draftFence opens the trailing fenced block the planner appends for the draft, distinct from
-// the ledger's ```ledger fence so the two snapshots are extracted independently (order between
-// them does not matter, as long as both follow the prose — displayProse strips both from the
-// live stream and stored transcript). The closing fence is a bare ``` like the ledger's.
-const draftFence = "```draft"
+// toolProposeDraft is the name of the output tool the planner calls to propose the draft (the
+// spec files + seed issues) as schema-validated arguments (T4.29).
+const toolProposeDraft = "propose_draft"
 
-// draftWire is the JSON wire shape inside the ```draft block — kept separate from the rendered
-// Draft so the presentation types carry no json concerns (mirrors ledgerWire).
+// draftWire is the JSON wire shape of the propose_draft call's arguments — kept separate from the
+// rendered Draft so the presentation types carry no json concerns (mirrors ledgerWire).
 type draftWire struct {
 	Summary string `json:"summary"`
 	Specs   []struct {
@@ -94,21 +96,75 @@ type draftWire struct {
 	} `json:"issues"`
 }
 
-// parseDraft extracts the trailing ```draft fenced JSON block from a planner reply and returns
-// the parsed draft. It degrades gracefully exactly like parseLedger: no block, a malformed or
-// empty block, or a block proposing neither a spec nor an issue returns (Draft{}, false) — so a
-// draft-less turn never errors and never clobbers a prior draft (the caller overwrites only when
-// ok is true). Spec content is preserved verbatim; everything else is trimmed, and an entry
-// missing its essential field (a spec with no path/content, an issue with no title) is dropped.
-func parseDraft(reply string) (Draft, bool) {
-	_, raw, ok := cutFencedBlock(reply, draftFence)
-	if !ok {
-		return Draft{}, false
+// proposeDraftToolDef is the output-tool definition the planner calls to propose the draft. Like
+// update_ledger it is a pure-output tool — it records the proposal and commits nothing (the
+// human's Approve is the consent gate) and never triggers a model round-trip. Spec content is one
+// JSON string (markdown with `\n`-escaped newlines), which the tool channel carries cleanly — the
+// fenced-block era's "newline inside a JSON string breaks the parse" footgun is gone.
+func proposeDraftToolDef() model.ToolDef {
+	return model.ToolDef{
+		Name: toolProposeDraft,
+		Description: "Propose the concrete deliverable — the spec markdown files and the seed work items — for the human to Approve. " +
+			"Call only once intent has genuinely converged; re-emit the complete draft each turn it changes (latest wins). " +
+			"This records the proposal only: it commits nothing (Approve is the human's consent gate) and does not end the conversation.",
+		Params: json.RawMessage(`{
+			"type": "object",
+			"properties": {
+				"summary": {"type": "string", "description": "One-line description of the whole change (becomes the commit subject)."},
+				"specs": {
+					"type": "array",
+					"description": "The spec markdown files to author. Each spec must be referenced by at least one issue.",
+					"items": {
+						"type": "object",
+						"properties": {
+							"path": {"type": "string", "description": "Repo-relative path under specs/, a .md file, e.g. \"specs/orders-export.md\"."},
+							"content": {"type": "string", "description": "The complete spec markdown as a single string (escape newlines as \\n)."}
+						},
+						"required": ["path", "content"]
+					}
+				},
+				"issues": {
+					"type": "array",
+					"description": "The seed work items, kept coarse (one per coherent deliverable — the autonomous planner decomposes them).",
+					"items": {
+						"type": "object",
+						"properties": {
+							"title": {"type": "string"},
+							"body": {"type": "string", "description": "What to build, in prose."},
+							"role": {"type": "string", "description": "Pipeline entry stage; omit for the default entry role."},
+							"spec": {"type": "string", "description": "The spec path this issue implements."},
+							"key": {"type": "string", "description": "A local key other issues reference in depends_on."},
+							"depends_on": {"type": "array", "items": {"type": "string"}, "description": "Keys of sibling issues that must land first."}
+						},
+						"required": ["title"]
+					}
+				}
+			},
+			"required": ["summary", "specs", "issues"]
+		}`),
 	}
+}
+
+// parseDraftArgs decodes a propose_draft call's arguments into a Draft. Like parseLedgerArgs it
+// degrades to an error (never a panic): a payload that does not decode, or one proposing neither a
+// spec nor an issue, returns an error the caller acks/logs rather than clobbering a prior draft.
+// Spec content is preserved verbatim; everything else is trimmed, and an entry missing its
+// essential field (a spec with no path/content, an issue with no title) is dropped.
+func parseDraftArgs(args json.RawMessage) (Draft, error) {
 	var w draftWire
-	if err := json.Unmarshal([]byte(strings.TrimSpace(raw)), &w); err != nil {
-		return Draft{}, false
+	if err := json.Unmarshal(args, &w); err != nil {
+		return Draft{}, err
 	}
+	d := draftFromWire(w)
+	if d.Empty() {
+		return Draft{}, errors.New("draft proposes neither a spec file nor a seed issue")
+	}
+	return d, nil
+}
+
+// draftFromWire normalizes a decoded draftWire into a rendered Draft: trims fields (spec content
+// verbatim) and drops a spec with no path/content or an issue with no title.
+func draftFromWire(w draftWire) Draft {
 	d := Draft{Summary: strings.TrimSpace(w.Summary)}
 	for _, s := range w.Specs {
 		path := strings.TrimSpace(s.Path)
@@ -137,10 +193,7 @@ func parseDraft(reply string) (Draft, bool) {
 			DependsOn: deps,
 		})
 	}
-	if d.Empty() {
-		return Draft{}, false
-	}
-	return d, true
+	return d
 }
 
 // DecisionRecord is one finalized decision destined for the git decisions sidecar — a settled
