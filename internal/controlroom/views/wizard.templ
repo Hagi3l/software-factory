@@ -108,6 +108,12 @@ templ WizardTranscript(msgs []wizard.Message, busy bool) {
 			@wizardBubble(m)
 		}
 	}
+	// The exploration status strip (T4.28): while the planner reads the codebase in its
+	// read-only sandbox, each `tool` SSE event swaps in a one-line label ("read_file foo.go")
+	// so the human sees activity during a multi-step turn. It is empty (and hidden via
+	// empty:hidden) outside exploration, and re-rendered empty by the `turn` re-fetch — so it
+	// clears itself when the turn concludes. The ::before magnifier frames the swapped label.
+	<div id="wizard-explore" sse-swap="tool" class="flex items-center gap-2 rounded-md border border-border bg-canvas px-3 py-1.5 text-xs text-muted empty:hidden before:content-['🔍']"></div>
 	// The streaming target: assistant `delta` events replace its content as the reply is
 	// generated. While a turn is in flight but no token has arrived yet, it holds the typing
 	// indicator; the first `delta` overwrites it. Whitespace-pre-wrap preserves the model's

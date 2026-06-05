@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -249,6 +251,24 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		return nil, err
 	}
 
+	// Production uses the Docker backend; a test may inject the local host-exec backend
+	// (never config-selectable — see runOptions.backend). The same backend serves the runner
+	// (building candidates), the gate (verifying them), and — when configured — the
+	// requirements-planner wizard's read-only codebase exploration (T4.28). Built before the
+	// control room so the planner wiring below can hand it to WithSandbox.
+	backend := opts.backend
+	if backend == nil {
+		backend = sandbox.NewDockerBackend()
+	}
+
+	// One temp dir holds every per-sandbox broker socket (runner, gate, and the planner's
+	// read-only exploration sandbox), cleaned up on teardown.
+	sockDir, err := os.MkdirTemp("", "harness-broker-")
+	if err != nil {
+		return nil, err
+	}
+	releases = append(releases, func() { _ = os.RemoveAll(sockDir) })
+
 	// Control room, co-located when serving is enabled. It shares this run's in-process
 	// NATS (the pump tails the agent-event subjects into the SSE hub) and reads the same
 	// three stores the loops write — beads (read-only; the orchestrator is the single
@@ -319,7 +339,25 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			if rerr != nil {
 				return nil, fmt.Errorf("read requirements planner persona: %w", rerr)
 			}
-			planner = wizard.NewPlanner(adapter, string(personaBytes), wizard.WithMaxTokens(rp.MaxTokens), wizard.WithLogger(log))
+			plannerOpts := []wizard.Option{wizard.WithMaxTokens(rp.MaxTokens), wizard.WithLogger(log)}
+			// Read-only codebase exploration (T4.28): when a sandbox profile is configured, give the
+			// planner the agent's read tools over a fresh read-only sandbox seeded from the repo, so
+			// it grounds specs + seed issues in the real code. baseRef defaults to the repo's current
+			// branch (the harness repo is master, a target repo may differ — never hardcode main).
+			if rp.SandboxProfile != "" {
+				baseRef := rp.BaseRef
+				if baseRef == "" {
+					baseRef = defaultBranch(repo)
+				}
+				image := cfg.Infra.Sandbox.ResolveImage(rp.SandboxProfile)
+				plannerOpts = append(plannerOpts, wizard.WithSandbox(backend, repo, rp.SandboxProfile, image, baseRef, cfg.Infra.Sandbox.Limits, sockDir))
+			}
+			planner = wizard.NewPlanner(adapter, string(personaBytes), plannerOpts...)
+			releases = append(releases, func() {
+				ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+				defer cancel()
+				planner.Shutdown(ctx)
+			})
 			// The consent-gated write seam: on Create-APPROVE it commits the drafted spec, writes the
 			// decisions sidecar, stores the transcript, and creates the seed issues; on Resolve-APPROVE
 			// (T4.15) it commits the refined spec and returns the dead-lettered issue to the ready pool.
@@ -350,20 +388,6 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			Env:        opts.env,
 		})
 	}
-
-	// Production uses the Docker backend; a test may inject the local host-exec backend
-	// (never config-selectable — see runOptions.backend). The same backend serves both
-	// the runner (building candidates) and the gate (verifying them).
-	backend := opts.backend
-	if backend == nil {
-		backend = sandbox.NewDockerBackend()
-	}
-
-	sockDir, err := os.MkdirTemp("", "harness-broker-")
-	if err != nil {
-		return nil, err
-	}
-	releases = append(releases, func() { _ = os.RemoveAll(sockDir) })
 
 	// The agent inner loop is the runner's Invoker. Its ToolSource composes the
 	// in-sandbox workspace tools with the lifecycle tools (submit/escalate/
@@ -420,4 +444,23 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	}
 
 	return &runComponents{orch: orch, rnr: rnr, server: server, cleanup: cleanupAll}, nil
+}
+
+// defaultBranch returns the repo's current branch name, used as the base ref the planner's
+// read-only exploration sandbox is seeded at when requirements_planner.base_ref is unset
+// (T4.28). It must not hardcode "main": the harness repo is "master" and a target repo may use
+// either. On any failure it falls back to "main" (the harness convention) — exploration will
+// then degrade loudly at provision time if that ref does not exist, which is the right signal.
+func defaultBranch(repo string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD") // #nosec G204 -- fixed git binary, repo-scoped, no external input.
+	out, err := cmd.Output()
+	if err != nil {
+		return "main"
+	}
+	if ref := strings.TrimSpace(string(out)); ref != "" && ref != "HEAD" {
+		return ref
+	}
+	return "main"
 }

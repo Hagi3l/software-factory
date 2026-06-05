@@ -27,15 +27,25 @@
 # the contract and the conventions it leans on).
 spec_depth: 1
 
-# The requirements planner behind the control-room Create-Task wizard: the trusted,
-# NON-sandboxed model that converses with the operator, converges on testable intent, and
-# drafts the spec + seed issue(s). It reuses the canonical model layer directly (host-side,
-# not the runner/broker) and resolves its model through infra.dev.yaml's `models` registry;
-# the API key comes from the environment. Omitting this block disables the wizard.
+# The requirements planner behind the control-room Create-Task wizard: the trusted model that
+# converses with the operator, converges on testable intent, and drafts the spec + seed
+# issue(s). The conversation runs host-side (canonical model layer directly, not the
+# runner/broker), resolving its model through infra.dev.yaml's `models` registry; the API key
+# comes from the environment. Omitting this block disables the wizard.
+#
+# sandbox_profile enables read-only codebase exploration (T4.28): because vault is an
+# ESTABLISHED app, the planner provisions a fresh read-only, zero-network sandbox over the repo
+# (the same `vault-toolchain` image the souls use, so gopls-backed semantic tools work) and gets
+# the agent's read tools, so the specs + seed issues it drafts fit the real code. base_ref is the
+# branch run.sh initializes the demo repo at. Drop sandbox_profile to fall back to a pure
+# conversation. Exploration is read-only; the planner still writes nothing but the consent-gated
+# spec + issues.
 requirements_planner:
-  model:      "deepseek/deepseek-v4-pro"
-  persona:    souls/prompts/requirements-planner.md
-  max_tokens: 4096
+  model:           "deepseek/deepseek-v4-pro"
+  persona:         souls/prompts/requirements-planner.md
+  max_tokens:      4096
+  sandbox_profile: vault-toolchain
+  base_ref:        main
 
 dag:
   # Human entry stage: the operator authors intent in the Create-Task wizard, which seeds

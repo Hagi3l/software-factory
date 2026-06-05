@@ -28,13 +28,16 @@ import (
 	"html"
 	"log/slog"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 	"unicode/utf8"
 
+	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/controlroom/live"
 	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/harness/internal/sandbox"
 )
 
 // SSE event names the wizard broadcasts on a session's hub. The view binds to both: a
@@ -52,6 +55,11 @@ const (
 	// emitted a ```draft block, so the proposed spec + seed issues (and the APPROVE button)
 	// appear exactly when the planner has something to propose.
 	eventDraft = "draft"
+	// eventTool is a transient status line emitted while the planner explores the codebase
+	// (T4.28): each read tool call broadcasts a humanized label ("read_file foo.go") so the
+	// human sees activity during a multi-step exploration turn instead of a frozen spinner.
+	// The view shows it as an ephemeral strip, cleared on the terminal eventTurn.
+	eventTool = "tool"
 )
 
 const (
@@ -69,6 +77,11 @@ const (
 	// few DOM swaps per reply while staying live. The final `turn` re-fetch always shows the
 	// exact full text, so a coalesced (slightly behind) live stream is harmless.
 	deltaFlushRunes = 12
+	// maxToolTurns bounds the read-only exploration round-trips within ONE human turn (T4.28):
+	// the model may call tools, see results, and call again, but only this many times before
+	// the turn must conclude with a prose reply. It is a termination guarantee against a model
+	// that loops on tool calls forever; the per-turn timeout bounds wall-clock independently.
+	maxToolTurns = 16
 )
 
 // Message is one presentation-layer turn of the conversation — the view renders these
@@ -88,6 +101,7 @@ type Planner struct {
 	maxTokens   int
 	turnTimeout time.Duration
 	log         *slog.Logger
+	sandboxCfg  *sandboxConfig // read-only exploration template (T4.28); nil = tools disabled
 
 	mu          sync.Mutex
 	sessions    map[string]*Session
@@ -134,6 +148,31 @@ func WithTurnTimeout(d time.Duration) Option {
 	}
 }
 
+// WithSandbox enables read-only codebase exploration (T4.28): each Create session may provision
+// a fresh, read-only, zero-network sandbox seeded from repo at baseRef and give the planner the
+// agent's read tools over it, so it grounds specs + seed issues in the real code. backend/limits
+// come straight from the resolved infra config; image is the concrete artifact ResolveImage
+// produced for profile; sockDir is where the per-session deny-all broker socket is bound. Absent
+// this option a session has no tools and behaves exactly as a pure-conversation planner.
+func WithSandbox(backend sandbox.Backend, repo, profile, image, baseRef string, limits config.SandboxLimits, sockDir string) Option {
+	return func(p *Planner) {
+		if backend == nil || profile == "" {
+			return
+		}
+		p.sandboxCfg = &sandboxConfig{
+			backend: backend,
+			repo:    repo,
+			profile: profile,
+			image:   image,
+			baseRef: baseRef,
+			limits:  limits,
+			sockDir: sockDir,
+			// log is filled from the planner's final logger when New() copies this template
+			// onto a session (option order does not guarantee p.log is set yet here).
+		}
+	}
+}
+
 // NewPlanner builds a requirements planner over a resolved model adapter and persona text.
 // The composition root resolves the configured model to an adapter (via the infra registry)
 // and reads the persona file, so this package depends on neither config nor the filesystem —
@@ -164,7 +203,20 @@ func (p *Planner) New() *Session {
 		maxTokens:   p.maxTokens,
 		turnTimeout: p.turnTimeout,
 		log:         p.log,
+		sandboxCfg:  p.sessionSandboxCfg(),
 	})
+}
+
+// sessionSandboxCfg returns the per-session copy of the exploration template (T4.28) with the
+// planner's resolved logger filled in, or nil when exploration is disabled. Returning a copy
+// keeps each session's config independent and lets the logger be resolved after option order.
+func (p *Planner) sessionSandboxCfg() *sandboxConfig {
+	if p.sandboxCfg == nil {
+		return nil
+	}
+	c := *p.sandboxCfg
+	c.log = p.log
+	return &c
 }
 
 // register installs a freshly built session in the bounded map (evicting the oldest past the
@@ -175,12 +227,49 @@ func (p *Planner) register(s *Session) *Session {
 	for len(p.order) >= p.maxSessions {
 		oldest := p.order[0]
 		p.order = p.order[1:]
+		evicted := p.sessions[oldest]
 		delete(p.sessions, oldest)
+		// Tear down the evicted session's exploration sandbox off the lock (teardown does
+		// Docker work and must not block registration). Safe against an in-flight turn: the
+		// running turn captured its *explorer locally, and Teardown mid-Exec is contractual.
+		if evicted != nil {
+			go evicted.teardownExplorer()
+		}
 	}
 	p.sessions[s.ID] = s
 	p.order = append(p.order, s.ID)
 	p.mu.Unlock()
 	return s
+}
+
+// Shutdown tears down every live session's exploration sandbox, draining the planner. The
+// composition root defers it so the host does not leak containers when the control room stops.
+// It is best-effort and bounded per sandbox by teardownTimeout; ctx only bounds the overall
+// drain. After Shutdown the planner holds no sessions.
+func (p *Planner) Shutdown(ctx context.Context) {
+	p.mu.Lock()
+	sessions := make([]*Session, 0, len(p.sessions))
+	for _, s := range p.sessions {
+		sessions = append(sessions, s)
+	}
+	p.sessions = make(map[string]*Session)
+	p.order = nil
+	p.mu.Unlock()
+
+	done := make(chan struct{})
+	go func() {
+		var wg sync.WaitGroup
+		for _, s := range sessions {
+			wg.Add(1)
+			go func(s *Session) { defer wg.Done(); s.teardownExplorer() }(s)
+		}
+		wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // Get returns the session with the given id, or nil if it is unknown (never created, or
@@ -209,11 +298,70 @@ type Session struct {
 	// against the issue *it* bound — never an issue id the browser supplies (T4.15).
 	issueID string
 
+	// sandboxCfg is the read-only exploration template (T4.28), copied from the planner at
+	// mint; nil disables tools entirely. provMu serializes the (costly) lazy provision so a
+	// Docker boot never blocks rendering reads that take s.mu. explorer is the live read-only
+	// stack, built on first tool call and reused across turns, guarded by s.mu.
+	sandboxCfg *sandboxConfig
+	provMu     sync.Mutex
+	explorer   *explorer
+
 	mu       sync.Mutex
 	messages []model.Message
 	busy     bool
 	ledger   []LedgerItem // latest-wins alignment-ledger snapshot (T4.13), guarded by mu
 	draft    Draft        // latest-wins drafted spec + seed issues (T4.14), guarded by mu
+}
+
+// ensureExplorer returns the session's live exploration stack, provisioning it lazily on first
+// use. It returns (nil, nil) when exploration is disabled (no sandboxCfg) — the caller then
+// advertises no tools. The costly Provision runs under provMu (NOT s.mu) so it never blocks
+// Messages()/Ledger() rendering; at most one turn runs per session (the busy flag), so this is
+// only racing a concurrent teardown, which the re-check under s.mu handles.
+func (s *Session) ensureExplorer(ctx context.Context) (*explorer, error) {
+	s.mu.Lock()
+	cfg := s.sandboxCfg
+	exp := s.explorer
+	s.mu.Unlock()
+	if cfg == nil {
+		return nil, nil
+	}
+	if exp != nil {
+		return exp, nil
+	}
+
+	s.provMu.Lock()
+	defer s.provMu.Unlock()
+	// Re-check: a turn may have provisioned (or a teardown nilled) while we waited on provMu.
+	s.mu.Lock()
+	exp = s.explorer
+	s.mu.Unlock()
+	if exp != nil {
+		return exp, nil
+	}
+
+	built, err := buildExplorer(ctx, *cfg)
+	if err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	s.explorer = built
+	s.mu.Unlock()
+	return built, nil
+}
+
+// teardownExplorer tears down the session's exploration sandbox if one was provisioned, exactly
+// once. It swaps the field to nil under s.mu and runs cleanup off the lock (cleanup does Docker
+// work). Idempotent and nil-safe, so eviction, Shutdown, and a normal session close can all
+// call it without coordination.
+func (s *Session) teardownExplorer() {
+	s.mu.Lock()
+	exp := s.explorer
+	s.explorer = nil
+	s.mu.Unlock()
+	if exp != nil {
+		exp.cleanup()
+	}
 }
 
 // Hub is the session's SSE hub — the control-room stream handler subscribes to it and the
@@ -366,20 +514,18 @@ func (s *Session) Send(userText string) (started bool) {
 	}
 	s.busy = true
 	s.messages = append(s.messages, model.Message{Role: model.RoleUser, Text: userText})
-	turn := len(s.messages)
 	s.mu.Unlock()
-
-	// TEMP debug: message IN. Remove with the matching markers in run().
-	s.log.Info("wizard/DEBUG: message in", "session", s.ID, "turn", turn, "chars", len(userText))
 
 	go s.run()
 	return true
 }
 
-// run executes one model reply turn: a single trusted adapter.Complete (no broker, no
-// sandbox, no tools — pure conversation), streaming the growing reply to the hub. It always
-// clears busy and broadcasts the terminal `turn` nudge, even on error, so a failed turn
-// never wedges the session and the transcript still refreshes (rendering the error note).
+// run executes one human turn to completion. With exploration disabled it is a single trusted
+// adapter.Complete (pure conversation, as before). With exploration enabled it is a bounded
+// loop: the model may call read-only tools against the sandboxed checkout, see the results, and
+// call again, until it replies with prose — only that final prose is recorded. It always clears
+// busy and broadcasts the terminal `turn` nudge, even on error, so a failed turn never wedges
+// the session and the transcript still refreshes (rendering the error note).
 func (s *Session) run() {
 	ctx, cancel := context.WithTimeout(context.Background(), s.turnTimeout)
 	defer cancel()
@@ -388,46 +534,14 @@ func (s *Session) run() {
 	msgs := slices.Clone(s.messages)
 	s.mu.Unlock()
 
-	// Accumulate the reply and re-broadcast the cumulative (HTML-escaped) text as it grows,
-	// coalesced by deltaFlushRunes. Cumulative (not incremental) so a dropped SSE frame
-	// self-heals on the next one — matching the hub's best-effort drop semantics.
-	var b strings.Builder
-	lastLen := 0
-	// TEMP debug: first-token latency. Remove with the matching markers.
-	start := time.Now()
-	sawFirst := false
-	onEvent := func(ev model.StreamEvent) {
-		if ev.TextDelta == "" {
-			return
-		}
-		if !sawFirst {
-			sawFirst = true
-			s.log.Info("wizard/DEBUG: first token", "session", s.ID, "after", time.Since(start).String())
-		}
-		b.WriteString(ev.TextDelta)
-		if n := utf8.RuneCountInString(b.String()); n-lastLen >= deltaFlushRunes {
-			lastLen = n
-			// Stream only the prose: suppress the trailing ```ledger JSON block so its raw text
-			// never flashes in the live stream as it accumulates (the panel renders it instead).
-			s.hub.Broadcast(live.Event{Name: eventDelta, Data: html.EscapeString(displayProse(b.String()))})
-		}
+	// Advertise the read-only exploration tools when this session has them enabled. The defs are
+	// static (no sandbox needed), so a conversation that never explores provisions nothing.
+	var defs []model.ToolDef
+	if s.sandboxCfg != nil {
+		defs = readOnlyToolDefs()
 	}
 
-	// TEMP debug: dispatching the model call. If you see this but never "model turn returned"
-	// below, the call is hung in the provider/network — not in any harness-side parsing.
-	s.log.Info("wizard/DEBUG: dispatching model turn", "session", s.ID, "messages", len(msgs), "max_tokens", s.maxTokens)
-
-	resp, err := s.adapter.Complete(ctx, model.Request{
-		System:    s.persona,
-		Messages:  msgs,
-		MaxTokens: s.maxTokens,
-	}, onEvent)
-
-	// TEMP debug: message OUT (the model call returned, success or error).
-	s.log.Info("wizard/DEBUG: model turn returned",
-		"session", s.ID, "elapsed", time.Since(start).String(), "reply_chars", len(resp.Text), "err", err)
-
-	reply := resp.Text
+	reply, err := s.converse(ctx, msgs, defs)
 	if err != nil {
 		s.log.Error("wizard: model turn failed", "session", s.ID, "err", err)
 		reply = fmt.Sprintf("The requirements planner hit an error and could not reply: %v\n\nPlease try again.", err)
@@ -479,6 +593,121 @@ func (s *Session) run() {
 	}
 	if hasDraft {
 		s.hub.Broadcast(live.Event{Name: eventDraft, Data: ""})
+	}
+}
+
+// converse runs the model to a prose conclusion for one human turn, executing read-only tool
+// calls in between. It returns the FINAL reply text (the turn that came back with no tool
+// calls); the intermediate tool-call turns are internal scaffolding and never surface in the
+// transcript. The final reply's prose streams to the hub as it arrives (coalesced `delta`
+// events); each exploration call broadcasts a `tool` status line. defs is empty when
+// exploration is disabled, so the loop concludes on the first turn exactly as the old single
+// adapter.Complete did. Bounded by maxToolTurns (and the caller's per-turn timeout).
+func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []model.ToolDef) (string, error) {
+	for turn := 1; turn <= maxToolTurns; turn++ {
+		// Accumulate this turn's reply and re-broadcast the cumulative (HTML-escaped) prose as it
+		// grows, coalesced by deltaFlushRunes. A fresh builder per turn so an intermediate
+		// preamble is replaced by the final reply rather than concatenated. Cumulative (not
+		// incremental) so a dropped SSE frame self-heals on the next — matching the hub's drops.
+		var b strings.Builder
+		lastLen := 0
+		onEvent := func(ev model.StreamEvent) {
+			if ev.TextDelta == "" {
+				return
+			}
+			b.WriteString(ev.TextDelta)
+			if n := utf8.RuneCountInString(b.String()); n-lastLen >= deltaFlushRunes {
+				lastLen = n
+				// Stream only the prose: suppress the trailing ```ledger/```draft JSON blocks so
+				// their raw text never flashes in the live stream (the panels render them instead).
+				s.hub.Broadcast(live.Event{Name: eventDelta, Data: html.EscapeString(displayProse(b.String()))})
+			}
+		}
+
+		resp, err := s.adapter.Complete(ctx, model.Request{
+			System:    s.persona,
+			Messages:  msgs,
+			Tools:     defs,
+			MaxTokens: s.maxTokens,
+		}, onEvent)
+		if err != nil {
+			return "", err
+		}
+		if len(resp.ToolCalls) == 0 {
+			return resp.Text, nil // the final prose reply (carries the ledger/draft blocks)
+		}
+
+		// Tool-call turn: record the model's request, dispatch the reads, feed the results back.
+		// Kept only in the local msgs slice fed to the model — never appended to s.messages.
+		// dispatch does not read msgs, so evaluating both messages in one append is order-safe.
+		msgs = append(msgs,
+			model.Message{Role: model.RoleAssistant, Text: resp.Text, ToolCalls: resp.ToolCalls},
+			model.Message{Role: model.RoleTool, ToolResults: s.dispatch(ctx, resp.ToolCalls)})
+	}
+	return "", fmt.Errorf("exploration did not converge within %d tool round-trips", maxToolTurns)
+}
+
+// dispatch executes the model's read-only tool calls against the session's exploration sandbox
+// (provisioned lazily on the first call) and returns one ToolResult per call, in order. It
+// never returns a fatal error: an unavailable sandbox, an unknown tool, or a tool that errors
+// each become an IsError result the model can react to, so a failed exploration degrades to a
+// normal reply rather than crashing the background conversation goroutine. The explorer is
+// captured implicitly via ensureExplorer; a concurrent eviction that tears the sandbox down
+// mid-Exec surfaces as a tool error here, which is the correct "I lost access" behavior.
+func (s *Session) dispatch(ctx context.Context, calls []model.ToolCall) []model.ToolResult {
+	exp, err := s.ensureExplorer(ctx)
+	results := make([]model.ToolResult, 0, len(calls))
+	for _, tc := range calls {
+		s.hub.Broadcast(live.Event{Name: eventTool, Data: html.EscapeString(humanizeToolCall(tc))})
+		switch {
+		case err != nil:
+			results = append(results, model.ToolResult{ToolCallID: tc.ID, Content: "could not access the codebase: " + err.Error(), IsError: true})
+		case exp == nil:
+			results = append(results, model.ToolResult{ToolCallID: tc.ID, Content: "codebase exploration is not available", IsError: true})
+		default:
+			results = append(results, dispatchOne(ctx, exp, tc))
+		}
+	}
+	return results
+}
+
+// dispatchOne runs a single tool call against the explorer, converting every failure into an
+// IsError ToolResult (the conversation must never crash on a bad call).
+func dispatchOne(ctx context.Context, exp *explorer, tc model.ToolCall) model.ToolResult {
+	tool, ok := exp.byName[tc.Name]
+	if !ok {
+		return model.ToolResult{ToolCallID: tc.ID, Content: "unknown tool: " + tc.Name, IsError: true}
+	}
+	out, err := tool.Invoke(ctx, tc.Args)
+	if err != nil {
+		return model.ToolResult{ToolCallID: tc.ID, Content: "tool error: " + err.Error(), IsError: true}
+	}
+	return model.ToolResult{ToolCallID: tc.ID, Content: out.Content, IsError: out.IsError}
+}
+
+// humanizeToolCall renders a short label for a read tool call for the live exploration status
+// strip ("read_file internal/foo.go", `search "func New"`, "find_symbol Planner"). It
+// best-effort extracts the salient argument from the call's JSON; on any miss it falls back to
+// the bare tool name. Display only — never parsed back.
+func humanizeToolCall(tc model.ToolCall) string {
+	var a struct {
+		Path    string `json:"path"`
+		Pattern string `json:"pattern"`
+		Name    string `json:"name"`
+		Query   string `json:"query"`
+	}
+	_ = json.Unmarshal(tc.Args, &a)
+	switch {
+	case a.Path != "":
+		return tc.Name + " " + a.Path
+	case a.Pattern != "":
+		return tc.Name + " " + strconv.Quote(a.Pattern)
+	case a.Name != "":
+		return tc.Name + " " + a.Name
+	case a.Query != "":
+		return tc.Name + " " + strconv.Quote(a.Query)
+	default:
+		return tc.Name
 	}
 }
 

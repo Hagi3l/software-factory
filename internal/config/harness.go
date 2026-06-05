@@ -48,10 +48,21 @@ type Harness struct {
 // composition root resolves the same registry to an adapter); Persona is the markdown
 // prompt that gives it its elicitation behavior, resolved against the config root like a
 // soul persona. MaxTokens bounds one reply turn (0 = the adapter default).
+//
+// SandboxProfile and BaseRef are optional and enable read-only codebase exploration
+// (T4.28): when SandboxProfile names a profile in the infra sandbox registry, the wizard
+// provisions a read-only, zero-network sandbox over the integration repo (seeded at BaseRef,
+// defaulting to the repo's current branch) and gives the planner the agent's read tools
+// (read_file/list_dir/search + the LSP comprehension tools) so it can ground its specs and
+// seed issues in the real code. Absent SandboxProfile, the planner has no tools and behaves
+// exactly as before (pure conversation). The conversation itself stays trusted and host-side;
+// only the model-chosen repo reads are sandbox-confined (see specs/control-room.md).
 type RequirementsPlanner struct {
-	Model     string `yaml:"model"`
-	Persona   string `yaml:"persona"`
-	MaxTokens int    `yaml:"max_tokens,omitempty"`
+	Model          string `yaml:"model"`
+	Persona        string `yaml:"persona"`
+	MaxTokens      int    `yaml:"max_tokens,omitempty"`
+	SandboxProfile string `yaml:"sandbox_profile,omitempty"`
+	BaseRef        string `yaml:"base_ref,omitempty"`
 }
 
 // Stage kinds for non-agent stages. An agent stage names a Role instead; a stage is

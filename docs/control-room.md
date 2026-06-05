@@ -99,7 +99,11 @@ is autonomous. It's a guided conversation, not a form:
 1. **Conversation** (`/create`) — a chat with the trusted requirements planner that
    streams its reply token-by-token over SSE. The persona probes for examples, edge
    cases, what to reject, and what's out of scope, converging on testable acceptance
-   criteria.
+   criteria. If `requirements_planner.sandbox_profile` is configured (see
+   [configuration.md](configuration.md)), the planner can also **explore the existing
+   codebase** read-only to ground its specs — a small status strip ("🔍 read_file …")
+   shows each read while it looks. The reads run in a read-only, zero-network sandbox
+   over the repo, provisioned lazily on first use; the planner still writes nothing.
 2. **Alignment ledger** — a live panel beside the conversation showing where things
    stand: each fork in one of four states (`open`, `agreed`, `discussing`, `deferred`)
    with a one-line rationale. Forks are surfaced and answered **in batches**: each

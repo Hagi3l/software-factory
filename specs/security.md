@@ -31,11 +31,20 @@ and production deploy (deferred).
 ## Trust boundaries
 
 **Trusted:** orchestrator, runner, the human-facing requirements planner (runs no
-untrusted code), beads, `main`.
+untrusted code *on the host*), beads, `main`.
 
 **Untrusted:** every sandboxed agent and every artifact it produces.
 
 The controls below all derive from keeping that line bright.
+
+The requirements planner is on the trusted side because its conversation and its spec/issue
+authoring run host-side with no code execution. When it grounds specs in an existing codebase
+(see [control-room.md](control-room.md)), the *reads* it issues are model-directed, so they are
+**not** treated as trusted: they execute inside a read-only, zero-network sandbox seeded from
+the repo, behind a deny-all broker, torn down per session. This keeps the trust line bright —
+a model-chosen command reaches neither the host nor the network — and is strictly a *narrowing*
+of capability: the planner gains a confined code-*reading* surface and no write, host, or egress
+path.
 
 ---
 

@@ -308,7 +308,16 @@ threefold:
 2. **Author and maintain `specs/`.** Output is markdown in the spec tree — new
    files, cross-links, and the README index kept consistent. The wizard owns spec
    link-integrity, not just issue creation.
-3. **Gate on explicit human approval.** The human reviews the drafted spec + the
+3. **Ground in the existing code (when configured).** Against an established codebase the
+   planner gets **read-only exploration tools** — the agent's `read_file`/`list_dir`/`search`
+   plus the LSP comprehension tools (`find_symbol`/`references`/…) — so its specs and seed
+   issues fit the real structure and its link-integrity is checked against real files, not
+   assumed. The reads run in a **read-only, zero-network sandbox** seeded from the repo (the
+   same construction the [gate's verification sandbox](verification.md) uses, behind a deny-all
+   broker); the sandbox is provisioned **lazily** on the first tool call and torn down when the
+   session ends or is evicted, so a conversation that never explores boots nothing. Exploration
+   is read-only — the planner's only outputs remain the spec + seed issues.
+4. **Gate on explicit human approval.** The human reviews the drafted spec + the
    seed issues and approves *before* anything is written. **That approval is the
    consent boundary** — everything past it is autonomous. Approval is itself gated
    on a converged [alignment ledger](#the-alignment-ledger) (no fork left `open` or
@@ -317,16 +326,19 @@ threefold:
 Data flow:
 
 ```
-human ⇄ requirements planner (LLM, trusted, NOT sandboxed; streams over SSE)
+human ⇄ requirements planner (LLM, trusted; conversation runs host-side; streams over SSE)
+      ↳ may read the codebase via read-only tools, executed in a read-only zero-network
+        sandbox (lazily provisioned); a `tool` SSE event surfaces each read as a status line
       → drafts spec markdown + proposed seed issues
 human → APPROVE
       → spec committed to git;  seed issues created via the orchestrator's
         single-writer path (validated, never written directly)
 ```
 
-The planner runs no untrusted code (it converses and writes specs/issues), so it
-is correctly outside the sandbox. Its conversation is itself an LLM interaction and
-is therefore observable/replayable like any other.
+The planner's conversation and its spec/issue authoring run host-side and write no untrusted
+code; its only *read* of untrusted code is sandbox-confined and network-isolated, so a
+model-directed command can never reach the host or the network. Its conversation is itself an
+LLM interaction and is therefore observable/replayable like any other.
 
 ---
 

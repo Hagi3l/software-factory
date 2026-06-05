@@ -469,6 +469,16 @@ func (c *Config) validateRequirementsPlanner(add func(string, ...any)) {
 	if rp.MaxTokens < 0 {
 		add("requirements_planner max_tokens is %d; it must be >= 0", rp.MaxTokens)
 	}
+	// Read-only codebase exploration (T4.28): a configured sandbox_profile must resolve to a
+	// declared infra sandbox profile, exactly like a soul's sandbox. An unknown profile would
+	// otherwise only surface when the wizard first tries to provision its read-only sandbox.
+	if rp.SandboxProfile != "" {
+		if c.Infra == nil || c.Infra.Sandbox.Profiles == nil {
+			add("requirements_planner sandbox_profile %q is set but no infra sandbox profiles are defined", rp.SandboxProfile)
+		} else if _, ok := c.Infra.Sandbox.Profiles[rp.SandboxProfile]; !ok {
+			add("requirements_planner sandbox_profile %q is not defined in the infra sandbox profiles", rp.SandboxProfile)
+		}
+	}
 }
 
 // validateModels checks every soul's declared model resolves in the infra registry

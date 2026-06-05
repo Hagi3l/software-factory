@@ -51,10 +51,14 @@ roles (see [configuration.md](configuration.md)). The stages:
 
 **Two distinct planners** exist and must not be conflated:
 
-- The **requirements planner** is interactive, human-facing, and *not sandboxed*
-  (it runs no untrusted code — it converses and writes specs + seed issues). It is
-  the one place a human is in the loop, realised as the **Create-Task wizard** in
-  the [control room](control-room.md). See [specs-process.md](specs-process.md).
+- The **requirements planner** is interactive and human-facing. Its conversation and its
+  spec/issue authoring are trusted and run host-side (it runs no untrusted code *on the
+  host*). When the work targets an existing codebase it may also *read* that code to ground
+  its specs — but those model-chosen reads run inside a **read-only, zero-network sandbox**
+  seeded from the repo, exactly like an agent's reads, so a model-directed command never
+  touches the host. It still **writes** nothing but specs + seed issues, and only on human
+  approval. It is the one place a human is in the loop, realised as the **Create-Task wizard**
+  in the [control room](control-room.md). See [specs-process.md](specs-process.md).
 - The **decomposition planner** is autonomous and sandboxed. It reads a seed issue
   plus its spec and breaks it into concrete work items with dependency edges. It is the
   pipeline's autonomous entry: the human seeds one `plan` issue and the planner produces

@@ -118,15 +118,27 @@ relevant contract rather than the whole `specs/` tree.
 
 ```yaml
 requirements_planner:
-  model:      claude-opus-4-8
-  persona:    souls/prompts/requirements-planner.md
-  max_tokens: 4096
+  model:           claude-opus-4-8
+  persona:         souls/prompts/requirements-planner.md
+  max_tokens:      4096
+  sandbox_profile: go-toolchain   # optional — enables read-only codebase exploration
+  base_ref:        main           # optional — branch the read-only checkout is seeded at
 ```
 
-The trusted, **non-sandboxed** LLM behind the Create-Task wizard — the one place a
-human is in the loop. It runs no untrusted code, so it reuses the model layer directly
-(not the runner/broker). Its `model` resolves through the infra `models` registry like
-a soul's. Omitting this whole block disables the wizard.
+The trusted LLM behind the Create-Task wizard — the one place a human is in the loop. Its
+conversation runs host-side (the model layer directly, not the runner/broker); its `model`
+resolves through the infra `models` registry like a soul's. Omitting this whole block disables
+the wizard.
+
+`sandbox_profile` (optional) enables **read-only codebase exploration**: when set to a profile
+from the infra `sandbox.profiles` registry, the planner provisions a read-only, zero-network
+sandbox over the integration repo and gains the agent's read tools
+(`read_file`/`list_dir`/`search` + the LSP comprehension tools), so it grounds specs and seed
+issues in the real code. Use a profile whose image carries the language server (the same one
+the souls use) for precise semantic results; otherwise they degrade to text search. `base_ref`
+(optional) is the branch the read-only checkout is seeded at, defaulting to the repo's current
+branch. Omit `sandbox_profile` to keep the planner a pure conversation. Exploration is
+read-only; the planner still writes nothing but the consent-gated spec + seed issues.
 
 ## A soul
 

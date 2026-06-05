@@ -102,10 +102,12 @@ differentiator for observability and the audit mechanism for no-human-review. Se
 [observability.md](observability.md).
 
 ### Requirements planner
-The **trusted, non-sandboxed** conversational planner behind the
-[wizard](#wizard)'s Create-Task / Resolve flow. It helps a human elicit intent and
-draft specs + seed issues, talking to the model layer directly (no broker, no
-sandbox — it runs no untrusted code). Distinct from the autonomous
+The **trusted** conversational planner behind the [wizard](#wizard)'s Create-Task /
+Resolve flow. It helps a human elicit intent and draft specs + seed issues, talking to
+the model layer directly (no broker — the conversation runs host-side). To ground its
+specs in an existing codebase it **may read that code through a read-only, zero-network
+sandbox** (the agent's read tools over a throwaway checkout); it **writes** nothing but
+specs + seed issues, and only on human approval. Distinct from the autonomous
 [plan stage](#plan-stage-decomposition-planner). See
 [control-room.md](control-room.md), [specs-process.md](specs-process.md).
 
