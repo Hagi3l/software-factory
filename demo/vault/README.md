@@ -85,6 +85,22 @@ Then open the control room at <http://127.0.0.1:8080>.
    child flows author-tests → implement → qa → integrate. When it lands, `git -C <scratch>
    log` shows the provenance trailer and the diff is your feature.
 
+### Watch the telemetry land (optional)
+
+The harness emits OpenTelemetry spans at the broker, orchestrator, and runner — every
+invocation is one trace (`invocation → boot → llm-turn ×N → tool-call ×M → gate-run`; see
+`specs/observability.md`). To show that live, run with `JAEGER=1`:
+
+```bash
+JAEGER=1 ./demo/vault/run.sh
+```
+
+This spins a single **Jaeger all-in-one** container (insecure OTLP/gRPC on `4317`, trace UI
+on `16686`) and points the demo's `otel.endpoint` at it — no change to the tracked config.
+Open <http://127.0.0.1:16686>, pick the **`harness`** service, and each invocation shows up
+as a trace waterfall as the pipeline runs. The container is torn down on exit. (The default
+run leaves tracing off, as `infra.dev.yaml` ships.)
+
 ### A good feature to draft on stage
 
 A **one-time, single-use secret share link**: generate an expiring link that reveals one

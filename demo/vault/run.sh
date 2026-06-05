@@ -20,6 +20,7 @@
 #   SERVE_ADDR='127.0.0.1:9000' ./demo/vault/run.sh
 #   BD=/path/to/bd ./demo/vault/run.sh                      # override the beads CLI
 #   KEEP_SITE=1 ./demo/vault/run.sh                         # don't delete the scratch repo on exit
+#   JAEGER=1 ./demo/vault/run.sh                            # spin a Jaeger container; export OTel traces to it
 set -euo pipefail
 
 # ---- knobs (override via env) ----------------------------------------------------------
@@ -31,6 +32,8 @@ SERVE_ADDR="${SERVE_ADDR:-127.0.0.1:8080}"
 BD="${BD:-bd}"
 IMAGE='vault-toolchain'       # sandbox profile named by the vault souls
 BASE_IMAGE='go-toolchain'     # the vault image bases on this kernel image
+JAEGER_NAME='harness-vault-jaeger'              # container name (JAEGER=1 only)
+JAEGER_IMAGE='jaegertracing/all-in-one:latest'  # single-binary OTLP collector + trace UI
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
@@ -61,11 +64,19 @@ if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
   docker build -f "$DEMO_DIR/Dockerfile" -t "$IMAGE" "$APP_DIR"
 fi
 
-# ---- materialize config (substitute model/endpoint only if overridden) -----------------
+# ---- materialize config (model/endpoint subs, and the Jaeger OTLP endpoint) ------------
+# Copy the tracked config to a temp dir whenever we need to rewrite it — for a MODEL/ENDPOINT
+# override and/or to point OTel at the Jaeger container — so demo/vault/config stays pristine.
 CONFIG_DIR="$DEMO_DIR/config"
+MODEL_OVERRIDDEN=
 if [ "$MODEL" != "$DEFAULT_MODEL" ] || [ "$MODEL_ENDPOINT" != "$DEFAULT_ENDPOINT" ]; then
+  MODEL_OVERRIDDEN=1
+fi
+if [ -n "$MODEL_OVERRIDDEN" ] || [ -n "${JAEGER:-}" ]; then
   CONFIG_DIR="$(mktemp -d -t harness-vault-cfg-XXXXXX)/config"
   cp -r "$DEMO_DIR/config" "$CONFIG_DIR"
+fi
+if [ -n "$MODEL_OVERRIDDEN" ]; then
   # The model name is the flash registry key in infra.dev.yaml AND the `model:` field in
   # every soul; substitute both so they stay consistent (validation cross-checks them). The
   # requirements_planner is pinned to the separate -pro registry key and is intentionally
@@ -75,6 +86,12 @@ if [ "$MODEL" != "$DEFAULT_MODEL" ] || [ "$MODEL_ENDPOINT" != "$DEFAULT_ENDPOINT
     rm -f "$f.bak"
   done
   say "Using model '$MODEL' at $MODEL_ENDPOINT (config materialized in $CONFIG_DIR)"
+fi
+if [ -n "${JAEGER:-}" ]; then
+  # Repoint otel.endpoint from "" (off) to the Jaeger container's OTLP/gRPC port on the host.
+  # Matches only the empty-string value, so the model `endpoint:` URL above is untouched.
+  sed -i.bak 's|^  endpoint: "".*|  endpoint: "127.0.0.1:4317"|' "$CONFIG_DIR/infra.dev.yaml"
+  rm -f "$CONFIG_DIR/infra.dev.yaml.bak"
 fi
 
 # ---- scaffold a throwaway target repo from the established app -------------------------
@@ -92,8 +109,24 @@ git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
 # invisible and bd would hang forever waiting on stdin. Force the non-interactive path.
 ( cd "$SITE" && "$BD" init --prefix harness --non-interactive >/dev/null )
 
-cleanup() { [ -n "${KEEP_SITE:-}" ] || rm -rf "$SITE"; }
+cleanup() {
+  [ -n "${KEEP_SITE:-}" ] || rm -rf "$SITE"
+  [ -z "${JAEGER:-}" ] || docker rm -f "$JAEGER_NAME" >/dev/null 2>&1 || true
+}
 trap cleanup EXIT
+
+# ---- start Jaeger (OTLP collector + trace UI), if requested ----------------------------
+# Single container: insecure OTLP/gRPC on 4317 (matches the harness exporter — no auth, no
+# headers) and the trace UI on 16686. The exporter dials lazily and degrades gracefully, so
+# this need only be reachable by the time the first span is exported.
+if [ -n "${JAEGER:-}" ]; then
+  say "Starting Jaeger (OTLP collector + trace UI) — http://127.0.0.1:16686"
+  docker rm -f "$JAEGER_NAME" >/dev/null 2>&1 || true   # clear any stale container from a prior run
+  docker run -d --name "$JAEGER_NAME" \
+    -e COLLECTOR_OTLP_ENABLED=true \
+    -p 16686:16686 -p 4317:4317 \
+    "$JAEGER_IMAGE" >/dev/null
+fi
 
 # ---- validate, run ---------------------------------------------------------------------
 say "Validating demo config"
@@ -109,5 +142,6 @@ echo "    next step    : open http://$SERVE_ADDR/create and draft a feature requ
 echo "                   (e.g. a one-time, single-use secret share link). Approve it in the"
 echo "                   wizard, then watch the Board and Activity views take it to a merge."
 echo "    when it lands: 'git -C $SITE log' shows the provenance trailer; the diff is the feature."
+[ -z "${JAEGER:-}" ] || echo "    telemetry    : open http://127.0.0.1:16686 (service 'harness') to watch each invocation as a trace"
 echo
 "$HARNESS" run --config "$CONFIG_DIR" --repo "$SITE" --bd "$BD" --serve-addr "$SERVE_ADDR"
