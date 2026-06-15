@@ -67,6 +67,22 @@ the `qa` [gate](glossary.md#gate) is orchestrator-controlled and runs in a clean
 so the meaningful, recordable comparison is the two *producing* souls, with the gate's
 independence carried structurally by the sandbox boundary.
 
+### The verifier's egress is deny-all, widened only for package fetch
+
+The verification sandbox reaches nothing by default — no model calls, no git push, no
+events — so an untrusted candidate cannot smuggle its grade out or pull in anything that
+would let it cheat the gate. The one principled exception is **package fetch**: a candidate
+that adds a brand-new dependency must be *buildable* in the verifier, or it could never be
+re-gated even though the producing agent's own sandbox fetched the dep fine. So when a
+deployment allowlists the [package proxy](security.md#control-2--supply-chain-mediation),
+the verifier is granted the **same** `package-proxy` egress and nothing else — one opt-in
+that covers producer and verifier together. This widens the verifier's *reach*, not what it
+*trusts*: `go.sum` (which the candidate carries) pins the exact module bytes the producer
+fetched, the checksum DB is proxied through the same chokepoint, and the `qa` scanners run
+post-fetch — so the verifier builds against the identical, pinned dependency set, with the
+fetch logged at the broker like any other egress. Both producer and verifier route through
+the *one* host-side fetcher, so what they permit can never drift.
+
 ### Model diversity is configured, not mandated
 
 Soul independence (above) is enforced by the harness. *Model* independence —

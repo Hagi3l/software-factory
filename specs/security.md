@@ -87,6 +87,14 @@ A private **vetted mirror/proxy that pins, scans, and logs at fetch time** remai
 that want to *block* a bad dependency before it is ever pulled rather than reject it at
 the gate. It is not required for the guarantees above.
 
+Both the producing agent's sandbox **and** the
+[verification sandbox](glossary.md#verification-sandbox) reach the proxy through the **one**
+host-side fetcher, gated by the same allowlist opt-in: allowlisting `package-proxy` grants
+the egress to both, so a candidate that adds a new dependency can be built by the producer
+*and* re-gated by the verifier against the identical pinned bytes. The verifier is otherwise
+deny-all (see [Control 4](#control-4--producer--verifier)); package fetch is the only egress
+it is ever granted, and it cannot push, call a model, or emit events.
+
 ---
 
 ## Control 3 — Scoped, short-lived secrets
@@ -104,8 +112,11 @@ the gate. It is not required for the guarantees above.
 Verification runs in a fresh sandbox the orchestrator controls, never the
 producer's; tests are authored independently of code; agents propose and the
 orchestrator applies. This prevents untrusted processes from grading their own
-output or merging their own code. See [verification.md](verification.md),
-[integration.md](integration.md).
+output or merging their own code. The verifier's sandbox is deny-all — no model
+calls, git push, or events — with the lone, principled exception of the
+[package-proxy egress](#control-2--supply-chain-mediation) (so a new-dependency
+candidate is re-gatable against the same pinned bytes the producer fetched). See
+[verification.md](verification.md), [integration.md](integration.md).
 
 ---
 

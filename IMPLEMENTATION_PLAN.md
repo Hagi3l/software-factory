@@ -1304,14 +1304,38 @@ them); only the *order of attention* changes.
   egress) → T5.6a:** the gate *verifier* sandbox is still deny-all, so a candidate that adds a **brand-new**
   dependency fetches+builds in the agent's sandbox but **cannot yet be re-gated** (the verifier can't fetch it).
   ([security.md](specs/security.md), [components/runner.md](specs/components/runner.md), [components/sandbox.md](specs/components/sandbox.md))
-- [ ] **T5.6a Gate-verifier package egress** — give the gate's verification sandbox a `package-proxy` egress so a
-  candidate that adds a brand-new dependency can be re-gated (today the verifier is deny-all and builds only
-  against the baked module cache, so a new-dep candidate fails re-gating even though the agent's own sandbox
-  fetched it fine — T5.6). Scope: extract the relay's host-side fetch into a shared fetcher both the runner relay
-  and the gate use, replace the gate's `denyHandler` with a fetch-only handler, and allowlist `package-proxy` in
-  `gate.provisionVerifier` (a `gate.New` option threading the proxy URL). Integrity is unchanged (`go.sum` pins
-  the exact bytes the producer used), but it widens the verifier's trust boundary, so note it in
-  verification.md/security.md. ([verification.md](specs/verification.md), [components/runner.md](specs/components/runner.md))
+- [x] **T5.6a Gate-verifier package egress** — *done.* The verification sandbox can now re-gate a candidate that
+  adds a brand-new dependency (before, the verifier was deny-all and built only against the baked module cache, so
+  a new-dep candidate failed re-gating even though the agent's own sandbox fetched the dep fine via T5.6).
+  **(1) Shared fetcher (single source, no drift):** the relay's host-side fetch logic moved verbatim out of
+  `internal/runner/broker_handler.go` into a new leaf package **`internal/packageproxy`** (`Fetcher{base, client}`
+  + `NewFetcher` + `Fetch(ctx, broker.FetchPackageRequest)` + `ValidatePath` + the path/query split + `MaxBytes`/
+  `DefaultTimeout` consts). It does no telemetry/logging — each caller wraps `Fetch` in its own `tool-call` span so
+  the egress shows up in the right trace. The relay now holds a `*packageproxy.Fetcher` (nil when no proxy) instead
+  of `packageProxy string` + `httpClient`, and `FetchPackage` is a thin span+log wrapper over `Fetch`; a nil
+  receiver / empty base errors "no package proxy configured" so the existing relay tests pass unchanged.
+  **(2) Fetch-only verifier:** `gate.Runner` gains a `packageProxy` field + a functional-option seam
+  (`gate.New(..., opts ...Option)` + `WithPackageProxy(base)` — variadic so existing call sites are unchanged).
+  `provisionVerifier` now calls a new `verifierBroker()`: empty proxy ⇒ the old `denyHandler{}` + `WithAllowlist(nil)`
+  (deny-all preserved); configured proxy ⇒ a new **`fetchOnlyHandler`** (shares `internal/packageproxy`) behind
+  `WithAllowlist([]string{config.DestPackageProxy})` — package-proxy is the ONLY allowlisted destination, so the
+  broker's deny-by-default dispatch rejects model/git/event calls before they reach the handler (the handler's
+  denials are defense in depth). The fetch span nests under the gate-run trace naturally (the broker serves on a
+  ctx descending from Run's gate-run span — no re-parenting needed, unlike the relay). **(3) Wiring (one opt-in
+  covers both):** `cmd/harness` passes `gate.WithPackageProxy(cfg.Infra.Broker.PackageProxyURL())` **iff**
+  `cfg.Infra.Broker.PackageProxyAllowed()` — so allowlisting `package-proxy` grants the egress to the producer
+  *and* the verifier together; a deny-all deployment keeps the verifier deny-all. **Trust unchanged, reach widened:**
+  `go.sum` (carried by the candidate) pins the exact module bytes, the checksum DB is proxied through the same
+  chokepoint, and the qa scanners run post-fetch — the verifier builds against the identical pinned set, logged at
+  the broker. Tests: `internal/packageproxy` (proxy+query forward, status echo, not-configured error, malformed-path
+  pre-egress rejection, oversize cap, `ValidatePath` table); `internal/gate/verifierbroker_test.go` drives a real
+  broker round-trip (`broker.Listen`+`Serve`+`NewClient`) asserting deny-all denies all four methods and fetch-only
+  allows package fetch + still denies model/git/event. `make check` green (lint 0 issues; full unit suite passes —
+  the lone failure, `agent.TestSessionsRealGopls`, is the pre-existing real-gopls/Docker-image test, unrelated to
+  this change). Specs/docs: verification.md ("The verifier's egress is deny-all, widened only for package fetch"),
+  security.md (Control 2 + Control 4 notes), docs/configuration.md (allowlist bullet). **Live full go-fetch-through-
+  the-verifier-container is offline-unverifiable here** (no real network in the zero-net sandbox), as with T5.6.
+  ([verification.md](specs/verification.md), [components/runner.md](specs/components/runner.md), [security.md](specs/security.md))
 - [ ] **T5.7 Scoped short-lived secret minting** — the runner mints a per-task git token scoped to push *only* the task branch, injected for the invocation lifetime and dying with the sandbox (replaces the bootstrap local-repo push). ([components/runner.md](specs/components/runner.md), [security.md](specs/security.md))
 - [x] **T5.8 Distributed NATS** — *done.* The code seam for an external NATS cluster, plus the concrete
   JetStream stream definitions that were the **messaging.md OPEN**. **Latent bug closed:** the infra overlay

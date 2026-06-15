@@ -234,6 +234,10 @@ models:
   Integrity is `go.sum` + the public checksum DB (pinning, served through the same shim
   path) plus the `qa` gate's post-fetch `govulncheck`/license scan, so the public proxy is
   the deliberate default and a private vetted mirror is an optional `package_proxy` swap.
+  Allowlisting `package-proxy` also grants the **gate verification sandbox** the same egress
+  (T5.6a), so a candidate that adds a brand-new dependency can be re-gated against the
+  identical pinned bytes; the verifier is otherwise deny-all. Omitting it keeps both the
+  agent sandbox and the verifier on the baked module cache only.
   See [security.md](../specs/security.md) Control 2.
 - **`sandbox.profiles`** resolves the logical profile a soul names (`sandbox: go-toolchain`)
   to the concrete artifact this backend boots — an `image` for docker/gvisor, a `rootfs`

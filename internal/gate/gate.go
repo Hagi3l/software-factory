@@ -22,6 +22,7 @@ import (
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/harness/internal/packageproxy"
 	"github.com/Loxstomper/harness/internal/sandbox"
 	"github.com/Loxstomper/harness/internal/telemetry"
 )
@@ -237,6 +238,29 @@ type Runner struct {
 	socketDir string
 	log       *slog.Logger
 	tel       *telemetry.Provider
+
+	// packageProxy, when set, gives the verification sandbox a package-proxy egress so a
+	// candidate that adds a brand-new dependency can be re-gated (T5.6a). Empty keeps the
+	// verifier deny-all (the default — see provisionVerifier). It is the same base URL the
+	// runner's relay forwards to (config.BrokerConfig.PackageProxyURL); cmd/harness sets it
+	// only when the operator has allowlisted package-proxy, so enabling the producer's
+	// dependency fetch enables the verifier's by the same opt-in.
+	packageProxy string
+}
+
+// Option configures a gate Runner. Functional options keep New's positional collaborators
+// stable while letting later capabilities (the verifier's package egress, T5.6a) be added
+// without churning every call site.
+type Option func(*Runner)
+
+// WithPackageProxy grants the verification sandbox a package-proxy egress forwarding to
+// base (the runner's package proxy, proxy.golang.org by default), so a candidate adding a
+// new dependency can be re-gated. An empty base is a no-op (verifier stays deny-all), so
+// callers may pass it unconditionally. This widens the verifier's *reach* but not what it
+// *trusts*: go.sum pins the exact bytes the producer fetched (see specs/verification.md,
+// specs/security.md).
+func WithPackageProxy(base string) Option {
+	return func(r *Runner) { r.packageProxy = base }
 }
 
 // New builds a gate Runner over a sandbox backend and the check registry that resolves
@@ -247,14 +271,18 @@ type Runner struct {
 // verification sandbox still needs a broker endpoint to provision, but it is a deny-all
 // one — see Run). A nil logger discards; a nil telemetry Provider defaults to Noop, so the
 // gate-run span and metric are emitted unconditionally with no overhead when export is off.
-func New(backend sandbox.Backend, registry Registry, store artifact.Store, socketDir string, log *slog.Logger, tel *telemetry.Provider) *Runner {
+func New(backend sandbox.Backend, registry Registry, store artifact.Store, socketDir string, log *slog.Logger, tel *telemetry.Provider, opts ...Option) *Runner {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(io.Discard, nil))
 	}
 	if tel == nil {
 		tel = telemetry.Noop()
 	}
-	return &Runner{backend: backend, registry: registry, store: store, socketDir: socketDir, log: log, tel: tel}
+	r := &Runner{backend: backend, registry: registry, store: store, socketDir: socketDir, log: log, tel: tel}
+	for _, o := range opts {
+		o(r)
+	}
+	return r
 }
 
 // Run provisions a fresh verification sandbox seeded with the candidate branch, runs
@@ -514,11 +542,15 @@ func (r *Runner) logFailure(ref string, check Check, cr CheckResult) {
 }
 
 // provisionVerifier provisions one fresh verification sandbox seeded at ref, behind its
-// own deny-all broker (the verifier must reach nothing — no model calls, git push, or
-// events; the socket exists only because Provision requires a broker endpoint, and
-// serving deny-all is how "the verifier has zero I/O" is enforced by construction). It
-// returns the live sandbox and a cleanup that stops the broker and tears the sandbox
-// down; the caller MUST defer the cleanup, since the backend holds host resources.
+// own broker. By default the broker is deny-all (the verifier must reach nothing — no
+// model calls, git push, or events; the socket exists only because Provision requires a
+// broker endpoint, and serving deny-all is how "the verifier has zero I/O" is enforced by
+// construction). When a package proxy is configured (WithPackageProxy, T5.6a) the broker
+// instead serves a fetch-only handler that permits exactly the package-proxy egress — so a
+// candidate that adds a brand-new dependency can be re-gated against the same proxy the
+// producer fetched from — and still denies everything else. It returns the live sandbox and
+// a cleanup that stops the broker and tears the sandbox down; the caller MUST defer the
+// cleanup, since the backend holds host resources.
 func (r *Runner) provisionVerifier(ctx context.Context, c Candidate, ref string) (sandbox.Sandbox, func(), error) {
 	id, err := gateID()
 	if err != nil {
@@ -541,7 +573,7 @@ func (r *Runner) provisionVerifier(ctx context.Context, c Candidate, ref string)
 		_ = ln.Close() // unlinks the socket we just bound
 		return nil, nil, fmt.Errorf("gate: provision verification sandbox: %w", err)
 	}
-	srv := broker.NewServer(denyHandler{}, broker.WithAllowlist(nil))
+	srv := r.verifierBroker()
 	brokerCtx, stopBroker := context.WithCancel(ctx)
 	go func() {
 		if err := srv.Serve(brokerCtx, ln); err != nil {
@@ -759,11 +791,76 @@ func (denyHandler) PublishEvent(context.Context, broker.PublishRequest) error {
 	return fmt.Errorf("gate: verification sandbox has no broker egress")
 }
 
-// FetchPackage is denied: the gate verifier currently builds the candidate against the
-// baked module cache only. A candidate that adds a brand-new dependency therefore cannot
-// yet be re-gated (the agent's own sandbox can fetch it via the broker, but the verifier's
-// is deny-all) — giving the verifier its own package-proxy egress is a filed follow-up to
-// T5.6 (it touches the producer != verifier boundary, though go.sum pins integrity).
+// FetchPackage is denied with the rest: the deny-all verifier builds the candidate against
+// the baked module cache only. A deployment that allowlists package-proxy gets the
+// fetch-only verifier instead (verifierBroker / fetchOnlyHandler, T5.6a), so a brand-new
+// dependency can be re-gated.
 func (denyHandler) FetchPackage(context.Context, broker.FetchPackageRequest) (broker.FetchPackageResult, error) {
 	return broker.FetchPackageResult{}, fmt.Errorf("gate: verification sandbox has no broker egress")
+}
+
+// verifierBroker builds the broker the verification sandbox serves. Deny-all by default;
+// when a package proxy is configured it serves a fetch-only handler with package-proxy the
+// only allowlisted destination, so the verifier can pull a candidate's new dependency to
+// re-gate it (T5.6a) and nothing else. The allowlist gate in the broker server rejects the
+// other three methods before they reach the handler — the handler's denials are defense in
+// depth, matching denyHandler.
+func (r *Runner) verifierBroker() *broker.Server {
+	if r.packageProxy == "" {
+		return broker.NewServer(denyHandler{}, broker.WithAllowlist(nil))
+	}
+	h := fetchOnlyHandler{
+		fetcher: packageproxy.NewFetcher(r.packageProxy, nil),
+		tel:     r.tel,
+		log:     r.log,
+	}
+	return broker.NewServer(h, broker.WithAllowlist([]string{config.DestPackageProxy}))
+}
+
+// fetchOnlyHandler is the verification sandbox's broker handler when a package proxy is
+// configured (T5.6a): it permits exactly the package-proxy egress and denies model calls,
+// git push, and event publish — which a verifier must never make (producer != verifier; the
+// gate reaches nothing else by construction). Re-gating a new-dependency candidate widens the
+// verifier's *reach*, not what it *trusts*: go.sum pins the exact bytes the producer fetched.
+// It shares internal/packageproxy with the runner relay so the producer's fetch and the
+// verifier's can never drift; the fetch is wrapped in a tool-call span so the egress shows up
+// under the gate-run trace.
+type fetchOnlyHandler struct {
+	fetcher *packageproxy.Fetcher
+	tel     *telemetry.Provider
+	log     *slog.Logger
+}
+
+var _ broker.Handler = fetchOnlyHandler{}
+
+func (fetchOnlyHandler) Complete(context.Context, model.Request) (model.Response, error) {
+	return model.Response{}, fmt.Errorf("gate: verification sandbox may only fetch packages")
+}
+
+func (fetchOnlyHandler) GitPush(context.Context, broker.GitPushRequest) (broker.GitPushResult, error) {
+	return broker.GitPushResult{}, fmt.Errorf("gate: verification sandbox may only fetch packages")
+}
+
+func (fetchOnlyHandler) PublishEvent(context.Context, broker.PublishRequest) error {
+	return fmt.Errorf("gate: verification sandbox may only fetch packages")
+}
+
+func (h fetchOnlyHandler) FetchPackage(ctx context.Context, req broker.FetchPackageRequest) (broker.FetchPackageResult, error) {
+	// The broker serves on a context descending from the gate-run span (Run → provisionVerifier
+	// → Serve), so the tool-call span nests under that trace without re-parenting.
+	_, span := h.tel.Tracer().Start(ctx, telemetry.SpanToolCall, trace.WithAttributes(
+		attribute.String(telemetry.AttrComponent, telemetry.ComponentBroker),
+		attribute.String(telemetry.AttrToolName, telemetry.ToolPackageFetch),
+	))
+	defer span.End()
+
+	res, err := h.fetcher.Fetch(ctx, req)
+	if err != nil {
+		span.RecordError(err)
+		h.log.Error("gate: package fetch failed", "path", req.Path, "err", err)
+		return broker.FetchPackageResult{}, err
+	}
+	span.SetAttributes(attribute.Int(telemetry.AttrHTTPStatus, res.Status))
+	h.log.Info("gate: package fetch", "path", req.Path, "status", res.Status, "bytes", len(res.Body))
+	return res, nil
 }

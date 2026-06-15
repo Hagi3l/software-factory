@@ -442,7 +442,14 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// commands run — the checks are data, not code. It shares the same artifact store as
 	// the runner: each check's stdout/stderr is harvested there before teardown so the
 	// provenance trailer can cite the evidence by hash.
-	gateRunner := gate.New(backend, gate.Registry(cfg.Harness.Checks), store, sockDir, log, tel)
+	// When the operator has allowlisted package-proxy, the verification sandbox gets the
+	// same egress (T5.6a) so a candidate that adds a brand-new dependency can be re-gated —
+	// the producer and verifier share the one opt-in. Without it the verifier stays deny-all.
+	var gateOpts []gate.Option
+	if cfg.Infra.Broker.PackageProxyAllowed() {
+		gateOpts = append(gateOpts, gate.WithPackageProxy(cfg.Infra.Broker.PackageProxyURL()))
+	}
+	gateRunner := gate.New(backend, gate.Registry(cfg.Harness.Checks), store, sockDir, log, tel, gateOpts...)
 
 	orch, err := orchestrator.New(orchestrator.Options{
 		Config:    cfg,
