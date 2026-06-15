@@ -22,6 +22,14 @@ const (
 	MethodGitPush Method = "git.push"
 	// MethodPublishEvent emits a best-effort progress/log event. Destination: NATS.
 	MethodPublishEvent Method = "event.publish"
+	// MethodFetchPackage proxies one Go module-proxy GET to the package proxy on the
+	// broker allowlist (public proxy.golang.org by default). Destination: package-proxy.
+	// It is how a zero-network sandbox fetches a dependency it does not already have
+	// cached — every pull mediated and logged at the runner, the one egress chokepoint
+	// (see specs/security.md Control 2, specs/components/runner.md). The agent never
+	// speaks this directly: the in-sandbox GOPROXY shim (internal/goproxy) forwards `go`'s
+	// module-proxy requests over it.
+	MethodFetchPackage Method = "package.fetch"
 )
 
 // destination is the egress allowlist token a method maps to. The tokens match the
@@ -36,6 +44,8 @@ func (m Method) destination() string {
 		return "git"
 	case MethodPublishEvent:
 		return "nats"
+	case MethodFetchPackage:
+		return "package-proxy"
 	default:
 		return ""
 	}
@@ -97,6 +107,27 @@ type GitPushResult struct {
 type PublishRequest struct {
 	Type    string          `json:"type"`              // event kind, e.g. "progress" | "log"
 	Payload json.RawMessage `json:"payload,omitempty"` // event body, opaque to the broker
+}
+
+// FetchPackageRequest is one Go module-proxy GET, forwarded verbatim by the in-sandbox
+// GOPROXY shim (internal/goproxy). Path is the request path the `go` client asked for,
+// e.g. "/github.com/pkg/errors/@v/list", "/github.com/pkg/errors/@v/v0.9.1.zip", or a
+// "/sumdb/sum.golang.org/lookup/..." checksum-DB query: the runner prepends the configured
+// proxy base and performs the fetch. Only the path crosses the boundary — the sandbox never
+// learns the proxy URL, consistent with the broker hiding every destination from the agent.
+type FetchPackageRequest struct {
+	Path string `json:"path"`
+}
+
+// FetchPackageResult is the proxied response. Status is the upstream HTTP status echoed
+// back so the `go` client sees a real 200/404/410 (go treats 404/410 as "not found, try
+// the next proxy" and any other non-2xx as a hard error). Body is the response bytes
+// (base64 over JSON); ContentType is echoed so go parses the payload correctly. The body is
+// bounded by the runner (see maxPackageBytes in the relay) so it fits one broker frame.
+type FetchPackageResult struct {
+	Status      int    `json:"status"`
+	ContentType string `json:"content_type,omitempty"`
+	Body        []byte `json:"body,omitempty"`
 }
 
 // maxFrameSize caps a single length-prefixed frame. The server reads frames from the

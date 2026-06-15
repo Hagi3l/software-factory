@@ -33,7 +33,14 @@ nats:
   # consume + replay (the work/dlq/approvals streams are deliberately unbounded).
   jetstream: { replicas: 1, max_age: 168h }
 broker:
-  allowlist: [llm-api, nats, git]
+  # The egress allowlist: the only destinations the runner brokers for the zero-network
+  # sandbox (deny-by-default). package-proxy permits Go module fetches — routed through the
+  # in-sandbox GOPROXY shim to the runner, which fetches from package_proxy and logs every
+  # pull (T5.6). Supply-chain integrity is go.sum + the public checksum DB (pinning), broker
+  # logging, and the qa gate's post-fetch govulncheck/license scan — so the public proxy is
+  # the deliberate default, not a private vetted mirror (an optional swap). See specs/security.md.
+  allowlist: [llm-api, nats, git, package-proxy]
+  package_proxy: https://proxy.golang.org
 artifacts:
   backend: files
   path: ./.harness/artifacts

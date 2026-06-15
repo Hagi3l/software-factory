@@ -122,4 +122,20 @@ read-only views; the live feed (`/events`) returns 503 and data-backed views sho
 | `--addr HOST:PORT` | `127.0.0.1:8080` | address to listen on |
 
 See [the control room](control-room.md) for the views.
+
+## `harness sandbox-goproxy` (internal)
+
+Not run by operators — the `go-toolchain` sandbox image's entrypoint starts it inside the
+sandbox. It is the in-sandbox GOPROXY shim (T5.6): an HTTP server `go`'s `GOPROXY` points
+at, which forwards each module-proxy request over the bind-mounted broker socket to the
+runner. The runner fetches from the configured `broker.package_proxy` and logs the pull —
+so a zero-network sandbox can fetch a dependency it doesn't already have cached, mediated at
+the one egress chokepoint (or denied, if `package-proxy` isn't allowlisted). It holds no
+policy; the allowlist and proxy base live on the runner. See [configuration.md](configuration.md)
+(`broker`) and [security.md](../specs/security.md) Control 2.
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--broker NET:ADDR` | `unix:/run/harness/broker.sock` | runner broker endpoint (`unix:<path>` or `vsock:<cid>:<port>`) |
+| `--addr HOST:PORT` | `127.0.0.1:8123` | loopback address to serve the GOPROXY on |
 </content>

@@ -16,7 +16,7 @@ import (
 
 // allDestinations is the egress set an operator typically configures; tests that want
 // the gate to pass use it so they exercise the handler path, not the deny path.
-var allDestinations = []string{"llm-api", "git", "nats"}
+var allDestinations = []string{"llm-api", "git", "nats", "package-proxy"}
 
 // fakeHandler records what it was called with and returns canned responses/errors. It
 // stands in for the runner's real relay (plan T1.12) so the protocol and the
@@ -32,6 +32,10 @@ type fakeHandler struct {
 
 	gotEvent PublishRequest
 	eventErr error
+
+	gotFetch  FetchPackageRequest
+	fetchResp FetchPackageResult
+	fetchErr  error
 }
 
 func (f *fakeHandler) Complete(_ context.Context, req model.Request) (model.Response, error) {
@@ -47,6 +51,11 @@ func (f *fakeHandler) GitPush(_ context.Context, req GitPushRequest) (GitPushRes
 func (f *fakeHandler) PublishEvent(_ context.Context, ev PublishRequest) error {
 	f.gotEvent = ev
 	return f.eventErr
+}
+
+func (f *fakeHandler) FetchPackage(_ context.Context, req FetchPackageRequest) (FetchPackageResult, error) {
+	f.gotFetch = req
+	return f.fetchResp, f.fetchErr
 }
 
 // pipeClient returns a Client wired to srv over a fresh in-memory pipe per call, so a
@@ -121,6 +130,31 @@ func TestPublishEventRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFetchPackageRoundTrip(t *testing.T) {
+	h := &fakeHandler{fetchResp: FetchPackageResult{Status: 200, ContentType: "text/plain", Body: []byte("v1.0.0\n")}}
+	c := pipeClient(NewServer(h, WithAllowlist(allDestinations)))
+
+	got, err := c.FetchPackage(context.Background(), FetchPackageRequest{Path: "/github.com/pkg/errors/@v/list"})
+	if err != nil {
+		t.Fatalf("FetchPackage: %v", err)
+	}
+	if got.Status != 200 || got.ContentType != "text/plain" || string(got.Body) != "v1.0.0\n" {
+		t.Errorf("result = %+v, want status=200 text/plain body=%q", got, "v1.0.0\n")
+	}
+	if h.gotFetch.Path != "/github.com/pkg/errors/@v/list" {
+		t.Errorf("handler got path %q, want the request path unchanged", h.gotFetch.Path)
+	}
+}
+
+func TestFetchPackageDeniedWhenNotAllowlisted(t *testing.T) {
+	// Allow git but not package-proxy: a package fetch is denied even though the method is known.
+	s := NewServer(&fakeHandler{}, WithAllowlist([]string{"git"}))
+	resp := s.dispatch(context.Background(), Request{Method: MethodFetchPackage, Params: json.RawMessage(`{"path":"/x/@v/list"}`)})
+	if resp.Error == nil || resp.Error.Code != CodeDenied {
+		t.Fatalf("resp = %+v, want CodeDenied", resp.Error)
+	}
+}
+
 func TestHandlerErrorPropagates(t *testing.T) {
 	h := &fakeHandler{completeErr: errors.New("model API 503")}
 	c := pipeClient(NewServer(h, WithAllowlist(allDestinations)))
@@ -158,7 +192,7 @@ func TestDispatchDeniesDestinationNotInAllowlist(t *testing.T) {
 func TestDefaultServerDeniesEverything(t *testing.T) {
 	// No WithAllowlist -> deny-by-default: every destination is rejected.
 	s := NewServer(&fakeHandler{})
-	for _, m := range []Method{MethodCompletion, MethodGitPush, MethodPublishEvent} {
+	for _, m := range []Method{MethodCompletion, MethodGitPush, MethodPublishEvent, MethodFetchPackage} {
 		resp := s.dispatch(context.Background(), Request{Method: m, Params: json.RawMessage(`{}`)})
 		if resp.Error == nil || resp.Error.Code != CodeDenied {
 			t.Errorf("method %q: resp = %+v, want CodeDenied", m, resp.Error)

@@ -25,6 +25,7 @@ type Handler interface {
 	Complete(ctx context.Context, req model.Request) (model.Response, error)
 	GitPush(ctx context.Context, req GitPushRequest) (GitPushResult, error)
 	PublishEvent(ctx context.Context, ev PublishRequest) error
+	FetchPackage(ctx context.Context, req FetchPackageRequest) (FetchPackageResult, error)
 }
 
 // Server is the runner side of the broker: it accepts connections from the sandbox,
@@ -163,6 +164,17 @@ func (s *Server) dispatch(ctx context.Context, req Request) Response {
 			return errorResponse(CodeHandlerError, err.Error())
 		}
 		return Response{} // fire-and-forget: ack with an empty body
+
+	case MethodFetchPackage:
+		var fr FetchPackageRequest
+		if err := json.Unmarshal(req.Params, &fr); err != nil {
+			return errorResponse(CodeBadRequest, fmt.Sprintf("package fetch params: %v", err))
+		}
+		res, err := s.handler.FetchPackage(ctx, fr)
+		if err != nil {
+			return errorResponse(CodeHandlerError, err.Error())
+		}
+		return resultResponse(res)
 	}
 
 	// Unreachable: every method with a non-empty destination is handled above.

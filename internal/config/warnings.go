@@ -24,6 +24,7 @@ func (c *Config) Warnings() []string {
 	}
 
 	c.warnModelDiversity(warn)
+	c.warnPackageProxy(warn)
 
 	if len(warnings) == 0 {
 		return nil
@@ -38,6 +39,23 @@ func (c *Config) Warnings() []string {
 		}
 	}
 	return uniq
+}
+
+// warnPackageProxy advises when broker.package_proxy is configured but the package-proxy
+// egress destination is not in the allowlist: the proxy URL is then dead config — the
+// broker denies every package fetch deny-by-default, so a sandbox that needs a new
+// dependency fails even though a proxy was named. It is advisory, not fatal: a deployment
+// might intentionally keep package fetch off (relying solely on the baked module cache)
+// while leaving the proxy URL in place for a later flip. See specs/security.md Control 2.
+func (c *Config) warnPackageProxy(warn func(string, ...any)) {
+	if c.Infra == nil {
+		return
+	}
+	b := c.Infra.Broker
+	if b.PackageProxy != "" && !b.PackageProxyAllowed() {
+		warn("broker.package_proxy is set to %q but %q is not in broker.allowlist, so package fetches are denied (deny-by-default); add %q to the allowlist to enable dependency fetching, or drop package_proxy",
+			b.PackageProxy, DestPackageProxy, DestPackageProxy)
+	}
 }
 
 // warnModelDiversity advises when a verifier role shares a model provider — the family

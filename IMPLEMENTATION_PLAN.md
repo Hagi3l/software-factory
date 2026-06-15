@@ -1218,7 +1218,9 @@ them); only the *order of attention* changes.
   dependency licences) rather than failing on the internal module. Specs/docs updated: sandbox.md
   ("Per-language language server" gets the concrete manifest convention; the OPEN narrows from "build &
   publish" to **publish & digest-pinning** — composition is now defined, only registry push + `@sha256`
-  pinning remains, which needs registry infra dev lacks), `config/harness.yaml` offline note,
+  pinning remains. **Decided (2026-06-15): the default publish target is a public registry
+  (`ghcr.io`/Docker Hub), digest-pinned — the `@sha256:` digest is content-addressed so a public host
+  weakens nothing, and it removes the private-infra blocker; a private registry stays an optional swap.**), `config/harness.yaml` offline note,
   `docs/getting-started.md` troubleshooting, Makefile qa-gate comments. No image rebuild needed for the
   Makefile/manifest-consumer changes (the Makefile travels in the seeded worktree). The e2e Docker test
   (`HARNESS_E2E_IMAGE`/`go-toolchain` tag) is unaffected. `go vet`/`golangci-lint` clean on the new
@@ -1266,7 +1268,50 @@ them); only the *order of attention* changes.
   half (seed correct ownership) lands with **T5.2** (hardware-blocked). No CLI/config/route/view change ⇒ no
   `docs/` change. ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T5.5** *(optional)* gVisor backend (medium-trust). ([components/sandbox.md](specs/components/sandbox.md))
-- [ ] **T5.6 Vetted package mirror/proxy** — route package fetches through a pinning/scanning/logging proxy on the broker allowlist; a read-through cache amortizes downloads without weakening egress control. ([security.md](specs/security.md), [components/runner.md](specs/components/runner.md))
+- [x] **T5.6 Package proxy on the broker allowlist** — *done.* Package fetch is now a brokered, allowlisted,
+  logged egress for the **agent/implementor sandbox**, so a zero-network sandbox can pull a dependency it does
+  not already have cached without ever leaving the one audited chokepoint. **Decided (2026-06-15): the default
+  proxy is the public `proxy.golang.org`** (pinning by `go.sum` + the public checksum DB, logging at the broker,
+  post-fetch `govulncheck`/license scanning at the `qa` gate already cover what a private mirror would add — a
+  vetted block-before-fetch mirror stays an optional `broker.package_proxy` swap). **Mechanism (the piece the
+  zero-network model makes non-trivial):** the agent loop runs host-side and `go build`/`go test` run *inside*
+  the container, which has only loopback + the bind-mounted broker socket — and `go`'s `GOPROXY` speaks HTTP,
+  not the broker's framed RPC, and can't dial a unix socket. So the toolchain image runs an **in-sandbox GOPROXY
+  shim** (`harness sandbox-goproxy`, new `internal/goproxy` + cmd) bound to `127.0.0.1:8123` that forwards each
+  module-proxy request (path-agnostic, so `/sumdb/...` checksum-DB lookups flow through too, preserving pinning)
+  over the broker to the runner. **Broker:** new `MethodFetchPackage` (`package.fetch`) → destination
+  `package-proxy`, `FetchPackageRequest{Path}`/`FetchPackageResult{Status,ContentType,Body}`, server dispatch +
+  client method, all gated by the existing deny-by-default allowlist. **Relay (`FetchPackage`):** validates the
+  untrusted path (absolute, no scheme/`..`/control chars), URL-joins it onto the configured base (confined to
+  the proxy host by construction), does the real logged HTTPS GET, body-capped at `maxPackageBytes` (32 MiB) so
+  it fits one 64 MiB broker frame — a larger module fails loudly (the protocol is one-shot, not streamed; a
+  documented limit). A `tool-call` span + `AttrHTTPStatus` make the egress observable like git-push. **Config:**
+  `BrokerConfig.PackageProxy` + `PackageProxyURL()` (default resolution) + `PackageProxyAllowed()` + `DestPackageProxy`
+  const; `validateBroker` rejects a malformed proxy URL at the startup gate; a non-fatal `Warnings()` advisory
+  fires when `package_proxy` is set but `package-proxy` is not allowlisted (dead config). **Wiring:**
+  `runner.Options.PackageProxy` threaded from `cfg.Infra.Broker.PackageProxyURL()`. **Image:** a builder stage
+  bakes the `harness` binary in; `deploy/harness-sandbox-init.sh` is the entrypoint that starts the shim then
+  `exec "$@"` (the runner's `sleep` keep-alive stays PID 1 — no backend change); `GOPROXY` flips from `off` to
+  the shim. **Safe everywhere by deny-by-default:** a cached-only build never contacts the shim, so the image is
+  identical whether or not a deployment allowlists package fetch (the gate's verifier and any unconfigured run
+  behave exactly as before — a new dep is simply denied). Shipped `config/infra.dev.yaml` allowlists
+  `package-proxy` + sets the default proxy. **Verified:** host-side logic fully unit-tested (broker round-trip +
+  deny, relay proxy/status-echo/no-proxy/path-rejection via httptest, `internal/goproxy` handler forward/query/
+  405/502, config URL validation + warning + defaults, `parseBrokerEndpoint`); `go build`/`vet`/`golangci-lint`
+  clean (0 issues); the **builder stage + `sandbox-goproxy` subcommand built and run in a real linux container**
+  (`docker build --target harness-build` → `harness sandbox-goproxy -h`). The full go-fetch-through-container is
+  **offline-unverifiable here** (no real network in the zero-net sandbox), as expected. **Filed follow-up (gate
+  egress) → T5.6a:** the gate *verifier* sandbox is still deny-all, so a candidate that adds a **brand-new**
+  dependency fetches+builds in the agent's sandbox but **cannot yet be re-gated** (the verifier can't fetch it).
+  ([security.md](specs/security.md), [components/runner.md](specs/components/runner.md), [components/sandbox.md](specs/components/sandbox.md))
+- [ ] **T5.6a Gate-verifier package egress** — give the gate's verification sandbox a `package-proxy` egress so a
+  candidate that adds a brand-new dependency can be re-gated (today the verifier is deny-all and builds only
+  against the baked module cache, so a new-dep candidate fails re-gating even though the agent's own sandbox
+  fetched it fine — T5.6). Scope: extract the relay's host-side fetch into a shared fetcher both the runner relay
+  and the gate use, replace the gate's `denyHandler` with a fetch-only handler, and allowlist `package-proxy` in
+  `gate.provisionVerifier` (a `gate.New` option threading the proxy URL). Integrity is unchanged (`go.sum` pins
+  the exact bytes the producer used), but it widens the verifier's trust boundary, so note it in
+  verification.md/security.md. ([verification.md](specs/verification.md), [components/runner.md](specs/components/runner.md))
 - [ ] **T5.7 Scoped short-lived secret minting** — the runner mints a per-task git token scoped to push *only* the task branch, injected for the invocation lifetime and dying with the sandbox (replaces the bootstrap local-repo push). ([components/runner.md](specs/components/runner.md), [security.md](specs/security.md))
 - [x] **T5.8 Distributed NATS** — *done.* The code seam for an external NATS cluster, plus the concrete
   JetStream stream definitions that were the **messaging.md OPEN**. **Latent bug closed:** the infra overlay

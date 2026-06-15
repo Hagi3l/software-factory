@@ -60,7 +60,7 @@ Consequences that ripple through every other spec:
 
 - An untrusted agent has **zero direct network**. Its only channel is a local
   socket to its runner, which brokers a small allowlist of destinations (LLM API,
-  NATS, vetted package mirror, git). One chokepoint to audit. See
+  NATS, package proxy, git). One chokepoint to audit. See
   [security.md](security.md).
 - An untrusted agent **cannot write beads**. It *proposes* changes; the
   orchestrator validates and writes them. See "single writer" below.

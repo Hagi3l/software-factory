@@ -192,7 +192,8 @@ nats:
   url: ""                    # "" = embedded in-process server (dev); set = external cluster (T5.8)
   jetstream: { replicas: 1, max_age: 168h }   # replicas: per-stream replication; max_age: result retention
 broker:
-  allowlist: [llm-api, nats, git]   # the only egress the sandbox is granted
+  allowlist: [llm-api, nats, git, package-proxy]   # the only egress the sandbox is granted
+  package_proxy: https://proxy.golang.org           # Go module proxy fetches route to (default)
 artifacts:
   backend: files             # files (single-host dev) | s3 (distributed: S3/MinIO)
   path: ./.harness/artifacts # files backend root (relative paths resolve against the repo)
@@ -223,6 +224,17 @@ models:
 - **`sandbox.backend`** is `docker` in the bootstrap (a stand-in for Firecracker) and
   the sandbox is `broker-only`: zero direct network, every call mediated by the broker
   against the `allowlist`.
+- **`broker.allowlist`** is the deny-by-default egress set (a destination not listed is
+  refused at the broker). `package-proxy` permits Go module fetches: the zero-network
+  sandbox can't reach a proxy directly, so the image runs an in-sandbox GOPROXY shim
+  (`harness sandbox-goproxy`) that forwards `go`'s module-proxy requests over the broker to
+  the runner, which fetches from **`broker.package_proxy`** (default the public
+  `proxy.golang.org`) and logs every pull (T5.6). Omit `package-proxy` and dependency
+  fetches are denied — a build then resolves only from the image's baked module cache.
+  Integrity is `go.sum` + the public checksum DB (pinning, served through the same shim
+  path) plus the `qa` gate's post-fetch `govulncheck`/license scan, so the public proxy is
+  the deliberate default and a private vetted mirror is an optional `package_proxy` swap.
+  See [security.md](../specs/security.md) Control 2.
 - **`sandbox.profiles`** resolves the logical profile a soul names (`sandbox: go-toolchain`)
   to the concrete artifact this backend boots — an `image` for docker/gvisor, a `rootfs`
   for firecracker. The soul stays env-agnostic; dev points the name at a local tag, prod

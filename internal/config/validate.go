@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -98,6 +99,7 @@ func (c *Config) Validate() error {
 		c.validateOTel(add)
 		c.validateArtifacts(add)
 		c.validateSigning(add)
+		c.validateBroker(add)
 	}
 
 	if len(problems) == 0 {
@@ -699,6 +701,25 @@ func (c *Config) validateSigning(add func(string, ...any)) {
 	s := c.Infra.Signing
 	if s.Enabled && strings.TrimSpace(s.Key) == "" {
 		add("signing.enabled is true but signing.key (the SSH private signing key path) is empty")
+	}
+}
+
+// validateBroker checks the broker egress block (T5.6). Only the run-time-breaking fault
+// is gated here: a package_proxy URL that is set but malformed would make every dependency
+// fetch fail at the gate/agent with an opaque dial error, so a typo must fail loud at the
+// startup gate instead. The allowlist contents are otherwise free-form tokens the broker
+// matches by string (deny-by-default), so an unknown one simply never matches — not a
+// fault. Whether package_proxy is set without the package-proxy destination allowlisted (so
+// the proxy is configured but fetches are still denied) is an advisory, not fatal — see
+// Warnings. See specs/components/runner.md, specs/security.md.
+func (c *Config) validateBroker(add func(string, ...any)) {
+	proxy := c.Infra.Broker.PackageProxy
+	if proxy == "" {
+		return
+	}
+	u, err := url.Parse(proxy)
+	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+		add("broker.package_proxy %q must be an http(s) URL with a host (e.g. %s)", proxy, defaultPackageProxy)
 	}
 }
 

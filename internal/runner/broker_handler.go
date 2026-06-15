@@ -4,7 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
+	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strings"
@@ -48,6 +51,16 @@ type relay struct {
 	repo          string // source repository the candidate branch is pushed into
 	allowedBranch string // the ONLY branch this invocation may push (task branch only)
 
+	// packageProxy is the base URL of the package proxy this invocation's FetchPackage
+	// calls are forwarded to (config.BrokerConfig.PackageProxyURL — proxy.golang.org by
+	// default). Empty disables package fetch even if package-proxy is allowlisted (a
+	// fetch then errors rather than dialing nothing). The runner host has network; the
+	// sandbox does not, so this egress happens here, the audited chokepoint.
+	packageProxy string
+	// httpClient performs the package-proxy egress. A seam so FetchPackage is unit-testable
+	// against an httptest server; defaulted to a bounded client in newRelay.
+	httpClient *http.Client
+
 	// pushBundle applies a git bundle (the candidate branch, extracted from the
 	// sandbox) into the source repo on the runner host and returns the pushed head.
 	// A seam so the relay's orchestration is unit-testable without real git; the
@@ -70,6 +83,8 @@ type relayConfig struct {
 	role          string
 	repo          string
 	allowedBranch string
+	packageProxy  string
+	httpClient    *http.Client
 	log           *slog.Logger
 	tel           *telemetry.Provider
 	model         string
@@ -80,6 +95,13 @@ func newRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox, cfg rela
 	tel := cfg.tel
 	if tel == nil {
 		tel = telemetry.Noop()
+	}
+	hc := cfg.httpClient
+	if hc == nil {
+		// A bounded client for the package-proxy egress: a fetch must not hang an invocation
+		// (the wall budget is the backstop, but a per-request ceiling fails faster and frees
+		// the broker connection). proxy.golang.org module zips are the largest payload.
+		hc = &http.Client{Timeout: packageFetchTimeout}
 	}
 	return &relay{
 		adapter:       adapter,
@@ -94,6 +116,8 @@ func newRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox, cfg rela
 		role:          cfg.role,
 		repo:          cfg.repo,
 		allowedBranch: cfg.allowedBranch,
+		packageProxy:  cfg.packageProxy,
+		httpClient:    hc,
 		pushBundle:    pushBundleToRepo,
 	}
 }
@@ -255,6 +279,128 @@ func (r *relay) GitPush(ctx context.Context, req broker.GitPushRequest) (broker.
 	span.SetAttributes(attribute.String(telemetry.AttrGitCommit, commit))
 	r.log.Info("broker: git push", "branch", req.Branch, "commit", commit)
 	return broker.GitPushResult{Commit: commit}, nil
+}
+
+// packageFetchTimeout bounds one package-proxy egress round-trip; packageFetchTimeout and
+// maxPackageBytes together keep a single fetch from hanging or overflowing one broker frame.
+const packageFetchTimeout = 60 * time.Second
+
+// maxPackageBytes caps the proxied body. The broker frames a whole response as one
+// length-prefixed message capped at maxFrameSize (64 MiB), and base64 over JSON inflates
+// the body ~1.33x, so the raw body must stay well under that. 32 MiB covers the vast
+// majority of module zips; a larger module fails the fetch loudly rather than overflowing
+// the frame (documented limitation — the broker protocol is one-shot, not streamed).
+const maxPackageBytes = 32 << 20
+
+// FetchPackage proxies one Go module-proxy GET to the configured package proxy (default
+// proxy.golang.org) on behalf of the zero-network sandbox, and returns the upstream
+// status/body. This is the supply-chain chokepoint (specs/security.md Control 2): the
+// runner host holds the network, so the fetch happens here and is logged, while the agent
+// only ever sees the bytes. Integrity is not this layer's job — go.sum + the checksum DB
+// (proxied through the same path) pin every module, and the qa gate scans post-fetch.
+func (r *relay) FetchPackage(ctx context.Context, req broker.FetchPackageRequest) (broker.FetchPackageResult, error) {
+	// A package fetch is a brokered egress tool, so it gets a tool-call span like git push.
+	_, span := r.tel.Tracer().Start(r.spanParent(ctx), telemetry.SpanToolCall, trace.WithAttributes(
+		attribute.String(telemetry.AttrComponent, telemetry.ComponentBroker),
+		attribute.String(telemetry.AttrToolName, telemetry.ToolPackageFetch),
+	))
+	defer span.End()
+
+	if r.packageProxy == "" {
+		err := fmt.Errorf("package fetch: no package proxy configured")
+		span.RecordError(err)
+		return broker.FetchPackageResult{}, err
+	}
+	if err := validateModuleProxyPath(req.Path); err != nil {
+		span.RecordError(err)
+		r.log.Warn("broker: package fetch refused, malformed path", "path", req.Path, "err", err)
+		return broker.FetchPackageResult{}, err
+	}
+
+	// Confine the request to the proxy host by construction: parse the trusted base and join
+	// the untrusted (but validated) path onto it, rather than string-concatenating a URL the
+	// path could hijack with a scheme or authority.
+	base, err := url.Parse(r.packageProxy)
+	if err != nil {
+		err = fmt.Errorf("package fetch: invalid proxy base %q: %w", r.packageProxy, err)
+		span.RecordError(err)
+		return broker.FetchPackageResult{}, err
+	}
+	target := *base
+	target.Path = strings.TrimRight(base.Path, "/") + pathOnly(req.Path)
+	target.RawQuery = queryOnly(req.Path)
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, target.String(), nil)
+	if err != nil {
+		span.RecordError(err)
+		return broker.FetchPackageResult{}, fmt.Errorf("package fetch: build request: %w", err)
+	}
+	resp, err := r.httpClient.Do(httpReq)
+	if err != nil {
+		span.RecordError(err)
+		r.log.Error("broker: package fetch failed", "path", req.Path, "err", err)
+		return broker.FetchPackageResult{}, fmt.Errorf("package fetch %s: %w", req.Path, err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxPackageBytes+1))
+	if err != nil {
+		span.RecordError(err)
+		return broker.FetchPackageResult{}, fmt.Errorf("package fetch %s: read body: %w", req.Path, err)
+	}
+	if len(body) > maxPackageBytes {
+		err := fmt.Errorf("package fetch %s: response exceeds %d bytes (too large for one broker frame)", req.Path, maxPackageBytes)
+		span.RecordError(err)
+		r.log.Error("broker: package fetch too large", "path", req.Path)
+		return broker.FetchPackageResult{}, err
+	}
+
+	span.SetAttributes(attribute.Int(telemetry.AttrHTTPStatus, resp.StatusCode))
+	r.log.Info("broker: package fetch", "path", req.Path, "status", resp.StatusCode, "bytes", len(body))
+	return broker.FetchPackageResult{
+		Status:      resp.StatusCode,
+		ContentType: resp.Header.Get("Content-Type"),
+		Body:        body,
+	}, nil
+}
+
+// validateModuleProxyPath rejects a package-fetch path that is not a plain absolute request
+// path. The path comes from the untrusted sandbox; though it is confined to the proxy host
+// by URL-joining (FetchPackage), a malformed one (scheme, "..", control chars) is refused
+// here so it never reaches the egress at all — defense in depth at the chokepoint.
+func validateModuleProxyPath(p string) error {
+	if p == "" || !strings.HasPrefix(p, "/") {
+		return fmt.Errorf("package fetch: path %q must be an absolute request path", p)
+	}
+	if strings.Contains(p, "://") {
+		return fmt.Errorf("package fetch: path %q must not contain a scheme", p)
+	}
+	if strings.Contains(p, "..") {
+		return fmt.Errorf("package fetch: path %q must not contain %q", p, "..")
+	}
+	for _, c := range p {
+		if c <= ' ' || c == 0x7f {
+			return fmt.Errorf("package fetch: path %q contains a control or space character", p)
+		}
+	}
+	return nil
+}
+
+// pathOnly / queryOnly split a forwarded module-proxy path into its path and query halves.
+// The GOPROXY shim forwards `go`'s request as "<path>[?<query>]"; the sumdb tile/lookup
+// endpoints can carry a query, the module endpoints do not.
+func pathOnly(p string) string {
+	if i := strings.IndexByte(p, '?'); i >= 0 {
+		return p[:i]
+	}
+	return p
+}
+
+func queryOnly(p string) string {
+	if i := strings.IndexByte(p, '?'); i >= 0 {
+		return p[i+1:]
+	}
+	return ""
 }
 
 // PublishEvent forwards a best-effort agent progress/log event to NATS on this

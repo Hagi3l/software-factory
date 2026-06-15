@@ -8,10 +8,14 @@
 # Why each piece exists:
 #   - Go 1.26 + git + make: the toolchain the implementor agent and the gate need to
 #     build and test the harness.
-#   - The module cache is baked in (`go mod download`) and GOPROXY=off because the
-#     sandbox runs with NO network (the zero-network invariant) — `go build`/`go test`
-#     must resolve every dependency offline from this cache. A task that adds a new
-#     dependency therefore needs the image rebuilt (or a vetted mirror — T5.6).
+#   - The module cache is baked in (`go mod download`) so a build resolves cached
+#     dependencies offline. For dependencies NOT in the cache, GOPROXY points at the
+#     in-sandbox GOPROXY shim (T5.6): `harness sandbox-goproxy` is started by the
+#     entrypoint and forwards `go`'s module-proxy requests over the bind-mounted broker
+#     socket to the runner, which fetches them from the package proxy and logs them (the
+#     one egress chokepoint). A build needing only cached modules never contacts the shim;
+#     one needing a new module is mediated by the runner's allowlist (deny-by-default), so
+#     the image is identical whether or not a deployment allowlists package fetch.
 #   - A default git identity so the agent can commit its candidate branch in-sandbox.
 #
 # No `safe.directory '*'` crutch: the Docker backend now chowns the seeded worktree to
@@ -38,6 +42,17 @@
 #     launch convention, lsmanifest.ManifestPath). It is COPYd from the SAME file the
 #     Go package embeds (internal/sandbox/lsmanifest/language-servers.json), so the
 #     format the tools resolve and the file the image carries cannot drift.
+# Builder stage: compile the harness binary so the in-sandbox GOPROXY shim
+# (`harness sandbox-goproxy`, T5.6) is available inside the image. Only cmd + internal +
+# the module files are copied (not .git/docs/specs), so the build is lean and deterministic.
+FROM golang:1.26 AS harness-build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+COPY cmd ./cmd
+COPY internal ./internal
+RUN CGO_ENABLED=0 go build -trimpath -o /out/harness ./cmd/harness
+
 FROM golang:1.26
 
 RUN apt-get update \
@@ -75,7 +90,19 @@ ENV GOVULNDB=file:///opt/harness/vulndb
 RUN mkdir -p /etc/harness
 COPY internal/sandbox/lsmanifest/language-servers.json /etc/harness/language-servers.json
 
+# In-sandbox GOPROXY shim (T5.6): the harness binary + the entrypoint that starts it.
+COPY --from=harness-build /out/harness /usr/local/bin/harness
+COPY deploy/harness-sandbox-init.sh /usr/local/bin/harness-sandbox-init
+RUN chmod +x /usr/local/bin/harness-sandbox-init
+
 WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
-ENV GOPROXY=off GOFLAGS=-mod=mod
+
+# GOPROXY points at the in-sandbox shim (started by the entrypoint), GOFLAGS keeps module
+# resolution in -mod=mod. Cached deps resolve from the baked cache without contacting it; a
+# new dep is fetched through the runner's broker (mediated + logged) or denied by its
+# allowlist. GONOSUMCHECK is NOT set: go.sum + the checksum DB still pin every module — the
+# sumdb is served through the same shim path (/sumdb/...), preserving supply-chain integrity.
+ENV GOPROXY=http://127.0.0.1:8123 GOFLAGS=-mod=mod
+ENTRYPOINT ["/usr/local/bin/harness-sandbox-init"]

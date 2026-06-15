@@ -60,6 +60,16 @@ func (c *Client) PublishEvent(ctx context.Context, ev PublishRequest) error {
 	return c.roundTrip(ctx, MethodPublishEvent, ev, nil)
 }
 
+// FetchPackage proxies one Go module-proxy GET through the runner to the package proxy on
+// the broker allowlist. The runner prepends the configured proxy base to req.Path, fetches,
+// and returns the upstream status/body. Used by the in-sandbox GOPROXY shim (internal/goproxy),
+// not the agent loop directly.
+func (c *Client) FetchPackage(ctx context.Context, req FetchPackageRequest) (FetchPackageResult, error) {
+	var res FetchPackageResult
+	err := c.roundTrip(ctx, MethodFetchPackage, req, &res)
+	return res, err
+}
+
 // roundTrip performs one request/response exchange on a fresh connection: marshal the
 // params, write the request frame, read the response frame, and either return the
 // broker's Error or decode the result into out (which may be nil for ack-only calls).

@@ -13,3 +13,6 @@
 
 # Stray bare `go build ./cmd/harness` output (use make build -> /bin/)
 /harness
+
+# Local secret (OpenRouter key) — never commit
+token.txt

@@ -39,12 +39,21 @@ the runner (vsock for Firecracker, unix socket for Docker). The runner relays a
 |---------------|-------------|-------|
 | model completion | model API | runner holds the key + the [provider adapter](../models.md); agent is provider-unaware |
 | `publish` / events | NATS | agent never has NATS creds |
-| package fetch | **vetted mirror** | supply-chain control point; pin/scan/log |
+| package fetch | **package proxy** (public `proxy.golang.org` by default) | pinned by `go.sum` + checksum DB, logged at the broker, scanned post-fetch by the `qa` gate; a vetted pin/scan-at-fetch mirror is an optional swap |
 | git push | task branch only | scoped token, minted per task |
 
 Anything not on the allowlist is denied. This makes the runner the **single
 audited chokepoint** for all agent egress — the load-bearing security control of
 the whole factory. See [../security.md](../security.md).
+
+**Package fetch crosses the boundary via an in-sandbox GOPROXY shim.** A zero-network
+sandbox can't dial a proxy, and `go`'s `GOPROXY` speaks HTTP, not the broker's framed RPC —
+so the toolchain image runs a tiny loopback HTTP server (`harness sandbox-goproxy`) that
+forwards each module-proxy request over the broker to the runner, which performs the real
+fetch and logs it. The shim holds no policy: the allowlist and the proxy base live on the
+runner, so a destination the operator hasn't allowed is refused there (deny-by-default) and
+the refusal is relayed back to `go` as a failed fetch. This keeps package fetch on exactly
+the same audited path as every other egress.
 
 ## Model calls: the runner is the provider boundary
 

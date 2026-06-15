@@ -54,7 +54,7 @@ The single most important control. A sandboxed agent has **no direct network**.
 Its only channel is a local socket to its [runner](components/runner.md), which
 relays a small **allowlist** and logs every call:
 
-- LLM API · NATS · vetted package mirror · git (task branch only).
+- LLM API · NATS · package proxy (public `proxy.golang.org` by default) · git (task branch only).
 
 Everything else is denied by default. The runner is the **one audited chokepoint**
 for all agent egress. A compromised agent simply has nowhere to send data and
@@ -65,9 +65,27 @@ nothing to pull from. See [components/sandbox.md](components/sandbox.md).
 ## Control 2 — Supply-chain mediation
 
 Dependency fetches are the obvious attack on an autonomous factory. All package
-access is routed through a **vetted mirror/proxy** that pins, scans, and logs what
-is pulled. The `qa` gate additionally runs dependency/vulnerability/license scans
-(see [verification.md](verification.md)).
+access is routed through a proxy on the broker allowlist, so every pull is **mediated
+and logged** at the one chokepoint and nothing is fetched off-allowlist.
+
+The default proxy is the **public `proxy.golang.org`**, not a private vetted mirror.
+This is a deliberate simplification: the supply-chain guarantees the mirror would add
+are already covered by primitives we have, so a parallel scanning mirror is not on the
+default path.
+
+- **Pinning** — `go.sum` plus the public Go checksum database (`sum.golang.org`) pin
+  every module to exact, tamper-evident bytes; a substituted dependency fails the
+  checksum, not a mirror policy.
+- **Logging** — the proxy is on the broker allowlist, so the runner logs every fetch
+  regardless of where it resolves.
+- **Scanning** — the `qa` gate runs `govulncheck` + license-scan on every change (see
+  [verification.md](verification.md)), so vulnerable/ill-licensed dependencies are
+  caught *post-fetch at the gate* rather than pre-fetch at the proxy.
+
+A private **vetted mirror/proxy that pins, scans, and logs at fetch time** remains an
+**optional** deployment swap — point the allowlisted proxy at it — for organizations
+that want to *block* a bad dependency before it is ever pulled rather than reject it at
+the gate. It is not required for the guarantees above.
 
 ---
 

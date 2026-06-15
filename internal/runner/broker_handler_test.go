@@ -6,6 +6,8 @@ import (
 	"errors"
 	"io"
 	"log/slog"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -353,6 +355,89 @@ func TestRelayPublishEvent(t *testing.T) {
 	}
 	if got.Type != "progress" {
 		t.Errorf("event type = %q, want progress", got.Type)
+	}
+}
+
+// --- FetchPackage ------------------------------------------------------------
+
+func TestRelayFetchPackageProxiesAndLogs(t *testing.T) {
+	var gotPath string
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.WriteHeader(200)
+		_, _ = w.Write([]byte("v1.0.0\nv1.1.0\n"))
+	}))
+	defer proxy.Close()
+
+	r := newRelay(&recordingAdapter{}, &recordingPublisher{}, &bundleSandbox{}, relayConfig{
+		eventSubject: "harness.agent.inv-1.events", issueID: "iss-1", role: "implementor",
+		repo: "/repo", allowedBranch: "candidate/iss-1", log: discardLogger(),
+		packageProxy: proxy.URL,
+	})
+
+	res, err := r.FetchPackage(context.Background(), broker.FetchPackageRequest{Path: "/github.com/pkg/errors/@v/list"})
+	if err != nil {
+		t.Fatalf("FetchPackage: %v", err)
+	}
+	if gotPath != "/github.com/pkg/errors/@v/list" {
+		t.Errorf("proxy got path %q, want the request path joined onto the proxy base", gotPath)
+	}
+	if res.Status != 200 || string(res.Body) != "v1.0.0\nv1.1.0\n" {
+		t.Errorf("result = %+v, want status 200 and the proxied body", res)
+	}
+	if !strings.HasPrefix(res.ContentType, "text/plain") {
+		t.Errorf("content-type = %q, want the upstream text/plain echoed", res.ContentType)
+	}
+}
+
+func TestRelayFetchPackageForwardsUpstreamStatus(t *testing.T) {
+	// 404/410 must be echoed, not swallowed: go reads them as "not found, try the next proxy".
+	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusGone)
+	}))
+	defer proxy.Close()
+
+	r := newRelay(&recordingAdapter{}, &recordingPublisher{}, &bundleSandbox{}, relayConfig{
+		eventSubject: "e", issueID: "iss-1", role: "implementor", repo: "/repo",
+		allowedBranch: "candidate/iss-1", log: discardLogger(), packageProxy: proxy.URL,
+	})
+
+	res, err := r.FetchPackage(context.Background(), broker.FetchPackageRequest{Path: "/x/@v/v9.9.9.info"})
+	if err != nil {
+		t.Fatalf("FetchPackage: %v", err)
+	}
+	if res.Status != http.StatusGone {
+		t.Errorf("status = %d, want 410 echoed from upstream", res.Status)
+	}
+}
+
+func TestRelayFetchPackageNoProxyConfigured(t *testing.T) {
+	r := newRelay(&recordingAdapter{}, &recordingPublisher{}, &bundleSandbox{}, relayConfig{
+		eventSubject: "e", issueID: "iss-1", role: "implementor", repo: "/repo",
+		allowedBranch: "candidate/iss-1", log: discardLogger(), // packageProxy empty
+	})
+	if _, err := r.FetchPackage(context.Background(), broker.FetchPackageRequest{Path: "/x/@v/list"}); err == nil {
+		t.Fatal("FetchPackage with no proxy configured must error, got nil")
+	}
+}
+
+func TestRelayFetchPackageRejectsMalformedPath(t *testing.T) {
+	// The proxy must never be dialed for a malformed path; a hit here is a failure.
+	proxy := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Error("malformed path must be rejected before any egress")
+	}))
+	defer proxy.Close()
+
+	r := newRelay(&recordingAdapter{}, &recordingPublisher{}, &bundleSandbox{}, relayConfig{
+		eventSubject: "e", issueID: "iss-1", role: "implementor", repo: "/repo",
+		allowedBranch: "candidate/iss-1", log: discardLogger(), packageProxy: proxy.URL,
+	})
+
+	for _, bad := range []string{"", "no-leading-slash", "/has/../traversal", "https://evil.example/x", "/has space"} {
+		if _, err := r.FetchPackage(context.Background(), broker.FetchPackageRequest{Path: bad}); err == nil {
+			t.Errorf("path %q: want rejection, got nil error", bad)
+		}
 	}
 }
 

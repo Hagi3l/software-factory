@@ -44,6 +44,23 @@ func setStagePostcondition(c *Config, name string, pc []string) {
 	c.Harness.DAG[name] = st
 }
 
+// A package_proxy set without the package-proxy destination allowlisted is dead config —
+// fetches are still denied — so it warns (non-fatal); allowlisting it clears the advisory.
+func TestWarnPackageProxyNotAllowlisted(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Broker.PackageProxy = "https://proxy.golang.org"
+	c.Infra.Broker.Allowlist = []string{"llm-api", "git"} // package-proxy missing
+	mustWarn(t, c.Warnings(), "package_proxy is set")
+
+	c.Infra.Broker.Allowlist = []string{"git", DestPackageProxy}
+	for _, w := range c.Warnings() {
+		if strings.Contains(w, "package_proxy is set") {
+			t.Errorf("allowlisted package-proxy must not warn, got %q", w)
+		}
+	}
+}
+
 // The canonical config runs both the implementor (producer) and the security reviewer
 // (qa verifier) on the anthropic provider, so validate must advise the shared family —
 // this is the N-version diversity warning T2.13 adds (specs/verification.md).

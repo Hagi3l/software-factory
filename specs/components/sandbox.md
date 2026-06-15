@@ -94,8 +94,11 @@ producer-distinct sandbox (see [below](#two-distinct-sandboxes-per-work-item)).
 
 The package data a zero-network gate needs (the `govulncheck` vulnerability DB, licence
 metadata) is **baked into the profile image**, never fetched — the same offline guarantee
-the build relies on. What stays open is caching *fresh* package downloads across
-invocations without weakening egress (below).
+the build relies on. A *fresh* dependency the baked module cache does not hold is fetched
+**through the broker**, not directly: the image runs an in-sandbox GOPROXY shim that
+forwards `go`'s module-proxy requests to the runner's package proxy (T5.6, see
+[runner.md](runner.md)), so even a brand-new dependency stays on the one logged egress path.
+What stays open is *caching* those fetches across invocations (below).
 
 ### Per-language language server
 
@@ -181,10 +184,15 @@ Note the deliberate separation enforced by **producer ≠ verifier**:
   defined (T5.3): a per-profile `deploy/*.Dockerfile` bakes the toolchain, the module
   cache (offline build), the gate tooling (golangci-lint, gosec, govulncheck + an
   offline vuln-DB snapshot, go-licenses, gremlins), and the per-language server +
-  manifest. What stays open is the *publish* half — scanning each built image and
-  pushing it to a registry under the **pinned digest** the `profiles` registry
-  references — which needs registry infrastructure the dev environment lacks (the dev
-  overlay resolves the local `harness/go-toolchain:dev` tag; production pins
-  `…@sha256:…`).
+  manifest. What stays is the *publish* half — pushing each built image to a registry
+  under the **pinned digest** the `profiles` registry references. The default publish
+  target is a **public registry** (e.g. `ghcr.io`/Docker Hub), not private registry
+  infrastructure: the byte-pinning guarantee comes from the **digest**
+  (`registry/img@sha256:…`), which is content-addressed and so holds identically no
+  matter which registry hosts the image — a public registry weakens nothing the
+  threat model relies on, and removes the standing-up-private-infra blocker. The dev
+  overlay still resolves the local `harness/go-toolchain:dev` tag; production pins
+  `<public-registry>/…@sha256:…`. (A private registry stays an optional swap for
+  air-gapped or scan-on-push deployments.)
 - **Caching** package downloads across invocations without weakening the egress
   control (e.g. a read-through vetted mirror) — TBD; see [runner.md](runner.md).

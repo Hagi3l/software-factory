@@ -758,3 +758,12 @@ func (denyHandler) GitPush(context.Context, broker.GitPushRequest) (broker.GitPu
 func (denyHandler) PublishEvent(context.Context, broker.PublishRequest) error {
 	return fmt.Errorf("gate: verification sandbox has no broker egress")
 }
+
+// FetchPackage is denied: the gate verifier currently builds the candidate against the
+// baked module cache only. A candidate that adds a brand-new dependency therefore cannot
+// yet be re-gated (the agent's own sandbox can fetch it via the broker, but the verifier's
+// is deny-all) — giving the verifier its own package-proxy egress is a filed follow-up to
+// T5.6 (it touches the producer != verifier boundary, though go.sum pins integrity).
+func (denyHandler) FetchPackage(context.Context, broker.FetchPackageRequest) (broker.FetchPackageResult, error) {
+	return broker.FetchPackageResult{}, fmt.Errorf("gate: verification sandbox has no broker egress")
+}

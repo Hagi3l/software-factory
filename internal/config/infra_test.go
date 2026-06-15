@@ -34,6 +34,28 @@ func TestResolveImage(t *testing.T) {
 	}
 }
 
+// PackageProxyURL resolves to the operator's URL when set, else the public default; the
+// public default keeps the zero-config path working (T5.6).
+func TestPackageProxyURL(t *testing.T) {
+	if got := (BrokerConfig{}).PackageProxyURL(); got != "https://proxy.golang.org" {
+		t.Errorf("default = %q, want the public proxy", got)
+	}
+	if got := (BrokerConfig{PackageProxy: "https://mirror.internal/mod"}).PackageProxyURL(); got != "https://mirror.internal/mod" {
+		t.Errorf("explicit = %q, want the operator's URL", got)
+	}
+}
+
+// PackageProxyAllowed reports whether the package-proxy egress is permitted — deny-by-default
+// when the token is absent, so package fetch stays off unless an operator opts in.
+func TestPackageProxyAllowed(t *testing.T) {
+	if (BrokerConfig{Allowlist: []string{"llm-api", "git"}}).PackageProxyAllowed() {
+		t.Error("package-proxy absent must report not allowed (deny-by-default)")
+	}
+	if !(BrokerConfig{Allowlist: []string{"git", DestPackageProxy}}).PackageProxyAllowed() {
+		t.Error("package-proxy present must report allowed")
+	}
+}
+
 // With no profiles registry at all, every name resolves to itself — the historical
 // "name == image tag" behavior the unconfigured/test paths depend on.
 func TestResolveImageNoRegistry(t *testing.T) {

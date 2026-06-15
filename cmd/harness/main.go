@@ -57,6 +57,8 @@ func dispatch(args []string) int {
 		err = cmdReject(rest)
 	case "serve":
 		err = cmdServe(rest)
+	case "sandbox-goproxy":
+		err = cmdSandboxGoproxy(rest)
 	case "version", "-v", "--version":
 		fmt.Fprintf(os.Stdout, "harness %s\n", version)
 		return 0
@@ -89,6 +91,9 @@ usage:
   harness reject   [--nats URL] [--approver WHO] [--repo DIR] [--bd PATH] <issue>
   harness serve    [--addr HOST:PORT]
   harness version
+
+internal (run inside the sandbox by the image entrypoint, not by operators):
+  harness sandbox-goproxy [--broker NET:ADDR] [--addr HOST:PORT]
 
 Run a subcommand with -h for its flags.
 `)

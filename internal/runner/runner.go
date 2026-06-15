@@ -86,6 +86,11 @@ type Options struct {
 	// Allowlist is the broker egress allowlist (config.Infra.Broker.Allowlist). Empty
 	// means deny every destination — the secure default.
 	Allowlist []string
+	// PackageProxy is the base URL the relay forwards brokered package fetches to
+	// (config.Infra.Broker.PackageProxyURL — proxy.golang.org by default). It is consulted
+	// only when "package-proxy" is in Allowlist; otherwise package fetch is denied at the
+	// broker. Empty disables the egress even if allowlisted. See specs/security.md Control 2.
+	PackageProxy string
 	// AckWait is the JetStream lease: a work message is acked only after harvest, so a
 	// runner that dies mid-task lets JetStream redeliver after AckWait. It must exceed
 	// the longest an invocation can take; it defaults to Limits.Wall when unset.
@@ -349,6 +354,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		role:          brief.Issue.Role,
 		repo:          r.opts.Repo,
 		allowedBranch: core.CandidateBranch(brief.Issue.ID),
+		packageProxy:  r.opts.PackageProxy,
 		log:           r.log.With("invocation", invID, "issue", brief.Issue.ID),
 		tel:           r.tel,
 		model:         brief.Soul.Model,

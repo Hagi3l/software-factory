@@ -609,6 +609,25 @@ func TestValidNATSEndpoint(t *testing.T) {
 	}
 }
 
+// A malformed broker.package_proxy is a guaranteed dependency-fetch failure, so it must be
+// caught at the startup gate; a well-formed http(s) URL and an unset proxy both pass (T5.6).
+func TestValidateBrokerPackageProxy(t *testing.T) {
+	for _, bad := range []string{"not-a-url", "ftp://host/x", "https://", "proxy.golang.org"} {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.Broker.PackageProxy = bad
+		mustContain(t, problems(t, c), "broker.package_proxy")
+	}
+	for _, ok := range []string{"", "https://proxy.golang.org", "http://mirror.internal:8080/mod"} {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.Broker.PackageProxy = ok
+		if err := c.Validate(); err != nil {
+			t.Errorf("package_proxy %q: Validate failed: %v", ok, err)
+		}
+	}
+}
+
 func TestValidateEmptyDAG(t *testing.T) {
 	c := validConfig()
 	c.Souls = nil

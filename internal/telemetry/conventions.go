@@ -64,6 +64,7 @@ const (
 	AttrCandidateRef   = "harness.candidate.ref"
 	AttrGatePassed     = "harness.gate.passed"
 	AttrGateChecksRun  = "harness.gate.checks_run"
+	AttrHTTPStatus     = "harness.http.status" // upstream status of a brokered package fetch
 )
 
 // Token-kind attribute values for AttrTokenKind on the token-throughput counter. The
@@ -88,6 +89,10 @@ const (
 // call the broker mediates (workspace tools run unbrokered inside the sandbox and are
 // invisible to the collector by design; the broker sees only egress).
 const ToolGitPush = "git-push"
+
+// ToolPackageFetch is the AttrToolName value for a brokered Go module-proxy fetch — the
+// supply-chain egress the broker mediates and logs (specs/security.md Control 2).
+const ToolPackageFetch = "package-fetch"
 
 // Metric names. Three families — latency, throughput, and cost — the budget view
 // renders (specs/control-room.md T4.10). Durations are recorded in seconds (the OTel

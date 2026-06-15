@@ -193,3 +193,7 @@ func (denyHandler) GitPush(context.Context, broker.GitPushRequest) (broker.GitPu
 func (denyHandler) PublishEvent(context.Context, broker.PublishRequest) error {
 	return fmt.Errorf("wizard: exploration sandbox has no broker egress")
 }
+
+func (denyHandler) FetchPackage(context.Context, broker.FetchPackageRequest) (broker.FetchPackageResult, error) {
+	return broker.FetchPackageResult{}, fmt.Errorf("wizard: exploration sandbox has no broker egress")
+}

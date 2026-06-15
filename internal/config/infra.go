@@ -105,7 +105,49 @@ type JetStreamConfig struct {
 // sandbox. Deny-by-default: only named destinations are reachable, and only via the
 // broker (see specs/components/runner.md, specs/security.md).
 type BrokerConfig struct {
-	Allowlist []string `yaml:"allowlist"` // e.g. [llm-api, nats, package-mirror, git]
+	Allowlist []string `yaml:"allowlist"` // e.g. [llm-api, nats, package-proxy, git]
+	// PackageProxy is the base URL of the Go module proxy package fetches are routed to
+	// (T5.6). Empty resolves to the public default proxy.golang.org via PackageProxyURL:
+	// the spec's supply-chain guarantees (go.sum + checksum-DB pinning, broker logging,
+	// post-fetch gate scanning) hold against the public proxy, so a private vetted mirror
+	// is an optional swap, not the default. Only consulted when DestPackageProxy is in the
+	// allowlist (otherwise package fetch is denied). See specs/security.md Control 2.
+	PackageProxy string `yaml:"package_proxy,omitempty"`
+}
+
+// DestPackageProxy is the egress-allowlist token (and broker destination) for package
+// fetches — the value an operator lists in broker.allowlist to permit dependency pulls.
+// It is the single source of truth shared by config and the broker's Method.destination;
+// the other destination tokens (llm-api, nats, git) are likewise plain strings the broker
+// owns. See specs/components/runner.md.
+const DestPackageProxy = "package-proxy"
+
+// defaultPackageProxy is the public Go module proxy used when broker.package_proxy is
+// unset. The public proxy is the deliberate default (security.md Control 2): pinning by
+// go.sum + the public checksum DB, logging at the broker, and post-fetch scanning at the
+// qa gate already cover what a private mirror would add.
+const defaultPackageProxy = "https://proxy.golang.org"
+
+// PackageProxyURL resolves the package-proxy base URL: the operator's broker.package_proxy
+// when set, else the public default. Total, so the relay always has a concrete base when
+// the package-proxy destination is allowlisted.
+func (b BrokerConfig) PackageProxyURL() string {
+	if b.PackageProxy != "" {
+		return b.PackageProxy
+	}
+	return defaultPackageProxy
+}
+
+// PackageProxyAllowed reports whether the package-proxy egress destination is in the
+// allowlist — i.e. whether the runner should permit (and the relay perform) package
+// fetches at all. Deny-by-default: absent the token, a fetch is rejected at the broker.
+func (b BrokerConfig) PackageProxyAllowed() bool {
+	for _, d := range b.Allowlist {
+		if d == DestPackageProxy {
+			return true
+		}
+	}
+	return false
 }
 
 // ArtifactsConfig selects the content-addressed artifact store backend. The files
