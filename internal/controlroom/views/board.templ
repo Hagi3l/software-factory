@@ -19,10 +19,22 @@ import (
 templ BoardPage(board query.Board) {
 	@Layout("Harness — Board", "board") {
 		<script src="/static/ticker.js" defer></script>
+		<script src="/static/board-autoscroll.js" defer></script>
 		<div class="space-y-4">
 			<div class="flex items-baseline justify-between">
 				<h1 class="text-xl font-semibold tracking-tight">Board</h1>
-				<span class="text-sm text-muted">{ strconv.Itoa(board.Total) } issues</span>
+				<div class="flex items-center gap-3">
+					<button
+						id="board-autoscroll-toggle"
+						type="button"
+						aria-pressed="true"
+						title="Auto-scroll the board to where the work is"
+						class="inline-flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-xs font-medium text-muted transition hover:border-border-strong hover:text-fg aria-pressed:border-st-progress aria-pressed:bg-st-progress-bg aria-pressed:text-st-progress"
+					>
+						<span aria-hidden="true">⇄</span>auto-scroll
+					</button>
+					<span class="text-sm text-muted">{ strconv.Itoa(board.Total) } issues</span>
+				</div>
 			</div>
 			<div hx-ext="sse" sse-connect="/events">
 				<div
@@ -56,7 +68,12 @@ templ BoardColumns(board query.Board) {
 // boardColumn is one stage's column: a header naming the stage with a live count, then
 // its cards (ordered by the query layer for a stable render).
 templ boardColumn(col query.BoardColumn) {
-	<div class="flex w-72 shrink-0 flex-col rounded-xl border border-border bg-surface shadow-card">
+	<div
+		if col.Focus {
+			data-board-focus
+		}
+		class="flex w-72 shrink-0 flex-col rounded-xl border border-border bg-surface shadow-card"
+	>
 		<div class="flex items-center justify-between border-b border-border px-3 py-2.5">
 			<span class="text-sm font-semibold text-fg">{ col.Stage }</span>
 			<span class="rounded-full bg-canvas px-2 py-0.5 text-xs font-medium text-muted">{ strconv.Itoa(len(col.Cards)) }</span>

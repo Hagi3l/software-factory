@@ -177,6 +177,94 @@ func TestBoardCardCarriesTimerAnchors(t *testing.T) {
 	}
 }
 
+// TestBoardFrontier exercises the work-frontier rule that drives the board's auto-scroll
+// (control-room.md "Follow the frontier", T4.30): exactly one column is Focus, and it is the
+// leftmost column holding any incomplete (non-closed) card — blocked counts, so a blocked card
+// pulls focus — else the rightmost column when every card is closed. "Leftmost" is positional
+// over the rendered columns, so it follows stageOrder.
+func TestBoardFrontier(t *testing.T) {
+	stageOrder := []string{"plan", "implement", "qa", "integrate"}
+	focused := func(b Board) string {
+		for _, c := range b.Columns {
+			if c.Focus {
+				return c.Stage
+			}
+		}
+		return ""
+	}
+	count := func(b Board) int {
+		n := 0
+		for _, c := range b.Columns {
+			if c.Focus {
+				n++
+			}
+		}
+		return n
+	}
+
+	cases := []struct {
+		name   string
+		issues []core.Issue
+		want   string
+	}{
+		{
+			name: "leftmost incomplete, skipping a fully-closed earlier column",
+			issues: []core.Issue{
+				{ID: "h-1", Role: "plan", Status: "closed"},      // plan all done
+				{ID: "h-2", Role: "implement", Status: "open"},   // ← leftmost incomplete
+				{ID: "h-3", Role: "qa", Status: "in_progress"},
+			},
+			want: "implement",
+		},
+		{
+			name: "a blocked card counts as incomplete and pulls focus",
+			issues: []core.Issue{
+				{ID: "h-1", Role: "plan", Status: "closed"},
+				{ID: "h-2", Role: "implement", Status: "blocked"}, // ← blocked is incomplete
+				{ID: "h-3", Role: "qa", Status: "closed"},
+			},
+			want: "implement",
+		},
+		{
+			name: "everything closed → rightmost column",
+			issues: []core.Issue{
+				{ID: "h-1", Role: "plan", Status: "closed"},
+				{ID: "h-2", Role: "qa", Status: "closed"},
+			},
+			want: "integrate", // last declared column
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			r := NewReader(&fakeIssues{all: tc.issues}, &fakeArts{}, &fakeProv{})
+			board, err := r.Board(context.Background(), stageOrder)
+			if err != nil {
+				t.Fatalf("Board: %v", err)
+			}
+			if n := count(board); n != 1 {
+				t.Fatalf("focused columns = %d, want exactly 1", n)
+			}
+			if got := focused(board); got != tc.want {
+				t.Errorf("frontier = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// TestBoardFrontierEmpty proves a board with no columns has no focus (and does not panic).
+func TestBoardFrontierEmpty(t *testing.T) {
+	r := NewReader(&fakeIssues{}, &fakeArts{}, &fakeProv{})
+	board, err := r.Board(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	for _, c := range board.Columns {
+		if c.Focus {
+			t.Errorf("empty board marked column %q as focus", c.Stage)
+		}
+	}
+}
+
 func TestBoardListAllError(t *testing.T) {
 	r := NewReader(&fakeIssues{allErr: errors.New("bd down")}, &fakeArts{}, &fakeProv{})
 	if _, err := r.Board(context.Background(), nil); err == nil {

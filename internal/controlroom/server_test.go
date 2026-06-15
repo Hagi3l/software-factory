@@ -221,8 +221,10 @@ func TestDAGRendersGraph(t *testing.T) {
 }
 
 // TestStaticAssets verifies the embedded assets are served with the right content type and
-// the immutable cache header, and that the Tailwind-compiled CSS carries real utility
-// rules (so the build pipeline, not just the embed, is exercised).
+// a no-store cache header (the URLs are not fingerprinted, so on this localhost dev tool we
+// never let a browser cache a stale JS/CSS file across a rebuild), and that the
+// Tailwind-compiled CSS carries real utility rules (so the build pipeline, not just the
+// embed, is exercised).
 func TestStaticAssets(t *testing.T) {
 	ts := newTestServer(t)
 
@@ -245,8 +247,8 @@ func TestStaticAssets(t *testing.T) {
 		if ct := r.header.Get("Content-Type"); !strings.Contains(ct, tc.wantCType) {
 			t.Errorf("GET %s: Content-Type = %q, want to contain %q", tc.path, ct, tc.wantCType)
 		}
-		if cc := r.header.Get("Cache-Control"); !strings.Contains(cc, "max-age") {
-			t.Errorf("GET %s: Cache-Control = %q, want a max-age", tc.path, cc)
+		if cc := r.header.Get("Cache-Control"); !strings.Contains(cc, "no-store") {
+			t.Errorf("GET %s: Cache-Control = %q, want no-store", tc.path, cc)
 		}
 		if tc.wantContent != "" && !strings.Contains(r.body, tc.wantContent) {
 			t.Errorf("GET %s: body missing %q", tc.path, tc.wantContent)

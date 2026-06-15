@@ -52,7 +52,7 @@ func Layout(title string, active string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><link rel=\"stylesheet\" href=\"/static/app.css\"><script src=\"/static/htmx.min.js\" defer></script><script src=\"/static/htmx-ext-sse.min.js\" defer></script><script src=\"/static/alpine.min.js\" defer></script><script src=\"/static/alerts.js\" defer></script></head><body class=\"flex h-full flex-col font-sans antialiased\"><header class=\"flex items-center gap-6 border-b border-border bg-surface px-6 py-3\"><a href=\"/\" class=\"text-sm font-semibold tracking-tight text-fg\">harness <span class=\"text-faint\">control room</span></a><nav class=\"flex flex-wrap gap-1 text-sm\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><link rel=\"stylesheet\" href=\"/static/app.css\"><script src=\"/static/htmx.min.js\" defer></script><script src=\"/static/htmx-ext-sse.min.js\" defer></script><script src=\"/static/alerts.js\" defer></script></head><body class=\"flex h-full flex-col font-sans antialiased\"><header class=\"flex items-center gap-6 border-b border-border bg-surface px-6 py-3\"><a href=\"/\" class=\"text-sm font-semibold tracking-tight text-fg\">harness <span class=\"text-faint\">control room</span></a><nav class=\"flex flex-wrap gap-1 text-sm\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -78,7 +78,7 @@ func Layout(title string, active string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</main></body></html>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</main><!--\n\t\t\t\tAlpine loads LAST, after the page body and its per-view component scripts\n\t\t\t\t(wizard.js / ticker.js / dag.js, all rendered inside the body). Alpine's\n\t\t\t\tstandalone build calls start() via queueMicrotask the instant its script runs —\n\t\t\t\tit does not wait for DOMContentLoaded — so it initializes every x-data the\n\t\t\t\tmoment it loads. The views use the global-function x-data pattern\n\t\t\t\t(x-data=\"wizardChat()\"), so those globals must already be defined when start()\n\t\t\t\truns. Loading Alpine after them (defer preserves document order) guarantees that;\n\t\t\t\tloading it in <head> made start() fire before the component scripts existed,\n\t\t\t\tthrowing \"wizardChat is not defined\" and leaving the component dead.\n\t\t\t--><script src=\"/static/alpine.min.js\" defer></script></body></html>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -139,7 +139,7 @@ func navLink(item NavItem, active string) templ.Component {
 			var templ_7745c5c3_Var4 templ.SafeURL
 			templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(item.Href))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layout.templ`, Line: 71, Col: 36}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layout.templ`, Line: 82, Col: 36}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 			if templ_7745c5c3_Err != nil {
@@ -152,7 +152,7 @@ func navLink(item NavItem, active string) templ.Component {
 			var templ_7745c5c3_Var5 string
 			templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(item.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layout.templ`, Line: 71, Col: 150}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layout.templ`, Line: 82, Col: 150}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 			if templ_7745c5c3_Err != nil {
@@ -170,7 +170,7 @@ func navLink(item NavItem, active string) templ.Component {
 			var templ_7745c5c3_Var6 templ.SafeURL
 			templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(item.Href))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layout.templ`, Line: 73, Col: 36}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layout.templ`, Line: 84, Col: 36}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 			if templ_7745c5c3_Err != nil {
@@ -183,7 +183,7 @@ func navLink(item NavItem, active string) templ.Component {
 			var templ_7745c5c3_Var7 string
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinStringErrs(item.Label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layout.templ`, Line: 73, Col: 123}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `views/layout.templ`, Line: 84, Col: 123}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {

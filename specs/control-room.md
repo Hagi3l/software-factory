@@ -33,7 +33,7 @@ of the build (`go generate`), not the runtime.
 
 | View | Purpose | Source |
 |------|---------|--------|
-| **Board** | kanban over beads issues by stage; live, with animated card moves and per-card timers | beads + NATS (SSE) |
+| **Board** | kanban over beads issues by stage; live, with animated card moves, per-card timers, and auto-scroll to the work frontier | beads + NATS (SSE) |
 | **DAG** | the [issue dependency graph](glossary.md#issue-dependency-graph); blockers, merge order | beads → server-side SVG |
 | **Activity feed** | what the agents *and the factory* are doing right now — agent `token`/`reasoning`/`tool` events plus system lifecycle events, filterable by source | NATS events (SSE) + factory log bridge |
 | **Issue / invocation detail** | Brief, transcript, candidate diff, gate evidence, budget, retries | beads + [artifact store](components/artifact-store.md) + [trace](observability.md) |
@@ -117,6 +117,31 @@ legible at a glance:
   rendered server-side, no ticker). Only `closed` freezes; a **blocked** card keeps
   ticking by design, since its time-in-state is the "how long has this been awaiting
   triage" signal.
+
+**Follow the frontier (auto-scroll).** The board is as wide as the whole pipeline,
+so on any real run it is wider than the viewport. Rather than make the operator chase
+work with the scrollbar, the board **auto-scrolls horizontally to the work frontier**:
+it keeps in view the **leftmost column that still holds incomplete work** — any card
+not yet `closed`, so `open` / `in_progress` / **`blocked`** all count as incomplete
+(a blocked card therefore *pulls* focus, since it is exactly the work awaiting a
+human). When every card is `closed`, the frontier is the **rightmost** column — the
+factory is done, so the view rests at the finish line. The frontier column is
+**left-aligned** in the viewport, so the operator sees it *and the road ahead* of it.
+"Leftmost" is purely positional over the rendered columns, so column order — including
+where the ad-hoc and **unassigned** columns sit — is governed by the configured stage
+order, not by this behavior.
+
+The frontier is a property of board *state*, so it is **computed server-side** and
+recomputed on every refetch — the same [`issue-state`](messaging.md) nudge that
+animates a card's move also re-marks which column is the frontier. As work closes out
+left-to-right the frontier walks rightward, and the view follows the work across the
+board with no human input. It is **on by default** and persists across the live swaps;
+a toggle in the board header turns it off, **remembered across visits**, and any manual
+horizontal scroll also pauses it until the operator re-enables it — the human stays in
+control of their own viewport. It respects `prefers-reduced-motion` (motion suppressed
+for operators who ask for it); the first paint snaps to the frontier, later moves ease
+smoothly. This is a *viewport* convenience only — it never moves work, just where the
+operator is looking.
 
 Note what stays absent **by design**: there is no drag-to-move. Humans never move
 work — the orchestrator is the single writer and the human's only levers are the

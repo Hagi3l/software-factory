@@ -88,10 +88,15 @@ func cardOf(i core.Issue) IssueCard {
 	}
 }
 
-// BoardColumn is one stage's cards on the kanban board.
+// BoardColumn is one stage's cards on the kanban board. Focus marks the single column the
+// board auto-scrolls to — the work frontier (control-room.md "Follow the frontier"): the
+// leftmost column holding incomplete work, else the rightmost when everything is closed. It
+// is a property of board state, so the query layer (not the view) is its single source of
+// truth; exactly one column is Focus across a non-empty board.
 type BoardColumn struct {
 	Stage string
 	Cards []IssueCard
+	Focus bool
 }
 
 // Board is the kanban projection: every issue grouped by stage (its role), columns in the
@@ -134,7 +139,32 @@ func (r *Reader) Board(ctx context.Context, stageOrder []string) (Board, error) 
 		sort.Slice(cards, func(a, b int) bool { return cards[a].ID < cards[b].ID })
 		board.Columns = append(board.Columns, BoardColumn{Stage: stage, Cards: cards})
 	}
+	if idx := frontierColumn(board.Columns); idx >= 0 {
+		board.Columns[idx].Focus = true
+	}
 	return board, nil
+}
+
+// frontierColumn returns the index of the board's work frontier — the column the view
+// auto-scrolls into view (control-room.md "Follow the frontier"). The rule is purely
+// positional over the rendered columns: the leftmost column holding any incomplete card
+// (anything not closed — open/in_progress/blocked all count, so a blocked card pulls focus),
+// else the rightmost column when every card is closed (the factory is done, so the view rests
+// at the finish line). Returns -1 for a board with no columns. Column ordering — including
+// where the ad-hoc/unassigned columns sit — is the caller's stageOrder concern, not this
+// rule's; "leftmost" simply means lowest index.
+func frontierColumn(cols []BoardColumn) int {
+	if len(cols) == 0 {
+		return -1
+	}
+	for i := range cols {
+		for _, c := range cols[i].Cards {
+			if c.Status != statusClosed {
+				return i
+			}
+		}
+	}
+	return len(cols) - 1
 }
 
 // orderedStages returns the board's columns in render order: every declared stage first, in

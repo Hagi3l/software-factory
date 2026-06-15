@@ -20,7 +20,6 @@ templ Layout(title string, active string) {
 			<link rel="stylesheet" href="/static/app.css"/>
 			<script src="/static/htmx.min.js" defer></script>
 			<script src="/static/htmx-ext-sse.min.js" defer></script>
-			<script src="/static/alpine.min.js" defer></script>
 			<script src="/static/alerts.js" defer></script>
 		</head>
 		<body class="flex h-full flex-col font-sans antialiased">
@@ -38,6 +37,18 @@ templ Layout(title string, active string) {
 			<main class="flex-1 overflow-auto p-6">
 				{ children... }
 			</main>
+			<!--
+				Alpine loads LAST, after the page body and its per-view component scripts
+				(wizard.js / ticker.js / dag.js, all rendered inside the body). Alpine's
+				standalone build calls start() via queueMicrotask the instant its script runs —
+				it does not wait for DOMContentLoaded — so it initializes every x-data the
+				moment it loads. The views use the global-function x-data pattern
+				(x-data="wizardChat()"), so those globals must already be defined when start()
+				runs. Loading Alpine after them (defer preserves document order) guarantees that;
+				loading it in <head> made start() fire before the component scripts existed,
+				throwing "wizardChat is not defined" and leaving the component dead.
+			-->
+			<script src="/static/alpine.min.js" defer></script>
 		</body>
 	</html>
 }

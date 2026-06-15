@@ -1114,6 +1114,34 @@ components/artifact-store.md, glossary.md).
   configs validate. **Docs:** no CLI/config/route change — `docs/control-room.md` describes only user-facing
   behavior (not the fenced blocks), so no doc change needed. (needs T4.13, T4.14, T4.27, T4.28)
   ([control-room.md](specs/control-room.md), [models.md](specs/models.md), [verification.md](specs/verification.md))
+- [ ] **T4.30 Board auto-scroll to the work frontier** — the board is as wide as the whole
+  pipeline, so on a real run it overflows the viewport; rather than make the operator chase work
+  with the scrollbar, the board auto-scrolls horizontally to follow it left→right (spec:
+  [control-room.md](specs/control-room.md) "Follow the frontier"). **Frontier rule (server-computed,
+  the single source of truth):** the focal column is the **leftmost column holding any non-`closed`
+  card** — `open`/`in_progress`/**`blocked`** all count as incomplete, so a blocked (dead-lettered)
+  card *pulls* focus; when **every** card is `closed` the frontier is the **rightmost** column (work
+  done, view rests at the finish line). "Leftmost" is purely positional over the rendered columns, so
+  column order (incl. the ad-hoc/`(unassigned)` columns) stays a `stageOrder` config concern, *not*
+  this feature's. As work closes out the frontier walks rightward — the left→right "follow the cards"
+  sweep falls out for free. **Build:** (1) `query.Board` gains a frontier marker — a `Focus bool` on
+  `BoardColumn` (or a `FocusStage string` on `Board`), set by a pure helper that scans columns in
+  render order; unit-test the rule directly (leftmost-incomplete, blocked-counts, all-closed→rightmost,
+  empty/all-unassigned, single-column). (2) `views/board.templ` tags the focal column div
+  `data-board-focus` and adds the header **toggle** (a small "⇄ auto-scroll" pill next to the issue
+  count, default on) + the `<script src="/static/board-autoscroll.js" defer>` tag; `make generate` to
+  rebuild `board_templ.go`. (3) New vanilla asset `assets/static/board-autoscroll.js` (mirrors
+  `ticker.js`/`dag.js`, auto-embedded via the existing `//go:embed` of `assets/static`): on first paint
+  scroll `[data-board-focus]` into view **instantly** (`inline:'start'` — left-aligned so the frontier
+  *and the road ahead* show), and on every `htmx:afterSwap` of `#board` ease to it **smoothly**; lives
+  on the stable `#board` parent so it survives the columns-fragment swap. **On by default**, persisted
+  in `localStorage`; the header toggle flips/persists it; any manual horizontal scroll pauses it until
+  the operator re-enables via the toggle (human stays in control of their own viewport); respects
+  `prefers-reduced-motion` (motion suppressed). Viewport-only — never moves work (no drag-to-move stays
+  intact). **Tests + docs:** a `board_test.go` assertion that the focal column is tagged and the toggle
+  + script are wired (mirroring the existing `hx-trigger` assertions), the `query.Board` frontier unit
+  tests, and `docs/control-room.md` updated in the same change (view-surface change). (needs T4.4,
+  T4.18) ([control-room.md](specs/control-room.md))
 
 ## Phase 5 — Production isolation & distribution
 

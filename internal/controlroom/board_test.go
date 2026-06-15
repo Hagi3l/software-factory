@@ -189,6 +189,40 @@ func TestBoardCardsLinkToInvocation(t *testing.T) {
 	}
 }
 
+// TestBoardAutoScroll is T4.30's contract: the board marks its work frontier and wires the
+// auto-scroll that follows it (control-room.md "Follow the frontier"). The shared fixture has a
+// closed planner card, a blocked test-author card, and an in-flight implementor card, so the
+// frontier is test-author (the leftmost column with incomplete work — blocked counts), not the
+// all-closed planner column. The toggle (header) and the script must be present, and only the
+// frontier column carries data-board-focus.
+func TestBoardAutoScroll(t *testing.T) {
+	ts := boardServer(t)
+	r := get(t, ts, "/board")
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	for _, want := range []string{
+		`<script src="/static/board-autoscroll.js"`, // the driver is loaded
+		`id="board-autoscroll-toggle"`,              // the header toggle exists
+		"data-board-focus",                          // a frontier column is marked
+	} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("board page missing %q", want)
+		}
+	}
+	// Exactly one column is the frontier.
+	if n := strings.Count(r.body, "data-board-focus"); n != 1 {
+		t.Errorf("data-board-focus count = %d, want exactly 1", n)
+	}
+	// The frontier is the test-author column (blocked card), not the all-closed planner column.
+	// The data-board-focus attribute lives in the test-author column's opening <div>, which sits
+	// after the planner header and before the test-author header (its own header span).
+	focus := pos(r.body, "data-board-focus")
+	if focus < pos(r.body, ">planner<") || focus > pos(r.body, ">test-author<") {
+		t.Errorf("frontier marker not on the test-author column (the leftmost incomplete stage)")
+	}
+}
+
 // TestBoardInMotion is T4.18's contract: the board refreshes off the typed issue-state event
 // (not the coarse agent-event), opts the swap into View Transitions, gives every card a stable
 // id + view-transition-name so a moved card animates, and emits the two epoch anchors + the

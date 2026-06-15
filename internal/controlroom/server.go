@@ -155,7 +155,7 @@ func New(opts Options) *Server {
 // rendering the home page.
 func (s *Server) routes() {
 	// Embedded static assets (compiled CSS + vendored JS), served from the binary.
-	s.mux.Handle("GET /static/", cacheStatic(http.FileServerFS(assets.FS)))
+	s.mux.Handle("GET /static/", noStoreStatic(http.FileServerFS(assets.FS)))
 
 	// Liveness probe — no dependencies, so it answers even before the data layer (T4.2)
 	// is wired; useful for tests and for ops once the server fronts real components.
@@ -1152,12 +1152,16 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	}
 }
 
-// cacheStatic adds a long-lived immutable cache header to embedded assets. They are
-// content-fixed for the lifetime of a binary, so aggressive caching is safe and spares
-// the network on every page load.
-func cacheStatic(next http.Handler) http.Handler {
+// noStoreStatic tells the browser never to cache embedded assets. The control room is a
+// localhost dev tool served from the binary's own embed.FS — every asset is in memory, so a
+// fresh fetch on each load is effectively free, and skipping the cache removes the
+// stale-asset footgun: the URLs are not fingerprinted (`/static/wizard.js`, not
+// `/static/wizard.<hash>.js`), so any positive cache lifetime would let a browser keep serving
+// a JS/CSS file from a previous build (or a transient 404) after a rebuild — the exact failure
+// that surfaced as Alpine's "send is not defined".
+func noStoreStatic(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "public, max-age=3600")
+		w.Header().Set("Cache-Control", "no-store")
 		next.ServeHTTP(w, r)
 	})
 }
