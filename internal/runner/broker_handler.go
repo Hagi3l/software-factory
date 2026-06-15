@@ -20,6 +20,7 @@ import (
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/packageproxy"
 	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/harness/internal/secret"
 	"github.com/Loxstomper/harness/internal/telemetry"
 )
 
@@ -47,8 +48,16 @@ type relay struct {
 	eventSubject  string // harness.agent.<id>.events — where token/progress events fan out
 	issueID       string // the issue this invocation is working — stamped on every published event
 	role          string // the issue's role/stage — stamped alongside issueID (specs/messaging.md)
-	repo          string // source repository the candidate branch is pushed into
+	repo          string // source repository the candidate branch is pushed into (local-push fallback)
 	allowedBranch string // the ONLY branch this invocation may push (task branch only)
+
+	// remote + minter select the push destination (T5.7). When remote is set, the
+	// candidate branch is pushed to that real remote authenticated by a per-task token
+	// minter mints (nil minter ⇒ unauthenticated, valid for a file:// remote — the dev
+	// shape); when remote is empty, the branch is applied to the local repo (the bootstrap
+	// path, pushBundle below). See specs/security.md Control 3, specs/components/runner.md.
+	remote string
+	minter secret.Minter
 
 	// fetcher performs the brokered package-proxy egress (config.BrokerConfig.PackageProxyURL
 	// — proxy.golang.org by default). It is the same host-side fetcher the gate verifier uses
@@ -61,8 +70,13 @@ type relay struct {
 	// pushBundle applies a git bundle (the candidate branch, extracted from the
 	// sandbox) into the source repo on the runner host and returns the pushed head.
 	// A seam so the relay's orchestration is unit-testable without real git; the
-	// default is pushBundleToRepo.
+	// default is pushBundleToRepo. Used only on the local-push path (remote == "").
 	pushBundle func(ctx context.Context, repo, branch string, bundle []byte) (string, error)
+
+	// pushRemote pushes the extracted bundle's branch to the configured remote with the
+	// minted credential and returns the pushed head. The remote-push counterpart of
+	// pushBundle, a seam for the same reason; the default is pushBundleToRemote.
+	pushRemote func(ctx context.Context, remote string, cred secret.GitCredential, branch string, bundle []byte) (string, error)
 
 	mu       sync.Mutex
 	usage    model.Usage            // tallied across every completion this invocation (budget input, plan T1.16)
@@ -80,6 +94,8 @@ type relayConfig struct {
 	role          string
 	repo          string
 	allowedBranch string
+	remote        string
+	minter        secret.Minter
 	packageProxy  string
 	httpClient    *http.Client
 	log           *slog.Logger
@@ -113,8 +129,11 @@ func newRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox, cfg rela
 		role:          cfg.role,
 		repo:          cfg.repo,
 		allowedBranch: cfg.allowedBranch,
+		remote:        cfg.remote,
+		minter:        cfg.minter,
 		fetcher:       fetcher,
 		pushBundle:    pushBundleToRepo,
+		pushRemote:    pushBundleToRemote,
 	}
 }
 
@@ -233,13 +252,20 @@ func (r *relay) Complete(ctx context.Context, req model.Request) (model.Response
 	return resp, nil
 }
 
-// GitPush lands the candidate branch the agent built inside the sandbox into the source
-// repo. The branch must be exactly this invocation's task branch — naming any other
-// branch (in particular a protected one like main) is refused, which is how "push only
-// the task branch" is enforced without yet minting a scoped token (that token is plan
-// Phase 5; here the destination is the local source repo). The commits are extracted
-// from the network-less sandbox as a git bundle over Exec stdout — never a bind mount
-// or copy-out — preserving the microVM-shaped isolation (see specs/components/sandbox.md).
+// GitPush lands the candidate branch the agent built inside the sandbox. The branch must
+// be exactly this invocation's task branch — naming any other branch (in particular a
+// protected one like main) is refused, which is how "push only the task branch" is
+// enforced: the runner-held token scopes to the repository, the broker guard scopes to the
+// one branch (see specs/security.md). The commits are extracted from the network-less
+// sandbox as a git bundle over Exec stdout — never a bind mount or copy-out — preserving
+// the microVM-shaped isolation (see specs/components/sandbox.md).
+//
+// Destination (T5.7): when a remote is configured the bundle is pushed to that real remote
+// authenticated by a per-task token the relay's minter mints just-in-time and revokes the
+// instant the push completes (the token dies with its one use, tighter than the invocation
+// lifetime; its TTL is the backstop). The agent never holds the token or the remote URL.
+// With no remote configured the bundle is applied to the local source repo (the bootstrap
+// path). Either way the token-minting and remote URL live only on the trusted runner.
 func (r *relay) GitPush(ctx context.Context, req broker.GitPushRequest) (broker.GitPushResult, error) {
 	// The git-push is the one egress tool the broker mediates, so it gets a tool-call span
 	// (workspace tools run unbrokered inside the sandbox and are invisible by design). The
@@ -265,7 +291,7 @@ func (r *relay) GitPush(ctx context.Context, req broker.GitPushRequest) (broker.
 		return broker.GitPushResult{}, err
 	}
 
-	commit, err := r.pushBundle(ctx, r.repo, req.Branch, bundle)
+	commit, err := r.landBundle(ctx, req.Branch, bundle)
 	if err != nil {
 		span.RecordError(err)
 		r.log.Error("broker: git push failed applying branch", "branch", req.Branch, "err", err)
@@ -275,6 +301,34 @@ func (r *relay) GitPush(ctx context.Context, req broker.GitPushRequest) (broker.
 	span.SetAttributes(attribute.String(telemetry.AttrGitCommit, commit))
 	r.log.Info("broker: git push", "branch", req.Branch, "commit", commit)
 	return broker.GitPushResult{Commit: commit}, nil
+}
+
+// landBundle routes the extracted candidate bundle to its destination: a configured remote
+// (with a just-in-time minted, immediately-revoked scoped token) or, in the bootstrap
+// single-host shape, the local source repo. The token is minted right before the push and
+// revoked right after — its only use — so it never outlives the push. Revoke is best-effort:
+// the token's TTL bounds exposure if it fails, so a revoke error is logged, not propagated.
+func (r *relay) landBundle(ctx context.Context, branch string, bundle []byte) (string, error) {
+	if r.remote == "" {
+		return r.pushBundle(ctx, r.repo, branch, bundle)
+	}
+
+	var cred secret.GitCredential
+	if r.minter != nil {
+		c, err := r.minter.Mint(ctx, secret.MintRequest{IssueID: r.issueID, Branch: branch})
+		if err != nil {
+			return "", fmt.Errorf("mint scoped push token: %w", err)
+		}
+		cred = c
+		defer func() {
+			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), revokeTimeout)
+			defer cancel()
+			if err := r.minter.Revoke(rctx, cred); err != nil {
+				r.log.Warn("broker: revoke scoped push token failed (token self-expires by its TTL)", "err", err)
+			}
+		}()
+	}
+	return r.pushRemote(ctx, r.remote, cred, branch, bundle)
 }
 
 // FetchPackage proxies one Go module-proxy GET to the configured package proxy (default
@@ -467,7 +521,18 @@ func pushBundleToRepo(ctx context.Context, repo, branch string, bundle []byte) (
 // runGit runs a git subcommand in repo and returns its combined output. Combined output
 // (not just stdout) is returned so a failure carries git's stderr diagnostics.
 func runGit(ctx context.Context, repo string, args ...string) (string, error) {
+	return runGitEnv(ctx, repo, nil, args...)
+}
+
+// runGitEnv runs a git subcommand in repo with extra environment appended to the process
+// environment, returning combined output. The extra env carries the scoped push token to
+// git's credential helper (push.go) without ever placing it in argv. A nil extraEnv leaves
+// the process environment untouched (the common read-only case).
+func runGitEnv(ctx context.Context, repo string, extraEnv []string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...) // #nosec G204 -- fixed git binary, repo-scoped; args are runner-controlled, not untrusted agent input.
+	if len(extraEnv) > 0 {
+		cmd.Env = append(os.Environ(), extraEnv...)
+	}
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }

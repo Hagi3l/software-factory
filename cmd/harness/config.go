@@ -7,6 +7,7 @@ import (
 
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/controlroom/query"
+	"github.com/Loxstomper/harness/internal/secret"
 )
 
 // loadConfig loads the configuration rooted at dir for the named environment,
@@ -155,6 +156,25 @@ func signingKey(cfg *config.Config) string {
 		return ""
 	}
 	return cfg.Infra.Signing.Key
+}
+
+// pushMinter builds the per-task git push token minter from config, or returns nil when no
+// minting authority is configured (T5.7, specs/security.md Control 3). A nil minter with a
+// configured git.remote means an unauthenticated remote push (a file:// remote — the dev
+// shape); with no git.remote it is unused (the bootstrap local-repo apply). Only the
+// fully-configured GitHub App is built — a partial block is already a Validate error.
+func pushMinter(cfg *config.Config) secret.Minter {
+	if cfg.Infra == nil || !cfg.Infra.Git.GitHubApp.Active() {
+		return nil
+	}
+	app := cfg.Infra.Git.GitHubApp
+	return secret.NewGitHubAppMinter(secret.GitHubAppConfig{
+		APIBase:        app.APIBase,
+		AppID:          app.AppID,
+		InstallationID: app.InstallationID,
+		Repository:     app.Repository,
+		KeyPath:        app.PrivateKey,
+	})
 }
 
 // roleIsAgentStage reports whether role is fulfilled by an agent stage in the DAG.

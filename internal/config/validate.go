@@ -100,6 +100,7 @@ func (c *Config) Validate() error {
 		c.validateArtifacts(add)
 		c.validateSigning(add)
 		c.validateBroker(add)
+		c.validateGit(add)
 	}
 
 	if len(problems) == 0 {
@@ -721,6 +722,64 @@ func (c *Config) validateBroker(add func(string, ...any)) {
 	if err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
 		add("broker.package_proxy %q must be an http(s) URL with a host (e.g. %s)", proxy, defaultPackageProxy)
 	}
+}
+
+// validateGit checks the git push block (T5.7, specs/security.md Control 3). Only
+// run-time-breaking shape faults are gated: a malformed remote URL would fail every push
+// with an opaque git error, and a partial GitHub App block can never mint a token, so both
+// must fail loud at the startup gate. The App private-key PATH existence is deliberately
+// NOT checked — it is a runtime-provisioned secret (the API-key posture, like the signing
+// key), mounted possibly only at run time; a missing key fails closed on the first push.
+// Whether git is actually allowlisted (so a configured remote can be reached) is an
+// advisory, not fatal — see Warnings.
+func (c *Config) validateGit(add func(string, ...any)) {
+	g := c.Infra.Git
+	if g.Remote != "" && !validGitRemote(g.Remote) {
+		add("git.remote %q must be an https://, http://, ssh://, git://, or file:// URL, an scp-style user@host:path, or a local path", g.Remote)
+	}
+	app := g.GitHubApp
+	if app.set() && !app.Active() {
+		add("git.github_app is partially configured; app_id, installation_id, repository, and private_key (path) are all required to mint scoped push tokens")
+	}
+	// A configured authority with nowhere to push is dead config: the token would be minted
+	// and immediately have no remote to authenticate against.
+	if app.Active() && g.Remote == "" {
+		add("git.github_app is configured but git.remote is empty; the minted token has no remote to push to")
+	}
+	if app.APIBase != "" {
+		if u, err := url.Parse(app.APIBase); err != nil || u.Host == "" || (u.Scheme != "http" && u.Scheme != "https") {
+			add("git.github_app.api_base %q must be an http(s) URL with a host (e.g. %s)", app.APIBase, "https://api.github.com")
+		}
+	}
+}
+
+// validGitRemote accepts the git remote forms a push can target: a scheme URL
+// (https/http/ssh/git with a host, or file:// where the host may be empty for a local
+// path), an scp-style user@host:path, or a bare local filesystem path. It is deliberately
+// lenient — git supports many transports — catching only obvious garbage at the gate.
+func validGitRemote(remote string) bool {
+	if i := strings.Index(remote, "://"); i >= 0 {
+		u, err := url.Parse(remote)
+		if err != nil {
+			return false
+		}
+		switch u.Scheme {
+		case "https", "http", "ssh", "git":
+			return u.Host != ""
+		case "file":
+			return u.Path != "" || u.Host != ""
+		default:
+			return false
+		}
+	}
+	// scp-style "user@host:path" (an @ before the first colon, both sides non-empty).
+	if at := strings.Index(remote, "@"); at > 0 {
+		if colon := strings.Index(remote[at:], ":"); colon > 1 {
+			return true
+		}
+	}
+	// A bare absolute local path is a valid git remote (a local clone/bare repo).
+	return strings.HasPrefix(remote, "/")
 }
 
 // knownCondition reports whether s is a recognized guard: either a bare identifier

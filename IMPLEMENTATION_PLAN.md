@@ -1114,7 +1114,11 @@ components/artifact-store.md, glossary.md).
   configs validate. **Docs:** no CLI/config/route change — `docs/control-room.md` describes only user-facing
   behavior (not the fenced blocks), so no doc change needed. (needs T4.13, T4.14, T4.27, T4.28)
   ([control-room.md](specs/control-room.md), [models.md](specs/models.md), [verification.md](specs/verification.md))
-- [ ] **T4.30 Board auto-scroll to the work frontier** — the board is as wide as the whole
+- [x] **T4.30 Board auto-scroll to the work frontier** — *done* (commit b63be26: `query.frontierColumn` marks
+  the focal column `data-board-focus`, `board-autoscroll.js` scrolls it left-aligned on first paint + every live
+  swap, on-by-default toggle persisted in localStorage, manual-scroll pause, `prefers-reduced-motion` respected;
+  static assets served `no-store` + Alpine loaded last). The full task detail below is retained for reference. —
+  the board is as wide as the whole
   pipeline, so on a real run it overflows the viewport; rather than make the operator chase work
   with the scrollbar, the board auto-scrolls horizontally to follow it left→right (spec:
   [control-room.md](specs/control-room.md) "Follow the frontier"). **Frontier rule (server-computed,
@@ -1336,7 +1340,45 @@ them); only the *order of attention* changes.
   security.md (Control 2 + Control 4 notes), docs/configuration.md (allowlist bullet). **Live full go-fetch-through-
   the-verifier-container is offline-unverifiable here** (no real network in the zero-net sandbox), as with T5.6.
   ([verification.md](specs/verification.md), [components/runner.md](specs/components/runner.md), [security.md](specs/security.md))
-- [ ] **T5.7 Scoped short-lived secret minting** — the runner mints a per-task git token scoped to push *only* the task branch, injected for the invocation lifetime and dying with the sandbox (replaces the bootstrap local-repo push). ([components/runner.md](specs/components/runner.md), [security.md](specs/security.md))
+- [x] **T5.7 Scoped short-lived secret minting** — *done.* The runner now mints a per-task, short-lived,
+  repo-scoped git push token, uses it host-side for the real remote push, and revokes it the instant the push
+  completes — replacing the bootstrap local-repo apply. **Architectural reading (the one subtlety):** the agent
+  reaches git only through the broker's `git.push` (branch name, no URL, no token); the runner does the real push
+  host-side, so the token **never enters the network-less sandbox** — the agent is *remote-unaware* exactly as it
+  is *provider-unaware* for model calls. "Injected for the invocation lifetime" is honored by scoping the secret
+  to the invocation on the **runner**, not by handing it to the sandbox (the only reading consistent with
+  zero-network + the existing protocol.go contract "the agent never holds the token or the remote URL"). **(1) New
+  leaf package `internal/secret`** (`Minter` interface + `GitCredential{Username,Token,Expiry}` + `MintRequest`):
+  the runner's secret-custody seam, the provider-adapter pattern applied to credentials. Shipped impl
+  **`GitHubAppMinter`** mints a **GitHub App installation token** (stdlib RS256 JWT signed with the App key → POST
+  `/app/installations/{id}/access_tokens` scoped `repositories:[name]` + `permissions:{contents:write}`) and
+  **revokes** it (DELETE `/installation/token`). Network-free constructor (key read + GitHub dialed only on Mint,
+  like the model registry / OTLP exporter). **Branch-scope honesty:** a GitHub token can't scope to a branch, so
+  **"only the task branch" stays the broker branch guard's job** (already enforced); the token supplies repo +
+  contents-write + ~1h TTL. **(2) Runner push path** (`internal/runner/push.go` + `broker_handler.go`): the relay
+  gains `remote`/`minter`; new **`landBundle`** routes the extracted bundle — empty `remote` ⇒ the old local-repo
+  apply (`pushBundle` seam, unchanged), set `remote` ⇒ `pushBundleToRemote` (unbundle into a throwaway repo →
+  `git push <remote>` → rev-parse). Token injected via an **inline git credential helper reading it from the
+  environment, never argv/URL** (`HARNESS_GIT_USER`/`HARNESS_GIT_TOKEN` + `GIT_TERMINAL_PROMPT=0`), so it never
+  leaks into `ps`, the repo config, or the reflog. Mint is just-in-time before the push; **revoke is deferred,
+  best-effort** (TTL is the backstop, a revoke error is logged not fatal — a good candidate isn't thrown away).
+  Nil minter on a set remote = unauthenticated push (valid for a `file://` remote — the dev shape). **(3) Config:**
+  new **`Infra.Git{Remote, GitHubApp}`** + `GitHubAppConfig{APIBase,AppID,InstallationID,Repository,PrivateKey}`;
+  the App `private_key` is a **runtime secret referenced by PATH** (API-key/signing-key posture — never the bytes,
+  existence not checked at validate time). `validateGit` gates run-breaking shape (malformed remote URL; partial
+  App block; App-without-remote; bad api_base); new `DestGitPush="git"` + `BrokerConfig.GitPushAllowed()`; a
+  `Warnings()` advisory fires when `git.remote` is set but `git` isn't allowlisted (dead config, mirrors the
+  package-proxy advisory). **(4) Wiring:** `cmd/harness` `pushMinter(cfg)` builds the minter iff the App is fully
+  configured; `runner.Options.{GitRemote,Minter}` thread it through. Shipped `config/infra.dev.yaml` gains the
+  commented `git:` block (dev stays empty ⇒ local apply). **Verified offline:** real git bundle→remote push to a
+  local bare repo (unbundle→push→rev-parse lands the branch); token never in argv; relay mints+revokes around the
+  push; mint-failure aborts, revoke-failure is non-fatal; GitHub minter mint/revoke + RS256 JWT verified against an
+  httptest GitHub stub (signature checked with the public key, repo/permission scope asserted); PKCS#1+PKCS#8 key
+  parsing; config validate/warn tables. Full suite green (lint 0 across the repo). **Live full push-to-real-GitHub
+  is the deployment remainder** (no GitHub App credentials offline — like T5.8's cluster / T5.9's bucket), as is
+  the **orchestrator-side fetch-from-remote** for a distributed merge (the single-host dev path merges from the
+  local repo, unchanged; remote-push mode is the distributed-deployment shape). TCB-touching (runner push path),
+  human-reviewed. ([components/runner.md](specs/components/runner.md), [security.md](specs/security.md))
 - [x] **T5.8 Distributed NATS** — *done.* The code seam for an external NATS cluster, plus the concrete
   JetStream stream definitions that were the **messaging.md OPEN**. **Latent bug closed:** the infra overlay
   already declared `nats.url`, `nats.jetstream.replicas`, and `nats.jetstream.max_age`, but the code **ignored

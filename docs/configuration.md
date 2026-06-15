@@ -194,6 +194,13 @@ nats:
 broker:
   allowlist: [llm-api, nats, git, package-proxy]   # the only egress the sandbox is granted
   package_proxy: https://proxy.golang.org           # Go module proxy fetches route to (default)
+git:                          # where the candidate branch is pushed + how it's authed (T5.7)
+  # remote: https://github.com/acme/widgets.git     # "" = local-repo apply (dev); set = real remote
+  # github_app:                                      # mints a per-task, short-lived scoped push token
+  #   app_id: "123456"
+  #   installation_id: "7891011"
+  #   repository: acme/widgets
+  #   private_key: /run/secrets/harness_github_app.pem   # PATH to the App PEM; a runtime secret
 artifacts:
   backend: files             # files (single-host dev) | s3 (distributed: S3/MinIO)
   path: ./.harness/artifacts # files backend root (relative paths resolve against the repo)
@@ -239,6 +246,20 @@ models:
   identical pinned bytes; the verifier is otherwise deny-all. Omitting it keeps both the
   agent sandbox and the verifier on the baked module cache only.
   See [security.md](../specs/security.md) Control 2.
+- **`git`** configures where the candidate branch is pushed and how that push is
+  authenticated (T5.7). An **empty `remote`** (the dev default) keeps the bootstrap
+  local-repo apply — the runner lands the branch into the local source repo, no token. A
+  **set `remote`** routes the push to a real git remote. **`git.github_app`** (optional)
+  makes the runner mint a **GitHub App installation token** per task: scoped to the
+  repository with `contents:write`, minted just before the push and **revoked the instant
+  it completes** (its ~1h TTL is the backstop). A GitHub token can't be scoped to a branch,
+  so "only the task branch" is enforced by the broker's branch guard — the token supplies the
+  repo scope, the guard the branch scope. The agent never holds the token or the remote URL;
+  the push happens host-side on the trusted runner. The App **`private_key`** is a runtime
+  secret referenced by **path** (like the signing key and API keys — never committed or baked
+  into an image; existence is not checked at validate time). A `remote` with no `github_app`
+  pushes unauthenticated (valid for a `file://` remote). `git` must be in `broker.allowlist`
+  for any push to be brokered. See [security.md](../specs/security.md) Control 3.
 - **`sandbox.profiles`** resolves the logical profile a soul names (`sandbox: go-toolchain`)
   to the concrete artifact this backend boots — an `image` for docker/gvisor, a `rootfs`
   for firecracker. The soul stays env-agnostic; dev points the name at a local tag, prod

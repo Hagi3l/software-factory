@@ -105,6 +105,39 @@ it is ever granted, and it cannot push, call a model, or emit events.
 - **No standing credentials baked into images.** Generated code must never be able
   to capture a durable secret.
 
+### Minting the push token
+
+The candidate-branch push is the one egress that needs a write credential, and it is the
+sharpest test of "the secret never reaches the sandbox": the agent must get its branch out,
+but it must never hold a token that could push anything else, anywhere else, later.
+
+- **The token lives only on the trusted runner.** The agent reaches git solely through the
+  broker's `git.push` (branch name only — no URL, no token); the runner does the real push
+  host-side. So the credential is never injected into the network-less sandbox at all — the
+  agent is *remote-unaware* exactly as it is *provider-unaware* for model calls. This is a
+  deliberate reading of "injected for the invocation lifetime": the secret is scoped to the
+  invocation on the **runner**, not handed to the sandbox.
+- **Scheme: GitHub App installation token.** The runner mints an installation access token
+  scoped to the one repository with `contents:write`, signs the App JWT with a private key
+  it reads at mint time, and pushes with it. A GitHub token **cannot** be scoped to a single
+  branch, so "**only the task branch**" is enforced by the runner's broker **branch guard**
+  (it refuses any branch but `candidate/<issue>`), not by the token — the token supplies the
+  repo-scoped, short-lived credential; the guard supplies the branch scope. This split is the
+  honest mechanism behind "a token that can push only the task's branch".
+- **Dies with its one use.** The token is minted just before the push and **revoked the
+  instant the push completes** — tighter than the invocation lifetime; its ~1h TTL is only a
+  backstop if revocation fails. Revoke is best-effort (a transient failure does not throw away
+  a good candidate — the TTL bounds exposure), logged when it fails.
+- **Key custody.** The App private key follows the **API-key / signing-key posture** — a
+  runtime-provisioned secret referenced by **path** in config, never committed or baked into
+  an image, read only on the trusted runner at mint time. Production delivery is a
+  secret-manager mount (the deployment remainder, like the signing key of Control 10).
+- **Dev / single-host shape.** With no remote configured the candidate branch is applied to
+  the local source repo (the bootstrap path, no token). A remote with no App configured pushes
+  unauthenticated — valid for a `file://` remote — so the mechanism is exercisable offline
+  without a credential authority. The `git` egress destination must be allowlisted either way
+  (deny-by-default).
+
 ---
 
 ## Control 4 — Producer ≠ verifier

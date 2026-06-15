@@ -89,6 +89,17 @@ agent to act unobserved. The full transcript captured here is what makes
 - **No standing credentials in sandbox images.** Generated code must never be able
   to exfiltrate a durable secret.
 
+The push token is the worked example. The agent reaches git only through the broker's
+`git.push` (a branch name — no URL, no token); the runner mints a **GitHub App installation
+token** scoped to the repository with `contents:write`, performs the real push host-side, and
+**revokes the token the moment the push completes** (its ~1h TTL is the backstop). The token
+never enters the sandbox — the agent is remote-unaware, as it is provider-unaware for model
+calls. Branch scope ("only the task branch") is enforced by the broker **branch guard**, since
+a GitHub token cannot be scoped to a branch; the App private key is a runtime-provisioned
+secret referenced by path (the API-key posture), read only on the trusted runner at mint time.
+With no remote configured the branch is applied to the local repo (the bootstrap single-host
+shape). See [security.md](../security.md) Control 3.
+
 ---
 
 ## Lifecycle of one invocation

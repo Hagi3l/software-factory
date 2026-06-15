@@ -61,6 +61,21 @@ func TestWarnPackageProxyNotAllowlisted(t *testing.T) {
 	}
 }
 
+func TestWarnGitRemoteNotAllowlisted(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Git.Remote = "https://github.com/acme/widgets.git"
+	c.Infra.Broker.Allowlist = []string{"llm-api", "nats"} // git missing
+	mustWarn(t, c.Warnings(), "git.remote is set")
+
+	c.Infra.Broker.Allowlist = []string{"llm-api", DestGitPush}
+	for _, w := range c.Warnings() {
+		if strings.Contains(w, "git.remote is set") {
+			t.Errorf("allowlisted git must not warn, got %q", w)
+		}
+	}
+}
+
 // The canonical config runs both the implementor (producer) and the security reviewer
 // (qa verifier) on the anthropic provider, so validate must advise the shared family —
 // this is the N-version diversity warning T2.13 adds (specs/verification.md).

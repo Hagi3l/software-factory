@@ -15,6 +15,7 @@ type Infra struct {
 	Sandbox   SandboxConfig            `yaml:"sandbox"`
 	NATS      NATSConfig               `yaml:"nats"`
 	Broker    BrokerConfig             `yaml:"broker"`
+	Git       GitConfig                `yaml:"git,omitempty"`
 	Artifacts ArtifactsConfig          `yaml:"artifacts"`
 	OTel      OTelConfig               `yaml:"otel"`
 	Signing   SigningConfig            `yaml:"signing,omitempty"`
@@ -144,6 +145,68 @@ func (b BrokerConfig) PackageProxyURL() string {
 func (b BrokerConfig) PackageProxyAllowed() bool {
 	for _, d := range b.Allowlist {
 		if d == DestPackageProxy {
+			return true
+		}
+	}
+	return false
+}
+
+// GitConfig configures where the candidate branch is pushed and how that push is
+// authenticated (T5.7, specs/security.md Control 3). It is the production replacement for
+// the bootstrap local-repo push: Remote names a real git remote, and GitHubApp (when set)
+// is the authority the runner mints a per-task, short-lived push token from.
+//
+// Empty Remote keeps the bootstrap shape — the candidate branch is applied to the local
+// source repo on the runner host, no token. A set Remote with no GitHubApp pushes
+// unauthenticated (valid for a file:// remote — the dev shape and what the offline tests
+// exercise). A set Remote with GitHubApp pushes authenticated by a minted installation
+// token that dies with the push. The `git` egress destination must be in broker.allowlist
+// for any push to be permitted at all (deny-by-default) — see Warnings for the advisory.
+type GitConfig struct {
+	Remote    string          `yaml:"remote,omitempty"`     // real git remote URL the candidate branch is pushed to; empty = local-repo apply
+	GitHubApp GitHubAppConfig `yaml:"github_app,omitempty"` // the token-minting authority (optional; unset = unauthenticated remote)
+}
+
+// GitHubAppConfig configures the GitHub App installation-token minter (T5.7). A GitHub App
+// installation token scopes to the repository with contents:write permission and lasts at
+// most an hour — branch-level scoping is not a token capability, so "only the task branch"
+// is enforced by the runner's broker branch guard (the agent never names another branch and
+// the runner refuses one if it did). The private key follows the API-key / signing-key
+// posture: a runtime-provisioned SECRET referenced by PATH (PrivateKey), read at mint time,
+// NEVER committed or baked into an image; its existence is therefore not checked at config
+// time (a missing/unreadable key fails loudly on the first push — fail-closed).
+type GitHubAppConfig struct {
+	APIBase        string `yaml:"api_base,omitempty"`     // GitHub REST API base; empty = public api.github.com (Enterprise Server overrides)
+	AppID          string `yaml:"app_id,omitempty"`       // the App's id (the JWT issuer)
+	InstallationID string `yaml:"installation_id,omitempty"` // the installation to mint a token for
+	Repository     string `yaml:"repository,omitempty"`   // "owner/name" — the one repo the token is scoped to
+	PrivateKey     string `yaml:"private_key,omitempty"`  // PATH to the App's PEM private key (a runtime secret, never the bytes)
+}
+
+// Active reports whether the GitHub App minter is fully configured and should be built. All
+// four fields are required to mint a token; a partial block is a config error (see
+// validateGit), not a silently-disabled minter.
+func (g GitHubAppConfig) Active() bool {
+	return g.AppID != "" && g.InstallationID != "" && g.Repository != "" && g.PrivateKey != ""
+}
+
+// set reports whether any GitHub App field is populated — used by validation to flag a
+// partial block (some fields set but not Active).
+func (g GitHubAppConfig) set() bool {
+	return g.AppID != "" || g.InstallationID != "" || g.Repository != "" || g.PrivateKey != ""
+}
+
+// DestGitPush is the egress-allowlist token (and broker destination) for git push — the
+// value an operator lists in broker.allowlist to permit the candidate-branch push. Single
+// source of truth shared by config and the broker's Method.destination.
+const DestGitPush = "git"
+
+// GitPushAllowed reports whether the git egress destination is in the allowlist — i.e.
+// whether the runner will broker a push at all. Deny-by-default: absent the token, the push
+// is rejected at the broker regardless of git.remote.
+func (b BrokerConfig) GitPushAllowed() bool {
+	for _, d := range b.Allowlist {
+		if d == DestGitPush {
 			return true
 		}
 	}

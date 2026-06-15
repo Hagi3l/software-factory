@@ -628,6 +628,75 @@ func TestValidateBrokerPackageProxy(t *testing.T) {
 	}
 }
 
+func TestValidateGitRemote(t *testing.T) {
+	for _, ok := range []string{
+		"", "https://github.com/acme/widgets.git", "http://host/r", "ssh://git@host/r",
+		"git://host/r", "file:///srv/repo.git", "git@github.com:acme/widgets.git", "/srv/repo.git",
+	} {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.Git.Remote = ok
+		if err := c.Validate(); err != nil {
+			t.Errorf("git.remote %q: Validate failed: %v", ok, err)
+		}
+	}
+	for _, bad := range []string{"https://", "ftp://host/r", "not a remote"} {
+		c := validConfig()
+		c.Souls = fullSouls(t)
+		c.Infra.Git.Remote = bad
+		mustContain(t, problems(t, c), "git.remote")
+	}
+}
+
+func TestValidateGitHubApp(t *testing.T) {
+	fullApp := GitHubAppConfig{AppID: "1", InstallationID: "2", Repository: "o/r", PrivateKey: "/k.pem"}
+
+	// A fully-configured app with a remote validates (key path existence is NOT checked).
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Git.Remote = "https://github.com/o/r.git"
+	c.Infra.Git.GitHubApp = fullApp
+	if err := c.Validate(); err != nil {
+		t.Errorf("full github_app + remote: Validate failed: %v", err)
+	}
+
+	// A partial app (missing private_key) is a fault.
+	c = validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Git.Remote = "https://github.com/o/r.git"
+	partial := fullApp
+	partial.PrivateKey = ""
+	c.Infra.Git.GitHubApp = partial
+	mustContain(t, problems(t, c), "git.github_app is partially configured")
+
+	// A full app with no remote has nowhere to push.
+	c = validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Git.GitHubApp = fullApp
+	mustContain(t, problems(t, c), "git.github_app is configured but git.remote is empty")
+
+	// A malformed api_base is a fault.
+	c = validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Git.Remote = "https://github.com/o/r.git"
+	badBase := fullApp
+	badBase.APIBase = "ftp://nope"
+	c.Infra.Git.GitHubApp = badBase
+	mustContain(t, problems(t, c), "git.github_app.api_base")
+}
+
+func TestGitHubAppConfigActive(t *testing.T) {
+	if (GitHubAppConfig{}).Active() {
+		t.Error("empty github_app should not be Active")
+	}
+	if (GitHubAppConfig{AppID: "1", InstallationID: "2", Repository: "o/r"}).Active() {
+		t.Error("github_app missing private_key should not be Active")
+	}
+	if !(GitHubAppConfig{AppID: "1", InstallationID: "2", Repository: "o/r", PrivateKey: "/k"}).Active() {
+		t.Error("fully-configured github_app should be Active")
+	}
+}
+
 func TestValidateEmptyDAG(t *testing.T) {
 	c := validConfig()
 	c.Souls = nil

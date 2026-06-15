@@ -25,6 +25,7 @@ func (c *Config) Warnings() []string {
 
 	c.warnModelDiversity(warn)
 	c.warnPackageProxy(warn)
+	c.warnGitPush(warn)
 
 	if len(warnings) == 0 {
 		return nil
@@ -55,6 +56,21 @@ func (c *Config) warnPackageProxy(warn func(string, ...any)) {
 	if b.PackageProxy != "" && !b.PackageProxyAllowed() {
 		warn("broker.package_proxy is set to %q but %q is not in broker.allowlist, so package fetches are denied (deny-by-default); add %q to the allowlist to enable dependency fetching, or drop package_proxy",
 			b.PackageProxy, DestPackageProxy, DestPackageProxy)
+	}
+}
+
+// warnGitPush advises when git.remote is configured but the git egress destination is not
+// in the allowlist: the remote is then dead config — the broker denies the candidate-branch
+// push deny-by-default, so every invocation's submit fails even though a remote was named.
+// Advisory, not fatal, mirroring warnPackageProxy: a deployment might stage a remote ahead
+// of flipping git egress on. See specs/security.md Control 3.
+func (c *Config) warnGitPush(warn func(string, ...any)) {
+	if c.Infra == nil {
+		return
+	}
+	if c.Infra.Git.Remote != "" && !c.Infra.Broker.GitPushAllowed() {
+		warn("git.remote is set to %q but %q is not in broker.allowlist, so the candidate-branch push is denied (deny-by-default); add %q to the allowlist to enable pushing, or drop git.remote",
+			c.Infra.Git.Remote, DestGitPush, DestGitPush)
 	}
 }
 

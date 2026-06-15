@@ -77,7 +77,11 @@ comments/identifiers** (`behavior`/`neighbor`/`fulfill`/`modeled`); specs may st
 British. Code **formatting is not gated** — `.golangci.yml` enables no formatters and
 `make check` runs `golangci-lint run` (not `fmt`), so `gofmt -l` flags committed files
 that pass the gate cleanly; trust `golangci-lint run`, don't reformat unrelated files.
-`make test-*`
+On **macOS** the default `$TMPDIR` (`/var/folders/…`) overruns the ~104-char unix-socket
+path limit, so broker-socket tests (`internal/gate`, `internal/runner`, incl. the embedded-NATS
+ones) fail with `bind: invalid argument` / `invoker was never called`. These are **not code
+bugs** — run with a short `TMPDIR` (`mkdir -p /tmp/st && TMPDIR=/tmp/st go test ./...`) and they
+pass. `make test-*`
 targets emit `go test -json` to `test/results/`
 (gitignored) — each target produces a `.json` (ndjson) + `.stderr`. If `jq` can't
 parse the JSON, check the `.stderr` file for compile errors. Triage with `jq`

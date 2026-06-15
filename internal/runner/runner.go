@@ -26,6 +26,7 @@ import (
 	"github.com/Loxstomper/harness/internal/messaging"
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/harness/internal/secret"
 	"github.com/Loxstomper/harness/internal/telemetry"
 )
 
@@ -91,6 +92,16 @@ type Options struct {
 	// only when "package-proxy" is in Allowlist; otherwise package fetch is denied at the
 	// broker. Empty disables the egress even if allowlisted. See specs/security.md Control 2.
 	PackageProxy string
+	// GitRemote is the real git remote the candidate branch is pushed to (T5.7,
+	// config.Infra.Git.Remote). Empty keeps the bootstrap local-repo apply into Repo; set
+	// routes the push to the remote, authenticated by Minter when present. See
+	// specs/security.md Control 3, specs/components/runner.md.
+	GitRemote string
+	// Minter mints the per-task, short-lived, branch-scoped git push credential and revokes
+	// it after the push (T5.7). Consulted only when GitRemote is set; nil there means an
+	// unauthenticated remote push (a file:// remote — the dev shape). The runner holds the
+	// minter and the token; the sandbox never does. See specs/security.md Control 3.
+	Minter secret.Minter
 	// AckWait is the JetStream lease: a work message is acked only after harvest, so a
 	// runner that dies mid-task lets JetStream redeliver after AckWait. It must exceed
 	// the longest an invocation can take; it defaults to Limits.Wall when unset.
@@ -354,6 +365,8 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		role:          brief.Issue.Role,
 		repo:          r.opts.Repo,
 		allowedBranch: core.CandidateBranch(brief.Issue.ID),
+		remote:        r.opts.GitRemote,
+		minter:        r.opts.Minter,
 		packageProxy:  r.opts.PackageProxy,
 		log:           r.log.With("invocation", invID, "issue", brief.Issue.ID),
 		tel:           r.tel,

@@ -429,6 +429,8 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		ResolveImage: cfg.Infra.Sandbox.ResolveImage,
 		Allowlist:    cfg.Infra.Broker.Allowlist,
 		PackageProxy: cfg.Infra.Broker.PackageProxyURL(),
+		GitRemote:    cfg.Infra.Git.Remote,
+		Minter:       pushMinter(cfg),
 		Logger:       log,
 		Telemetry:    tel,
 	}, backend, reg, nc, loop, store, js)

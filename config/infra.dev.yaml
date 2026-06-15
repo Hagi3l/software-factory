@@ -41,6 +41,24 @@ broker:
   # the deliberate default, not a private vetted mirror (an optional swap). See specs/security.md.
   allowlist: [llm-api, nats, git, package-proxy]
   package_proxy: https://proxy.golang.org
+# git: where the candidate branch is pushed and how that push is authenticated (T5.7).
+# Empty (the dev default) keeps the bootstrap local-repo apply: the runner lands the
+# candidate branch into the local source repo, no token — the single-host shape. A
+# distributed deployment sets `remote` to a real git remote and `github_app` to mint a
+# per-task, short-lived push token. The token scopes to the repo with contents:write (a
+# GitHub App installation token can't scope to a branch — the runner's broker branch guard
+# enforces "only the task branch"); it is minted just before the push and revoked the
+# instant it's done, dying with the invocation. The App private key is a runtime secret
+# referenced by PATH, NEVER committed or baked into an image (the API-key posture); its
+# existence is not checked at validate time. `git` must stay in broker.allowlist for any
+# push to be brokered. See specs/security.md Control 3, specs/components/runner.md.
+# git:
+#   remote: https://github.com/acme/widgets.git
+#   github_app:
+#     app_id: "123456"
+#     installation_id: "7891011"
+#     repository: acme/widgets
+#     private_key: /run/secrets/harness_github_app.pem
 artifacts:
   backend: files
   path: ./.harness/artifacts
