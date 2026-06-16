@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -945,7 +946,33 @@ func (s *Server) handleCreateDraft(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
 		return
 	}
-	s.render(w, r, views.DraftPanel(sess.ID, sess.Draft(), s.seeder != nil))
+	draft := sess.Draft()
+	// Pair each proposed spec with the file on disk so an edit renders as a line diff, not a
+	// whole-file dump (T4.32a); a new file falls through to full content.
+	specs := wizard.SpecFileDiffs(draft.Specs, s.readSpecFile)
+	s.render(w, r, views.DraftPanel(sess.ID, draft, specs, s.seeder != nil))
+}
+
+// readSpecFile reads a repo-relative spec path from disk for the wizard draft diff (T4.32a). It
+// returns the file content and true when the file exists within the repo; a missing file, a
+// path that escapes the repo, an empty repo root (standalone serve), or any read fault returns
+// ("", false) so the draft panel falls back to rendering the full proposed content — an edit
+// then renders as if it were new, which is honest when the prior version is unreadable. The path
+// is planner-proposed (trusted output) but is cleaned and confined under s.repo as defense in
+// depth, mirroring handlePersona's bounded read.
+func (s *Server) readSpecFile(rel string) (string, bool) {
+	if s.repo == "" {
+		return "", false
+	}
+	clean := filepath.Clean(filepath.FromSlash(rel))
+	if clean == "" || clean == "." || filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	data, err := os.ReadFile(filepath.Join(s.repo, clean)) // #nosec G304 -- repo-relative, ..-confined, planner-proposed path; read-only.
+	if err != nil {
+		return "", false
+	}
+	return string(data), true
 }
 
 // handleCreateApprove is the consent gate (T4.14, specs/control-room.md "Gate on explicit
@@ -1066,7 +1093,8 @@ func (s *Server) handleResolveBlast(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "could not compute the blast radius\n", http.StatusInternalServerError)
 		return
 	}
-	s.render(w, r, views.ResolvePanel(sess.ID, draft, s.resolver != nil, br))
+	specs := wizard.SpecFileDiffs(draft.Specs, s.readSpecFile)
+	s.render(w, r, views.ResolvePanel(sess.ID, draft, specs, s.resolver != nil, br))
 }
 
 // handleResolveApprove is the Resolve consent gate (T4.15): the human approves the refined spec,

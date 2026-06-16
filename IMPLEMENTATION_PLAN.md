@@ -1224,12 +1224,33 @@ components/artifact-store.md, glossary.md).
   `make check`-equivalent green for the blast radius (cmd/harness + controlroom + config tests pass, lint 0, both
   shipped + vault configs validate). (needs T4.14, T4.15) ([specs-process.md](specs/specs-process.md),
   [control-room.md](specs/control-room.md))
-- [ ] **T4.32a** *(optional, UX polish)* Approve-view diff for spec edits — `draftSpecFiles`
-  (`internal/controlroom/views/wizard.templ`) renders full proposed content with no diff, so for an *edit* the
-  operator can't see what changed against the on-disk file. Render an added/removed line diff when the file
-  already exists (full content for new files); plumb the current on-disk content into the draft-panel data the
-  server assembles. Benefits Resolve mode for free (shared renderer). Not a hard blocker — Resolve already
-  edits-without-diff and ships. ([control-room.md](specs/control-room.md))
+- [x] **T4.32a Approve-view diff for spec edits** — *done.* The wizard draft panel now renders an
+  **edit** as a line diff against the file on disk instead of dumping the whole proposed file with no
+  indication of what changed; a **new** file still shows full content. **Pure-Go diff, no git, no dep:**
+  new `internal/controlroom/wizard/specdiff.go` holds `LineDiff(old, new)` (a back-to-front LCS alignment
+  emitting every line as context/add/del — no hunking, since spec files are modest and the panel is
+  collapsible) + `SpecFileDiffs(specs, read)` which pairs each `DraftSpec` with on-disk content into a
+  `SpecFileDiff{Path, IsNew, Content, Diff}`. The proposal is uncommitted (the planner's draft), so the
+  only thing to compare against is the **working-tree** file — git shell-out is inapplicable. **Server
+  plumbs the disk read:** new `Server.readSpecFile(rel)` reads a repo-relative path under `s.repo`
+  (already held since T4.4), cleaned and **`..`-confined** as defense-in-depth on the planner-proposed
+  path (mirrors `handlePersona`'s bounded read); a missing file / path-escape / empty repo / read fault
+  returns `ok=false` so the panel **degrades to full-content** (an edit renders as if new) rather than
+  blanking. Both `handleCreateDraft` and `handleResolveBlast` build `[]SpecFileDiff` and pass it to the
+  panels. **Shared renderer (Resolve benefits for free):** `draftSpecFiles` now takes `[]wizard.SpecFileDiff`;
+  a new `specDiff` templ renders add/del/context lines with a +/-/space gutter and st-ok/st-blocked tints
+  (the tint classes live in the templ, not a Go helper, because the Tailwind `@source` scanner only reads
+  `*.templ`/`*_templ.go` — same lesson as T4.10), plus a "new file"/"edit" badge. `DraftPanel`/`ResolvePanel`
+  gained the `specs` param; the empty-render call sites pass `nil`. **This fulfills the spec promise** at
+  control-room.md ("the wizard shows the spec diff and its blast radius before commit") which Resolve had
+  not yet met. Docs (control-room.md Draft + Resolve steps) updated; no spec change needed (the spec already
+  said "spec diff"). Tests: `LineDiff` alignment / identical-input all-context / pure insert+delete;
+  `SpecFileDiffs` new-vs-edit-vs-unreadable-fallback; server `TestCreateDraftRendersEditDiff` (on-disk file →
+  edit badge + `- Old body.`/`+ Body.` lines, not a new-file badge) and `TestReadSpecFileConfinement`
+  (`..`/absolute/missing/empty-repo refusal). `make generate` ran (regenerate from repo root to keep the
+  canonical `internal/controlroom/views/` FileName prefix — `make generate`'s `go generate` runs templ from
+  the package dir and rewrites the prefix to `views/`, churning all `*_templ.go`; run `templ generate` from
+  root instead). Lint 0, controlroom + wizard tests green. ([control-room.md](specs/control-room.md))
 
 ## Phase 5 — Production isolation & distribution
 

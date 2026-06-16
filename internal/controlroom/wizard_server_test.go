@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -362,6 +364,80 @@ func TestCreateDraftRendersPanel(t *testing.T) {
 
 	if u := get(t, ts, "/create/draft/deadbeef"); u.status != http.StatusNotFound {
 		t.Errorf("/create/draft unknown session = %d, want 404", u.status)
+	}
+}
+
+// TestCreateDraftRendersEditDiff proves the draft panel shows a line diff (T4.32a) when the
+// proposed spec already exists on disk: with Repo set and specs/export.md present with different
+// content, the fragment marks the file as an edit and renders the removed/added lines, rather than
+// dumping the whole proposed file with no indication of what changed. The on-disk content is read
+// from the repo root the server holds; a new file (no on-disk match) still shows full content.
+func TestCreateDraftRendersEditDiff(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(repo, "specs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// The scripted draft proposes specs/export.md = "# Export\n\nBody.\n"; put a prior version on
+	// disk so the proposal is an edit, not a new file.
+	if err := os.WriteFile(filepath.Join(repo, "specs", "export.md"), []byte("# Export\n\nOld body.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	p := wizard.NewPlanner(draftAdapter(), "persona", wizard.WithTurnTimeout(5*time.Second))
+	s := New(Options{Planner: p, Seeder: &fakeSeeder{}, Repo: repo})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	sess := p.New()
+
+	if !sess.Send("build a CSV exporter") {
+		t.Fatal("Send returned false")
+	}
+	waitFor(t, func() bool { return !sess.Busy() && !sess.Draft().Empty() }, "draft not produced")
+
+	frag := get(t, ts, "/create/draft/"+sess.ID)
+	if frag.status != http.StatusOK {
+		t.Fatalf("draft status = %d, want 200", frag.status)
+	}
+	for _, want := range []string{
+		"specs/export.md", // the spec path
+		">edit<",          // marked as an edit, not a new file
+		"- Old body.",     // the removed line from disk
+		"+ Body.",         // the added line from the proposal
+	} {
+		if !strings.Contains(frag.body, want) {
+			t.Errorf("edit-diff draft panel missing %q\nbody: %s", want, frag.body)
+		}
+	}
+	// It must NOT claim this is a new file.
+	if strings.Contains(frag.body, ">new file<") {
+		t.Errorf("edit incorrectly marked as a new file\nbody: %s", frag.body)
+	}
+}
+
+// TestReadSpecFileConfinement proves readSpecFile refuses to read outside the repo root (defense in
+// depth on a planner-proposed path) and returns ok=false for a missing repo or a missing file, so
+// the draft panel degrades to full-content rather than reading arbitrary host files (T4.32a).
+func TestReadSpecFileConfinement(t *testing.T) {
+	repo := t.TempDir()
+	if err := os.WriteFile(filepath.Join(repo, "inside.md"), []byte("in"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s := New(Options{Repo: repo})
+
+	if c, ok := s.readSpecFile("inside.md"); !ok || c != "in" {
+		t.Errorf("readSpecFile(inside.md) = %q,%v; want \"in\",true", c, ok)
+	}
+	for _, bad := range []string{"../escape.md", "/etc/passwd", "..", ""} {
+		if _, ok := s.readSpecFile(bad); ok {
+			t.Errorf("readSpecFile(%q) returned ok=true; want refusal", bad)
+		}
+	}
+	if _, ok := s.readSpecFile("missing.md"); ok {
+		t.Errorf("readSpecFile(missing.md) returned ok=true; want false")
+	}
+	// No repo configured (standalone serve) reads nothing.
+	if _, ok := New(Options{}).readSpecFile("inside.md"); ok {
+		t.Errorf("readSpecFile with empty repo returned ok=true; want false")
 	}
 }
 

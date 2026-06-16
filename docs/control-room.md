@@ -120,7 +120,10 @@ is autonomous. It's a guided conversation, not a form:
    fits a domain an existing spec owns is folded into that file in place (and the
    `specs/README.md` index is refreshed when the spec-file set changes), so editing a
    spec or the index is a first-class draft that needs no backing issue. You see the
-   proposed specs and issues before committing.
+   proposed specs and issues before committing — a **new** spec file shows its full
+   proposed content, while an **edit** to an existing file shows a line diff (added
+   lines green, removed rose) against what's on disk, so you review *what changed*
+   rather than re-reading the whole file.
 4. **APPROVE** — an explicit consent gate, **soft-gated on a converged ledger**: you
    cannot commit with a fork still `discussing` (the planner names which to resolve
    first), but plain `open` forks are **auto-deferred and recorded** rather than blocking
@@ -144,7 +147,8 @@ or the "Resolve →" links on the DLQ and detail pages). It's the guided way to 
 
 It pre-loads the escalation, the governing spec slice, and the transcript that raised
 it, then runs the same conversation/ledger/draft flow. Before the consent gate it shows
-the **blast radius** of your proposed spec edit: which in-flight issues would reissue
+the **spec diff** (a line diff of the refinement against the spec on disk, the same
+renderer the Create draft panel uses) and the **blast radius** of your proposed spec edit: which in-flight issues would reissue
 and which already-merged `(epic, spec-path)` groups would re-derive. APPROVE writes the
 refined spec, commits it, and **reopens** the dead-lettered issue so the next dispatch
 re-resolves the edited slice. Resolve creates no new seed issues — new scope goes

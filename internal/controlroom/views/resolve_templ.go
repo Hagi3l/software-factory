@@ -119,7 +119,7 @@ func ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messag
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = ResolvePanel(sessionID, wizard.Draft{}, canResolve, query.BlastRadius{}).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = ResolvePanel(sessionID, wizard.Draft{}, nil, canResolve, query.BlastRadius{}).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -434,7 +434,7 @@ func resolveSpecSlice(rc query.ResolveContext) templ.Component {
 // draft. Empty (the planner has not drafted a refinement yet) it shows a muted invitation. The
 // spec edit reuses draftSpecFiles (the same rendering as Create); seed issues are deliberately not
 // shown — Resolve refines a spec and reopens the stuck issue, it does not create new work.
-func ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query.BlastRadius) templ.Component {
+func ResolvePanel(session string, draft wizard.Draft, specs []wizard.SpecFileDiff, canResolve bool, br query.BlastRadius) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
 		if templ_7745c5c3_CtxErr := ctx.Err(); templ_7745c5c3_CtxErr != nil {
@@ -488,7 +488,7 @@ func ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query.
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = draftSpecFiles(draft.Specs).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = draftSpecFiles(specs).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

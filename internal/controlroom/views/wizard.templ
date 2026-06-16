@@ -50,7 +50,7 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 					hx-trigger="sse:draft, sse:turn, every 8s"
 					hx-swap="innerHTML"
 				>
-					@DraftPanel(sessionID, wizard.Draft{}, true)
+					@DraftPanel(sessionID, wizard.Draft{}, nil, true)
 				</div>
 				<div id="wizard-result"></div>
 				@wizardConversation(sessionID, "Describe the change you want, or answer the planner's question…", msgs)
@@ -366,7 +366,7 @@ func ledgerStatusClass(status string) string {
 // serve with no repo to write) the draft is shown read-only with a note instead of a dead
 // button. The proposed spec content is templ-escaped as inert text — it is the trusted planner's
 // output but still model-authored markdown, never rendered as markup.
-templ DraftPanel(session string, draft wizard.Draft, canApprove bool) {
+templ DraftPanel(session string, draft wizard.Draft, specs []wizard.SpecFileDiff, canApprove bool) {
 	if draft.Empty() {
 		<div class="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4 text-sm text-muted">
 			<p>
@@ -403,7 +403,7 @@ templ DraftPanel(session string, draft wizard.Draft, canApprove bool) {
 					<p class="text-sm text-fg">{ draft.Summary }</p>
 				}
 			</div>
-			@draftSpecFiles(draft.Specs)
+			@draftSpecFiles(specs)
 			if len(draft.Issues) > 0 {
 				<div class="flex flex-col gap-2">
 					<h3 class="text-xs font-medium uppercase tracking-wide text-muted">Seed issues</h3>
@@ -443,22 +443,56 @@ templ DraftPanel(session string, draft wizard.Draft, canApprove bool) {
 	}
 }
 
-// draftSpecFiles renders the proposed/refined spec markdown as collapsible files — the content
-// the consent gate would write. Extracted so both the Create draft panel and the Resolve panel
-// (T4.15) render spec edits identically (single source). The content is templ-escaped as inert
-// text: trusted planner output, but still model-authored markdown, never rendered as markup.
-templ draftSpecFiles(specs []wizard.DraftSpec) {
-	if len(specs) > 0 {
+// draftSpecFiles renders the proposed/refined spec files as collapsible panels — the content the
+// consent gate would write. Extracted so both the Create draft panel and the Resolve panel
+// (T4.15) render spec edits identically (single source). A brand-new file (IsNew) shows its full
+// proposed content; an edit shows a line diff against the file currently on disk (T4.32a), so the
+// operator sees *what changed* rather than re-reading the whole file. All text is templ-escaped as
+// inert text: trusted planner output, but still model-authored markdown, never rendered as markup.
+// The diff tint classes (st-ok/st-blocked) live here, not in a Go helper, because the Tailwind
+// @source scanner only reads *.templ + generated *_templ.go.
+templ draftSpecFiles(files []wizard.SpecFileDiff) {
+	if len(files) > 0 {
 		<div class="flex flex-col gap-2">
 			<h3 class="text-xs font-medium uppercase tracking-wide text-muted">Spec files</h3>
-			for _, sp := range specs {
+			for _, f := range files {
 				<details class="rounded-md border border-border bg-canvas">
-					<summary class="cursor-pointer px-3 py-2 text-sm text-fg">{ sp.Path }</summary>
-					<pre class="overflow-x-auto whitespace-pre-wrap border-t border-border px-3 py-2 text-xs leading-relaxed text-fg">{ sp.Content }</pre>
+					<summary class="cursor-pointer px-3 py-2 text-sm text-fg">
+						{ f.Path }
+						if f.IsNew {
+							<span class="ml-2 rounded bg-st-ok-bg px-1.5 py-0.5 text-xs text-st-ok">new file</span>
+						} else {
+							<span class="ml-2 rounded bg-st-idle-bg px-1.5 py-0.5 text-xs text-st-idle">edit</span>
+						}
+					</summary>
+					if f.IsNew {
+						<pre class="overflow-x-auto whitespace-pre-wrap border-t border-border px-3 py-2 text-xs leading-relaxed text-fg">{ f.Content }</pre>
+					} else {
+						@specDiff(f.Diff)
+					}
 				</details>
 			}
 		</div>
 	}
+}
+
+// specDiff renders a line diff of an edited spec: added lines tinted emerald, removed lines rose,
+// unchanged lines muted, each with a +/-/space gutter so the change is legible without relying on
+// color alone. Lines are individual blocks (not one <pre>) so each carries its own tint; whitespace
+// is preserved per line (T4.32a).
+templ specDiff(lines []wizard.DiffLine) {
+	<div class="overflow-x-auto border-t border-border font-mono text-xs leading-relaxed">
+		for _, ln := range lines {
+			switch ln.Kind {
+				case wizard.DiffAdd:
+					<div class="whitespace-pre-wrap bg-st-ok-bg px-3 text-st-ok">{ "+ " + ln.Text }</div>
+				case wizard.DiffDel:
+					<div class="whitespace-pre-wrap bg-st-blocked-bg px-3 text-st-blocked">{ "- " + ln.Text }</div>
+				default:
+					<div class="whitespace-pre-wrap px-3 text-muted">{ "  " + ln.Text }</div>
+			}
+		}
+	</div>
 }
 
 // draftIssueRow renders one proposed seed issue: its title, the role it will enter the pipeline

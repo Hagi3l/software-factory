@@ -118,7 +118,12 @@ jq -rs '
 (`go install github.com/a-h/templ/cmd/templ`) compiled to committed
 `*_templ.go`; CSS is the **Tailwind v4 standalone CLI** (`make tailwind` fetches the pinned
 binary into gitignored `bin/`). Run `make generate` after editing any `*.templ` or
-`assets/app.tw.css` — it runs `templ generate` then Tailwind. `templ` lives in
+`assets/app.tw.css` — it runs `templ generate` then Tailwind. **But** the committed
+`*_templ.go` carry a repo-root-relative `FileName` (`internal/controlroom/views/x.templ`),
+while `make generate`'s `go generate` runs templ from the package dir (the `//go:generate`
+directive lives in `internal/controlroom/generate.go`), rewriting every file's prefix to
+`views/x.templ` and churning all `*_templ.go`. To regenerate cleanly, run **`templ generate`
+from the repo root** (then `make tailwind`-built CSS via the Makefile if CSS changed). `templ` lives in
 `$(go env GOPATH)/bin`, so `make generate` needs the same `export PATH="$PATH:$(go env GOPATH)/bin"`
 the lint step does (tailwind is found via the Makefile's `bin/` path). A plain `make build` needs
 neither tool (generated Go + compiled `app.css` are committed). The Tailwind input

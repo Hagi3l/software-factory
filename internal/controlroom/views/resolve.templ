@@ -44,7 +44,7 @@ templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messa
 					hx-trigger="sse:draft, sse:turn, every 8s"
 					hx-swap="innerHTML"
 				>
-					@ResolvePanel(sessionID, wizard.Draft{}, canResolve, query.BlastRadius{})
+					@ResolvePanel(sessionID, wizard.Draft{}, nil, canResolve, query.BlastRadius{})
 				</div>
 				<div id="wizard-result"></div>
 				@wizardConversation(sessionID, "Describe how the spec should be clarified, or answer the planner's question…", msgs)
@@ -113,7 +113,7 @@ templ resolveSpecSlice(rc query.ResolveContext) {
 // draft. Empty (the planner has not drafted a refinement yet) it shows a muted invitation. The
 // spec edit reuses draftSpecFiles (the same rendering as Create); seed issues are deliberately not
 // shown — Resolve refines a spec and reopens the stuck issue, it does not create new work.
-templ ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query.BlastRadius) {
+templ ResolvePanel(session string, draft wizard.Draft, specs []wizard.SpecFileDiff, canResolve bool, br query.BlastRadius) {
 	if len(draft.Specs) == 0 {
 		<div class="rounded-lg border border-border bg-surface p-4 text-sm text-muted">
 			The refined spec will appear here, with its blast radius and an Approve button, once the
@@ -127,7 +127,7 @@ templ ResolvePanel(session string, draft wizard.Draft, canResolve bool, br query
 					<p class="text-sm text-fg">{ draft.Summary }</p>
 				}
 			</div>
-			@draftSpecFiles(draft.Specs)
+			@draftSpecFiles(specs)
 			@blastRadius(br)
 			if canResolve {
 				<form
