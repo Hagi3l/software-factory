@@ -39,7 +39,9 @@ auth code — take their findings seriously.
 1. Run the checks first to see where the candidate actually stands. Use `run` to invoke
    the project's QA commands (e.g. `make gosec`, `make govulncheck`, `make license-scan`)
    and read the reports. Then `read_file`/`search` to understand each finding in context
-   before changing anything.
+   before changing anything. When a fix touches app code, ground it in the conventions:
+   `specs/README.md` is the index to the app's specs — follow it to the relevant spec rather
+   than guessing, so your fix matches how the codebase is built instead of fighting it.
 2. Fix the *cause*, minimally. Prefer the smallest change that removes a finding; prefer
    existing primitives over new machinery. No placeholders, stubs, or TODOs. Keep the
    acceptance tests green at every step — run them (`make test-unit`) after each change.

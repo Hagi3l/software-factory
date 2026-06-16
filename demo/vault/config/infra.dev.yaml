@@ -43,12 +43,17 @@ models:
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
     cost: { input_per_mtok: 0.28, output_per_mtok: 0.88 }
-  # The requirements-planner (the Create-Task wizard) runs on the stronger -pro tier: it is
-  # the single human-in-the-loop conversation and the entire correctness lever, and it must
-  # reliably follow the fenced ```ledger / ```draft output protocol that drives the alignment
-  # ledger UI — a job the cheaper flash tier does not do dependably. Pinned separately so a
-  # MODEL= override (which only rewrites the flash slug) swaps the autonomous souls without
-  # downgrading the planner. cost is an estimate — set it to the real OpenRouter price.
+  # The stronger -pro tier, used by the three roles that define *what correct means* (and so
+  # gate everything downstream): the requirements-planner (the Create-Task wizard — the single
+  # human-in-the-loop conversation and the entire correctness lever, which must reliably follow
+  # the ledger/draft tool protocol that drives the alignment ledger UI), the decomposition
+  # planner (the `plan` stage — a wrong split wastes every soul below it), and the test-author
+  # (the `author-tests` stage — its acceptance tests are the spec made executable, the contract
+  # the factory trusts in place of a human and the ceiling on what the implementor can produce).
+  # All three are jobs the cheaper flash tier does not do dependably. Pinned separately so a
+  # MODEL= override (which only rewrites the flash slug) swaps the execution souls (implementor,
+  # security, merge-resolver) without downgrading these three. cost is an estimate — set it to
+  # the real OpenRouter price.
   "deepseek/deepseek-v4-pro":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1

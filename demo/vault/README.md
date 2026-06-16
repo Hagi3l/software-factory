@@ -58,16 +58,27 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
 
 - **Docker** running (the sandbox backend).
 - An **OpenRouter API key** in `OPENAI_API_KEY` (the openai-compat adapter and the
-  requirements-planner send it as the bearer token). The autonomous souls default to
-  `deepseek/deepseek-v4-flash`; override with `MODEL=` (must support function calling — the agent
-  loop drives the model through structured tool calls). A full-DAG run on real Go is
-  demanding, so prefer a capable model. The **requirements-planner** (the Create-Task
-  wizard) is pinned separately to the stronger `deepseek/deepseek-v4-pro` and is *not*
-  affected by `MODEL=`: it is the one human-in-the-loop conversation and must reliably
-  follow the `ledger`/`draft` output protocol that drives the alignment ledger UI, which
-  the cheaper flash tier does not do dependably. To change it, edit `requirements_planner.model`
-  in `config/harness.yaml`.
-- **beads** (`bd`) on your `PATH` (or pass `BD=/path/to/bd`).
+  requirements-planner send it as the bearer token). The execution souls (implementor,
+  security, merge-resolver) default to `deepseek/deepseek-v4-flash`; override with `MODEL=`
+  (must support function calling — the agent loop drives the model through structured tool
+  calls). A full-DAG run on real Go is demanding, so prefer a capable model. The three roles
+  that define *what correct means* are pinned separately to the stronger
+  `deepseek/deepseek-v4-pro` and are *not* affected by `MODEL=`: the **requirements-planner**
+  (the Create-Task wizard — the one human-in-the-loop conversation, which must reliably follow
+  the ledger/draft tool protocol that drives the alignment ledger UI), the **decomposition
+  planner** (the `plan` stage — a wrong split wastes every soul below it), and the
+  **test-author** (the `author-tests` stage — its tests are the spec made executable, the
+  contract the factory trusts in place of a human and the ceiling on what the implementor can
+  build). The cheaper flash tier does none of these dependably. To change the wizard, edit
+  `requirements_planner.model` in `config/harness.yaml`; to change the planner or test-author,
+  edit `model:` in `config/souls/planner.yaml` or `config/souls/test-author.yaml`.
+- **beads** (`bd`) on your `PATH` (or pass `BD=/path/to/bd`), and **dolt** on your `PATH`
+  (`brew install dolt`). The demo runs beads in **server mode**: `run.sh` has `bd init`
+  auto-start a persistent per-run `dolt sql-server` (data under the scratch repo's
+  `.beads/dolt/`, stopped and torn down on exit) so the constant orchestrator/control-room
+  polling hits a *warm* engine instead of cold-starting Dolt on every `bd` call — a list drops
+  from ~0.7s to ~0.2s and stops stampeding under concurrency, which is what prevents `bd list`
+  timeouts during a busy run. Nothing leaks into the public repo (`.beads/` stays git-excluded).
 - Go + `make` (to build the `harness` binary).
 - *(optional, for the public-repo + deploy story)* a **public GitHub repo** you can push to
   (default `git@github.com:Loxstomper/vault.git`; override with `VAULT_REMOTE=`) and a **VPS**

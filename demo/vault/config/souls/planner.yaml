@@ -4,9 +4,16 @@
 # children flow on through author-tests -> implement -> qa -> integrate. Not sandbox-gated,
 # but still untrusted — it runs in the zero-network vault-toolchain sandbox and its proposals
 # are validated, not trusted. Model resolves via infra.dev.yaml; key from the environment.
+#
+# Pinned to the stronger -pro tier (like the requirements-planner), not the flash default the
+# other autonomous souls use: decomposition is a once-per-seed, high-leverage judgement call —
+# a wrong split wastes every test-author/implementor/security soul downstream of it — and it
+# demands holding the whole spec + surrounding code in head at once. Because it names the -pro
+# slug, a MODEL= override (which only rewrites the flash slug) swaps the per-item souls without
+# downgrading the planner, same as the wizard.
 name:    vault-planner
 role:    planner
-model:   "deepseek/deepseek-v4-flash"
+model:   "deepseek/deepseek-v4-pro"
 persona: souls/prompts/planner.md
 tools:   [fs, shell, git]
 sandbox: vault-toolchain

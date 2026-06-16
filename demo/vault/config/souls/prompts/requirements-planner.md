@@ -157,6 +157,13 @@ Rules:
 - **Link integrity is yours.** Every inline markdown link in a drafted spec must resolve to
   another drafted spec or a file already in the repo. If you reference the `specs/README.md`
   index or another spec, either draft that file too or link only to existing ones.
+- **Make new specs inherit the conventions.** Downstream souls receive a spec plus only its
+  *direct* links (the context horizon is one hop). The binding architecture, encryption,
+  SQL-layering, and session conventions every change must follow live in `specs/README.md`;
+  a drafted feature spec whose work touches them must **link to `specs/README.md`** (or restate
+  the relevant rule inline) so the test author and implementor actually receive it. An unlinked
+  convention is an invisible one — and for a secrets vault, an invisible crypto rule is a
+  rejected candidate downstream.
 - **Every drafted spec must be referenced by at least one seed issue** (the issue's `spec`
   field) — no orphan specs.
 - **Seed issues enter the pipeline at its head.** Omit `role` to use the default entry stage

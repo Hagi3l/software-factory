@@ -55,6 +55,7 @@ say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 # ---- preflight -------------------------------------------------------------------------
 command -v docker >/dev/null || { echo "error: docker not found (the sandbox backend needs it)"; exit 1; }
 command -v "$BD"  >/dev/null || { echo "error: beads CLI '$BD' not found (set BD=/path/to/bd)"; exit 1; }
+command -v dolt   >/dev/null || { echo "error: dolt not found — server-mode beads auto-starts a 'dolt sql-server' (brew install dolt)"; exit 1; }
 command -v git    >/dev/null || { echo "error: git not found"; exit 1; }
 docker info >/dev/null 2>&1   || { echo "error: docker daemon not reachable"; exit 1; }
 [ -n "${OPENAI_API_KEY:-}" ] || { echo "error: OPENAI_API_KEY is not set — put your OpenRouter API key in it"; exit 1; }
@@ -87,10 +88,13 @@ if [ -n "$MODEL_OVERRIDDEN" ] || [ -n "${JAEGER:-}" ]; then
   cp -r "$DEMO_DIR/config" "$CONFIG_DIR"
 fi
 if [ -n "$MODEL_OVERRIDDEN" ]; then
-  # The model name is the flash registry key in infra.dev.yaml AND the `model:` field in
-  # every soul; substitute both so they stay consistent (validation cross-checks them). The
-  # requirements_planner is pinned to the separate -pro registry key and is intentionally
-  # NOT rewritten, so a MODEL= override swaps the souls without downgrading the planner.
+  # The flash slug is the flash registry key in infra.dev.yaml AND the `model:` field in the
+  # execution souls (implementor, security, merge-resolver); substitute both so they stay
+  # consistent (validation cross-checks them). The three -pro-pinned souls — the
+  # requirements_planner (harness.yaml), the decomposition planner (souls/planner.yaml), and
+  # the test-author (souls/test-author.yaml) — name the separate -pro slug, so this flash-slug
+  # sed leaves them untouched: a MODEL= override swaps the execution souls without downgrading
+  # the spec/decomposition/test-contract roles that define what correct means.
   for f in "$CONFIG_DIR/infra.dev.yaml" "$CONFIG_DIR/harness.yaml" "$CONFIG_DIR/souls/"*.yaml; do
     sed -i.bak -e "s|$DEFAULT_MODEL|$MODEL|g" -e "s|$DEFAULT_ENDPOINT|$MODEL_ENDPOINT|g" "$f"
     rm -f "$f.bak"
@@ -120,10 +124,19 @@ printf '.beads/\n' >> "$SITE/.git/info/exclude"
 git -C "$SITE" add .
 git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
   commit -qm 'seed: established secrets vault (auth + secrets + audit + dashboard)'
-# --non-interactive: bd init drops into a wizard when stdin is a tty (the normal case
-# when you run this script by hand). Its stdout is hidden below, so the prompt would be
-# invisible and bd would hang forever waiting on stdin. Force the non-interactive path.
-( cd "$SITE" && "$BD" init --prefix vault --non-interactive >/dev/null )
+# --server: run beads against a persistent, per-run `dolt sql-server` (bd auto-starts it and
+# records its pid/port under .beads/) instead of cold-starting the embedded Dolt engine on
+# every `bd` invocation. The orchestrator's reconcile loop and the control-room views poll
+# beads constantly during a run; a fresh engine cold-start per call (~0.7s each, and they
+# *contend* under concurrency — 8 at once stretch to ~4s) is what caused the `bd list`
+# timeouts. A warm server drops a list to ~0.2s with no stampede. Data lives in .beads/dolt/
+# (repo-scoped, torn down with the scratch repo, git-excluded like the rest of .beads);
+# cleanup() runs `bd dolt stop` before removing $SITE so the server doesn't orphan.
+# --non-interactive: bd init drops into a wizard when stdin is a tty (the normal case when
+# you run this script by hand). Its stdout is hidden below, so the prompt would be invisible
+# and bd would hang forever waiting on stdin. Force the non-interactive path.
+( cd "$SITE" && "$BD" init --prefix vault --server --non-interactive >/dev/null )
+"$BD" -C "$SITE" dolt status >/dev/null 2>&1 || { echo "error: beads dolt sql-server did not come up (see $SITE/.beads/dolt-server.log)"; exit 1; }
 
 # ---- reset the public repo to the green seed -------------------------------------------
 # The audience inspects this repo, so each run starts it from an identical pristine baseline
@@ -157,6 +170,10 @@ push_main_watcher() {
 
 cleanup() {
   [ -z "${PUSH_PID:-}" ] || kill "$PUSH_PID" >/dev/null 2>&1 || true
+  # Stop the per-run dolt sql-server before removing the repo, so it doesn't linger as an
+  # orphan holding its port and the deleted .beads/dolt files. Unconditional even under
+  # KEEP_SITE — a kept repo's server can be restarted on demand with `bd -C <repo> dolt start`.
+  "$BD" -C "$SITE" dolt stop >/dev/null 2>&1 || true
   [ -n "${KEEP_SITE:-}" ] || rm -rf "$SITE"
   [ -z "${JAEGER:-}" ] || docker rm -f "$JAEGER_NAME" >/dev/null 2>&1 || true
 }
