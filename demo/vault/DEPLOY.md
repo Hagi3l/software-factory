@@ -41,6 +41,16 @@ Then `sudo systemctl restart ssh`. Open the firewall for the three ports we use:
 sudo ufw allow 22,80,443/tcp && sudo ufw enable
 ```
 
+On a 512MB droplet, add 1GB of swap so a momentary spike (an `apt install`, a snapshot
+restore) can't OOM-kill anything — nothing *builds* here (the binary is compiled in CI), so
+this is just insurance:
+
+```bash
+sudo fallocate -l 1G /swapfile && sudo chmod 600 /swapfile
+sudo mkswap /swapfile && sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
 ## 3. Deploy user (what GitHub Actions logs in as)
 
 ```bash
