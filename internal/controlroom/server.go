@@ -853,8 +853,9 @@ func (s *Server) handleCreateLedger(w http.ResponseWriter, r *http.Request) {
 // chip pick / free text / "let's discuss"), so the planner reconciles the whole batch and
 // re-emits the ledger. It returns the transcript fragment so the human's answers show at once;
 // the refreshed ledger arrives separately over the `ledger` SSE nudge. The per-fork inputs are
-// named opt-<i>/text-<i>/discuss-<i>/note-<i> against the latest ledger (the same indices the
-// view rendered); each index is re-resolved in Answer, so a stale index is a no-op. Data
+// named opt-<i>/text-<i>/discuss-<i>/note-<i> with a hidden q-<i> carrying the fork's question; the
+// question (not the render index i) is the identity Answer re-resolves against the latest ledger,
+// so a reordered or shortened ledger never mis-attributes or silently drops an answer. Data
 // endpoint: 503 with no planner, 400 on a malformed form, 404 for an unknown session.
 func (s *Server) handleCreateLedgerAnswer(w http.ResponseWriter, r *http.Request) {
 	if s.planner == nil {
@@ -870,22 +871,31 @@ func (s *Server) handleCreateLedgerAnswer(w http.ResponseWriter, r *http.Request
 		http.Error(w, "unknown wizard session\n", http.StatusNotFound)
 		return
 	}
-	sess.Answer(parseForkAnswers(r, len(sess.Ledger())))
+	sess.Answer(parseForkAnswers(r))
 	s.render(w, r, views.WizardTranscript(sess.Messages(), sess.Busy(), sess.TurnElapsed()))
 }
 
-// parseForkAnswers collects the per-fork answer inputs from a batch submit into []ForkAnswer,
-// one per fork that carries any resolution (a chip pick, free text, or a "let's discuss" flag).
-// It iterates fork indices [0,count) — the latest ledger length — reading the opt-<i>/text-<i>/
-// discuss-<i>/note-<i> fields the view emitted; a fork with none of them is skipped, so an empty
-// submit yields no answers (a no-op in Answer). Indices are re-resolved against the latest ledger
-// in Answer, so a stale index simply drops.
-func parseForkAnswers(r *http.Request, count int) []wizard.ForkAnswer {
+// parseForkAnswers collects the per-fork answer inputs from a batch submit into []ForkAnswer, one
+// per fork that carries any resolution (a chip pick, free text, or a "let's discuss" flag). It is
+// driven by the hidden q-<i> question fields the view emits for every answerable fork — NOT by the
+// current ledger length, since the form may have rendered against an older ledger (more or fewer
+// forks, or a different order). For each q-<i> present it reads the sibling opt-<i>/text-<i>/
+// discuss-<i>/note-<i> inputs and carries the question through as the answer's stable identity; a
+// fork with none of the three moves is skipped. Answer re-resolves each question against the latest
+// ledger, so a reordered or shortened ledger maps every answer correctly or drops it cleanly — the
+// silent "wrong/lost answer at a stale index" failure is gone. The per-fork render index (i) is
+// only a local grouping key here; it carries no meaning past this function.
+func parseForkAnswers(r *http.Request) []wizard.ForkAnswer {
 	var answers []wizard.ForkAnswer
-	for i := 0; i < count; i++ {
-		discuss := r.FormValue("discuss-"+strconv.Itoa(i)) != ""
-		text := r.FormValue("text-" + strconv.Itoa(i))
-		optStr := r.FormValue("opt-" + strconv.Itoa(i))
+	for key, vals := range r.Form {
+		idx, ok := strings.CutPrefix(key, "q-")
+		if !ok || len(vals) == 0 {
+			continue // not a question field, or no value
+		}
+		question := vals[0]
+		discuss := r.FormValue("discuss-"+idx) != ""
+		text := r.FormValue("text-" + idx)
+		optStr := r.FormValue("opt-" + idx)
 		if !discuss && strings.TrimSpace(text) == "" && optStr == "" {
 			continue // this fork was left unanswered in the batch
 		}
@@ -896,11 +906,11 @@ func parseForkAnswers(r *http.Request, count int) []wizard.ForkAnswer {
 			}
 		}
 		answers = append(answers, wizard.ForkAnswer{
-			ItemIdx: i,
-			OptIdx:  opt,
-			Text:    text,
-			Discuss: discuss,
-			Note:    r.FormValue("note-" + strconv.Itoa(i)),
+			Question: question,
+			OptIdx:   opt,
+			Text:     text,
+			Discuss:  discuss,
+			Note:     r.FormValue("note-" + idx),
 		})
 	}
 	return answers

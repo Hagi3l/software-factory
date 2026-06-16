@@ -247,11 +247,14 @@ templ ledgerRow(idx int, it wizard.LedgerItem) {
 // flex-wrap row of option chips (radio inputs styled as pills, named opt-<idx> so one wins per
 // fork), a free-text box (named text-<idx> — folding in nuance the canned options missed, which
 // the spec makes first-class on *every* fork, not just a fallback), and a "let's discuss"
-// checkbox + optional note (discuss-<idx>/note-<idx>) that asks the planner to go deeper. All
-// inputs live inside the panel's single batch form; the indices match what the answer handler
-// re-resolves against the latest ledger.
+// checkbox + optional note (discuss-<idx>/note-<idx>) that asks the planner to go deeper. A hidden
+// q-<idx> carries the fork's QUESTION: that — not the render index idx — is the identity the
+// answer handler re-resolves against the latest ledger, so a ledger re-emitted (reordered or
+// shortened) between render and submit never mis-attributes or drops an answer. All inputs live
+// inside the panel's single batch form.
 templ ledgerForkControls(idx int, it wizard.LedgerItem) {
 	<div class="flex flex-col gap-2 pt-0.5">
+		<input type="hidden" name={ fmt.Sprintf("q-%d", idx) } value={ it.Question }/>
 		if len(it.Options) > 0 {
 			<div class="flex flex-wrap gap-2">
 				for j, opt := range it.Options {

@@ -247,8 +247,13 @@ func TestCreateLedgerAnswerRecordsTurn(t *testing.T) {
 	}
 	waitFor(t, func() bool { return !sess.Busy() && len(sess.Ledger()) == 2 }, "ledger not seeded")
 
-	// A batch: chip pick on fork 0, free text on fork 1.
-	form := url.Values{"session": {sess.ID}, "opt-0": {"0"}, "text-1": {"Use OAuth."}}
+	// A batch: chip pick on fork 0, free text on fork 1. The hidden q-<i> fields carry each fork's
+	// question — the identity the handler re-resolves against the latest ledger.
+	form := url.Values{
+		"session": {sess.ID},
+		"q-0":     {"Which datastore?"}, "opt-0": {"0"},
+		"q-1": {"Auth in v1?"}, "text-1": {"Use OAuth."},
+	}
 	pr, err := http.PostForm(ts.URL+"/create/ledger/answer", form)
 	if err != nil {
 		t.Fatalf("POST answer: %v", err)

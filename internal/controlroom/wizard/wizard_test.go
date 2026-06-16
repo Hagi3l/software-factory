@@ -355,18 +355,19 @@ func TestAnswerBatchFunnelsThroughPlanner(t *testing.T) {
 	if got := sess.Answer(nil); got != "" {
 		t.Errorf("empty batch returned %q, want empty", got)
 	}
-	if got := sess.Answer([]wizard.ForkAnswer{{ItemIdx: 9, OptIdx: 0}}); got != "" {
-		t.Errorf("out-of-range batch returned %q, want empty", got)
+	if got := sess.Answer([]wizard.ForkAnswer{{Question: "A fork that no longer exists", OptIdx: 0}}); got != "" {
+		t.Errorf("unknown-question batch returned %q, want empty", got)
 	}
 	if len(sess.Messages()) != before {
 		t.Errorf("a no-op Answer recorded a message")
 	}
 
-	// A real batch: chip pick on fork 1, free text on fork 2, "let's discuss" on fork 3.
+	// A real batch: chip pick on fork 1, free text on fork 2, "let's discuss" on fork 3 — each
+	// keyed by its question (the stable identity), not its position.
 	msg := sess.Answer([]wizard.ForkAnswer{
-		{ItemIdx: 0, OptIdx: 0},
-		{ItemIdx: 1, OptIdx: -1, Text: "Use the existing OAuth provider."},
-		{ItemIdx: 2, OptIdx: -1, Discuss: true, Note: "unsure of the target"},
+		{Question: "Which datastore?", OptIdx: 0},
+		{Question: "Auth in v1?", OptIdx: -1, Text: "Use the existing OAuth provider."},
+		{Question: "Rate limiting?", OptIdx: -1, Discuss: true, Note: "unsure of the target"},
 	})
 	for _, want := range []string{
 		"Here are my answers to the open forks:",
@@ -474,6 +475,75 @@ func TestDraftTurnParsesAndStreamsClean(t *testing.T) {
 	}
 	if strings.Contains(tr, "export.md") || strings.Contains(tr, "ledger") {
 		t.Errorf("transcript leaked a structured block: %s", tr)
+	}
+}
+
+// TestDraftNudgeBackstopDrivesTheCall proves the converse loop's one-shot draft backstop: when the
+// planner's concluding prose ANNOUNCES a draft but emits no propose_draft call, the engine injects
+// one corrective nudge and the model's follow-up call is harvested. Without the nudge the turn
+// would conclude on the bare prose and the promised draft would never appear — the
+// "narrates-but-never-acts" loop a human hit when the planner kept saying "let me propose the
+// draft" without ever recording one.
+func TestDraftNudgeBackstopDrivesTheCall(t *testing.T) {
+	const draftArgs = `{"summary":"One-time secrets","specs":[{"path":"specs/share.md","content":"# Share\n"}],` +
+		`"issues":[{"title":"Add /s/ endpoint","body":"Build it.","spec":"specs/share.md"}]}`
+	srv := modeltest.NewServer(t, []modeltest.Turn{
+		// Turn 1: announces the draft as a closing action, but emits NO propose_draft call.
+		{Text: "All forks agreed — let me propose the draft now."},
+		// Turn 2 (after the nudge): actually emits the propose_draft call.
+		{Text: "Here is the draft.", ToolCalls: []modeltest.ToolCall{{ID: "d1", Name: "propose_draft", Args: draftArgs}}},
+	})
+	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
+	sess := p.New()
+
+	if !sess.Send("make the spec") {
+		t.Fatal("Send returned false")
+	}
+	waitFor(t, func() bool { return !sess.Busy() }, "turn did not complete")
+
+	d := sess.Draft()
+	if d.Empty() {
+		t.Fatal("draft not stored — the nudge backstop did not drive the propose_draft call")
+	}
+	if d.Summary != "One-time secrets" || len(d.Specs) != 1 || len(d.Issues) != 1 {
+		t.Errorf("draft wrong after the nudge: %+v", d)
+	}
+	// The recorded prose is the post-nudge reply, and the nudge itself never enters the transcript
+	// (the local msgs slice is discarded — only the final prose is kept).
+	msgs := sess.Messages()
+	if last := msgs[len(msgs)-1]; last.Role != "assistant" || last.Text != "Here is the draft." {
+		t.Errorf("final message = %+v, want the post-nudge assistant reply", last)
+	}
+	for _, m := range msgs {
+		if strings.Contains(m.Text, "propose_draft tool") {
+			t.Errorf("the corrective nudge leaked into the transcript: %+v", m)
+		}
+	}
+}
+
+// TestDraftNudgeFiresAtMostOnce proves the backstop is one-shot: if the planner announces a draft,
+// is nudged, and STILL only narrates (no call), the turn concludes on the prose rather than nudging
+// forever. The scripted server has exactly two turns, so a third model call (a second nudge) would
+// over-run it and fail the test — that over-run check IS the termination proof.
+func TestDraftNudgeFiresAtMostOnce(t *testing.T) {
+	srv := modeltest.NewServer(t, []modeltest.Turn{
+		{Text: "Let me propose the draft."},
+		{Text: "Right, let me propose the draft."}, // still no call after the single nudge
+	})
+	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
+	sess := p.New()
+
+	if !sess.Send("make the spec") {
+		t.Fatal("Send returned false")
+	}
+	waitFor(t, func() bool { return !sess.Busy() }, "turn did not complete")
+
+	if d := sess.Draft(); !d.Empty() {
+		t.Errorf("a draft was recorded though the model never emitted the call: %+v", d)
+	}
+	msgs := sess.Messages()
+	if last := msgs[len(msgs)-1]; last.Text != "Right, let me propose the draft." {
+		t.Errorf("final prose = %q, want the second narration (exactly one nudge, two model calls)", last.Text)
 	}
 }
 

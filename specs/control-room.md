@@ -386,6 +386,15 @@ output stays robust across models, with no free-text block for the server to scr
 **output** tool calls (pure structured state) and are distinct from the read-only exploration
 tools (genuine actions): emitting one never triggers another exploration round-trip.
 
+**A draft is recorded only by the `propose_draft` call — and the engine holds the planner to
+that.** Because a prose-only turn concludes the conversation, a planner that *narrates* the draft
+("let me propose the draft") without emitting the call would otherwise leave the human staring at a
+promise that never materializes, re-asking while the model re-narrates. So when a turn's concluding
+prose announces a draft yet carried no `propose_draft` call, the engine injects a single corrective
+nudge — *prose does not record a draft; emit the call now if intent has converged* — and lets the
+model act. The nudge fires at most once per human turn (a termination guarantee) and only reminds,
+never forces: a planner that is genuinely not ready simply keeps to questions and the ledger.
+
 **Forks become chips.** When the planner surfaces a decision, it renders the
 options as selectable chips (with the tradeoff). Each fork offers the same three
 moves: **pick a chip** (it moves to *agreed*); **type free text** (the planner
@@ -399,10 +408,15 @@ optionally with a note on *what* gives them pause).
 posts a coherent set of currently-independent open forks at once, and the human
 resolves them in any combination in a single submit — far fewer round-trips than a
 linear question-at-a-time chat. Attribution stays unambiguous because **every
-answer carries its fork's id** (free-text answers are prefixed with the fork
-number); the planner reconciles the whole batch on its next turn — *including*
-noticing that one answer made another fork moot ("given your answer to Q1, Q3 falls
-away"). The division of labour is deliberate: the **ledger stays dumb and the
+answer carries its fork's identity — the fork's question, not its position.** The
+planner re-emits the *whole* ledger every turn and may reorder or drop forks, so a
+position captured when the form rendered can point at the wrong fork by the time the
+batch posts; keying each answer to its question re-resolves it against the latest
+ledger, mapping every answer to the right fork or dropping it cleanly when that fork
+is gone — never silently mis-applying it to a stale index. (The fork *number* shown
+to the human is just its position in the current ledger.) The planner reconciles the
+whole batch on its next turn — *including* noticing that one answer made another fork
+moot ("given your answer to Q1, Q3 falls away"). The division of labour is deliberate: the **ledger stays dumb and the
 planner stays smart** — the UI guarantees clean attribution, the planner owns all
 dependency reasoning, so there is no dependency graph to encode in the ledger.
 Dependent forks simply appear in the next batch once their prerequisites are agreed.
@@ -482,7 +496,8 @@ fresh or unsticking dead-lettered work.
   discussion.*
 - ~~**In-session ledger shape:** plain agreed/open checklist vs. the
   lightly-structured items.~~ **Decided:** the lightly-structured shape — forks
-  surfaced and answered in **batches** (every answer carrying its fork id), a
+  surfaced and answered in **batches** (every answer carrying its fork's question
+  as its identity), a
   first-class free-text move on every fork, and four item states
   (`open`/`agreed`/`discussing`/`deferred`) with approval **soft-gated** on a
   converged ledger. See [The alignment ledger](#the-alignment-ledger).

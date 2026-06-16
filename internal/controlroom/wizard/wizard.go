@@ -530,18 +530,23 @@ func (s *Session) Transcript() []byte {
 }
 
 // ForkAnswer is one human resolution to an open fork in a batch submit (T4.27,
-// specs/control-room.md "Forks are surfaced and answered in batches"): which fork (ItemIdx,
-// resolved against the latest ledger snapshot) and the resolution. The three first-class moves
-// are mutually exclusive, applied in precedence order: Discuss (flag "let's discuss", with an
-// optional Note on what gives the human pause) wins; then free Text (the human types the answer,
-// folding in nuance the canned options missed); then a chosen option (OptIdx >= 0, a chip pick).
-// An answer carrying none of these is dropped.
+// specs/control-room.md "Forks are surfaced and answered in batches"): which fork (Question — the
+// fork's STABLE identity, re-resolved against the latest ledger snapshot by exact text match) and
+// the resolution. Identity is the question, not a positional index: the planner re-emits the whole
+// ledger every turn and may reorder or drop forks, so a position captured when the form rendered
+// can land on the wrong fork (or past the end) by the time the batch posts — keying on the question
+// maps each answer to the right fork or drops it cleanly when that fork is gone, never silently
+// mis-applies. The three first-class moves are mutually exclusive, applied in precedence order:
+// Discuss (flag "let's discuss", with an optional Note on what gives the human pause) wins; then
+// free Text (the human types the answer, folding in nuance the canned options missed); then a
+// chosen option (OptIdx >= 0, a chip pick — an index WITHIN the resolved fork's options, which are
+// far more stable than fork order). An answer carrying none of these is dropped.
 type ForkAnswer struct {
-	ItemIdx int
-	OptIdx  int // chosen option index, or < 0 for none
-	Text    string
-	Discuss bool
-	Note    string
+	Question string // the fork's question text — its stable identity across ledger re-emissions
+	OptIdx   int    // chosen option index within the resolved fork, or < 0 for none
+	Text     string
+	Discuss  bool
+	Note     string
 }
 
 // Answer funnels a batch of fork resolutions back through the conversation as ONE user turn that
@@ -549,21 +554,34 @@ type ForkAnswer struct {
 // unambiguously and reconciles the whole batch on its next turn — including noticing that one
 // answer made another fork moot. Chip picks, free text, and "let's discuss" flags all become
 // lines in that single turn; the planner re-emits the ledger reflecting them (the planner stays
-// the single source of truth — there is no client-side ledger mutation). Each answer's ItemIdx is
-// resolved against the latest ledger; an out-of-range or empty answer is skipped. An empty batch
-// (nothing resolvable) is a no-op returning "". On success it returns the message it sent.
+// the single source of truth — there is no client-side ledger mutation). Each answer is resolved
+// to its fork by Question (exact match against the latest ledger), NOT by position: the loop walks
+// the current ledger so the fork numbers and order in the message always match what the human now
+// sees, and an answer whose question is no longer present is dropped cleanly (the fork was settled
+// or removed since the form rendered) rather than mis-attributed to whatever now sits at its old
+// index. An empty batch (nothing resolvable) is a no-op returning "". On success it returns the
+// message it sent.
 func (s *Session) Answer(answers []ForkAnswer) string {
 	s.mu.Lock()
 	ledger := slices.Clone(s.ledger)
 	s.mu.Unlock()
 
-	var lines []string
+	// Index the submitted answers by their fork's question — the stable identity we re-resolve
+	// against the latest ledger below (last write wins on the rare duplicate).
+	byQuestion := make(map[string]ForkAnswer, len(answers))
 	for _, a := range answers {
-		if a.ItemIdx < 0 || a.ItemIdx >= len(ledger) {
-			continue // the ledger may have moved on since the page was rendered
+		if q := strings.TrimSpace(a.Question); q != "" {
+			byQuestion[q] = a
 		}
-		it := ledger[a.ItemIdx]
-		n := a.ItemIdx + 1 // 1-based fork number, the id the planner attributes answers by
+	}
+
+	var lines []string
+	for i, it := range ledger {
+		a, ok := byQuestion[strings.TrimSpace(it.Question)]
+		if !ok {
+			continue // no answer submitted for this fork
+		}
+		n := i + 1 // 1-based fork number in the CURRENT ledger — the id the planner attributes by
 		switch {
 		case a.Discuss:
 			line := fmt.Sprintf("%d. %q → let's discuss", n, it.Question)
@@ -708,6 +726,44 @@ func plannerOutputToolDefs() []model.ToolDef {
 	return []model.ToolDef{updateLedgerToolDef(), proposeDraftToolDef()}
 }
 
+// draftNudge is the one-shot corrective the converse loop injects when the model's concluding
+// prose announces a draft but the turn emitted no propose_draft call (see converse). It reminds —
+// it does not command: a draft is recorded only by the tool call, so if the model is genuinely
+// ready it should call propose_draft now, and if it is not it should keep to questions + the
+// ledger. That phrasing keeps a false-positive harmless (a re-evaluation, never a forced draft).
+const draftNudge = "A draft is recorded ONLY when you call the propose_draft tool — prose describing " +
+	"it does nothing on its own, and your last reply described a draft without emitting the call. " +
+	"If intent has genuinely converged and you would recommend approving it, emit the propose_draft " +
+	"tool call now. If it has not converged, keep to prose + the ledger instead."
+
+// announcesDraft reports whether the planner's prose reads as an announcement that it is about to
+// (or just did) produce the draft — the "narrates the action instead of taking it" pattern the
+// draft backstop catches. It is a deliberately small, lowercased phrase match: only a backstop, so
+// a miss merely reverts to the prior behavior (prose shown, no draft) and a spurious hit is
+// absorbed by draftNudge's gentle wording. The phrases are the committal forms ("let me propose
+// the draft", "draft the spec"), not a bare mention of the word "draft".
+func announcesDraft(prose string) bool {
+	p := strings.ToLower(prose)
+	for _, phrase := range []string{
+		"propose the draft",
+		"propose the full draft",
+		"propose the spec",
+		"let me draft",
+		"let me propose",
+		"i'll draft",
+		"i will draft",
+		"draft the spec",
+		"draft the full spec",
+		"seed the issues",
+		"seed issues",
+	} {
+		if strings.Contains(p, phrase) {
+			return true
+		}
+	}
+	return false
+}
+
 // converse runs the model to a prose conclusion for one human turn. Two kinds of tool call flow
 // back. EXPLORATION (read-only action) calls — present only when the session has a sandbox — are
 // dispatched against it and their results fed back, driving another round-trip; that is what the
@@ -720,6 +776,7 @@ func plannerOutputToolDefs() []model.ToolDef {
 // the caller's per-turn timeout).
 func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []model.ToolDef) (plannerTurn, error) {
 	var out plannerTurn
+	nudged := false // the draft backstop fires at most once per human turn (termination)
 	for turn := 1; turn <= s.maxToolTurns; turn++ {
 		// Accumulate this turn's reply and re-broadcast the cumulative (HTML-escaped) prose as it
 		// grows, coalesced by deltaFlushRunes. A fresh builder per turn so an intermediate
@@ -771,6 +828,26 @@ func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []mod
 		}
 
 		if len(actionCalls) == 0 {
+			// Draft backstop: the model frequently *narrates* the draft as a closing action
+			// ("let me propose the draft") without emitting the propose_draft call — and since a
+			// prose-only turn concludes here, that promised draft would silently never appear, so
+			// the human re-asks and the model re-narrates forever. When the concluding prose
+			// announces a draft yet this turn carried no draft, inject one corrective nudge and let
+			// the model act. Capped to once per human turn so it can never loop: if the model still
+			// declines, we fall through to returning the prose. The nudge is gentle (it reminds, it
+			// does not force) so a false positive just prompts a re-evaluation, never a half-baked
+			// draft.
+			if !nudged && !out.draftSet && announcesDraft(resp.Text) {
+				nudged = true
+				msgs = append(msgs, model.Message{Role: model.RoleAssistant, Text: resp.Text, ToolCalls: resp.ToolCalls})
+				if len(outputAcks) > 0 {
+					// Keep the tool-call history well-formed: any output call this turn (e.g. an
+					// update_ledger riding alongside the prose) still needs its result fed back.
+					msgs = append(msgs, model.Message{Role: model.RoleTool, ToolResults: outputAcks})
+				}
+				msgs = append(msgs, model.Message{Role: model.RoleUser, Text: draftNudge})
+				continue
+			}
 			out.prose = resp.Text
 			return out, nil
 		}
