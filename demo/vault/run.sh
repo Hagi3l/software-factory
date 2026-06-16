@@ -7,6 +7,11 @@
 # pipeline (plan -> author-tests -> implement -> qa -> integrate) take it to a merge on
 # `main` — driven by a REMOTE model served by OpenRouter. See demo/vault/README.md.
 #
+# The scratch repo is wired to a PUBLIC GitHub repo (VAULT_REMOTE): it is reset to the green
+# seed at startup, and each landed feature's machine-authored merge commit is pushed there —
+# the artifact the audience inspects, and the push that fires the deploy (GitHub Actions ->
+# your VPS). Set VAULT_REMOTE='' for a purely-local run.
+#
 # Unlike demo/run.sh this does NOT seed an issue: the requirement is drafted on stage via
 # the wizard at /create. The repo ships green, so the agents extend a clean tree.
 #
@@ -19,6 +24,7 @@
 #   MODEL_ENDPOINT='https://openrouter.ai/api/v1' ./demo/vault/run.sh
 #   SERVE_ADDR='127.0.0.1:9000' ./demo/vault/run.sh
 #   BD=/path/to/bd ./demo/vault/run.sh                      # override the beads CLI
+#   VAULT_REMOTE='' ./demo/vault/run.sh                     # purely local; no GitHub push (default: push to the public repo)
 #   KEEP_SITE=1 ./demo/vault/run.sh                         # don't delete the scratch repo on exit
 #   JAEGER=1 ./demo/vault/run.sh                            # spin a Jaeger container; export OTel traces to it
 set -euo pipefail
@@ -30,6 +36,10 @@ MODEL="${MODEL:-$DEFAULT_MODEL}"
 MODEL_ENDPOINT="${MODEL_ENDPOINT:-$DEFAULT_ENDPOINT}"
 SERVE_ADDR="${SERVE_ADDR:-127.0.0.1:8080}"
 BD="${BD:-bd}"
+# Public GitHub repo the merged `main` is pushed to (the artifact the audience inspects).
+# Reset to the green seed at startup, then each landed feature is pushed onto it. Set empty
+# (VAULT_REMOTE='') for a purely-local run with no GitHub push.
+VAULT_REMOTE="${VAULT_REMOTE:-git@github.com:Loxstomper/vault.git}"
 IMAGE='vault-toolchain'       # sandbox profile named by the vault souls
 BASE_IMAGE='go-toolchain'     # the vault image bases on this kernel image
 JAEGER_NAME='harness-vault-jaeger'              # container name (JAEGER=1 only)
@@ -101,15 +111,52 @@ say "Scaffolding scratch vault repo: $SITE"
 cp -a "$APP_DIR/." "$SITE/"
 rm -rf "$SITE/bin" "$SITE/test/results" "$SITE"/*.db 2>/dev/null || true
 git -C "$SITE" init -q -b main
+# Keep the harness work store out of git entirely: .beads is the orchestrator's local Dolt
+# database, not part of the app. Using .git/info/exclude (local, untracked) rather than a
+# committed .gitignore means the machinery never appears in the public repo — not even as an
+# ignore rule. (bd init below creates .beads after the seed commit, so it is out of the seed
+# regardless; this guarantees it stays out of any later commit too.)
+printf '.beads/\n' >> "$SITE/.git/info/exclude"
 git -C "$SITE" add .
 git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
   commit -qm 'seed: established secrets vault (auth + secrets + audit + dashboard)'
 # --non-interactive: bd init drops into a wizard when stdin is a tty (the normal case
 # when you run this script by hand). Its stdout is hidden below, so the prompt would be
 # invisible and bd would hang forever waiting on stdin. Force the non-interactive path.
-( cd "$SITE" && "$BD" init --prefix harness --non-interactive >/dev/null )
+( cd "$SITE" && "$BD" init --prefix vault --non-interactive >/dev/null )
+
+# ---- reset the public repo to the green seed -------------------------------------------
+# The audience inspects this repo, so each run starts it from an identical pristine baseline
+# and then the landed feature is pushed on top. `seed` is an immutable browsable ref; `main`
+# is force-reset to it. The seed commit's tree is just the app (no .beads, no build
+# artifacts), so the public repo only ever shows the vault and the feature the agents add.
+if [ -n "$VAULT_REMOTE" ]; then
+  say "Resetting public repo to the green seed: $VAULT_REMOTE"
+  git -C "$SITE" remote add public "$VAULT_REMOTE"
+  git -C "$SITE" push --force public main                  # main → pristine seed
+  git -C "$SITE" push --force public "HEAD:refs/heads/seed" # immutable baseline ref
+fi
+
+# Background watcher: when the orchestrator advances local main (a feature integrated), push
+# it to the public repo. This is a trusted-layer egress of an already-gate-verified, merged
+# commit — the agents never touch the network or the remote; only this post-merge push does.
+push_main_watcher() {
+  local last
+  last="$(git -C "$SITE" rev-parse refs/heads/main 2>/dev/null || true)"
+  while true; do
+    sleep 4
+    local cur
+    cur="$(git -C "$SITE" rev-parse refs/heads/main 2>/dev/null || true)"
+    [ -n "$cur" ] && [ "$cur" != "$last" ] || continue
+    if git -C "$SITE" push public main >/dev/null 2>&1; then
+      printf '\n\033[1;32m==> pushed main → %s (%s) — deploy triggered\033[0m\n' "$VAULT_REMOTE" "${cur:0:8}"
+      last="$cur"
+    fi
+  done
+}
 
 cleanup() {
+  [ -z "${PUSH_PID:-}" ] || kill "$PUSH_PID" >/dev/null 2>&1 || true
   [ -n "${KEEP_SITE:-}" ] || rm -rf "$SITE"
   [ -z "${JAEGER:-}" ] || docker rm -f "$JAEGER_NAME" >/dev/null 2>&1 || true
 }
@@ -136,12 +183,21 @@ say "Validating demo config"
 # bearer token to OpenRouter.
 export OPENAI_API_KEY
 
+# Start the post-merge push watcher (no-op when VAULT_REMOTE is empty).
+if [ -n "$VAULT_REMOTE" ]; then push_main_watcher & PUSH_PID=$!; fi
+
 say "Running the harness — control room at http://$SERVE_ADDR  (Ctrl-C to stop)"
 echo "    scratch repo : $SITE"
+[ -z "$VAULT_REMOTE" ] || echo "    public repo  : $VAULT_REMOTE (reset to the green seed; the feature is pushed on merge)"
 echo "    next step    : open http://$SERVE_ADDR/create and draft a feature requirement"
 echo "                   (e.g. a one-time, single-use secret share link). Approve it in the"
 echo "                   wizard, then watch the Board and Activity views take it to a merge."
-echo "    when it lands: 'git -C $SITE log' shows the provenance trailer; the diff is the feature."
+if [ -n "$VAULT_REMOTE" ]; then
+  echo "    when it lands: the merge is pushed to $VAULT_REMOTE (machine-authored commit + provenance"
+  echo "                   trailer) — which fires the deploy. 'git -C $SITE log' shows the same locally."
+else
+  echo "    when it lands: 'git -C $SITE log' shows the provenance trailer; the diff is the feature."
+fi
 [ -z "${JAEGER:-}" ] || echo "    telemetry    : open http://127.0.0.1:16686 (service 'harness') to watch each invocation as a trace"
 echo
 "$HARNESS" run --config "$CONFIG_DIR" --repo "$SITE" --bd "$BD" --serve-addr "$SERVE_ADDR"

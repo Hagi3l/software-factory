@@ -33,6 +33,15 @@ type Provenance struct {
 	Verified     []string // gate checks that passed, each cited as name@<evidence-hash> when persisted
 	Traceability string   // artifact-store hash of the author-tests test↔spec traceability map
 	Transcript   string   // artifact-store hash of the full agent conversation (the replayable decision trail)
+
+	// Subject is the human-readable commit subject line (the issue's title), purely
+	// cosmetic so a merge reads like ordinary project history ("Add single-use share
+	// link") rather than "Integrate <id>". It is NOT part of the audited trailer: it is
+	// not signed-for in the SLSA sense (the Issue id on the trailer is the durable
+	// reference), and ParseCommitMessage does not recover it — the round trip is over the
+	// trailer only. Empty falls back to "Integrate <Issue>", so a record with no title
+	// stays self-describing.
+	Subject string
 }
 
 // Trailer renders the provenance block exactly as specs/security.md and
@@ -48,9 +57,17 @@ func (p Provenance) Trailer() string {
 }
 
 // CommitMessage is the full message for the integration commit: a one-line subject plus
-// the provenance trailer, separated by a blank line per git convention.
+// the provenance trailer, separated by a blank line per git convention. The subject is the
+// issue's title when one was threaded through (Subject), falling back to "Integrate
+// <Issue>" so a record with no title still produces a valid, self-describing message. The
+// trailer below the blank line is unchanged either way — it is the audited part, and the
+// read side (ParseCommitMessage) keys off it, never the subject.
 func (p Provenance) CommitMessage() string {
-	return fmt.Sprintf("Integrate %s\n\n%s", orNone(p.Issue), p.Trailer())
+	subject := p.Subject
+	if subject == "" {
+		subject = "Integrate " + orNone(p.Issue)
+	}
+	return fmt.Sprintf("%s\n\n%s", subject, p.Trailer())
 }
 
 // ParseCommitMessage is the inverse of CommitMessage/Trailer: it extracts a Provenance

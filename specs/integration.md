@@ -106,12 +106,20 @@ so there is nothing new to verify.
 ## Provenance on merge
 
 Every merge to `main` carries a trailer linking the commit back through the whole
-chain (see [security.md](security.md)):
+chain (see [security.md](security.md)). The commit subject is the **issue's title**, so
+`main`'s history reads like an ordinary project's; the trailer below the blank line is the
+audited record:
 
 ```
+Add single-use share link
+
 Soul: implementor-go | Model: claude-opus-4-7 | Tests-Soul: test-author-go
 Issue: bd-1234 | Prompt-SHA: 9af… | Verified: build@sha256:1c2…,test@sha256:8be…,gosec@sha256:0a4… | Traceability: sha256:7c1… | Transcript: sha256:3d2…
 ```
+
+The subject is purely cosmetic — the durable reference is the `Issue` id on the trailer, and
+the read path parses the trailer, never the subject — so a change whose issue carries no
+title degrades to the subject `Integrate <id>`, never a dropped trailer.
 
 Each `Verified` entry cites a passed check as `<name>@<evidence-hash>`, the hash
 pointing into the [artifact store](components/artifact-store.md) at that check's
@@ -129,7 +137,8 @@ fast-forward.** A bare fast-forward would move `main` onto the agent's own commi
 leaving nowhere to attach a trailer the trusted layer vouches for. Instead the
 orchestrator creates a **provenance commit on top of the verified candidate** —
 same tree (no file changes), parent = candidate tip, authored by the harness
-identity, message = the trailer — then advances `main` to it. So `main`'s tip is
+identity, message = the issue title (subject) followed by the trailer — then
+advances `main` to it. So `main`'s tip is
 always a trusted, attributable commit and the candidate history stays intact below.
 When a signing key is configured the orchestrator **SSH-signs** this commit with the
 harness identity (verified on read; see [security.md](security.md) "Signing the

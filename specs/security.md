@@ -190,9 +190,12 @@ human's one window into the factory into an XSS vector. See
 
 Because no human reviews the code, the **audit trail is the accountability**.
 Every merged change carries a chain: **beads issue → commit → signed evidence**,
-recorded as a commit trailer:
+recorded as a commit trailer (below a cosmetic subject line — the issue title — that is
+*not* part of the audited record; the durable reference is the `Issue` id here):
 
 ```
+Add single-use share link
+
 Soul: implementor-go | Model: claude-opus-4-7 | Tests-Soul: test-author-go
 Issue: bd-1234 | Prompt-SHA: 9af… | Verified: build@sha256:1c2…,test@sha256:8be…,gosec@sha256:0a4… | Traceability: sha256:7c1… | Transcript: sha256:3d2…
 ```

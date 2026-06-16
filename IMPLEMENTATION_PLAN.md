@@ -1146,6 +1146,34 @@ components/artifact-store.md, glossary.md).
   + script are wired (mirroring the existing `hx-trigger` assertions), the `query.Board` frontier unit
   tests, and `docs/control-room.md` updated in the same change (view-surface change). (needs T4.4,
   T4.18) ([control-room.md](specs/control-room.md))
+- [x] **T4.31 Live public-repo vault demo (GitHub push + deploy) + descriptive commit subjects** — *done.*
+  Turns the vault demo's terminal state from "merge into a throwaway local repo, deleted on exit" into
+  "push the verified merge to a **public GitHub repo** the audience inspects, which fires a deploy" — the
+  "no smoke and mirrors" surface. **(1) Descriptive commit subject (harness-wide):** `core.Provenance`
+  gains a cosmetic `Subject` field; `CommitMessage()` renders it as the subject line, falling back to
+  `Integrate <Issue>` when absent, with the **trailer below unchanged** — `ParseCommitMessage` still keys
+  off the trailer, never the subject, so the audited round trip is untouched (new `TestCommitMessageSubject`
+  pins both the title-as-subject and the fallback). `provenanceFor` threads `issue.Title` in, so `main`'s
+  history reads like an ordinary project's ("Add single-use share link") with a `harness`-authored commit
+  and a full provenance trailer. Specs updated: [integration.md](specs/integration.md) /
+  [security.md](specs/security.md) "Provenance on merge" examples now show subject + trailer and note the
+  subject is outside the audited record. **(2) Public-repo wiring (`demo/vault/run.sh`):** work-store prefix
+  flipped to `vault` (ids read `vault-12`, not `harness-12`, in the trailer); `.beads/` excluded via the
+  scratch repo's `.git/info/exclude` (the harness work store never reaches the public tree — not even as an
+  ignore rule); new `VAULT_REMOTE` knob (default `git@github.com:Loxstomper/vault.git`, `''` disables) that
+  at startup force-resets the public repo to the green seed (`main` + an immutable `seed` ref) and a
+  background watcher that pushes local `main` → public `main` on each landed merge — a trusted-layer egress
+  of an already-gate-verified commit (agents never touch the network). **(3) Deploy:**
+  `demo/vault/app/.github/workflows/deploy.yml` — on push to `main`, CI builds one static `CGO_ENABLED=0`
+  binary (pure-Go `modernc.org/sqlite` + `//go:embed` assets ⇒ no runtime deps) and ships it to a VPS over
+  SSH (`VPS_HOST`/`VPS_USER`/`VPS_SSH_KEY` secrets), run as a `vault` systemd service. **(4) Public README:**
+  `demo/vault/app/README.md` (the public repo's front page — realistic vault README + an honest "this is a
+  live demo" banner explaining machine-authored commits, provenance trailers, and the per-run history reset);
+  `demo/vault/README.md` updated to document the push/reset/deploy flow. `go test ./internal/core/...
+  ./internal/orchestrator/... ./internal/controlroom/query/...` green; `run.sh` passes `bash -n`. **Remaining
+  is operational, not engineering:** set the Actions secrets, stand up the `vault` systemd unit on the VPS,
+  and rehearse the exact stage feature end to end. ([integration.md](specs/integration.md),
+  [security.md](specs/security.md))
 
 ## Phase 5 — Production isolation & distribution
 

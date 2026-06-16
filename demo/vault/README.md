@@ -26,7 +26,13 @@ requirements   you draft a feature in the Create-Task wizard (/create) — the o
             └─ implement   a *different* soul makes them pass (proven RED→GREEN, clean sandbox)
                  └─ qa       a *different* soul re-runs tests + lint + gosec + govulncheck + license-scan
                       └─ integrate   the orchestrator merges to main (autonomous; no approval step)
+                           └─ deploy   the merge is pushed to a public GitHub repo → CI deploys it to your VPS
 ```
+
+The merged commit on `main` is authored by **`harness`** (the trusted layer, never the
+agent) with its provenance trailer, and its subject is the feature's title — so the public
+repo's history reads like an ordinary project's, with a machine author and a full audit
+trail. See "Push to a public repo + deploy" below.
 
 ## What's here
 
@@ -40,6 +46,8 @@ demo/vault/
     souls/                # planner, test-author, implementor, security, merge-resolver (+ prompts/)
   app/                    # the ESTABLISHED vault app — its own Go module; copied into the scratch repo
     cmd/ internal/ specs/ Makefile .golangci.yml ...
+    README.md             # the PUBLIC repo's front page (realistic vault README + an honest demo banner)
+    .github/workflows/deploy.yml  # CI: on push to main, build a static binary and ship it to the VPS
 ```
 
 It is a self-contained config, separate from the harness's own `config/`, so it can't
@@ -61,6 +69,10 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
   in `config/harness.yaml`.
 - **beads** (`bd`) on your `PATH` (or pass `BD=/path/to/bd`).
 - Go + `make` (to build the `harness` binary).
+- *(optional, for the public-repo + deploy story)* a **public GitHub repo** you can push to
+  (default `git@github.com:Loxstomper/vault.git`; override with `VAULT_REMOTE=`) and a **VPS**
+  for the deploy. Run with `VAULT_REMOTE=''` to stay purely local — the full pipeline still
+  runs and merges, it just doesn't push or deploy.
 
 On first run the `go-toolchain` base image and then the `vault-toolchain` image are built
 automatically if missing. The base build downloads the Go image + the offline vuln DB and
@@ -84,6 +96,31 @@ Then open the control room at <http://127.0.0.1:8080>.
 3. Watch the **Board** and **Activity** views as the planner fans the work out and each
    child flows author-tests → implement → qa → integrate. When it lands, `git -C <scratch>
    log` shows the provenance trailer and the diff is your feature.
+
+### Push to a public repo + deploy
+
+This is the "no smoke and mirrors" surface: the audience inspects a **real public GitHub
+repo** and watches a feature they didn't write appear on it. Set `VAULT_REMOTE` to that repo
+(it defaults to `git@github.com:Loxstomper/vault.git`; the host running `run.sh` needs push
+access — a deploy key or SSH key).
+
+- **At startup**, `run.sh` resets the public repo to the green baseline: it force-pushes the
+  seed to `main` and to an immutable `seed` ref. Every run starts from an identical pristine
+  state, so the demo is repeatable on stage.
+- **On merge**, a watcher pushes the harness's verified, machine-authored commit to the
+  public `main`. This is a *trusted-layer egress* — the sandboxed agents never touch the
+  network; only this post-merge push of an already-gate-verified commit does.
+- **The push fires the deploy.** [`app/.github/workflows/deploy.yml`](app/.github/workflows/deploy.yml)
+  builds a single static binary (pure-Go SQLite + embedded assets — no runtime deps) and
+  ships it to your VPS over SSH, where it runs as a `vault` systemd service behind Caddy at
+  `https://vault.lochie.dev`. The one-time VPS setup (Reserved IP, DNS, SSH hardening, deploy
+  user, Caddy, systemd) is the runbook in [`DEPLOY.md`](DEPLOY.md) — do it once and snapshot.
+  The full loop on stage: **describe → agents build → commit appears on GitHub (machine author
+  + provenance) → Actions go green → refresh the live URL → the feature is there.**
+
+The work-store prefix is `vault`, so issue ids read `vault-12` (not `harness-12`) in the
+commit trailer, and the harness work store (`.beads`) is kept out of git via the scratch
+repo's `.git/info/exclude` — so the public repo only ever shows the vault and the feature.
 
 ### Watch the telemetry land (optional)
 

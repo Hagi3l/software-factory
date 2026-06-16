@@ -61,6 +61,30 @@ func TestTrailerCitesTestsSoul(t *testing.T) {
 	}
 }
 
+// TestCommitMessageSubject pins the cosmetic subject behavior: the issue title becomes the
+// commit subject when threaded through, and an absent title falls back to "Integrate
+// <Issue>" so the message stays valid and self-describing. Either way the trailer below is
+// unchanged and still parses — the subject is never part of the audited round trip.
+func TestCommitMessageSubject(t *testing.T) {
+	withTitle := Provenance{Subject: "Add single-use share link", Issue: "vault-12", Soul: "impl", Model: "m"}
+	first, _, _ := splitFirstLine(withTitle.CommitMessage())
+	if first != "Add single-use share link" {
+		t.Errorf("subject = %q, want the issue title", first)
+	}
+
+	noTitle := Provenance{Issue: "vault-12", Soul: "impl", Model: "m"}
+	first, _, _ = splitFirstLine(noTitle.CommitMessage())
+	if first != "Integrate vault-12" {
+		t.Errorf("fallback subject = %q, want %q", first, "Integrate vault-12")
+	}
+
+	// The subject does not pollute the trailer: the record still round-trips over the
+	// trailer regardless of the subject above it.
+	if got, ok := ParseCommitMessage(withTitle.CommitMessage()); !ok || got.Issue != "vault-12" {
+		t.Errorf("ParseCommitMessage with a subject = (%+v, %v), want the trailer to parse with Issue vault-12", got, ok)
+	}
+}
+
 func splitFirstLine(s string) (first, rest string, ok bool) {
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\n' {

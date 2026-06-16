@@ -24,11 +24,16 @@ const (
 // a core.Provenance, and the trusted committer identity stamped on the merge.
 
 // provenanceFor assembles the provenance record for an accepted issue: the soul/model
-// from config, the issue id, the harvested Prompt-SHA from the Result's evidence, and
-// the names of the checks the gate verified.
+// from config, the issue id, the issue title (rendered as the commit subject), the
+// harvested Prompt-SHA from the Result's evidence, and the names of the checks the gate
+// verified.
 func (o *Orchestrator) provenanceFor(issue core.Issue, res core.Result, report gate.Report) core.Provenance {
 	prov := core.Provenance{
 		Issue:        issue.ID,
+		// The issue title becomes the commit subject so main's history reads like an
+		// ordinary project's ("Add single-use share link"), not "Integrate <id>". Purely
+		// cosmetic — the durable reference stays the Issue id on the trailer below.
+		Subject:      issue.Title,
 		PromptSHA:    res.Evidence.PromptSHA,
 		Verified:     verifiedChecks(report),
 		Traceability: issue.TraceMap,
