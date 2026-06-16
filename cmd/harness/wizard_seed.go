@@ -145,7 +145,12 @@ func (s *wizardSeeder) validate(req wizard.SeedRequest) error {
 		return err
 	}
 
-	// Issue spec references resolve, and every drafted spec is referenced by ≥1 seed issue.
+	// Issue spec references resolve, and every *newly-created* drafted spec is referenced by
+	// ≥1 seed issue. A drafted path that already exists on disk is an *edit* (folding intent
+	// into a spec a domain already owns, or refreshing the specs/README.md index when the
+	// spec-file set changes) — an edit seeds no new work, so it needs no backing issue
+	// (specs-process.md "Editing the tree, not just appending to it"; the coverage rule binds
+	// only new specs). This mirrors Resolve mode, which edits a spec without seeding anything.
 	referenced := map[string]bool{}
 	for _, is := range req.Issues {
 		if is.Spec == "" {
@@ -161,8 +166,11 @@ func (s *wizardSeeder) validate(req wizard.SeedRequest) error {
 		referenced[rel] = true
 	}
 	for sp := range batch {
+		if s.fileExists(sp) {
+			continue // editing an existing spec (incl. the README index) seeds no work
+		}
 		if !referenced[sp] {
-			return fmt.Errorf("drafted spec %q is not referenced by any seed issue (every spec must map to ≥1 issue)", sp)
+			return fmt.Errorf("newly-drafted spec %q is not referenced by any seed issue (every new spec must map to ≥1 issue)", sp)
 		}
 	}
 

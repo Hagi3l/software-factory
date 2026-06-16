@@ -75,6 +75,31 @@ func TestValidateDraft(t *testing.T) {
 		}
 	})
 
+	// T4.32: editing a spec that already exists on disk is *not* new work to seed, so it needs no
+	// backing issue (specs-process.md "the issue-coverage rule binds only newly-created specs").
+	t.Run("edit to existing spec needs no issue", func(t *testing.T) {
+		req := validSeedRequest()
+		// Fold an additive edit into the on-disk glossary alongside the new orders spec; the
+		// glossary edit is referenced by no issue and must still pass.
+		req.Specs = append(req.Specs, wizard.DraftSpec{Path: "specs/glossary.md", Content: "# Glossary\n\nNew term.\n"})
+		if err := s.validate(req); err != nil {
+			t.Errorf("edit to an existing spec (no backing issue) rejected: %v", err)
+		}
+	})
+
+	t.Run("README index edit needs no issue", func(t *testing.T) {
+		mustWrite(t, filepath.Join(repo, "specs", "README.md"), "# Index\n")
+		req := validSeedRequest()
+		// The new orders spec is seeded; the index refresh that makes it reachable is an edit.
+		req.Specs = append(req.Specs, wizard.DraftSpec{
+			Path:    "specs/README.md",
+			Content: "# Index\n\n- [Orders Export](orders-export.md)\n",
+		})
+		if err := s.validate(req); err != nil {
+			t.Errorf("README index edit (no backing issue) rejected: %v", err)
+		}
+	})
+
 	cases := map[string]func(*wizard.SeedRequest){
 		"no issues":         func(r *wizard.SeedRequest) { r.Issues = nil },
 		"no specs":          func(r *wizard.SeedRequest) { r.Specs = nil },

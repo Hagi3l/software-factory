@@ -116,13 +116,18 @@ is autonomous. It's a guided conversation, not a form:
    answer is folded back through the planner (not a separate client-side model), which
    reconciles the batch on its next turn — including dropping forks one answer made moot.
 3. **Draft** — once intent converges, the planner drafts the spec markdown and the
-   seed issues. You see the proposed specs and issues before committing.
+   seed issues. It **maintains** the spec tree rather than only growing it: intent that
+   fits a domain an existing spec owns is folded into that file in place (and the
+   `specs/README.md` index is refreshed when the spec-file set changes), so editing a
+   spec or the index is a first-class draft that needs no backing issue. You see the
+   proposed specs and issues before committing.
 4. **APPROVE** — an explicit consent gate, **soft-gated on a converged ledger**: you
    cannot commit with a fork still `discussing` (the planner names which to resolve
    first), but plain `open` forks are **auto-deferred and recorded** rather than blocking
    you — nothing is silently dropped. Approving commits the **server-side** draft (the
    trusted planner's snapshot, never browser content): it validates the spec (safe paths,
-   link integrity, every spec maps to ≥1 issue, seed issues enter at a legal entry
+   link integrity, every *newly-created* spec maps to ≥1 issue — editing an existing spec
+   or the README index seeds no work and needs none, seed issues enter at a legal entry
    stage), writes the spec files, stores the transcript, writes a decisions sidecar (the
    `agreed` forks as decisions and the `deferred` forks as "deliberately left open: X"
    pre-context for a later escalation), git-commits, and creates the seed issues. The

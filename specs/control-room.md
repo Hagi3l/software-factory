@@ -330,9 +330,15 @@ threefold:
    the acceptance criteria are the human's only correctness lever, the wizard
    actively probes for examples, edge cases, what-to-reject, and out-of-scope —
    converging on crisp criteria rather than wandering.
-2. **Author and maintain `specs/`.** Output is markdown in the spec tree — new
-   files, cross-links, and the README index kept consistent. The wizard owns spec
-   link-integrity, not just issue creation.
+2. **Author and maintain `specs/`.** Output is markdown in the spec tree — and it
+   *maintains* the tree, not just grows it: when intent fits a domain an existing spec
+   already owns, the wizard **edits that file in place** (additively, preserving what's
+   there) rather than spawning a near-duplicate, and creates a new spec only for a genuinely
+   new domain. When the *set* of spec files changes it updates the README index in the same
+   draft, keeping the cross-link graph navigable. The wizard owns spec link-integrity, not
+   just issue creation — and editing an existing spec seeds no work, so the
+   every-spec-maps-to-an-issue rule binds only *new* specs (see
+   [specs-process.md](specs-process.md)).
 3. **Ground in the existing code (when configured).** Against an established codebase the
    planner gets **read-only exploration tools** — the agent's `read_file`/`list_dir`/`search`
    plus the LSP comprehension tools (`find_symbol`/`references`/…) — so its specs and seed

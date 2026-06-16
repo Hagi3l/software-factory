@@ -71,13 +71,45 @@ status or supersession machinery.
 
 ---
 
+## Editing the tree, not just appending to it
+
+The wizard **maintains** the spec tree; it does not only grow it. When new or refined
+intent falls within a domain an existing spec already owns, the wizard **edits that file in
+place** — folding the behaviour in additively, preserving the sections already there —
+rather than spawning a parallel spec. It **creates a new spec file only when the work is a
+genuinely new domain** no existing spec covers. Two reasons this is the default:
+
+- **No sprawl.** One domain, one spec. A feature scattered into a new near-duplicate file
+  fragments the contract the test author reads.
+- **Grounding by inheritance.** A feature folded into an existing spec inherits that spec's
+  place in the cross-link graph — its links into the `README.md` index and its sibling
+  specs — so the bounded slice (below) resolves the right neighbours automatically. A fresh
+  standalone file starts disconnected until every link is wired by hand.
+
+The **`README.md` index is part of the tree the wizard keeps current.** When the *set* of
+spec files changes — a new spec added, or one removed — the wizard updates the index in the
+same draft, so the navigable graph stays complete and a newly-added spec is reachable from
+the index agents navigate from. A pure edit to an existing spec changes no file set and
+needs no index change.
+
+This applies to **both wizard modes**: Create authors or edits intent; Resolve edits an
+existing spec to remove the ambiguity that stuck an issue. Both write spec *edits*, and an
+edit is not new work to seed — so the **issue-coverage rule binds only newly-created
+specs**: every new spec must map to ≥1 seed issue (no orphaned prose nobody will build),
+but editing an existing spec — including the index — seeds no work and needs no backing
+issue. (This is exactly why Resolve can refine a spec and reopen the stuck issue without
+seeding anything new.)
+
+---
+
 ## Spec context horizon
 
 Because spec files cross-link, an agent is given a **bounded slice**, not the whole
 tree: the referenced file plus its linked neighbours to a configured depth.
 Slurping the entire `specs/` tree would blow context and dilute focus. The
 requirements planner owns link integrity (a natural postcondition on the
-`requirements` stage: every link resolves; every spec maps to ≥1 issue).
+`requirements` stage: every link resolves; every newly-created spec maps to ≥1 issue —
+edits to existing specs, including the index, seed no work, see [above](#editing-the-tree-not-just-appending-to-it)).
 
 The slice is built by the trusted orchestrator, not the agent. Each issue carries a
 **structured spec reference** (the repo-relative path of its governing file), set at

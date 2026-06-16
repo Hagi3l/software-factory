@@ -1174,6 +1174,40 @@ components/artifact-store.md, glossary.md).
   is operational, not engineering:** set the Actions secrets, stand up the `vault` systemd unit on the VPS,
   and rehearse the exact stage feature end to end. ([integration.md](specs/integration.md),
   [security.md](specs/security.md))
+- [x] **T4.32 Wizard edits existing specs + maintains the README index (new-specs-only coverage)** — *done.*
+  Brings the code in line with the spec lead (`specs-process.md` "Editing the tree, not just appending to it" +
+  `control-room.md` wizard responsibility #2). The wizard can now **edit** an existing spec or refresh the
+  `specs/README.md` index in a draft without a backing seed issue, so it maintains the tree instead of only
+  growing it (which previously left every new spec unreachable from the index the code-writing souls navigate
+  from). **(1) Core (`cmd/harness/wizard_seed.go` `validate()`):** the orphan-spec coverage loop now `continue`s
+  for any drafted path that already `fileExists` — an *edit* seeds no new work, so only **newly-created** specs
+  must map to ≥1 seed issue (error reworded to "newly-drafted spec … (every new spec must map to ≥1 issue)").
+  This mirrors Resolve mode (issue-coverage was already Create-only); `validateSpecFiles` link-integrity,
+  path-safety, dedup, and produces-legality are **unchanged**, so an edit still has its links checked and a new
+  orphan spec still fails. The approve path already `os.WriteFile`-overwrites, so no write-side change was
+  needed. **(2) Prompts:** the `config/` and `demo/vault/` requirements-planner personas gained two draft rules
+  — "Edit the tree, don't just grow it" (read-then-redraft the *whole* file additively; new file only for a
+  genuinely new domain) and "Keep the README index current" (refresh the index in the *same* draft when the
+  spec-file set changes) — and the coverage rule now reads "every *newly-created* spec … editing an existing spec
+  (incl. the index) seeds no work and needs no backing issue". The landing-page demo persona (`demo/config/`) is
+  left as-is — its world is single-file `index.html` page changes with a grep gate and no README tree to maintain.
+  **(3) Approve-view diff — deferred (optional follow-up, not a blocker):** `draftSpecFiles` still renders full
+  proposed content with no on-disk diff, so an edit shows the whole new file rather than what changed. Rendering
+  an added/removed line diff would benefit Resolve mode for free but needs the current on-disk content plumbed
+  into the view; carved out as **T4.32a** below. Resolve already edits-without-diff and ships, so this is UX
+  polish. **Tests** (`wizard_seed_test.go`): edit-to-existing-spec-with-no-issue passes, README-index-edit-with-
+  no-issue passes (both new sub-tests of `TestValidateDraft`); the existing "orphan spec" case still pins that a
+  *new* spec with no issue fails, and link-integrity/path-safety cases are untouched. **Docs:** `docs/control-room.md`
+  draft + APPROVE bullets updated (the coverage rule is now new-specs-only; maintain-the-tree behavior described).
+  `make check`-equivalent green for the blast radius (cmd/harness + controlroom + config tests pass, lint 0, both
+  shipped + vault configs validate). (needs T4.14, T4.15) ([specs-process.md](specs/specs-process.md),
+  [control-room.md](specs/control-room.md))
+- [ ] **T4.32a** *(optional, UX polish)* Approve-view diff for spec edits — `draftSpecFiles`
+  (`internal/controlroom/views/wizard.templ`) renders full proposed content with no diff, so for an *edit* the
+  operator can't see what changed against the on-disk file. Render an added/removed line diff when the file
+  already exists (full content for new files); plumb the current on-disk content into the draft-panel data the
+  server assembles. Benefits Resolve mode for free (shared renderer). Not a hard blocker — Resolve already
+  edits-without-diff and ships. ([control-room.md](specs/control-room.md))
 
 ## Phase 5 — Production isolation & distribution
 

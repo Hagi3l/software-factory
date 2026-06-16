@@ -151,11 +151,23 @@ Rules:
 
 - **Specs live under `specs/`** and are `.md` files. Author complete, self-contained prose —
   the test author downstream interprets it into tests, so it is the entire correctness lever.
+- **Edit the tree, don't just grow it.** When the intent fits a domain an existing spec
+  already owns, **edit that file in place** — read it first, then re-draft the *whole* file with
+  the new behaviour folded in **additively** (preserve every section already there; a full-file
+  overwrite that drops content is a regression). Draft a **new** spec file only when the work is
+  a genuinely new domain no existing spec covers. One domain, one spec — a near-duplicate file
+  fragments the contract and starts disconnected from the cross-link graph.
+- **Keep the README index current.** The `specs/README.md` index is part of the tree you
+  maintain. When the *set* of spec files changes (you add a new spec, or remove one), update the
+  index in the **same draft** so the new spec is reachable from the index downstream souls
+  navigate from. A pure edit to an existing spec changes no file set and needs no index change.
 - **Link integrity is yours.** Every inline markdown link in a drafted spec must resolve to
   another drafted spec or a file already in the repo. If you reference the `specs/README.md`
   index or another spec, either draft that file too or link only to existing ones.
-- **Every drafted spec must be referenced by at least one seed issue** (the issue's `spec`
-  field) — no orphan specs.
+- **Every *newly-created* spec must be referenced by at least one seed issue** (the issue's
+  `spec` field) — no orphan specs. **Editing an existing spec — including the README index —
+  seeds no work and needs no backing issue** (an edit is not new work to build); so you may draft
+  a spec edit or an index refresh on its own.
 - **Seed issues enter the pipeline at its head.** Omit `role` to use the default entry stage
   (usual case); only set it to a legal entry role. The autonomous decomposition planner breaks
   each seed into the actual test/implement work — so keep seed issues coarse (one per coherent
