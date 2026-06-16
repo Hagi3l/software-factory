@@ -248,6 +248,81 @@ func TestRunStopsAtFirstFailure(t *testing.T) {
 	}
 }
 
+// T2.12: independent scanners keep running past a failure, so one qa pass aggregates every
+// finding instead of stopping at the first. Here gosec and license-scan both fail; the gate
+// runs all four checks and records both failures (better dead-letter triage than bouncing
+// the candidate once per scanner).
+func TestRunAggregatesIndependentFailures(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit":   {ExitCode: 0, Stdout: []byte("ok")},
+		"make gosec":       {ExitCode: 1, Stdout: []byte("G104 unhandled error")},
+		"make govulncheck": {ExitCode: 0},
+		"make license-scan": {ExitCode: 1, Stdout: []byte("forbidden GPL dep")},
+	}}
+	be := &fakeBackend{sb: sb}
+	store := testStore(t)
+	reg := Registry{"tests-pass": "make test-unit", "gosec": "make gosec", "govulncheck": "make govulncheck", "license-scan": "make license-scan"}
+	g := New(be, reg, store, t.TempDir(), nil, nil, WithIndependentChecks([]string{"gosec", "govulncheck", "license-scan"}))
+
+	cand := testCandidate()
+	cand.Postconditions = []string{"tests-pass", "gosec", "govulncheck", "license-scan"}
+	report, err := g.Run(context.Background(), cand)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Passed {
+		t.Errorf("report.Passed = true, want false (two scanners failed)")
+	}
+	if len(report.Checks) != 4 {
+		t.Fatalf("ran %d checks, want 4 (all, aggregating past failures)", len(report.Checks))
+	}
+	byName := map[string]bool{}
+	for _, cr := range report.Checks {
+		byName[cr.Name] = cr.Passed
+	}
+	for name, wantPass := range map[string]bool{"tests-pass": true, "gosec": false, "govulncheck": true, "license-scan": false} {
+		if byName[name] != wantPass {
+			t.Errorf("check %q passed = %v, want %v", name, byName[name], wantPass)
+		}
+	}
+	// Every scanner actually ran — that is the point: all findings surface in one pass.
+	if len(sb.execed) != 4 {
+		t.Errorf("commands run = %v, want all 4", sb.execed)
+	}
+}
+
+// A non-independent failure still fail-fasts even when independent checks are configured, and
+// it does so even after an independent check has already failed — proofs and metrics stay
+// fail-fast (a meaningless downstream check must not run). gosec (independent) fails and the
+// run continues to tests-pass (non-independent), which fails and stops it before license-scan.
+func TestRunIndependentDoesNotDisableFailFast(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"make gosec":        {ExitCode: 1, Stdout: []byte("finding")},
+		"make test-unit":    {ExitCode: 1, Stderr: []byte("build broken")},
+		"make license-scan": {ExitCode: 0},
+	}}
+	be := &fakeBackend{sb: sb}
+	store := testStore(t)
+	reg := Registry{"tests-pass": "make test-unit", "gosec": "make gosec", "license-scan": "make license-scan"}
+	g := New(be, reg, store, t.TempDir(), nil, nil, WithIndependentChecks([]string{"gosec", "license-scan"}))
+
+	cand := testCandidate()
+	cand.Postconditions = []string{"gosec", "tests-pass", "license-scan"}
+	report, err := g.Run(context.Background(), cand)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Passed {
+		t.Errorf("report.Passed = true, want false")
+	}
+	if len(report.Checks) != 2 || report.Checks[0].Name != "gosec" || report.Checks[1].Name != "tests-pass" {
+		t.Fatalf("ran %+v, want [gosec, tests-pass] then stop (license-scan never runs)", report.Checks)
+	}
+	if len(sb.execed) != 2 {
+		t.Errorf("commands run = %v, want 2 (stopped at the non-independent failure)", sb.execed)
+	}
+}
+
 // A sandbox that cannot run a check at all is a gate infrastructure failure (error),
 // not a gate verdict — the orchestrator retries it rather than routing on_failure.
 func TestRunExecErrorIsInfraFailure(t *testing.T) {

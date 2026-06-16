@@ -19,7 +19,16 @@ type Harness struct {
 	// built-in check kind (metric comparisons like "mutation>=0.8", reserved proofs
 	// like "tests-red-then-green") are not command checks and need no entry here.
 	Checks map[string]string `yaml:"checks,omitempty"`
-	Policy Policy            `yaml:"policy"`
+	// IndependentChecks names the command checks the gate keeps running *past* a failure,
+	// so a single qa pass aggregates every independent-scanner finding (gosec + govulncheck
+	// + license-scan + golangci-lint at once) rather than stopping at the first — better
+	// dead-letter triage, since the human/agent sees all findings to fix in one round-trip
+	// (T2.12, specs/verification.md). Each name must be a key in Checks (a plain command
+	// check); the reserved proofs and metric comparisons are deliberately *not* eligible and
+	// stay fail-fast — a mutation score is meaningless on a candidate whose tests are red.
+	// Empty (the default) keeps every check fail-fast. Validated by validateIndependentChecks.
+	IndependentChecks []string `yaml:"independent_checks,omitempty"`
+	Policy            Policy   `yaml:"policy"`
 
 	// SpecDepth bounds the spec slice handed to an agent: the issue's referenced spec file
 	// plus its cross-linked neighbors reachable within this many link hops (0 = just the

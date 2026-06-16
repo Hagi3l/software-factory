@@ -132,6 +132,12 @@ checks:
   govulncheck:   make govulncheck
   license-scan:  make license-scan
 
+# Independent scanners the gate keeps running past a failure so one qa pass aggregates every
+# finding instead of stopping at the first — better dead-letter triage (T2.12). The
+# proof-shaped tests-pass stays fail-fast (no metric here to keep fail-fast). See
+# specs/verification.md.
+independent_checks: [golangci-lint, gosec, govulncheck, license-scan]
+
 policy:
   max_retries: 3
   # Per-issue cumulative cap across the on_failure loop: tokens + dollars + wall. Generous

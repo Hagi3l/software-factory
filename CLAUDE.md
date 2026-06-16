@@ -25,10 +25,10 @@ A CI/CD pipeline whose build steps are hostile-by-assumption agents.
 The kernel does `spec → implement → gate → merge` end-to-end (a live run needs a
 Docker daemon + `ANTHROPIC_API_KEY`); on top of it Phase 2 (independent
 verification), Phase 3 (full DAG, decomposition, merge queue), and Phase 4 (control
-room + Create-Task wizard, incl. **T4.15 Resolve mode**) are complete, with only
-optional **T2.11**/**T2.12** left in Phase 2 (N-version diversity is resolved as
-configuration; the non-fatal `harness validate` family-overlap advisory, T2.13, is
-done). **Phase
+room + Create-Task wizard, incl. **T4.15 Resolve mode**) are complete; Phase 2 is now
+fully complete (T2.12 run-all-independent-scanners landed; N-version diversity, T2.11,
+is resolved as configuration, with the non-fatal `harness validate` family-overlap
+advisory T2.13 done). **Phase
 5** (production isolation & distribution — Firecracker, distributed NATS, scoped
 secrets, signing) is the remaining engineering. `cmd/harness` exposes
 `validate`/`seed`/`run`/`approve`/`reject`/`serve`; bootstrap config lives in

@@ -208,9 +208,11 @@ type RunResult struct {
 	Stderr   []byte
 }
 
-// Report is the gate's verdict. Passed is true iff every check passed. The gate stops
-// at the first failing check — a failed build makes a subsequent test run meaningless
-// — so Checks holds the results up to and including any failure, not the full set.
+// Report is the gate's verdict. Passed is true iff every check passed. The gate stops at
+// the first failing *non-independent* check — a failed build makes a subsequent test run
+// meaningless — so Checks holds the results up to and including that failure. Independent
+// command checks (the scanners; see WithIndependentChecks, T2.12) do not stop the run, so
+// Checks may carry several independent failures aggregated in one pass.
 //
 // Verdict is the artifact-store reference to the assembled gate-verdict record (a
 // core.GateVerdict) the gate harvests after grading — the index over the per-check
@@ -246,6 +248,16 @@ type Runner struct {
 	// only when the operator has allowlisted package-proxy, so enabling the producer's
 	// dependency fetch enables the verifier's by the same opt-in.
 	packageProxy string
+
+	// independent is the set of command-check names the gate keeps running *past* a failure,
+	// so one qa pass aggregates every independent-scanner finding instead of stopping at the
+	// first (better dead-letter triage — a human/agent sees all the findings to fix at once,
+	// not one round-trip per scanner; T2.12). It is keyed by the bare check name (a command
+	// check's CheckResult.Name == its postcondition), so the reserved proofs and metric
+	// comparisons — whose Names are never plain registry keys — are never in it and stay
+	// fail-fast (a mutation score on red tests is meaningless; see specs/verification.md). It
+	// is the validated config.Harness.IndependentChecks; empty restores pure fail-fast.
+	independent map[string]bool
 }
 
 // Option configures a gate Runner. Functional options keep New's positional collaborators
@@ -261,6 +273,25 @@ type Option func(*Runner)
 // specs/security.md).
 func WithPackageProxy(base string) Option {
 	return func(r *Runner) { r.packageProxy = base }
+}
+
+// WithIndependentChecks marks the named command checks as independent: the gate records a
+// failure of one and keeps running the remaining checks rather than stopping, so a single
+// qa pass surfaces every independent-scanner finding at once (T2.12). Names that are not
+// plain command checks (reserved proofs, metric comparisons) never match a graded check's
+// Name, so they stay fail-fast even if mistakenly listed; harness validate rejects such
+// entries up front. An empty list is a no-op (pure fail-fast), so callers may pass it
+// unconditionally.
+func WithIndependentChecks(names []string) Option {
+	return func(r *Runner) {
+		if len(names) == 0 {
+			return
+		}
+		r.independent = make(map[string]bool, len(names))
+		for _, n := range names {
+			r.independent[n] = true
+		}
+	}
 }
 
 // New builds a gate Runner over a sandbox backend and the check registry that resolves
@@ -363,7 +394,14 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 		if !cr.Passed {
 			report.Passed = false
 			r.logFailure(c.Ref, check, cr)
-			break // a failed check makes the remaining ones meaningless; stop at the first
+			if !r.independent[check.Name] {
+				// A non-independent failure (a red proof, a broken build, a failed metric)
+				// makes the remaining checks meaningless — stop at the first.
+				break
+			}
+			// An independent scanner failed: record it and keep running so this one qa pass
+			// aggregates every independent finding (T2.12), not just the first.
+			continue
 		}
 		r.log.Debug("gate: check passed", "ref", c.Ref, "check", check.Name)
 	}

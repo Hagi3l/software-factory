@@ -213,15 +213,24 @@ Because the verification sandbox is [zero-network](security.md), a scanner that 
 reference data — the vulnerability database for `govulncheck`, licence metadata for
 `license-scan` — must read it from data baked into the role's sandbox image, the same
 offline guarantee the build relies on. A purely static analyser like `gosec` needs no such
-data. The gate runs its checks **fail-fast** (it stops at the first failure), so a `qa`
-run that trips one scanner surfaces that finding and re-routes to `implement` to fix it.
+data. The gate runs its checks **fail-fast by default** (it stops at the first failure), so
+a `qa` run that trips a proof or a metric surfaces that and re-routes to `implement` to fix it.
 Fail-fast is deliberate for the proof and measurement checks — a mutation score is
-meaningless on a candidate whose tests are red, so there is no point measuring it — and is
-retained for the scanners too in the kernel: aggregating *all* independent-scanner
-findings in one pass would aid a human triaging the dead-letter queue, but it needs a
-per-check "independent" signal in config so the gate knows which checks are safe to keep
-running past a failure, which is a self-contained refinement left for later rather than
-part of landing the stage.
+meaningless on a candidate whose tests are red, so there is no point measuring it.
+
+The independent scanners are the exception. A failed scanner does **not** make the next one
+meaningless — a `gosec` hit tells you nothing about whether `govulncheck` or `license-scan`
+will also fire — so stopping at the first wastes the others and forces the candidate to
+bounce once *per* scanner. Instead, the checks named in the config's **`independent_checks`**
+list (see [configuration.md](configuration.md)) are run **past a failure**: one `qa` pass
+records *every* independent finding at once, so the human triaging the dead-letter queue (or
+the agent re-routed to `implement`) fixes them all in a single round-trip. The signal is
+config, not code: only a command check (a scanner) may be listed, and `harness validate`
+rejects a reserved proof or a metric's measurement command, so those always stay fail-fast.
+The gate still stops at the first *non-independent* failure, and a candidate that trips any
+check still fails the gate — aggregation changes only *how much* a single failing pass
+reports, never the verdict. Each scanner's report is captured as gate evidence regardless, so
+all the aggregated findings are auditable by hash.
 
 ### Traceability map
 The test author emits, per test, the **spec heading + sentence** it claims to

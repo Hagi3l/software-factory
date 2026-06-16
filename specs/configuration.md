@@ -47,6 +47,8 @@ checks:                          # command-check postcondition -> shell command
   govulncheck:  govulncheck ./...                        # vulnerabilities verification
   license-scan: go-licenses check ./...                  # deps/licenses   sandbox
 
+independent_checks: [gosec, govulncheck, license-scan]   # run past a failure (see below)
+
 spec_depth: 1                    # spec-slice link-hop horizon (see below)
 
 policy:
@@ -122,6 +124,18 @@ policy:
   `govulncheck`, licence metadata for `license-scan`) reads it from data baked into the
   role's sandbox image, never the network — the same offline guarantee the build relies
   on (see [sandbox](components/sandbox.md), and rootfs composition in the build plan).
+- `independent_checks:` is the optional list of command checks the gate keeps running
+  **past** a failure, so one `qa` pass aggregates *every* independent-scanner finding
+  instead of stopping at the first — better dead-letter triage, since the human (or the
+  agent re-routed to `implement`) fixes them all in one round-trip rather than bouncing the
+  candidate once per scanner (see [verification.md](verification.md)). Only the
+  spec-independent scanners belong here; a reserved proof or a metric's measurement command
+  is **not** eligible (a mutation score on red tests is meaningless — those stay fail-fast),
+  and validation rejects such an entry. Each listed name must be a key in `checks:`. Omitting
+  the list (or leaving it empty) keeps every check fail-fast. The gate still stops at the
+  first *non-independent* failure, and aggregation never changes the verdict — a candidate
+  that trips any check still fails the gate; it only changes how much a single failing pass
+  reports.
 - **Human-approval** (`human-approved`) is a postcondition kind evaluated by the
   **orchestrator**, not a `checks` command — it reads orchestrator/beads state, not the
   repository, so it carries no `checks` entry. It holds only when a human has explicitly

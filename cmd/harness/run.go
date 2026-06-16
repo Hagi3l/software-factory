@@ -451,6 +451,9 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	if cfg.Infra.Broker.PackageProxyAllowed() {
 		gateOpts = append(gateOpts, gate.WithPackageProxy(cfg.Infra.Broker.PackageProxyURL()))
 	}
+	// Independent scanners keep running past a failure so one qa pass aggregates every finding
+	// (T2.12); empty list is a no-op (pure fail-fast). Validated by harness validate.
+	gateOpts = append(gateOpts, gate.WithIndependentChecks(cfg.Harness.IndependentChecks))
 	gateRunner := gate.New(backend, gate.Registry(cfg.Harness.Checks), store, sockDir, log, tel, gateOpts...)
 
 	orch, err := orchestrator.New(orchestrator.Options{

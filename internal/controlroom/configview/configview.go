@@ -92,10 +92,13 @@ type StageRow struct {
 }
 
 // CheckRow is one entry of the check registry: a postcondition name and the shell command
-// that realizes it in the verification sandbox.
+// that realizes it in the verification sandbox. Independent marks a scanner the gate keeps
+// running past a failure so one qa pass aggregates every finding (T2.12); the proofs and the
+// metric stay fail-fast and read false.
 type CheckRow struct {
-	Name    string
-	Command string
+	Name        string
+	Command     string
+	Independent bool
 }
 
 // RoleRow groups the souls that fulfill one role, ordered by selection specificity so the
@@ -205,7 +208,7 @@ func Build(cfg *config.Config, env string) ConfigView {
 			NodeHref: func(string) string { return "" }, // stage nodes are not click-through
 			Label:    "declared role-flow pipeline",
 		})
-		v.Checks = checkRows(h.Checks)
+		v.Checks = checkRows(h.Checks, h.IndependentChecks)
 		v.Policy = policyView(h.Policy)
 		v.StagesYAML = marshalYAML(h.DAG)
 		v.ChecksYAML = marshalYAML(h.Checks)
@@ -329,8 +332,13 @@ func stageFill(status string) string {
 	}
 }
 
-// checkRows flattens the check registry to a name-sorted slice.
-func checkRows(checks map[string]string) []CheckRow {
+// checkRows flattens the check registry to a name-sorted slice, marking each entry named in
+// independent as a scanner the gate keeps running past a failure (T2.12).
+func checkRows(checks map[string]string, independent []string) []CheckRow {
+	indep := make(map[string]bool, len(independent))
+	for _, n := range independent {
+		indep[n] = true
+	}
 	names := make([]string, 0, len(checks))
 	for n := range checks {
 		names = append(names, n)
@@ -338,7 +346,7 @@ func checkRows(checks map[string]string) []CheckRow {
 	sort.Strings(names)
 	rows := make([]CheckRow, 0, len(names))
 	for _, n := range names {
-		rows = append(rows, CheckRow{Name: n, Command: checks[n]})
+		rows = append(rows, CheckRow{Name: n, Command: checks[n], Independent: indep[n]})
 	}
 	return rows
 }

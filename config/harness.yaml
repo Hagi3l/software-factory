@@ -161,6 +161,16 @@ checks:
   license-scan:  make license-scan
   mutation:      make mutation
 
+# Independent scanners the gate keeps running PAST a failure, so one qa pass aggregates
+# every finding (e.g. a gosec hit AND a govulncheck hit AND a licence violation) instead of
+# stopping at the first — the human/agent triaging the dead-letter queue fixes them all in
+# one round-trip rather than bouncing the candidate once per scanner (T2.12). These are the
+# spec-independent command checks, safe to continue past because their findings don't make
+# each other meaningless. The proofs (tests-pass) and the metric (mutation>=0.8) are
+# deliberately NOT listed: they stay fail-fast — a mutation score on a candidate whose tests
+# are red is meaningless, so there is no point measuring it. See specs/verification.md.
+independent_checks: [golangci-lint, gosec, govulncheck, license-scan]
+
 policy:
   max_retries: 3
   # Per-issue cumulative cap across the on_failure loop: tokens + dollars + wall-clock. The

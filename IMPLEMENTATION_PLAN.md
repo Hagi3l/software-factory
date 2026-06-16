@@ -32,8 +32,8 @@ good autonomous implementation) — a later validation concern, never an enginee
   0–1 are done (see Status); Phases 2–3 are done bar a few open items kept in full below.
   The verbose per-task findings were pruned once complete — that history lives in git,
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
-- **Open tasks (`- [ ]`) keep their full detail** — the remaining Phase 5 items, plus the handful of
-  optional items left in Phase 2 (T2.11/T2.12). T4.26 (Config view) closed the original Phase-4 view
+- **Open tasks (`- [ ]`) keep their full detail** — the remaining Phase 5 items. **Phase 2 is now
+  fully complete** (T2.12 landed; T2.11 is resolved as configuration, not a build item). T4.26 (Config view) closed the original Phase-4 view
   roster and **T4.27 is done — Phase 4's original scope is fully complete** (and its one follow-up,
 **T4.29** — migrating the wizard's structured output from parsed fenced blocks to schema-validated
 tool calls — is now also done); **Phase 6 (agent semantic tooling — the
@@ -104,9 +104,31 @@ strengthens the human-reviewed loop. ([verification.md](specs/verification.md))
 - [x] **T2.7 Mutation-testing postcondition** — *done.*
 - [x] **T2.8 Test↔spec traceability map** — *done.*
 - [x] **T2.9 `qa` stage + soul** — *done.*
-- [ ] **T2.12** *(optional)* Run-all independent scanners — aggregate every independent-scanner
-  finding in one `qa` pass (better DLQ triage) instead of fail-fast, via a per-check
-  "independent" config signal the gate honors (keeps proof/measurement checks fail-fast). See T2.9. ([verification.md](specs/verification.md))
+- [x] **T2.12 Run-all independent scanners** — *done.* The gate aggregates every independent-scanner
+  finding in one `qa` pass instead of stopping at the first — better dead-letter triage, since the
+  human (or the agent re-routed to `implement`) fixes them all in one round-trip rather than bouncing
+  the candidate once per scanner. **The signal is config, not code:** new optional **`Harness.IndependentChecks
+  []string`** (`independent_checks:` in `harness.yaml`) names the command checks the gate keeps running past a
+  failure. `gate.WithIndependentChecks(names)` builds the `Runner.independent` set (keyed by bare check name =
+  a command check's `CheckResult.Name`); in `Run`, a failing check sets `Passed=false` and, **only if its name
+  is in the independent set**, `continue`s rather than `break`s — so the run records the failure and keeps
+  going. Reserved proofs and metric comparisons never produce a plain registry-key Name, so they can never be
+  in the set and **stay fail-fast** (a mutation score on red tests is meaningless); a non-independent failure
+  still stops the run even after an independent one has failed. **Aggregation never changes the verdict** — a
+  candidate that trips any check still fails the gate; it only changes how much one failing pass reports (each
+  scanner's report is still captured as gate evidence, so all findings stay auditable by hash). **Validation
+  (`validateIndependentChecks`):** each name must be a key in `checks:`, must not be a reserved proof, must not
+  be a metric's measurement command (collected by scanning DAG postconditions for `ParseMetricComparison`), and
+  must not repeat — each is a startup fault rather than a silently-ignored misclassification. Empty/omitted list
+  = pure fail-fast (a no-op option, passed unconditionally from `buildRunComponents`). **Control room:** the
+  Config view's check registry gains a **Gating** column tagging each check `independent` or `fail-fast`
+  (`CheckRow.Independent`, computed in `checkRows`). Shipped `config/harness.yaml` and `demo/vault/config` list
+  `[golangci-lint, gosec, govulncheck, license-scan]`. Specs (verification.md — "The independent scanners are
+  the exception"; configuration.md — `independent_checks:` field) and docs (configuration.md, control-room.md)
+  updated. Tests: gate aggregates two independent failures across all four checks; non-independent failure still
+  fail-fasts even after an independent one failed; validation accepts a well-formed list and rejects reserved
+  proof / unregistered / metric-command / duplicate. `make check`-clean (0 vet, 0 lint). See T2.9.
+  ([verification.md](specs/verification.md), [configuration.md](specs/configuration.md))
 - [x] **T2.10 Trusted-dev policy profile** — *done.* The **`human-approved`** postcondition is
   orchestrator-evaluated (not a `checks` command): on a passing integrate the orchestrator **parks**
   the candidate (blocked, recording its candidate ref + the gate-verified provenance) and publishes an

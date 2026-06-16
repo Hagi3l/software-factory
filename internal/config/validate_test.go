@@ -232,6 +232,41 @@ func TestValidateMetricWithoutCommand(t *testing.T) {
 	mustContain(t, problems(t, c), `stage "qa" declares the "mutation>=0.8" metric postcondition but no "mutation" command`)
 }
 
+// independent_checks names the command checks the gate keeps running past a failure so one
+// qa pass aggregates every scanner finding (T2.12). A well-formed list of registered command
+// checks validates cleanly.
+func TestValidateIndependentChecksValid(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Harness.IndependentChecks = []string{"gosec", "govulncheck", "license-scan"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("valid independent_checks rejected: %v", err)
+	}
+}
+
+// Only plain command checks may be marked independent: a reserved proof, an unregistered
+// name, a metric's measurement command, and a duplicate are each a config fault caught at
+// startup (the gate would otherwise silently ignore the misclassification).
+func TestValidateIndependentChecksRejections(t *testing.T) {
+	cases := map[string]struct {
+		names    []string
+		fragment string
+	}{
+		"reserved proof":   {[]string{"tests-red-then-green"}, `reserved proof "tests-red-then-green"`},
+		"unregistered":     {[]string{"nope"}, `references "nope", which is not a command in checks:`},
+		"metric command":   {[]string{"mutation"}, `lists "mutation", a metric measurement command`},
+		"duplicate":        {[]string{"gosec", "gosec"}, `lists "gosec" more than once`},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			c := validConfig()
+			c.Souls = fullSouls(t)
+			c.Harness.IndependentChecks = tc.names
+			mustContain(t, problems(t, c), tc.fragment)
+		})
+	}
+}
+
 // A produces self-loop is a depth cycle and must fail.
 func TestValidateProducesSelfLoop(t *testing.T) {
 	c := validConfig()

@@ -240,7 +240,51 @@ func (c *Config) validateDAG(add func(string, ...any)) {
 		}
 	}
 
+	c.validateIndependentChecks(add)
 	c.validateDepthGraph(add)
+}
+
+// validateIndependentChecks enforces that every name in independent_checks is a plain
+// command check the gate may safely keep running past a failure (T2.12). Only command
+// checks (scanners) qualify: continuing past one aggregates all independent findings in a
+// single qa pass for better dead-letter triage. A reserved proof or a metric's measurement
+// command is deliberately *not* eligible — a mutation score on red tests is meaningless, so
+// those stay fail-fast — and listing one is a config fault caught here rather than silently
+// ignored at the gate (whose check Names would never match it anyway).
+func (c *Config) validateIndependentChecks(add func(string, ...any)) {
+	if len(c.Harness.IndependentChecks) == 0 {
+		return
+	}
+	// Metric measurement commands (the "mutation" behind "mutation>=0.8") are registered in
+	// checks: like a command check, but they back a fail-fast metric comparison — collect them
+	// so they can be rejected from the independent set.
+	metricCommands := map[string]bool{}
+	for _, st := range c.Harness.DAG {
+		for _, pc := range st.Postcondition {
+			if metric, _, _, ok := core.ParseMetricComparison(pc); ok {
+				metricCommands[metric] = true
+			}
+		}
+	}
+	seen := map[string]bool{}
+	for _, name := range c.Harness.IndependentChecks {
+		if seen[name] {
+			add("independent_checks lists %q more than once", name)
+			continue
+		}
+		seen[name] = true
+		if reservedPostconditions[name] {
+			add("independent_checks lists reserved proof %q; only command checks can be independent", name)
+			continue
+		}
+		if _, ok := c.Harness.Checks[name]; !ok {
+			add("independent_checks references %q, which is not a command in checks:", name)
+			continue
+		}
+		if metricCommands[name] {
+			add("independent_checks lists %q, a metric measurement command; metric checks stay fail-fast", name)
+		}
+	}
 }
 
 // validateDepthGraph checks the produces edges form a reachable acyclic definition.

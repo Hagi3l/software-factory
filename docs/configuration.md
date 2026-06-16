@@ -61,6 +61,8 @@ checks:
   govulncheck:   make govulncheck
   license-scan:  make license-scan
   mutation:      make mutation
+
+independent_checks: [golangci-lint, gosec, govulncheck, license-scan]
 ```
 
 A metric comparison like `mutation>=0.8` resolves the command registered under its
@@ -68,6 +70,17 @@ metric name and grades the trailing numeric token of stdout. The reserved proofs
 `tests-red` and `tests-red-then-green` have no command of their own — they reuse
 `tests-pass` run against the candidate and/or its base, so the acceptance tests stay a
 single source of truth.
+
+`independent_checks` is the optional list of command checks the gate keeps running **past**
+a failure, so one `qa` pass surfaces *every* scanner finding at once instead of stopping at
+the first — the human triaging the dead-letter queue (or the agent re-routed to `implement`)
+fixes them all in one round-trip rather than bouncing the candidate once per scanner. Only
+spec-independent scanners belong here; the proofs (`tests-pass`) and the metric (`mutation`)
+stay fail-fast — a mutation score on a candidate whose tests are red is meaningless — and
+`harness validate` rejects a reserved proof or a metric command in the list. Each name must be
+a key in `checks:`; omit the list to keep everything fail-fast. Aggregation never changes the
+verdict (a candidate that trips any check still fails the gate), only how much one failing
+pass reports. See [verification.md](../specs/verification.md).
 
 `golangci-lint` is an ordinary command check (graded on exit code) on the `qa` and
 `resolve` gates. It is the *same* `make lint` the implementor runs in-loop for fast
