@@ -276,3 +276,12 @@ func EpicOf(i Issue) string {
 	}
 	return i.ID
 }
+
+// EpicBranch is the short branch name an epic's children integrate onto and the wizard commits
+// the feature's spec onto: epic/<epic_id>. It is the single source of truth for the name, shared
+// by the orchestrator's merge queue (which integrates children onto it and creates it off main on
+// first use) and the Create-Task wizard (which, under integration.mode: epic, opens it with the
+// approved spec as its first commit — T7.5). Keyed by the epic id (the root seed's id, threaded
+// onto every issue of the epic via EpicOf), so all children of one feature share one branch.
+// See specs/integration.md "The epic branch".
+func EpicBranch(epicID string) string { return "epic/" + epicID }

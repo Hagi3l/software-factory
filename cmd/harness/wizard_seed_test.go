@@ -199,6 +199,176 @@ func TestDecisionsSidecarPath(t *testing.T) {
 	}
 }
 
+// epicConfig is testConfig under integration.mode: epic (T7.5): the wizard then opens an
+// epic/<epic_id> branch with the spec and enforces the one-active-epic consent gate.
+func epicConfig() *config.Config {
+	c := testConfig()
+	c.Harness.Integration = &config.Integration{Mode: config.IntegrationEpic}
+	return c
+}
+
+// gitInitWithMain initializes a repo with an initial commit on main — the precondition for cutting
+// an epic branch (a real integration repo always carries main history).
+func gitInitWithMain(t *testing.T, repo string) {
+	t.Helper()
+	gitInit(t, repo)
+	mustWrite(t, filepath.Join(repo, "README.md"), "# repo\n")
+	runCmd(t, repo, "git", "add", "README.md")
+	runCmd(t, repo, "git", "commit", "-q", "-m", "init")
+}
+
+func requireGitBd(t *testing.T) {
+	t.Helper()
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	if _, err := exec.LookPath("bd"); err != nil {
+		t.Skip("bd not on PATH")
+	}
+}
+
+// TestSeedEpicCommitsSpecOntoEpicBranch proves the load-bearing half of T7.5: under epic mode the
+// approved spec lands on a fresh epic/<epic_id> branch cut from main, NOT on main, so main stays
+// quiescent until the terminal merge (one feature, one landing, one deploy). It also asserts the
+// spec stays readable from the working tree, since the orchestrator resolves an issue's spec slice
+// by reading the repo's working tree (so the feature's spec must be reachable there even though it
+// is committed only on the epic branch).
+func TestSeedEpicCommitsSpecOntoEpicBranch(t *testing.T) {
+	requireGitBd(t)
+	repo := t.TempDir()
+	gitInitWithMain(t, repo)
+	runCmd(t, repo, "bd", "init", "--prefix", "harness")
+
+	store, err := artifact.NewFilesStore(filepath.Join(repo, ".artifacts"))
+	if err != nil {
+		t.Fatalf("artifact store: %v", err)
+	}
+	bd := beads.New(beads.WithBinary("bd"), beads.WithDir(repo))
+	s := newWizardSeeder(epicConfig(), repo, bd, store, nil)
+
+	mainBefore := strings.TrimSpace(runCmd(t, repo, "git", "rev-parse", "refs/heads/main"))
+
+	res, err := s.Seed(context.Background(), validSeedRequest())
+	if err != nil {
+		t.Fatalf("Seed: %v", err)
+	}
+	if len(res.Issues) != 1 {
+		t.Fatalf("created %d issues, want 1", len(res.Issues))
+	}
+	epic := res.Issues[0].ID
+	branch := "epic/" + epic
+
+	// main did not move — the feature is held off main until the terminal merge.
+	if mainAfter := strings.TrimSpace(runCmd(t, repo, "git", "rev-parse", "refs/heads/main")); mainAfter != mainBefore {
+		t.Errorf("main moved on epic seed: %s -> %s (must stay quiescent)", mainBefore, mainAfter)
+	}
+	// The epic branch is the returned commit and is cut directly from main.
+	if tip := strings.TrimSpace(runCmd(t, repo, "git", "rev-parse", "refs/heads/"+branch)); tip != res.Commit {
+		t.Errorf("epic branch tip = %s, want returned commit %s", tip, res.Commit)
+	}
+	if parent := strings.TrimSpace(runCmd(t, repo, "git", "rev-parse", branch+"^")); parent != mainBefore {
+		t.Errorf("epic commit parent = %s, want main %s", parent, mainBefore)
+	}
+	// The spec lives on the epic branch, never on main.
+	if out := runCmd(t, repo, "git", "show", branch+":specs/orders-export.md"); !strings.Contains(out, "Orders Export") {
+		t.Errorf("spec missing from epic branch: %q", out)
+	}
+	if err := exec.Command("git", "-C", repo, "cat-file", "-e", "main:specs/orders-export.md").Run(); err == nil {
+		t.Error("spec leaked onto main (must be epic-branch-only until the terminal merge)")
+	}
+	// The spec is present in the working tree, so the orchestrator can resolve the slice.
+	if _, err := os.Stat(filepath.Join(repo, "specs", "orders-export.md")); err != nil {
+		t.Errorf("spec not in the working tree for resolution: %v", err)
+	}
+	// The seed issue carries no EpicID (it is the epic root; EpicOf folds it into its own epic).
+	got, err := bd.Get(context.Background(), epic)
+	if err != nil {
+		t.Fatalf("read back seed issue: %v", err)
+	}
+	if got.EpicID != "" {
+		t.Errorf("seed root EpicID = %q, want empty (it is its own epic)", got.EpicID)
+	}
+}
+
+// TestValidateEpicRequiresSingleRoot proves epic mode admits exactly one root seed issue (the
+// epic id is that root's id); a multi-root draft is refused, while per-item mode still accepts it.
+func TestValidateEpicRequiresSingleRoot(t *testing.T) {
+	repo := t.TempDir()
+	req := validSeedRequest()
+	req.Issues = append(req.Issues, wizard.DraftIssue{Title: "second root", Body: "x", Spec: "specs/orders-export.md"})
+
+	epic := newWizardSeeder(epicConfig(), repo, nil, nil, nil)
+	if err := epic.validate(req); err == nil || !strings.Contains(err.Error(), "exactly one root issue") {
+		t.Fatalf("epic validate with 2 roots = %v, want single-root refusal", err)
+	}
+	perItem := newWizardSeeder(testConfig(), repo, nil, nil, nil)
+	if err := perItem.validate(req); err != nil {
+		t.Fatalf("per-item validate with 2 roots = %v, want nil (no single-root rule)", err)
+	}
+}
+
+// TestSeedEpicRefusesSecondInFlight proves the one-active-epic consent gate: a second approval
+// while the first epic's work is still open is refused, naming the in-flight feature.
+func TestSeedEpicRefusesSecondInFlight(t *testing.T) {
+	requireGitBd(t)
+	repo := t.TempDir()
+	gitInitWithMain(t, repo)
+	runCmd(t, repo, "bd", "init", "--prefix", "harness")
+	store, err := artifact.NewFilesStore(filepath.Join(repo, ".artifacts"))
+	if err != nil {
+		t.Fatalf("artifact store: %v", err)
+	}
+	bd := beads.New(beads.WithBinary("bd"), beads.WithDir(repo))
+	s := newWizardSeeder(epicConfig(), repo, bd, store, nil)
+
+	if _, err := s.Seed(context.Background(), validSeedRequest()); err != nil {
+		t.Fatalf("first epic seed: %v", err)
+	}
+	_, err = s.Seed(context.Background(), validSeedRequest())
+	if err == nil || !strings.Contains(err.Error(), "one feature at a time") {
+		t.Fatalf("second epic seed = %v, want one-active-epic refusal", err)
+	}
+}
+
+// TestSeedEpicGateTracksLanding proves the gate's two closed-but-not-done states: a drained epic
+// (its only issue closed) is still "active" until its terminal merge lands it on main, and a
+// second feature is admitted only once that landing commit is present.
+func TestSeedEpicGateTracksLanding(t *testing.T) {
+	requireGitBd(t)
+	repo := t.TempDir()
+	gitInitWithMain(t, repo)
+	runCmd(t, repo, "bd", "init", "--prefix", "harness")
+	store, err := artifact.NewFilesStore(filepath.Join(repo, ".artifacts"))
+	if err != nil {
+		t.Fatalf("artifact store: %v", err)
+	}
+	bd := beads.New(beads.WithBinary("bd"), beads.WithDir(repo))
+	s := newWizardSeeder(epicConfig(), repo, bd, store, nil)
+
+	res, err := s.Seed(context.Background(), validSeedRequest())
+	if err != nil {
+		t.Fatalf("first seed: %v", err)
+	}
+	epic := res.Issues[0].ID
+
+	// Drain the epic (close its only issue) but do not land it: the gate still refuses, citing the
+	// pending terminal merge.
+	if err := bd.Close(context.Background(), epic); err != nil {
+		t.Fatalf("close seed issue: %v", err)
+	}
+	_, err = s.Seed(context.Background(), validSeedRequest())
+	if err == nil || !strings.Contains(err.Error(), "awaiting its terminal merge") {
+		t.Fatalf("drained-but-unlanded gate = %v, want pending-terminal-merge refusal", err)
+	}
+
+	// Simulate the terminal merge: a commit on main citing the epic id in its provenance trailer
+	// (the same form MergeEpic writes and greps for). The gate now admits the next feature.
+	runCmd(t, repo, "git", "commit", "--allow-empty", "-q", "-m", "merge: land feature\n\nIssue: "+epic+" | provenance")
+	if _, err := s.Seed(context.Background(), validSeedRequest()); err != nil {
+		t.Fatalf("seed after the feature landed = %v, want success", err)
+	}
+}
+
 func mustWrite(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

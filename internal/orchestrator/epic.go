@@ -10,7 +10,7 @@ import (
 // at the epic's terminal merge (specs/integration.md, T7.3). Keyed by the epic id (the root
 // seed's id, threaded forward onto every issue of the epic via core.EpicOf), so all children of
 // one feature share one branch and a different feature never collides with it.
-func epicBranch(epicID string) string { return "epic/" + epicID }
+func epicBranch(epicID string) string { return core.EpicBranch(epicID) }
 
 // epicMode reports whether the run lands verified work atomically per epic (integration.mode:
 // epic) rather than per item (the kernel default). It reads the validated config the

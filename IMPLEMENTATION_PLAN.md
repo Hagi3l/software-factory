@@ -47,8 +47,8 @@ autonomous implementation) — a later validation concern, never an engineering 
   optional items are T5.5 gVisor and T5.11 warm pools + HA), and **Phase 7** (atomic
   feature integration / epic mode — net-new feature work, not hardware-blocked; T7.1 (the live
   multi-child-rebase bug), T7.2 (`integration.mode` config), T7.3 (merge-queue retargeting), and
-  T7.4 (epic-completion detection + terminal merge) are done — T7.5 (one-active-epic consent gate
-  + wizard creates the epic branch with the spec) is next).
+  T7.4 (epic-completion detection + terminal merge), and T7.5 (one-active-epic consent gate +
+  wizard creates the epic branch with the spec) are done — T7.6 (board epic hero card) is next).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -363,16 +363,42 @@ per epic, not new machinery. Spec contract:
   spec change. **Deferred to T7.5:** the wizard creating `epic/<id>` with the spec as its first
   commit + the one-active-epic consent gate; until then the merge mechanics are complete but the
   spec rides in via `main` inheritance (T7.3's note).
-- [ ] **T7.5 One-active-epic consent gate + wizard creates the epic branch with the spec**
-  *(needs T7.4)* — under `mode: epic` the wizard's approval refuses to seed a second epic while
-  one is in flight, reporting the in-flight feature instead. Keeps `main` quiescent during an
-  epic (which is what lets T7.4 skip the terminal re-gate). **Also owns the deferred T7.3 piece:**
-  the wizard, knowing the epic-root id post-`Apply` (the consent gate defines what constitutes
-  "an epic" — single root for v1), creates `epic/<epic_id>` off `main` and commits the approved
-  spec onto it as its **first commit, not `main`** (load-bearing for atomicity — see
-  integration.md "The epic branch"). The merge queue's idempotent branch-create (T7.3) then
-  becomes a no-op for an epic the wizard already opened. *(spec)*
-  [control-room.md](specs/control-room.md), [integration.md](specs/integration.md)
+- [x] **T7.5 One-active-epic consent gate + wizard creates the epic branch with the spec**
+  *(needs T7.4)* — *done.* Two halves landed in the Create-Task wizard's seeder
+  (`cmd/harness/wizard_seed.go`). **One-active-epic consent gate** (`ensureNoActiveEpic`): under
+  `integration.mode: epic`, `Seed` refuses a second approval while an epic is in flight, before any
+  write. It reads `beads.ListAll`, groups by `core.EpicOf`, and an epic is "active" if any member is
+  not `closed` (work in flight) **OR** its subtree has drained but its terminal merge has not yet
+  landed it on `main`. The drained-but-unlanded clause (checked via `epicLandedOnMain`, which greps
+  `main` for a provenance trailer citing the epic id — the same idempotency check `MergeEpic` uses)
+  is load-bearing: seeding a second epic in that window would cut it from a `main` lacking the first
+  feature, and the first's terminal merge (whose tree is the epic branch's) would later revert it.
+  The refusal names the in-flight feature (root issue title + id). **Single root for v1:** `validate`
+  requires exactly one seed issue in epic mode (the epic id is that root's id; more roots would mint
+  multiple epic branches + terminal merges); per-item mode is unchanged. **Spec onto the epic branch**
+  (`seedEpic` + `commitOntoEpic`): epic mode swaps the last two Seed steps — create the seed issue
+  first to learn the epic-root id (= epic id), then commit the spec+sidecar onto a fresh
+  `epic/<epic_id>` branch cut from `main`, **not** onto `main`. Done with git plumbing (`add` →
+  `write-tree` → `commit-tree -p main` → `update-ref` → `reset -- <files>`) so `main` and the
+  working-tree HEAD never move; the working-tree spec files are left on disk (unstaged). **Key
+  discovery driving the design:** the orchestrator resolves an issue's spec slice by reading the
+  repo's *working tree* (`spec.Resolve(o.opts.Repo, ...)` → `os.ReadFile`), and child sandboxes base
+  off `main` (code). So the spec must stay readable from the working tree even though it is committed
+  only on the epic branch — hence `commitOntoEpic` leaves the spec files in the working tree
+  (uncommitted relative to main) rather than checking out the epic branch. Children get the spec via
+  their Brief (read from the working tree); their candidates integrate onto the epic branch; the
+  terminal merge brings spec+code to `main` once. No orchestrator changes were needed. **Single
+  source of truth:** added `core.EpicBranch(epicID)` (the `epic/<id>` name), now used by both the
+  orchestrator (`orchestrator.epicBranch` delegates to it) and the wizard. The merge queue's
+  idempotent branch-create (T7.3) is now a no-op for an epic the wizard already opened. Docs:
+  `docs/control-room.md` APPROVE step gained an epic-mode paragraph; spec (integration.md "The epic
+  branch", control-room.md) already documented this — no spec change. Tests
+  (`cmd/harness/wizard_seed_test.go`): `TestSeedEpicCommitsSpecOntoEpicBranch` (spec on epic branch
+  cut from main, main quiescent, spec **not** on main, spec readable in working tree, root has empty
+  EpicID), `TestValidateEpicRequiresSingleRoot`, `TestSeedEpicRefusesSecondInFlight`,
+  `TestSeedEpicGateTracksLanding` (drained-but-unlanded refused; admitted once a terminal-merge
+  trailer is on main). *(spec)* [integration.md](specs/integration.md),
+  [control-room.md](specs/control-room.md)
 - [ ] **T7.6 Board epic hero card** *(needs T7.4)* — render the epic on the
   [board](specs/control-room.md): every card gets an **epic badge** (root id) + a left-border
   tint hashed deterministically from `epic_id` (colour never the sole channel); the epic
@@ -399,6 +425,7 @@ per epic, not new machinery. Spec contract:
 - Thread `BudgetCaps` to the board cards so a `budget.wall` tint can render there (currently caps reach only the Budgets view) *(from T4.18)*.
 - Decomposition-preview dry-run before APPROVE (control-room.md OPEN, "leaning defer"; seed issues stay coarse and the autonomous planner decomposes) *(from T4.14)*.
 - Control-room surface for the transform log (e.g. a verification-view row weighing text-fallback renames) — the record is harvested onto Evidence; only the read/render is a follow-up *(from T6.3)*.
+- Resolve mode (`wizard_resolve.go`) still commits its spec refinement to `main` via `s.commit` even under epic mode, which would move `main` mid-epic; in epic mode a Resolve edit should commit onto the active epic branch instead (the dead-lettered issue carries its epic id). Out of T7.5's scope (Create wizard) *(from T7.5)*.
 
 ## Open decisions affecting the plan
 

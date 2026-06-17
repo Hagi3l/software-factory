@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Loxstomper/harness/internal/artifact"
@@ -39,6 +40,16 @@ import (
 // committed before the issues exist so a created issue's spec reference always resolves on disk.
 // A failure after the commit (a beads fault creating issues) leaves the spec committed without
 // issues — recoverable by re-seeding; it is surfaced to the human, never silently swallowed.
+//
+// Under integration.mode: epic the order of the last two steps swaps and the commit retargets
+// (T7.5, specs/integration.md "The epic branch"): the seed issue is created first to learn the
+// epic-root id (the epic id), then the spec is committed onto a fresh epic/<epic_id> branch cut
+// from main — *not* onto main — so main stays quiescent until the epic's terminal merge fires one
+// atomic landing. The spec files are still written to the working tree before the issue exists
+// (so the orchestrator, which resolves the spec slice by reading the working tree, sees the
+// feature's spec the moment the issue is dispatchable, even though it is committed only on the
+// epic branch). A one-active-epic consent gate (ensureNoActiveEpic) runs first: epic mode v1
+// refuses to open a second feature while one is in flight.
 type wizardSeeder struct {
 	cfg   *config.Config
 	repo  string
@@ -84,6 +95,15 @@ func (s *wizardSeeder) Seed(ctx context.Context, req wizard.SeedRequest) (wizard
 		return wizard.SeedResult{}, err
 	}
 
+	// Consent gate: epic mode v1 admits one active epic at a time (specs/integration.md "v1 scope").
+	// Refuse a second feature while one is in flight, reporting the in-flight feature — done before
+	// any write so a refused approval leaves the repo and beads untouched.
+	if s.epicMode() {
+		if err := s.ensureNoActiveEpic(ctx); err != nil {
+			return wizard.SeedResult{}, err
+		}
+	}
+
 	// 1. write the spec files.
 	written := make([]string, 0, len(req.Specs)+1)
 	for _, sp := range req.Specs {
@@ -120,14 +140,43 @@ func (s *wizardSeeder) Seed(ctx context.Context, req wizard.SeedRequest) (wizard
 	}
 	written = append(written, sidecar)
 
-	// 4. commit the spec + sidecar, then create the seed issues via the single-writer path.
-	commit, err := s.commit(ctx, written, commitMessage(req, transcriptRef, sidecar))
+	// 4. commit the spec + sidecar, then create the seed issues via the single-writer path. Epic
+	// mode swaps the order — create first to learn the epic-root id, then commit onto the epic
+	// branch (see seedEpic and the wizardSeeder doc comment).
+	message := commitMessage(req, transcriptRef, sidecar)
+	if s.epicMode() {
+		return s.seedEpic(ctx, req, written, transcriptRef, sidecar, message)
+	}
+	commit, err := s.commit(ctx, written, message)
 	if err != nil {
 		return wizard.SeedResult{}, err
 	}
 	created, err := s.createIssues(ctx, req, sidecar, transcriptRef)
 	if err != nil {
 		return wizard.SeedResult{Commit: commit, TranscriptRef: transcriptRef}, fmt.Errorf("create seed issues (spec already committed as %s): %w", short(commit), err)
+	}
+	return wizard.SeedResult{Commit: commit, TranscriptRef: transcriptRef, Issues: created}, nil
+}
+
+// seedEpic completes an APPROVE under integration.mode: epic (T7.5, specs/integration.md "The
+// epic branch"). It creates the seed issue first — the validate step guarantees exactly one, so
+// it is the epic root and its id IS the epic id (core.EpicOf folds a root into its own epic) —
+// then commits the already-written spec + sidecar onto a fresh epic/<epic_id> branch cut from
+// main, never onto main. Holding main quiescent for the epic's duration is load-bearing: it is
+// what lets the terminal merge land the whole feature in one commit (so one deploy fires per
+// feature) and skip re-gating (the children already verified the combined tree on the epic
+// branch). A failure committing the spec after the issue exists is surfaced (the issue is
+// recoverable by re-seeding), never silently swallowed.
+func (s *wizardSeeder) seedEpic(ctx context.Context, req wizard.SeedRequest, written []string, transcriptRef, sidecar, message string) (wizard.SeedResult, error) {
+	created, err := s.createIssues(ctx, req, sidecar, transcriptRef)
+	if err != nil {
+		return wizard.SeedResult{TranscriptRef: transcriptRef}, fmt.Errorf("create seed issue: %w", err)
+	}
+	epicID := created[0].ID // the single seed issue is the epic root; its id is the epic id.
+	commit, err := s.commitOntoEpic(ctx, epicID, written, message)
+	if err != nil {
+		return wizard.SeedResult{TranscriptRef: transcriptRef, Issues: created},
+			fmt.Errorf("open epic branch %s with the spec (seed issue %s already created): %w", core.EpicBranch(epicID), epicID, err)
 	}
 	return wizard.SeedResult{Commit: commit, TranscriptRef: transcriptRef, Issues: created}, nil
 }
@@ -139,6 +188,14 @@ func (s *wizardSeeder) Seed(ctx context.Context, req wizard.SeedRequest) (wizard
 func (s *wizardSeeder) validate(req wizard.SeedRequest) error {
 	if len(req.Issues) == 0 {
 		return errors.New("the draft has no seed issues to create")
+	}
+	// Epic mode lands one feature atomically, rooted at a single epic id (specs/integration.md
+	// "v1 scope — one active epic"). The epic id is the root seed's own id, so a draft must seed
+	// exactly one root issue; the autonomous decomposition planner fans it into children. More
+	// than one root would mint multiple epics (each its own branch + terminal merge), defeating
+	// the one-feature-one-landing contract.
+	if s.epicMode() && len(req.Issues) != 1 {
+		return fmt.Errorf("epic mode lands one feature atomically, so a draft must seed exactly one root issue (the planner decomposes it into children); got %d — consolidate them into a single seed issue", len(req.Issues))
 	}
 	batch, err := s.validateSpecFiles(req.Specs)
 	if err != nil {
@@ -306,6 +363,129 @@ func (s *wizardSeeder) createIssues(ctx context.Context, req wizard.SeedRequest,
 		out[i] = wizard.SeededIssue{ID: is.ID, Title: is.Title, Role: is.Role}
 	}
 	return out, nil
+}
+
+// epicMode reports whether the run lands verified work atomically per epic (integration.mode:
+// epic). It reads the validated config the wizard shares with the orchestrator; an absent block
+// reads as per-item via Harness.Mode() (which also tolerates a nil Harness).
+func (s *wizardSeeder) epicMode() bool {
+	return s.cfg != nil && s.cfg.Harness.Mode() == config.IntegrationEpic
+}
+
+// ensureNoActiveEpic enforces the v1 one-active-epic rule (specs/integration.md "v1 scope — one
+// active epic", specs/control-room.md): under integration.mode: epic the wizard refuses to open a
+// second feature while one is still in flight, so main stays quiescent for an epic's duration
+// (what lets the terminal merge land the feature in one commit and skip re-gating, T7.4). It reads
+// every issue (beads.ListAll, which surfaces closed issues `bd list` hides) and groups by epic
+// (core.EpicOf — a descendant's threaded id, or a root's own id). An epic is active if any member
+// is not yet closed (work in flight) OR its subtree has drained but its terminal merge has not yet
+// landed it on main (the window between the last child closing and the slow sweep firing). The
+// drained-but-unlanded clause is load-bearing: seeding a second epic in that window would cut it
+// from a main that does not yet contain the first feature, and the first's terminal merge — whose
+// tree is the epic branch's — would then revert the second. The refusal names the in-flight
+// feature so the human sees what blocks them, and runs before any write so a refusal is inert.
+func (s *wizardSeeder) ensureNoActiveEpic(ctx context.Context) error {
+	all, err := s.bd.ListAll(ctx)
+	if err != nil {
+		return fmt.Errorf("check for an in-flight epic: %w", err)
+	}
+	byEpic := map[string][]core.Issue{}
+	for _, is := range all {
+		byEpic[core.EpicOf(is)] = append(byEpic[core.EpicOf(is)], is)
+	}
+	// Deterministic order so the reported feature is stable when more than one epic is active.
+	epics := make([]string, 0, len(byEpic))
+	for epic := range byEpic {
+		epics = append(epics, epic)
+	}
+	sort.Strings(epics)
+	for _, epic := range epics {
+		members := byEpic[epic]
+		inFlight := false
+		for _, is := range members {
+			if is.Status != "closed" { // beads' terminal status; see core.Issue.Status doc.
+				inFlight = true
+				break
+			}
+		}
+		if inFlight {
+			return fmt.Errorf("epic mode runs one feature at a time: %s is still in flight; finish or abandon it before seeding another feature", s.epicFeatureName(epic, members))
+		}
+		landed, err := s.epicLandedOnMain(ctx, epic)
+		if err != nil {
+			return err
+		}
+		if !landed {
+			return fmt.Errorf("epic mode runs one feature at a time: %s has drained but is awaiting its terminal merge to main; wait for it to land before seeding another feature", s.epicFeatureName(epic, members))
+		}
+	}
+	return nil
+}
+
+// epicLandedOnMain reports whether an epic's atomic terminal merge has advanced main: a merge
+// commit citing the epic id in its provenance trailer is present on main. It mirrors the merger's
+// idempotency grep (MergeEpic) so the consent gate and the merge queue agree on "landed". An empty
+// result means not yet landed; a git error (e.g. no main ref) is surfaced rather than guessed.
+func (s *wizardSeeder) epicLandedOnMain(ctx context.Context, epic string) (bool, error) {
+	out, err := s.git(ctx, "log", "refs/heads/main", "--fixed-strings", "--grep=Issue: "+epic+" |", "--format=%H", "-n", "1")
+	if err != nil {
+		return false, fmt.Errorf("check whether epic %s has landed on main: %w", epic, err)
+	}
+	return strings.TrimSpace(out) != "", nil
+}
+
+// epicFeatureName is a human-facing label for an in-flight epic in the consent-gate refusal: the
+// root issue's title (the member whose id is the epic id) with the id, or the bare id when the
+// root is not in the snapshot.
+func (s *wizardSeeder) epicFeatureName(epic string, members []core.Issue) string {
+	for _, is := range members {
+		if is.ID == epic {
+			if t := strings.TrimSpace(is.Title); t != "" {
+				return fmt.Sprintf("%q (%s)", t, epic)
+			}
+		}
+	}
+	return epic
+}
+
+// commitOntoEpic commits the approved spec + sidecar onto a fresh epic/<epic_id> branch cut from
+// main, leaving main and the working tree's HEAD untouched (T7.5, specs/integration.md "The epic
+// branch"). It is done entirely with git plumbing: stage the spec files, snapshot the resulting
+// tree (main's tree + the spec), write a commit with main as its sole parent, and point the epic
+// branch at it — so neither main moves nor does the checkout switch branches. The working-tree
+// spec files are then unstaged but left on disk: the orchestrator resolves an issue's spec slice
+// by reading the repo's working tree, so the feature's spec must be readable there for the whole
+// epic even though it is committed only on the epic branch (the children's sandboxes still base
+// off main — code, not the spec, which reaches the agent via its Brief — and integrate their
+// candidates onto this branch). main exists in any real integration repo; absent it the epic
+// branch cannot be cut, which is surfaced as an error rather than guessed.
+func (s *wizardSeeder) commitOntoEpic(ctx context.Context, epicID string, files []string, message string) (string, error) {
+	branch := core.EpicBranch(epicID)
+	ref := "refs/heads/" + branch
+	mainTip, err := s.git(ctx, "rev-parse", "--verify", "refs/heads/main")
+	if err != nil {
+		return "", fmt.Errorf("epic mode requires an initialized main branch to cut %s from: %w", branch, err)
+	}
+	if _, err := s.git(ctx, append([]string{"add", "--"}, files...)...); err != nil {
+		return "", err
+	}
+	tree, err := s.git(ctx, "write-tree")
+	if err != nil {
+		return "", err
+	}
+	commit, err := s.git(ctx, "commit-tree", tree, "-p", mainTip, "-m", message)
+	if err != nil {
+		return "", err
+	}
+	if _, err := s.git(ctx, "update-ref", ref, commit); err != nil {
+		return "", err
+	}
+	// Unstage just the spec files (mixed reset of those paths); the working-tree copies remain on
+	// disk for spec resolution, and main's index/tree is left as it was.
+	if _, err := s.git(ctx, append([]string{"reset", "-q", "--"}, files...)...); err != nil {
+		return "", err
+	}
+	return commit, nil
 }
 
 // issueBody appends a provenance footer to a seed issue's body linking the decisions sidecar and

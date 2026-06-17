@@ -136,6 +136,14 @@ is autonomous. It's a guided conversation, not a form:
    pre-context for a later escalation), git-commits, and creates the seed issues. The
    running pipeline picks them up.
 
+   Under [`integration.mode: epic`](configuration.md) APPROVE has two extra behaviours
+   (T7.5): it commits the spec onto a fresh `epic/<epic_id>` branch cut from `main`
+   (its first commit) **instead of onto `main`**, so `main` stays still until the
+   feature's single terminal merge — and it **refuses a second approval while an epic is
+   in flight** (v1 runs one feature at a time), naming the in-flight feature. A draft
+   must seed exactly one root issue in epic mode (the planner decomposes it); the epic id
+   is that root's id.
+
 If the wizard isn't configured (no `requirements_planner` block, or standalone
 `harness serve`), `/create` shows a "wizard disabled" notice.
 
