@@ -29,8 +29,8 @@ const statusOpen = "open"
 // returned (callers keep their existing Nak-on-error semantics).
 //
 // Idempotency under at-least-once redelivery is provided UPSTREAM, not by a guard here:
-// handleResult/handleApproval act on a Result/decision only while the issue is in its expected
-// transient status (in_progress / blocked-with-candidate), so a redelivery that lands on an
+// handleResult acts on a Result only while the issue is in the in-flight projection, and
+// handleApproval only while it is blocked-with-candidate, so a redelivery that lands on an
 // already-settled issue returns before any write — no re-stamp, no re-announce. By the time a
 // write reaches transition it is therefore a genuine state change, which is why transition
 // announces unconditionally after a successful write (a stale-status guard here would instead
@@ -39,6 +39,19 @@ const statusOpen = "open"
 func (o *Orchestrator) transition(ctx context.Context, issue core.Issue, to string, write func(context.Context) error) error {
 	if err := write(ctx); err != nil {
 		return err
+	}
+	// Maintain the in-flight projection here — the one place every status write funnels through —
+	// so it can never silently drift from beads (specs/components/orchestrator.md "Live state vs.
+	// durable state"): a transition TO in_progress records the just-claimed issue (under a lease
+	// approximated from the configured TTL; the authoritative lease lives in beads), and any
+	// transition AWAY (open/closed/blocked) drops it. The two hot paths read this projection, not
+	// a lagging beads status, to decide "already dispatched" (scheduleReady) and "is this a live
+	// result" (handleResult). Updated only after a successful write, so the cache mirrors what was
+	// actually persisted.
+	if to == statusInProgress {
+		o.inflight.add(issue, time.Now().UTC().Add(o.leaseTTL))
+	} else {
+		o.inflight.remove(issue.ID)
 	}
 	o.announceState(issue, to)
 	return nil

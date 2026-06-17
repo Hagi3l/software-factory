@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -47,6 +48,7 @@ type fakeBeads struct {
 	claimErr error
 	applyErr error
 	getErr   error
+	closeErr error
 }
 
 func newFakeBeads() *fakeBeads { return &fakeBeads{issues: map[string]core.Issue{}} }
@@ -96,7 +98,14 @@ func (f *fakeBeads) Release(_ context.Context, id string) error {
 func (f *fakeBeads) Close(_ context.Context, id string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.closeErr != nil {
+		return f.closeErr
+	}
 	f.closed = append(f.closed, id)
+	if is, ok := f.issues[id]; ok {
+		is.Status = "closed"
+		f.issues[id] = is
+	}
 	return nil
 }
 
@@ -151,6 +160,10 @@ func (f *fakeBeads) Apply(_ context.Context, proposals []core.Proposal) ([]core.
 		f.seq++
 		is := p.Issue
 		is.ID = fmt.Sprintf("new-%d", f.seq)
+		// Mirror the real client's two-phase write into the read side: the proposal's blocked-by
+		// edges land as the created issue's DependsOn, so a later ListAll (e.g. planHasChildren's
+		// parent-link probe) sees them.
+		is.DependsOn = append([]string(nil), p.DependsOn...)
 		f.issues[is.ID] = is
 		created = append(created, is)
 		f.applied = append(f.applied, p)
@@ -167,7 +180,21 @@ func (f *fakeBeads) ListStranded(context.Context, time.Time) ([]string, error) {
 func (f *fakeBeads) InProgress(context.Context) ([]core.Issue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	return append([]core.Issue(nil), f.inflight...), nil
+	// An explicit f.inflight override (set by the spec-drift sweep tests) wins; otherwise derive
+	// the in_progress set from the issue map, like a real `bd list --status in_progress` — this is
+	// what lets the in-flight projection rebuild (newOrch/rebuildInflight) seed itself from the
+	// issues a test put with the inProgress() helper.
+	if f.inflight != nil {
+		return append([]core.Issue(nil), f.inflight...), nil
+	}
+	var out []core.Issue
+	for _, is := range f.issues {
+		if is.Status == statusInProgress {
+			out = append(out, is)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out, nil
 }
 
 func (f *fakeBeads) Reissue(_ context.Context, id string) error {
@@ -427,6 +454,12 @@ func newOrch(t *testing.T, cfg *config.Config, bd Beads, g Gate, m Merger) (*Orc
 	o, err := New(Options{Config: cfg, Repo: "/repo", Limits: config.SandboxLimits{CPU: 1, Mem: "1Gi", Wall: config.Duration(time.Minute)}}, bd, g, m, nc, js)
 	if err != nil {
 		t.Fatalf("New: %v", err)
+	}
+	// Seed the in-flight projection from beads exactly as Run does at startup, so unit tests that
+	// drive handleResult directly (bypassing Run) see issues a test put as in_progress as live —
+	// the result-gating path consults the projection, not a beads status read (T3.12).
+	if err := o.rebuildInflight(context.Background()); err != nil {
+		t.Fatalf("rebuild inflight: %v", err)
 	}
 	return o, nc
 }

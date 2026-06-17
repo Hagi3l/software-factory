@@ -32,7 +32,9 @@ good autonomous implementation) — a later validation concern, never an enginee
   0–1 are done (see Status); Phases 2–3 are done bar a few open items kept in full below.
   The verbose per-task findings were pruned once complete — that history lives in git,
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
-- **Open tasks (`- [ ]`) keep their full detail** — the remaining Phase 5 items. **Phase 2 is now
+- **Open tasks (`- [ ]`) keep their full detail** — the remaining Phase 5 items, plus one Phase-3 orchestrator
+  robustness item (**T3.13**, the sweep-cadence split; its predecessor **T3.12**, the in-flight projection that
+  fixed the eventually-consistent-beads dispatch storm a `demo/vault` run surfaced, is now **done**). **Phase 2 is now
   fully complete** (T2.12 landed; T2.11 is resolved as configuration, not a build item). T4.26 (Config view) closed the original Phase-4 view
   roster and **T4.27 is done — Phase 4's original scope is fully complete** (and its one follow-up,
 **T4.29** — migrating the wizard's structured output from parsed fenced blocks to schema-validated
@@ -263,6 +265,46 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
 - [x] **T3.9 Merge queue: serialized rebase onto `main`** — *done.*
 - [x] **T3.10 Re-gate the merged result** — *done.*
 - [x] **T3.11 Conflict-resolution issue** — *done.*
+- [x] **T3.12 Orchestrator in-flight projection (consistency under eventually-consistent beads reads)** — *done.*
+  Fixes the `demo/vault` re-dispatch storm (one `plan` issue claimed ~23×/45s, its first valid Result discarded as
+  stale, its decomposition applied twice, credits exhausted) caused by trusting a fresh `bd.ready()`/status read as a
+  read-your-writes-consistent surface beads is not under server-mode load. **New `inflightProjection`**
+  (`internal/orchestrator/inflight.go`): a mutex-guarded `map[id]inflightEntry{issue,lease}` — the single writer's
+  volatile, read-your-writes record of what it considers `in_progress`. **Derived, never authoritative:** maintained
+  ONLY at the one `transition()` choke point (add on a transition *to* `in_progress` under a lease ≈ now+`leaseTTL`;
+  remove on any transition to `open`/`closed`/`blocked`), so it cannot drift from beads, and **rebuilt from
+  `InProgress()` at `Run` startup** (`rebuildInflight`, before the first dispatch/result) so crash-safety is
+  unchanged — best-effort like the loop's other beads reads (a failed seed self-heals: `bd.ready()` never returns
+  `in_progress` work so an empty projection can't re-dispatch it; a result for pre-restart in-flight work is only
+  briefly ignored until the lease sweep restrands it). **Two hot paths consult it, not a lagging beads read:**
+  **(1)** `scheduleReady` keeps `bd.ready()` as the candidate oracle (DAG logic stays in beads) but **skips any
+  candidate already in the projection**; **(2)** `handleResult` processes a Result **iff its issue is in the
+  projection** (replacing the old `status != in_progress` gate), so a valid result is never discarded for a lagging
+  `open` status and a duplicate can't re-`Apply` (serial handling removes the issue before the next is processed).
+  **Belt-and-suspenders `acceptPlan` idempotency** for the non-atomic Apply→Close window: each plan child now carries
+  the plan in its `DependsOn` (a **parent link** — also makes children dispatch only once the decomposition is
+  accepted, since a closed blocker no longer blocks, like the planner's inter-sibling edges), and `planHasChildren`
+  (a `ListAll` parent-link probe on the rare plan-accept path) **skips a second Apply** and just finishes closing
+  when children already exist; a re-derivation plan (T3.7b) links no children to itself so it never false-positives.
+  TCB-touching (orchestrator), human-reviewed. Tests (`inflight_test.go` + fake updates: `InProgress` derives from
+  the issue map, `Apply` mirrors `DependsOn`, `Close` honors `closeErr`, `newOrch`/`orchWithRepo` seed the
+  projection): in-flight candidate not re-dispatched; valid result accepted despite a lagging `open` read;
+  not-in-flight/duplicate result ignored; duplicate `plan` Result doesn't double children; `acceptPlan` idempotent
+  across a Close failure; restart rebuilds from the `in_progress` set (`open` excluded). `make check`-clean (0 vet,
+  0 lint). **Unblocks T3.13.** ([components/orchestrator.md](specs/components/orchestrator.md) "Live state vs. durable state")
+- [ ] **T3.13 Split the sweep cadence off the dispatch tick** — `tickLoop` runs `scheduleReady`,
+  `recompileSpecDelta`, `recompileMergedDelta`, and `sweepLeases` on **one 2s ticker**. `recompileMergedDelta` does
+  a full-table **`ListAll`** every pass (every issue, including closed) purely to detect human spec edits to
+  already-merged work, and the drift/lease sweeps re-`list in_progress` — so the dominant Dolt **read** load is
+  paced by the dispatch interval, which is exactly the concurrent-read pressure that produces the write-visibility
+  lag T3.12 has to tolerate. Split the loop: keep dispatch + result handling responsive, move the heavy/rare sweeps
+  to a **separate, slower cadence** (configurable; ~30–60s default, since they track human spec edits at
+  minute-plus granularity). With T3.12's projection in place, the **lease sweep** becomes an in-memory scan and the
+  **in-flight spec-drift check** iterates the projection + re-resolves specs from the worktree — neither needs a
+  beads query, leaving `recompileMergedDelta`'s slow `ListAll` as the only beads read off the hot path. Reduces
+  Dolt contention (and thus the lag itself), independent of the correctness fix. Human-reviewed. Tests: sweeps fire
+  on the slow cadence not every dispatch tick; dispatch latency unchanged; lease/drift sweeps still recover stranded
+  and drifted work. (needs T3.12) ([components/orchestrator.md](specs/components/orchestrator.md))
 
 ## Phase 4 — Control room
 

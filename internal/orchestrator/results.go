@@ -119,18 +119,27 @@ func (o *Orchestrator) handleMessage(ctx context.Context, msg jetstream.Msg) {
 // err): a non-nil err with transient=true means "retry later" (Nak); transient=false
 // means "do not redeliver". A nil err means the Result was fully processed.
 //
-// It is idempotent: it acts only while the issue is in_progress, so a duplicate or
-// stale redelivery for an issue already accepted, rejected, or dead-lettered is a
-// no-op (see specs/components/orchestrator.md).
+// It is idempotent: it acts only while the issue is in the in-flight projection, so a
+// duplicate or stale redelivery for an issue already accepted, rejected, or dead-lettered
+// is a no-op — the terminal transition removed it from the projection (see
+// specs/components/orchestrator.md "Live state vs. durable state").
 func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (transient bool, err error) {
+	// Gate on the in-flight projection, NOT a beads status read. beads is not read-your-writes
+	// consistent under load, so a *valid* result can arrive before a status read would show
+	// in_progress (the claim write still propagating) — discarding it as "stale" was the observed
+	// bug. The projection is the single writer's own live record, so it never lags its own writes:
+	// a result is live iff its issue is in the projection. A duplicate or stale redelivery is
+	// ignored because the first result's terminal transition already removed the issue, and result
+	// handling is serial so that removal lands before the next is processed — so a duplicate can
+	// never re-Apply (specs/components/orchestrator.md "Live state vs. durable state").
+	if !o.inflight.has(res.IssueID) {
+		o.log.Info("orchestrator: result for issue not in flight, ignoring as stale/duplicate",
+			"issue", res.IssueID, "result_status", res.Status)
+		return false, nil
+	}
 	issue, err := o.bd.Get(ctx, res.IssueID)
 	if err != nil {
 		return true, fmt.Errorf("get issue %s: %w", res.IssueID, err)
-	}
-	if issue.Status != statusInProgress {
-		o.log.Info("orchestrator: result for issue not in progress, ignoring as stale/duplicate",
-			"issue", issue.ID, "status", issue.Status, "result_status", res.Status)
-		return false, nil
 	}
 
 	// Record this invocation's priced spend for the cost view (specs/control-room.md T4.10).
@@ -379,6 +388,30 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 // breadth"). Restricting targets to the declared produces stops an untrusted planner from
 // injecting work that skips stages (e.g. an implement issue with no author-tests).
 func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result) (bool, error) {
+	// Belt-and-suspenders idempotency for the non-atomic Apply→Close window (T3.12). The
+	// in-flight projection already stops a duplicate Result from re-entering here within a
+	// process; this guards the one remaining gap: Apply succeeds, then the Close transition
+	// fails (transient) or the orchestrator crashes — the plan stays in_progress, so a redelivery
+	// or a lease-sweep redispatch runs acceptPlan again. Without this it would Apply a SECOND
+	// decomposition (the corruption observed in the demo run: 4 children for a 2-child feature).
+	// The plan's children carry it in their DependsOn (a parent link added below), so their
+	// existence is the durable proof the decomposition already ran: if they exist, skip Apply and
+	// just finish closing the plan. This must precede the no-proposals/role checks, since the
+	// redelivered Result may be a fresh planner attempt with different (or no) proposals — they
+	// are moot once the decomposition exists.
+	hasChildren, err := o.planHasChildren(ctx, issue.ID)
+	if err != nil {
+		return true, fmt.Errorf("check plan %s children: %w", issue.ID, err)
+	}
+	if hasChildren {
+		o.log.Info("orchestrator: plan already decomposed (children exist); closing without re-applying", "issue", issue.ID)
+		if err := o.transition(ctx, issue, statusClosed, func(ctx context.Context) error {
+			return o.bd.Close(ctx, issue.ID)
+		}); err != nil {
+			return true, fmt.Errorf("close already-decomposed plan issue %s: %w", issue.ID, err)
+		}
+		return false, nil
+	}
 	if len(res.Proposes) == 0 {
 		// A planner that proposed nothing did not decompose the work; route it as a failure
 		// so the retry cap eventually dead-letters rather than silently stalling the pipeline.
@@ -414,6 +447,13 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage c
 	proposes := make([]core.Proposal, len(res.Proposes))
 	for i, p := range res.Proposes {
 		p.Issue.EpicID = epic
+		// Add a parent link: each child is blocked-by the plan issue, so it does not dispatch
+		// until the decomposition is accepted (the plan closes — a closed blocker no longer
+		// blocks, exactly like the planner's own inter-sibling DependsOn edges). This serves two
+		// ends: the child becomes ready only once its decomposition is committed, and the edge is
+		// the durable parent link planHasChildren reads to make a re-run of acceptPlan idempotent
+		// (T3.12). Copied, not appended in place, so a shared backing array can't alias siblings.
+		p.DependsOn = append(append([]string{}, p.DependsOn...), issue.ID)
 		proposes[i] = p
 	}
 	if _, err := o.bd.Apply(ctx, proposes); err != nil {
@@ -425,6 +465,31 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage c
 		return true, fmt.Errorf("close plan issue %s: %w", issue.ID, err)
 	}
 	o.log.Info("orchestrator: accepted decomposition", "issue", issue.ID, "children", len(res.Proposes))
+	return false, nil
+}
+
+// planHasChildren reports whether a plan issue's decomposition has already been applied, by
+// looking for any issue that lists the plan in its DependsOn — the parent link acceptPlan stamps
+// on every child it creates. It is the durable idempotency signal for the Apply→Close window
+// (T3.12): children created by a prior acceptPlan persist even if that attempt failed before
+// closing the plan, so their presence proves the decomposition ran and must not run again. It
+// reads ListAll because there is no by-parent beads query and a plan's children may be in any
+// status; this is acceptable because acceptPlan runs once per successful plan (a rare event), not
+// on the hot dispatch path. A re-derivation plan (recompileMergedDelta) is fresh and links no
+// children to itself, so it is correctly seen as un-decomposed and the original epic's issues —
+// which depend on a *different* plan — never false-positive it.
+func (o *Orchestrator) planHasChildren(ctx context.Context, planID string) (bool, error) {
+	all, err := o.bd.ListAll(ctx)
+	if err != nil {
+		return false, fmt.Errorf("list all issues: %w", err)
+	}
+	for _, is := range all {
+		for _, dep := range is.DependsOn {
+			if dep == planID {
+				return true, nil
+			}
+		}
+	}
 	return false, nil
 }
 

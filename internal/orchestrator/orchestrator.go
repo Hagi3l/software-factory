@@ -143,6 +143,14 @@ type Orchestrator struct {
 	base     string
 	dlq      string
 
+	// inflight is the in-memory in-flight projection: the single writer's read-your-writes
+	// consistent record of which issues are in_progress, maintained at the transition choke
+	// point and consulted by dispatch + result gating instead of a lagging beads read. It is
+	// derived from beads and rebuilt from the in_progress set at startup (rebuildInflight), so
+	// it is a consistency cache, never a source of truth (specs/components/orchestrator.md
+	// "Live state vs. durable state").
+	inflight *inflightProjection
+
 	// diffFiles returns the repo-relative paths a candidate ref changed relative to base.
 	// It is the input to the TCB-touching approval decision (T2.10) and a seam so the
 	// decision is unit-testable without a real repo; New defaults it to a git-backed impl.
@@ -205,6 +213,7 @@ func New(opts Options, bd Beads, g Gate, merger Merger, nc *nats.Conn, js jetstr
 		tick:     opts.Tick,
 		base:     opts.Base,
 		dlq:      messaging.SubjectDLQ,
+		inflight: newInflightProjection(),
 	}
 	if o.leaseTTL <= 0 {
 		o.leaseTTL = defaultLeaseTTL
@@ -255,6 +264,17 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 		return err
 	}
 
+	// Rebuild the in-flight projection from beads' durable in_progress set BEFORE the first
+	// dispatch or result is handled, so a restart resumes with an accurate live view. This keeps
+	// crash-safety unchanged: the projection is derived from beads, never a second source of truth
+	// (see rebuildInflight, specs/components/orchestrator.md "Crash safety"). Best-effort, like the
+	// loop's other beads reads (scheduleReady/sweeps log-and-continue): a failed seed self-heals —
+	// results for pre-restart in-flight work are briefly ignored until the lease sweep restrands
+	// and redispatches them — so a transient beads hiccup at boot must not crash the orchestrator.
+	if err := o.rebuildInflight(ctx); err != nil {
+		o.log.Error("orchestrator: rebuild in-flight projection at startup; continuing with empty projection", "err", err)
+	}
+
 	var wg sync.WaitGroup
 	errs := make(chan error, 3)
 
@@ -289,11 +309,33 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	return nil
 }
 
+// rebuildInflight seeds the in-flight projection from beads' durable in_progress set. It runs
+// once at startup, before the first dispatch or result is handled, so a restarted orchestrator
+// resumes with an accurate live view of which issues are claimed. Crash-safety is unchanged
+// because the projection is derived from beads, never a second source of truth: a crash loses
+// only the cache, which this rebuilds (specs/components/orchestrator.md "Crash safety"). The
+// caller (Run) treats a read failure as best-effort — it logs and continues with an empty
+// projection rather than crashing — because the loop's other beads reads are best-effort too and
+// a missed seed self-heals: bd.ready() never returns in_progress work, so an empty projection
+// cannot re-dispatch it; the only effect is that a result for pre-restart in-flight work is
+// briefly ignored until the lease sweep restrands and redispatches it.
+func (o *Orchestrator) rebuildInflight(ctx context.Context) error {
+	inflight, err := o.bd.InProgress(ctx)
+	if err != nil {
+		return fmt.Errorf("orchestrator: rebuild in-flight projection: %w", err)
+	}
+	o.inflight.reset(inflight, o.leaseTTL)
+	o.log.Info("orchestrator: rebuilt in-flight projection from beads", "in_flight", len(inflight))
+	return nil
+}
+
 // tickLoop schedules ready work, recompiles the spec delta (in-flight and already-merged), and
 // sweeps stranded leases on each tick, plus an immediate pass at startup so dispatch is not
-// delayed by one interval. Every pass is idempotent and reads its state from beads, never from
-// orchestrator memory: "already dispatched" is "not in the ready set"; "stale in-flight" is
-// "pinned spec hash no longer matches the re-resolved slice"; "stranded" is "lease expired". The
+// delayed by one interval. Every pass is idempotent: "already dispatched" is "in the in-flight
+// projection" (the single writer's read-your-writes record, NOT a lagging bd.ready() read —
+// that read paces faster than write-visibility under load and would re-dispatch in-flight work);
+// "stale in-flight" is "pinned spec hash no longer matches the re-resolved slice"; "stranded" is
+// "lease expired". The
 // in-flight reconcilers (recompileSpecDelta, sweepLeases) return affected in_progress issues to
 // the ready pool; recompileMergedDelta instead spawns a re-derivation plan for already-merged work
 // the spec edit reached. The next scheduleReady redispatches whatever they produced.

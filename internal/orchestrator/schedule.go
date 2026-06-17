@@ -24,6 +24,16 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 		return
 	}
 	for _, issue := range ready {
+		// Skip work already in flight. bd.ready() is the candidate oracle — it computes "no open
+		// blockers + precondition holds", so the DAG is not re-implemented in memory — but it is
+		// NOT read-your-writes consistent under load: a candidate claimed on a prior tick can
+		// still appear ready until the in_progress write propagates. The in-flight projection is
+		// the single writer's own live record, so it knows the claim already happened; skipping
+		// keeps a stale ready from re-dispatching in-flight work (the dispatch-storm fix, T3.12,
+		// specs/components/orchestrator.md "Live state vs. durable state").
+		if o.inflight.has(issue.ID) {
+			continue
+		}
 		stage, ok := o.stageForRole(issue.Role)
 		if !ok {
 			// Not an agent stage (or an unknown role): nothing to dispatch. Non-agent

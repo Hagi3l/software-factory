@@ -22,8 +22,9 @@ import (
 // spec-slice depth, and a discard logger — all buildBrief's spec resolution reads.
 func orchWithRepo(repo string, depth int) *Orchestrator {
 	return &Orchestrator{
-		opts: Options{Repo: repo, Config: &config.Config{Harness: &config.Harness{SpecDepth: depth}}},
-		log:  slog.New(slog.NewTextHandler(io.Discard, nil)),
+		opts:     Options{Repo: repo, Config: &config.Config{Harness: &config.Harness{SpecDepth: depth}}},
+		log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		inflight: newInflightProjection(),
 	}
 }
 

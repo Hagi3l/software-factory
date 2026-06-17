@@ -43,15 +43,16 @@ See also: [../architecture.md](../architecture.md), [../workflow.md](../workflow
 
 ## The reconciliation loop
 
-The orchestrator is a control loop, not an event handler with hidden state. Its
-**entire authoritative state lives in beads + JetStream**, so it can crash and
+The orchestrator is a control loop, not an event handler with hidden state. All
+**authoritative state lives in beads + JetStream** — nothing the orchestrator holds
+in memory is a source of truth it could not rebuild from beads — so it can crash and
 restart at any point and re-derive everything. Conceptually:
 
 ```
 loop:
-  ready  := bd.ready()                         # no open blockers + precondition ok
-  for issue in ready and not already dispatched:
-      bd.set(issue, in_progress, lease=ttl)    # single-writer transition
+  candidates := bd.ready()                     # no open blockers + precondition ok (may be stale)
+  for issue in candidates and not in inflight: # inflight = the in-flight projection (below)
+      bd.set(issue, in_progress, lease=ttl)    # single-writer transition; also records into inflight
       publish work.<role>  { brief(issue) }    # JetStream, at-least-once
 
   for result in completions:                   # agents' Result envelopes
@@ -68,27 +69,81 @@ loop:
 ```
 
 **Idempotency is mandatory.** Every step must be safe to repeat, because a
-restart re-runs it. "Already dispatched" is derived from beads state + JetStream
-delivery, never from orchestrator memory.
+restart re-runs it. "Already dispatched" is read from the **in-flight projection**
+(below), *not* from a fresh beads query — see why next.
 
 Every status write above (`in_progress`, `advance`, `on_failure`, `dead_letter`,
 `reset`) routes through the single transition choke point that stamps
-`state_entered_at` and publishes the [issue-state event](../messaging.md) — so the
-counter anchor and the live nudge are emitted exactly once per real transition, and
-a redelivered result that lands on an already-settled issue neither re-stamps nor
-re-announces (idempotent, like every other step).
+`state_entered_at`, publishes the [issue-state event](../messaging.md), **and updates
+the in-flight projection** — so the counter anchor, the live nudge, and the live
+read surface are all maintained at the same place, exactly once per real transition,
+and a redelivered result that lands on an already-settled issue neither re-stamps nor
+re-announces nor re-dispatches (idempotent, like every other step).
+
+---
+
+## Live state vs. durable state — the in-flight projection
+
+beads is the **durable** source of truth. It is **not** a strongly read-your-writes
+consistent **read surface** under load: the orchestrator's own reconcile loop (plus
+the [control room](../control-room.md)) drives enough concurrent traffic that a fresh
+`bd.ready()` issued moments after a `set(in_progress)` write may not yet observe that
+write. Treating `bd.ready()` as the authority for "already dispatched" therefore
+**re-dispatches in-flight work** — the same issue is claimed and published every tick
+until the write becomes visible, multiplying agent invocations and corrupting the
+graph with duplicate proposals. Polling cadence faster than write-visibility makes a
+storm, not progress.
+
+The orchestrator is the **single writer**, so it already knows the live status of
+every issue at the instant it writes it. It therefore keeps a small **in-flight
+projection**: a volatile in-memory record of the issues it currently considers
+`in_progress` (with their leases). Two rules make it correct and cheap:
+
+- **It is derived, never authoritative.** It holds nothing that is not recoverable
+  from beads. On restart it is rebuilt from the `in_progress` set (and their leases)
+  before the first dispatch, so the crash-safety guarantees are unchanged — beads
+  remains the truth; the projection is a consistency *cache* over it.
+- **It is maintained at the one transition choke point.** Every status write updates
+  it in the same place it writes beads: a transition *to* `in_progress` adds the
+  issue; any transition away from it (`open`, `closed`, `blocked`) removes it. Because
+  every status mutation already routes through that choke point, the projection cannot
+  silently drift from beads.
+
+How the two hot paths use it:
+
+- **Dispatch.** `bd.ready()` remains the **candidate oracle** — it still computes
+  "no open blockers + precondition holds", so the dependency graph is *not*
+  re-implemented in memory. The orchestrator then **skips any candidate already in
+  the projection.** A stale `bd.ready()` that returns a just-claimed issue is now
+  harmless: the projection knows it is in flight.
+- **Result gating.** A returning Result is processed only if its issue is in the
+  projection; otherwise it is a stale/duplicate redelivery and is ignored. This is
+  read from the projection, not a (possibly lagging) beads status read, so a valid
+  result is never discarded as "not in progress" because beads had not caught up, and
+  a duplicate cannot be applied twice (the first result removes the issue from the
+  projection before the next is processed — result handling is serial).
+
+Because the projection (not beads) answers "in flight?", the **lease sweep** scans
+it in memory, and the **in-flight spec-drift check** iterates it and re-resolves
+specs from the worktree — neither needs a beads query. The slow, full-table sweeps
+that *do* read beads (e.g. re-deriving already-merged work on a spec edit) run on a
+**separate, slower cadence** than dispatch, so they neither pace dispatch nor add to
+the read pressure that causes the lag in the first place.
 
 ---
 
 ## Crash safety
 
-- The orchestrator holds **no critical in-memory state**. On restart it reads
-  beads to find ready and in-flight work and resumes.
+- The orchestrator holds **no authoritative in-memory state**. Its only in-memory
+  state is the in-flight projection, which is **derived from beads and rebuilt from
+  the `in_progress` set on restart** before the first dispatch — so a crash loses
+  nothing. On restart it reads beads to find ready and in-flight work and resumes.
 - In-flight work is protected by a **lease/TTL** on the `in_progress` status plus
   JetStream `AckWait`: if the runner that owned an issue dies, its work message is
   redelivered and the orchestrator's sweep resets the stranded issue.
 - Because beads is single-writer, there is never a write race to resolve on
-  recovery — the orchestrator's view *is* the truth.
+  recovery — the orchestrator's view *is* the truth. The projection never overrides
+  beads; it only caches what the single writer already wrote.
 
 ---
 
