@@ -48,6 +48,14 @@ A cap (tokens / money / wall-clock) on an invocation and on an epic. The
 The web UI ([control-room.md](control-room.md)): the human's read-only window into
 the factory plus the [wizard](#wizard) — their only place to act.
 
+### Epic
+The whole tree of work for one feature: the root seed issue the [wizard](#wizard)
+creates plus every issue the planners decompose under it. Its `epic_id` (the root's
+id) is threaded forward across every issue (like the candidate base) and is the key
+for [`epic_budget`](#budget) aggregation and — under
+[`integration.mode: epic`](integration.md) — atomic feature landing. See
+[workflow.md](workflow.md), [integration.md](integration.md).
+
 ### Gate
 A postcondition check (build, test, mutation score, security scan) the orchestrator
 runs in a clean [verification sandbox](#verification-sandbox) to decide whether a

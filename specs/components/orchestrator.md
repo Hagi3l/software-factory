@@ -27,7 +27,14 @@ See also: [../architecture.md](../architecture.md), [../workflow.md](../workflow
    unrecoverable escalation, dead-letter.
 6. **Reconcile.** Detect and recover stranded work after crashes.
 7. **Run the merge queue.** Serialized integration to `main`. See
-   [../integration.md](../integration.md).
+   [../integration.md](../integration.md). Under
+   [`integration.mode: epic`](../configuration.md) the queue is **retargeted per
+   epic** (children integrate onto `epic/<epic_id>` instead of `main`); the
+   orchestrator additionally detects **epic completion** — an `epic_id` aggregate
+   read (the subtree is closed and nothing in it is in flight), evaluated on the slow
+   sweep cadence like [`epic_budget`](../workflow.md), never the dispatch hot path —
+   and on drain advances the epic root issue to its **terminal merge** of the epic
+   branch to `main`. v1 admits **one epic at a time**.
 8. **Emit telemetry.** Spans for scheduling, gating, and graph transitions. See
    [../observability.md](../observability.md).
 9. **Announce state transitions.** As the single writer, every status change is one

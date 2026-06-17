@@ -111,5 +111,6 @@ These specs are the contract the implementation satisfies, and most have been
 verification + full DAG + control room; see `IMPLEMENTATION_PLAN.md`). Decisions are
 recorded as the specs assert them. Open questions are called out inline with
 **OPEN:** markers; the few that remain are concentrated in Phase 5 (production
-isolation & distribution) — the spec tree currently carries none, the live ones
-being tracked in the plan.
+isolation & distribution) and Phase 7 (atomic feature integration — concurrent epics
+are deferred, see [integration.md](integration.md)), with the live ones tracked in
+the plan.

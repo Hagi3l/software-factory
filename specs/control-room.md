@@ -143,6 +143,27 @@ for operators who ask for it); the first paint snaps to the frontier, later move
 smoothly. This is a *viewport* convenience only — it never moves work, just where the
 operator is looking.
 
+**Epics on the board (epic integration).** When [`integration.mode: epic`](integration.md)
+is in force, the board makes the *feature* legible, not just the work items, since the
+feature is now the unit that lands and deploys. Every card already carries its
+`epic_id` (the root seed's id, threaded across the epic — [workflow.md](workflow.md)),
+so this needs no new data:
+
+- **Shared identity.** Each card shows an **epic badge** (the root id, optionally the
+  abbreviated feature title) and a left-border tint whose hue is a **deterministic hash
+  of `epic_id`** — no central colour registry, stable across restarts, and it
+  distinguishes simultaneous epics for free once concurrency lands. Colour is never the
+  *sole* channel (projector wash-out, colour-blindness): the badge text is the robust
+  identifier. With v1's single active epic the live payoff is **history/audit legibility**
+  (completed and abandoned epics stay grouped); the disambiguation value arrives with
+  concurrency.
+- **The root card is the hero.** The epic root renders distinctly from its children, with
+  a **progress indicator** (children integrated / total) and the live `budget` against the
+  [`epic_budget`](workflow.md) cap, so "bounded autonomy" is visible as the feature builds.
+  It carries the feature through an **`integrating`** state while children finish and flips
+  to **`done`** as the single terminal merge lands — the board's read of the atomic feature
+  landing, so the operator watches the *feature* complete without reading commits.
+
 Note what stays absent **by design**: there is no drag-to-move. Humans never move
 work — the orchestrator is the single writer and the human's only levers are the
 spec (the wizard) and escalations (the dead-letter queue). The board is read-only;
@@ -365,6 +386,12 @@ human → APPROVE
       → spec committed to git;  seed issues created via the orchestrator's
         single-writer path (validated, never written directly)
 ```
+
+Under [`integration.mode: epic`](integration.md) the consent gate has two extra
+behaviours: the drafted spec is committed onto the feature's **`epic/<epic_id>`
+branch** (its first commit), not `main`, so `main` moves only at the atomic terminal
+merge; and the gate **refuses a second approval** while an epic is in flight (v1 runs
+one epic at a time), reporting the in-flight feature instead of seeding a second.
 
 The planner's conversation and its spec/issue authoring run host-side and write no untrusted
 code; its only *read* of untrusted code is sandbox-confined and network-isolated, so a

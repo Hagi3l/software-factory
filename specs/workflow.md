@@ -33,6 +33,14 @@ The terminal state is **merged to `main`**. Production deploy is deliberately ou
 of scope for now; it is anticipated as an appended stage behind a promotion/policy
 gate, which the config-driven DAG makes additive.
 
+**Per-item vs. atomic-feature integration.** By default each work item lands on
+`main` independently (`integration.mode: per-item`), so a decomposed feature arrives
+as several commits. The opt-in **`epic` mode** instead lands the whole feature
+**atomically** — children integrate onto an `epic/<epic_id>` branch and `main`
+advances once, when the epic's subtree drains. The pipeline and stages are identical
+either way; only *where* `integrate` lands and *when* `main` moves change. See
+[integration.md](integration.md).
+
 ---
 
 ## Stages and roles

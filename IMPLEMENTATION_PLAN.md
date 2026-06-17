@@ -42,10 +42,11 @@ autonomous implementation) — a later validation concern, never an engineering 
   0–1, 2, 3, 4, and 6 are done; the verbose per-task findings were pruned once complete —
   that history lives in git, the code, and the specs they informed (each task updated its
   `(spec)` as it landed).
-- **Open tasks (`- [ ]`) keep their full detail** — the remaining Phase 5 items, all
-  optional or hardware-blocked. The only live engineering left is in Phase 5: the
-  Firecracker backend (T5.2) is hardware-blocked and deliberately last; the optional
-  items are T5.5 (gVisor) and T5.11 (warm pools + HA).
+- **Open tasks (`- [ ]`) keep their full detail.** Two open lines: **Phase 5** (production
+  isolation — the Firecracker backend T5.2 is hardware-blocked and deliberately last; the
+  optional items are T5.5 gVisor and T5.11 warm pools + HA), and **Phase 7** (atomic
+  feature integration / epic mode — net-new feature work, not hardware-blocked; T7.1 is also
+  a live bug fix that unblocks any multi-child feature today).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -270,6 +271,79 @@ is a build step, not a navigable language).
 
 ---
 
+## Phase 7 — Atomic feature integration (epic mode)
+
+Adds an opt-in **`integration.mode: epic`** that lands a whole feature **atomically**:
+children integrate onto an `epic/<epic_id>` branch and `main` advances exactly once, by
+the epic's terminal merge, when the epic's subtree drains. Default **`per-item`** is the
+existing kernel behaviour, untouched. Motivation: a `main` push triggers a deploy, so the
+unit of integration should be the *feature* the human drafted in the wizard, not the
+individual work item. Reuses existing primitives — the serialized merge queue, the
+`resolve` stage, and the `epic_id` already threaded across every issue (the
+[`epic_budget`](specs/workflow.md) key) — so the change is mostly *retargeting* the queue
+per epic, not new machinery. Spec contract:
+[integration.md](specs/integration.md) "Atomic feature integration (epic mode)",
+[configuration.md](specs/configuration.md), [control-room.md](specs/control-room.md)
+"Epics on the board", [components/orchestrator.md](specs/components/orchestrator.md). The
+**vault demo exercises it** (T7.7).
+
+- [ ] **T7.1 Fix the re-gate ref form (unblocks any multi-child rebase)** — the merge
+  queue's step-3 re-gate seeds its sandbox with `git clone` + `git checkout <ref>`, where a
+  clone exposes branches only as remote-tracking refs. `rebaseOntoMain` hands the re-gate the
+  **fully-qualified** `refs/heads/integration/<id>` (`integrationRef`), which `git checkout`
+  cannot resolve in a clone (no local ref by that path; it does not DWIM) → the merge loops
+  forever on `pathspec … did not match`, classified transient and redelivered with no cap.
+  Return the **short** branch name (`integration/<id>`) for the re-gate's `BaseRef` (DWIM
+  resolves it to `origin/integration/<id>`, exactly as the candidate gate uses
+  `candidate/<id>`), keeping the fully-qualified form only for `update-ref`/`-d`. Bug fix to
+  intended behaviour (the code comment already states the intent) — **no spec change**. Also
+  fixes per-item multi-child features today, and is the foundation epic mode's per-child
+  re-gate leans on. Regression test: drive `Merge` down the rebase path and assert the re-gate
+  is called with `integration/<id>`. *(spec)* [integration.md](specs/integration.md)
+- [ ] **T7.2 `integration.mode` config + validation** — parse the top-level
+  `integration: { mode: per-item | epic }` block (default `per-item` when absent), thread it
+  into the run config, and have `harness validate` reject any other value. *(spec)*
+  [configuration.md](specs/configuration.md)
+- [ ] **T7.3 Retarget the merge queue per epic** *(needs T7.1, T7.2)* — under
+  `mode: epic`: create `epic/<epic_id>` off `main` when the epic begins and commit the
+  [wizard](specs/control-room.md)'s approved spec onto it (its first commit, **not** `main`);
+  retarget every child-level integration op — rebase target, fast-forward check, re-gate base,
+  conflict detection, and the `resolve` stage's rebase — from `main` to the epic branch.
+  Everywhere the per-item queue reads "`main`", read "the epic branch." *(spec)*
+  [integration.md](specs/integration.md)
+- [ ] **T7.4 Epic-completion detection + terminal merge** *(needs T7.3)* — detect drain via
+  an `epic_id` aggregate read (subtree all-closed **and** zero in-flight in the subtree),
+  evaluated on the **slow sweep cadence** (like `epic_budget`, not the dispatch hot path); on
+  drain, advance the epic **root issue** to its terminal merge — a **merge commit** to `main`
+  (first parent `main`, second the epic branch tip), subject = feature title, **two-tier
+  provenance** (per-child commits preserved under the merge; whole-feature layer on the merge
+  commit). v1 (`main` quiescent — one epic) skips re-gating at the terminal step (the last
+  child's rebased re-gate already verified the whole feature); strict **all-or-nothing** — any
+  child dead-letter / `resolve` failure / `epic_budget` breach leaves the epic unmerged and the
+  branch abandoned, `main` untouched. Idempotent terminal merge (existing provenance-trailer
+  check). *(spec)* [integration.md](specs/integration.md),
+  [components/orchestrator.md](specs/components/orchestrator.md)
+- [ ] **T7.5 One-active-epic consent gate** *(needs T7.4)* — under `mode: epic` the wizard's
+  approval refuses to seed a second epic while one is in flight, reporting the in-flight
+  feature instead. Keeps `main` quiescent during an epic (which is what lets T7.4 skip the
+  terminal re-gate). *(spec)* [control-room.md](specs/control-room.md),
+  [integration.md](specs/integration.md)
+- [ ] **T7.6 Board epic hero card** *(needs T7.4)* — render the epic on the
+  [board](specs/control-room.md): every card gets an **epic badge** (root id) + a left-border
+  tint hashed deterministically from `epic_id` (colour never the sole channel); the epic
+  **root card is the hero** — distinct treatment, a **progress indicator** (children
+  integrated / total) and live spend vs. `epic_budget`, carried through an `integrating` state
+  to `done` as the terminal merge lands. No new data (rides existing `epic_id`). *(spec)*
+  [control-room.md](specs/control-room.md)
+- [ ] **T7.7 Vault demo exercises epic mode** *(needs T7.4)* — set `integration.mode: epic`
+  in `demo/vault/config/harness.yaml`; confirm a wizard-drafted, multi-child feature lands as
+  **one** merge commit and fires **one** deploy. The deploy path needs **zero** changes —
+  `run.sh`'s push watcher and `deploy.yml` already key on a `main` advance, which now happens
+  once per feature. Update `demo/vault/README.md`'s "How it maps to the real config" table to
+  note the epic-mode tuning. *(spec)* [integration.md](specs/integration.md)
+
+---
+
 ## Deferred & follow-ups (filed, not blocking)
 
 - Control-room tooltip on producer/verifier model-family overlap — the souls/config view now exists (T4.26) but the diversity-warning tooltip on it was never wired *(from T2.13)*.
@@ -288,5 +362,10 @@ here — mutation threshold, gate fail-fast, `integrate` ownership, the conditio
 language — are now recorded in the specs they informed, not duplicated here.)
 
 - HA orchestrator: single instance (fine for v1) vs. leader election (T5.11).
+- **Concurrent epics (epic mode).** Phase 7 v1 admits one active epic at a time (T7.5
+  refuses a second). Lifting it needs a two-level merge queue (children serialize onto their
+  epic branch; epic→`main` merges serialize onto `main`, an in-flight epic rebasing onto a
+  moved `main` + re-gating the whole feature at its terminal merge). Deferred; spec'd as OPEN
+  in [integration.md](specs/integration.md).
 - Exact module set in the TCB boundary — operationally the `policy.tcb_paths` globs (T2.10);
   the concrete list must still be reviewed and pinned before autonomy is switched on for harness work.

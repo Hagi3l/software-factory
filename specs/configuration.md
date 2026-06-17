@@ -41,6 +41,9 @@ dag:
                   produces:      [integrate] }
   integrate:    { kind: trusted-merge }
 
+integration:                     # how verified work becomes commits on main
+  mode: per-item                 #   per-item (default) | epic (atomic feature landing)
+
 checks:                          # command-check postcondition -> shell command
   tests-pass:   go test ./...    #   exit 0 = pass, run at the worktree root
   gosec:        gosec ./...                              # SAST            in the clean
@@ -63,6 +66,13 @@ policy:
   neighbours within this many link hops — rather than the whole `specs/` tree (0 = just
   the referenced file; 1 = it plus its direct neighbours). See
   [specs-process.md](specs-process.md).
+- `integration.mode` selects how verified work reaches `main` ([integration.md](integration.md)):
+  **`per-item`** (default — the kernel behaviour) lands each work item on `main` as its own
+  chain verifies; **`epic`** lands a whole feature **atomically** — children integrate onto an
+  `epic/<epic_id>` branch and `main` advances exactly once, by the epic's terminal merge, when
+  the epic's subtree has drained. Omitting the block defaults to `per-item`. Epic mode v1 runs
+  **one epic at a time** (the [wizard](control-room.md) refuses a second approval while one is
+  in flight). Validation rejects any `mode` outside `{per-item, epic}`.
 - `produces:` are the **declarative depth** transitions the orchestrator applies.
 - `precondition` / `postcondition` / `on_failure` are the stage guards (see
   [workflow.md](workflow.md)). Postconditions evaluate in a clean
@@ -308,7 +318,8 @@ validate` step must run before anything executes and check:
   **same role** must not share an identical selector — that would make one
   unreachable (selection always picks the same one); persona files exist;
 - the DAG `produces:` transitions don't create an unreachable or trivially-looping
-  definition.
+  definition;
+- `integration.mode`, if present, is one of `per-item` / `epic`.
 
 > Treat config validation as a gate on startup, not a nicety.
 
