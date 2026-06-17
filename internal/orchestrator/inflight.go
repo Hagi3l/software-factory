@@ -36,9 +36,9 @@ type inflightProjection struct {
 }
 
 // inflightEntry is one in-flight issue's cached live state: the issue snapshot as the single
-// writer last saw it, plus the lease it was claimed under. The lease is what lets a future
-// in-memory lease sweep (T3.13) avoid a beads query; T3.12 still sweeps leases from beads
-// (ListStranded), so the cached lease is advisory here and held for forward use.
+// writer last saw it, plus the lease it was claimed under. The lease is load-bearing: the
+// in-memory lease sweep (T3.13, sweepLeases) reads it instead of a beads query, and on restart
+// rebuildInflight seeds it from the durable lease_until so recovery uses the original deadline.
 type inflightEntry struct {
 	issue core.Issue
 	lease time.Time
@@ -74,16 +74,64 @@ func (p *inflightProjection) has(id string) bool {
 	return ok
 }
 
-// reset replaces the projection's contents with the given in-flight issues, each under a lease
-// expiring leaseTTL from now. Used by rebuildInflight to seed the projection from beads' durable
-// in_progress set at startup, so a restarted orchestrator resumes with an accurate live view.
-func (p *inflightProjection) reset(issues []core.Issue, leaseTTL time.Duration) {
+// updateIssue replaces the cached issue snapshot for an in-flight id, preserving its lease. It is
+// called by scheduleReady after it pins the spec hash — which happens *after* the claim transition
+// that first recorded the (un-pinned) issue — so the projection's snapshot carries the SpecHash
+// the in-memory spec-drift sweep (recompileSpecDelta) diffs against (T3.13). A no-op for an id no
+// longer in flight, so a result that settled the issue between claim and pin cannot resurrect it.
+func (p *inflightProjection) updateIssue(issue core.Issue) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	until := time.Now().UTC().Add(leaseTTL)
+	if e, ok := p.m[issue.ID]; ok {
+		e.issue = issue
+		p.m[issue.ID] = e
+	}
+}
+
+// issues returns a snapshot of every in-flight issue as the single writer last recorded it (at
+// claim/pin time). It is the in-memory replacement for the beads InProgress() query the spec-drift
+// sweep iterated (T3.13): the projection already holds the in_progress set and each issue's pinned
+// spec hash, so the sweep needs no beads read.
+func (p *inflightProjection) issues() []core.Issue {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	out := make([]core.Issue, 0, len(p.m))
+	for _, e := range p.m {
+		out = append(out, e.issue)
+	}
+	return out
+}
+
+// expired returns the in-flight issues whose lease has elapsed as of now (or that carry no lease
+// at all — an anomalous claim, swept so it cannot wedge in_progress forever). It is the in-memory
+// replacement for the beads stranded query the lease sweep ran (T3.13): the projection already
+// holds every in_progress issue and its lease, so the sweep needs no beads read. The condition
+// mirrors the old beads logic exactly — stranded iff the lease is not strictly after now (the zero
+// time, an absent lease, is before any now and so is reported).
+func (p *inflightProjection) expired(now time.Time) []core.Issue {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	var out []core.Issue
+	for _, e := range p.m {
+		if !e.lease.After(now) {
+			out = append(out, e.issue)
+		}
+	}
+	return out
+}
+
+// reset replaces the projection's contents with the given in-flight issues, each under its own
+// durable lease (issue.Lease, decoded from beads' lease_until). Used by rebuildInflight to seed
+// the projection from beads' in_progress set at startup, so a restarted orchestrator resumes with
+// an accurate live view AND the in-memory lease sweep recovers stranded work on the original
+// deadline rather than a fresh leaseTTL — keeping crash-safety unchanged (an issue whose lease
+// already passed is swept on the first tick; see specs/components/orchestrator.md "Crash safety").
+func (p *inflightProjection) reset(issues []core.Issue) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	p.m = make(map[string]inflightEntry, len(issues))
 	for _, is := range issues {
-		p.m[is.ID] = inflightEntry{issue: is, lease: until}
+		p.m[is.ID] = inflightEntry{issue: is, lease: is.Lease}
 	}
 }
 

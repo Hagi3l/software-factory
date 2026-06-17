@@ -573,42 +573,43 @@ func TestApplyRollbackOnCycleIntegration(t *testing.T) {
 	}
 }
 
-// ListStranded must return in_progress issues whose lease has expired (or is absent)
-// and exclude those with a future lease, against the real bd metadata round-trip.
-func TestListStrandedIntegration(t *testing.T) {
+// Claim's durable lease must round-trip back onto core.Issue.Lease when an in_progress issue is
+// read, against the real bd metadata round-trip. This is what lets the orchestrator seed its
+// in-flight projection from the original deadline on restart so the in-memory lease sweep (T3.13)
+// recovers pre-restart stranded work on time rather than resetting the clock. An issue not
+// in_progress carries no lease (it reads as the zero time, treated as immediately strandable).
+func TestClaimLeaseRoundTripsToIssue(t *testing.T) {
 	bdAvailable(t)
 	dir := bdInit(t)
 	c := New(WithDir(dir))
 
-	// expired: claimed with a tiny ttl that is already in the past by check time.
-	expired := quickCreate(t, dir, "stranded")
-	runBD(t, dir, "update", expired, "--status", "in_progress",
-		"--set-metadata", "lease_until=2000-01-01T00:00:00Z")
-	// fresh: a future lease — held by a live runner, not stranded.
-	fresh := quickCreate(t, dir, "held")
-	if _, err := c.Claim(context.Background(), fresh, time.Hour); err != nil {
-		t.Fatalf("Claim fresh: %v", err)
-	}
-	// noLease: in_progress with no lease metadata at all — treated as stranded.
-	noLease := quickCreate(t, dir, "no lease")
-	runBD(t, dir, "update", noLease, "--status", "in_progress")
-
-	stranded, err := c.ListStranded(context.Background(), time.Now().UTC())
+	// leased: claimed with a known ttl; the returned expiry is what must round-trip back.
+	leased := quickCreate(t, dir, "leased")
+	until, err := c.Claim(context.Background(), leased, time.Hour)
 	if err != nil {
-		t.Fatalf("ListStranded: %v", err)
+		t.Fatalf("Claim leased: %v", err)
 	}
-	got := map[string]bool{}
-	for _, id := range stranded {
-		got[id] = true
+	// open: never claimed (and so never leased).
+	open := quickCreate(t, dir, "open")
+
+	inflight, err := c.InProgress(context.Background())
+	if err != nil {
+		t.Fatalf("InProgress: %v", err)
 	}
-	if !got[expired] {
-		t.Errorf("expired issue %s not reported stranded; got %v", expired, stranded)
+	got := map[string]core.Issue{}
+	for _, is := range inflight {
+		got[is.ID] = is
 	}
-	if !got[noLease] {
-		t.Errorf("lease-less issue %s not reported stranded; got %v", noLease, stranded)
+	is, ok := got[leased]
+	if !ok {
+		t.Fatalf("claimed issue %s not in_progress; got %v", leased, inflight)
 	}
-	if got[fresh] {
-		t.Errorf("freshly-leased issue %s reported stranded; got %v", fresh, stranded)
+	// RFC3339 is second-granular, so compare to the second the lease was serialized at.
+	if want := until.Truncate(time.Second); !is.Lease.Equal(want) {
+		t.Errorf("decoded lease = %s, want %s (Claim's returned expiry)", is.Lease, want)
+	}
+	if _, ok := got[open]; ok {
+		t.Errorf("unclaimed issue %s reported in_progress; got %v", open, inflight)
 	}
 }
 

@@ -72,6 +72,14 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 				o.log.Error("orchestrator: pin spec hash; dispatching anyway", "issue", issue.ID, "err", err)
 			}
 		}
+		// Record the just-pinned spec hash into the in-flight projection's snapshot. The claim
+		// transition above recorded the issue BEFORE the pin, so without this the in-memory
+		// spec-drift sweep (recompileSpecDelta, T3.13) would diff against an empty hash and never
+		// fire. Set it to what we briefed against regardless of the pin write's outcome — a failed
+		// pin degrades durable drift tracking, not the live one. updateIssue is a no-op if a result
+		// already settled the issue between claim and here, so it cannot resurrect settled work.
+		issue.SpecHash = brief.SpecHash
+		o.inflight.updateIssue(issue)
 		if err := o.publishWork(ctx, issue.Role, brief); err != nil {
 			o.log.Error("orchestrator: publish work, releasing claim", "issue", issue.ID, "err", err)
 			// Undo the claim so the issue returns to ready and is redispatched promptly

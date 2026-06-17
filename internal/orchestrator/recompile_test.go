@@ -43,7 +43,9 @@ func TestRecompileSpecDeltaReissuesDriftedWork(t *testing.T) {
 	o := orchWithRepo(repo, 1)
 	bd := newFakeBeads()
 	o.bd = bd
-	bd.inflight = []core.Issue{{ID: "iss-1", Role: "implement", Status: statusInProgress, Spec: "specs/orders.md", SpecHash: pinned}}
+	// Seed the in-flight projection as scheduleReady would have at dispatch (pinned to the
+	// original slice version): the sweep now iterates the projection, not a beads read (T3.13).
+	o.inflight.add(core.Issue{ID: "iss-1", Role: "implement", Status: statusInProgress, Spec: "specs/orders.md", SpecHash: pinned}, testLease())
 
 	// No edit yet: the re-resolved hash matches the pin, so nothing is reissued.
 	o.recompileSpecDelta(context.Background())
@@ -52,6 +54,49 @@ func TestRecompileSpecDeltaReissuesDriftedWork(t *testing.T) {
 	}
 
 	// A human refines the spec: the slice changes, so the pinned hash is now stale.
+	mustWriteSpec(t, specPath, "# Orders\nreject negatives AND zero\n")
+	o.recompileSpecDelta(context.Background())
+	if len(bd.reissued) != 1 || bd.reissued[0] != "iss-1" {
+		t.Fatalf("reissued = %v, want [iss-1] after the spec edit", bd.reissued)
+	}
+}
+
+// TestScheduleReadyRecordsPinnedSpecHashForDriftSweep proves the wiring T3.13 depends on: the
+// in-memory spec-drift sweep reads the pinned spec hash from the in-flight projection, and
+// scheduleReady records that hash into the projection (updateIssue) AFTER it pins — because the
+// claim transition recorded the issue before the pin existed. Without that record the sweep would
+// diff against an empty hash and never fire. Drives the real path end to end: dispatch a ready
+// issue against an on-disk spec, then edit the spec and assert the drift sweep reissues it.
+func TestScheduleReadyRecordsPinnedSpecHashForDriftSweep(t *testing.T) {
+	repo := t.TempDir()
+	specPath := filepath.Join(repo, "specs", "orders.md")
+	mustWriteSpec(t, specPath, "# Orders\nreject negatives\n")
+
+	bd := newFakeBeads()
+	bd.ready = []core.Issue{{ID: "iss-1", Title: "do it", Role: "implement", Spec: "specs/orders.md"}}
+	o, _ := newOrch(t, kernelConfig(2), bd, &fakeGate{}, &fakeMerger{})
+	o.opts.Repo = repo
+	o.opts.Config.Harness.SpecDepth = 1
+
+	o.scheduleReady(context.Background())
+
+	// The projection snapshot must carry the pinned (non-empty) hash, not the empty hash the
+	// pre-pin claim transition recorded.
+	inflight := o.inflight.issues()
+	if len(inflight) != 1 || inflight[0].ID != "iss-1" {
+		t.Fatalf("projection = %v, want [iss-1] in flight after dispatch", inflight)
+	}
+	if inflight[0].SpecHash == "" {
+		t.Fatal("projection snapshot carries no pinned spec hash; the drift sweep would never fire")
+	}
+
+	// No edit: the sweep, reading the projection's pin, leaves the work alone.
+	o.recompileSpecDelta(context.Background())
+	if len(bd.reissued) != 0 {
+		t.Fatalf("reissued %v with no spec change; want none", bd.reissued)
+	}
+
+	// A human edits the spec: the drift sweep reissues, proving the recorded pin is live.
 	mustWriteSpec(t, specPath, "# Orders\nreject negatives AND zero\n")
 	o.recompileSpecDelta(context.Background())
 	if len(bd.reissued) != 1 || bd.reissued[0] != "iss-1" {
@@ -71,11 +116,10 @@ func TestRecompileSpecDeltaSkipsWithoutDriftSignal(t *testing.T) {
 	o := orchWithRepo(repo, 1)
 	bd := newFakeBeads()
 	o.bd = bd
-	bd.inflight = []core.Issue{
-		{ID: "no-spec", Role: "implement", Status: statusInProgress},                                                  // no spec ref -> nothing to diff
-		{ID: "no-pin", Role: "implement", Status: statusInProgress, Spec: "specs/orders.md"},                          // dispatched, not yet pinned -> skip
-		{ID: "gone", Role: "implement", Status: statusInProgress, Spec: "specs/gone.md", SpecHash: "sha256:deadbeef"}, // unresolvable -> leave alone
-	}
+	// The sweep iterates the in-flight projection (T3.13), so seed it directly.
+	o.inflight.add(core.Issue{ID: "no-spec", Role: "implement", Status: statusInProgress}, testLease())                                                  // no spec ref -> nothing to diff
+	o.inflight.add(core.Issue{ID: "no-pin", Role: "implement", Status: statusInProgress, Spec: "specs/orders.md"}, testLease())                          // dispatched, not yet pinned -> skip
+	o.inflight.add(core.Issue{ID: "gone", Role: "implement", Status: statusInProgress, Spec: "specs/gone.md", SpecHash: "sha256:deadbeef"}, testLease()) // unresolvable -> leave alone
 
 	o.recompileSpecDelta(context.Background())
 	if len(bd.reissued) != 0 {

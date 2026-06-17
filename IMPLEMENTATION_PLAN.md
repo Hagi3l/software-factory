@@ -32,10 +32,11 @@ good autonomous implementation) — a later validation concern, never an enginee
   0–1 are done (see Status); Phases 2–3 are done bar a few open items kept in full below.
   The verbose per-task findings were pruned once complete — that history lives in git,
   the code, and the specs they informed (each task updated its `(spec)` as it landed).
-- **Open tasks (`- [ ]`) keep their full detail** — the remaining Phase 5 items, plus one Phase-3 orchestrator
-  robustness item (**T3.13**, the sweep-cadence split; its predecessor **T3.12**, the in-flight projection that
-  fixed the eventually-consistent-beads dispatch storm a `demo/vault` run surfaced, is now **done**). **Phase 2 is now
-  fully complete** (T2.12 landed; T2.11 is resolved as configuration, not a build item). T4.26 (Config view) closed the original Phase-4 view
+- **Open tasks (`- [ ]`) keep their full detail** — the remaining Phase 5 items. **Phase 3 is now fully complete**
+  (**T3.13**, the sweep-cadence split, landed — the in-memory lease/spec-drift sweeps now read the T3.12 in-flight
+  projection and only the rare merged-delta `ListAll` stays on a slow cadence; its predecessor **T3.12**, the
+  projection that fixed the eventually-consistent-beads dispatch storm a `demo/vault` run surfaced, is also done).
+  **Phase 2 is now fully complete** (T2.12 landed; T2.11 is resolved as configuration, not a build item). T4.26 (Config view) closed the original Phase-4 view
   roster and **T4.27 is done — Phase 4's original scope is fully complete** (and its one follow-up,
 **T4.29** — migrating the wizard's structured output from parsed fenced blocks to schema-validated
 tool calls — is now also done); **Phase 6 (agent semantic tooling — the
@@ -292,19 +293,40 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
   not-in-flight/duplicate result ignored; duplicate `plan` Result doesn't double children; `acceptPlan` idempotent
   across a Close failure; restart rebuilds from the `in_progress` set (`open` excluded). `make check`-clean (0 vet,
   0 lint). **Unblocks T3.13.** ([components/orchestrator.md](specs/components/orchestrator.md) "Live state vs. durable state")
-- [ ] **T3.13 Split the sweep cadence off the dispatch tick** — `tickLoop` runs `scheduleReady`,
-  `recompileSpecDelta`, `recompileMergedDelta`, and `sweepLeases` on **one 2s ticker**. `recompileMergedDelta` does
-  a full-table **`ListAll`** every pass (every issue, including closed) purely to detect human spec edits to
-  already-merged work, and the drift/lease sweeps re-`list in_progress` — so the dominant Dolt **read** load is
-  paced by the dispatch interval, which is exactly the concurrent-read pressure that produces the write-visibility
-  lag T3.12 has to tolerate. Split the loop: keep dispatch + result handling responsive, move the heavy/rare sweeps
-  to a **separate, slower cadence** (configurable; ~30–60s default, since they track human spec edits at
-  minute-plus granularity). With T3.12's projection in place, the **lease sweep** becomes an in-memory scan and the
-  **in-flight spec-drift check** iterates the projection + re-resolves specs from the worktree — neither needs a
-  beads query, leaving `recompileMergedDelta`'s slow `ListAll` as the only beads read off the hot path. Reduces
-  Dolt contention (and thus the lag itself), independent of the correctness fix. Human-reviewed. Tests: sweeps fire
-  on the slow cadence not every dispatch tick; dispatch latency unchanged; lease/drift sweeps still recover stranded
-  and drifted work. (needs T3.12) ([components/orchestrator.md](specs/components/orchestrator.md))
+- [x] **T3.13 Split the sweep cadence off the dispatch tick** — *done.* Closes the last open Phase-3
+  orchestrator-robustness item; the spec ([components/orchestrator.md](specs/components/orchestrator.md) "Live state vs.
+  durable state", lines ~103/126–131) already described this design, so the work was implementing it. **The dominant Dolt
+  read load is now off the hot path: every in-flight reconciler reads the in-flight projection (T3.12), not beads.**
+  **(1) In-memory lease sweep:** `sweepLeases` no longer calls `bd.ListStranded` — it iterates the projection's new
+  **`expired(now)`** (entries whose cached lease is `!After(now)`; a zero lease, an anomalous claim, reads as strandable,
+  mirroring the old beads logic exactly) and releases each. The projection's cached issue snapshot carries role/epic, so
+  the per-issue `bd.Get` the old sweep needed is also gone. **`beads.Client.ListStranded` + its interface method + the
+  fake stub + `TestListStrandedIntegration` were removed** — the projection is the single source for "what is stranded",
+  no duplicate. **(2) In-memory spec-drift sweep:** `recompileSpecDelta` iterates the projection's new **`issues()`**
+  snapshot instead of `bd.InProgress` and re-resolves specs from the worktree — no beads read. **Wiring fix this needed:**
+  scheduleReady pins the spec hash *after* the claim transition that first records the (un-pinned) issue, so the new
+  **`updateIssue`** projection method records the briefed `SpecHash` into the snapshot right after the pin — without it the
+  drift diff would compare against an empty hash and never fire (regression-tested end-to-end). **(3) Crash-safety kept
+  exact:** because the lease sweep now trusts the projection's lease, `rebuildInflight`/`reset` had to seed the *durable*
+  lease, not `now+leaseTTL`. New **`core.Issue.Lease`** (decoded from beads `lease_until` via the existing `metaTime`, in
+  `toCore`) carries it, and `reset(issues)` seeds each entry from `issue.Lease` — so a runner that died **before** a
+  restart is swept on its **original** deadline (an already-expired durable lease strands on the first tick) rather than
+  waiting a fresh TTL. This realizes the spec's "rebuilt from the in_progress set (and their leases)". **(4) Cadence split
+  (single goroutine, two tickers):** `tickLoop` selects over a **fast `dispatch` ticker** (`o.tick`, 2s) running
+  `dispatchPass` (scheduleReady → in-memory lease sweep → in-memory spec-drift sweep) and a **slow `sweep` ticker**
+  (`o.sweep`, new `defaultSweepInterval` **30s**, settable via `Options.SweepInterval` like `Tick`/`LeaseTTL`) running
+  `recompileMergedDelta` (the full-table `ListAll`, the one remaining beads read off the hot path). Both fire an immediate
+  startup pass. **Kept in ONE goroutine on purpose:** the result consumer already writes beads concurrently with the tick
+  loop, so a second sweep *goroutine* would add a new beads-write race; two tickers in one `select` change cadence, not
+  concurrency — beads writes stay serialized within the loop exactly as before. `SweepInterval` stays an Options default
+  (not YAML) for parity with `Tick`/`LeaseTTL` — no config-shape/CLI/route/view change ⇒ no `docs/` change; the spec was
+  already correct, so none needed there either. TCB-touching (orchestrator), human-reviewed. Tests: `expired` returns
+  expired+zero-lease excludes live; `reset` seeds durable lease (pre-restart-expired ⇒ strandable, future ⇒ not);
+  sweepLeases releases expired-only and drops them from the projection; scheduleReady→recompileSpecDelta drift fires via
+  the recorded pin; beads `lease_until`→`core.Issue.Lease` round-trip; existing rebuild/dispatch-storm/idempotency tests
+  green. `make check`-clean (0 vet, 0 lint repo-wide; full unit suite passes — the lone failure, `agent.TestSessionsRealGopls`,
+  is the pre-existing real-gopls/Docker-image test, unrelated). **Phase 3 is now fully complete.** (needs T3.12)
+  ([components/orchestrator.md](specs/components/orchestrator.md))
 
 ## Phase 4 — Control room
 

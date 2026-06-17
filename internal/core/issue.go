@@ -227,6 +227,18 @@ type Issue struct {
 	// specs/components/orchestrator.md §9, specs/control-room.md "The board, in motion").
 	StateEnteredAt time.Time
 
+	// Lease is the expiry of the claim that put this issue in_progress (UTC), populated when
+	// an in_progress issue is read back (it rides in beads metadata, stamped by Claim). It is
+	// the durable record of a claim's deadline: a runner that dies mid-task leaves its issue
+	// in_progress, and once the lease passes the orchestrator's sweep releases it back to ready.
+	// The orchestrator caches it in its in-flight projection at claim time and, crucially, seeds
+	// the projection from this durable value on restart so the in-memory lease sweep recovers
+	// pre-restart stranded work on the original deadline rather than a fresh one (T3.13). Zero
+	// for an issue that is not in_progress (Release clears the lease) — treated as immediately
+	// strandable by the sweep, mirroring the old beads stranded query. See
+	// specs/components/orchestrator.md ("Live state vs. durable state").
+	Lease time.Time
+
 	// CreatedAt is when beads first created the issue — the anchor the control-room board's
 	// per-card "total time" timer ticks from (client-side, like StateEnteredAt). Unlike the
 	// other facets it is not harness-written metadata: it is beads' own top-level `created_at`

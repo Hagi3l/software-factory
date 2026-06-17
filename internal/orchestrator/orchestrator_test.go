@@ -27,10 +27,8 @@ import (
 // concurrently.
 type fakeBeads struct {
 	mu       sync.Mutex
-	ready    []core.Issue
-	issues   map[string]core.Issue
-	stranded []string
-	inflight []core.Issue
+	ready  []core.Issue
+	issues map[string]core.Issue
 
 	claimed     []string
 	released    []string
@@ -171,22 +169,12 @@ func (f *fakeBeads) Apply(_ context.Context, proposals []core.Proposal) ([]core.
 	return created, nil
 }
 
-func (f *fakeBeads) ListStranded(context.Context, time.Time) ([]string, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	return append([]string(nil), f.stranded...), nil
-}
-
 func (f *fakeBeads) InProgress(context.Context) ([]core.Issue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	// An explicit f.inflight override (set by the spec-drift sweep tests) wins; otherwise derive
-	// the in_progress set from the issue map, like a real `bd list --status in_progress` — this is
-	// what lets the in-flight projection rebuild (newOrch/rebuildInflight) seed itself from the
-	// issues a test put with the inProgress() helper.
-	if f.inflight != nil {
-		return append([]core.Issue(nil), f.inflight...), nil
-	}
+	// Derive the in_progress set from the issue map, like a real `bd list --status in_progress` —
+	// this is what lets the in-flight projection rebuild (newOrch/rebuildInflight) seed itself from
+	// the issues a test put with the inProgress() helper.
 	var out []core.Issue
 	for _, is := range f.issues {
 		if is.Status == statusInProgress {
@@ -1217,16 +1205,35 @@ func TestHandleResultGateInfraErrorIsTransient(t *testing.T) {
 
 // --- sweep -------------------------------------------------------------------
 
+// TestSweepReleasesStranded proves the in-memory lease sweep (T3.13): the stranded set is read
+// from the in-flight projection, not a beads query. Two issues whose lease has elapsed are
+// released back to ready; an issue with a live (future) lease is left in flight. The released
+// issues are also dropped from the projection by the release transition.
 func TestSweepReleasesStranded(t *testing.T) {
 	bd := newFakeBeads()
-	bd.stranded = []string{"iss-a", "iss-b"}
 	o, _ := newOrch(t, kernelConfig(2), bd, &fakeGate{}, &fakeMerger{})
+
+	past := time.Now().Add(-time.Minute)
+	o.inflight.add(core.Issue{ID: "iss-a", Role: "implement"}, past)
+	o.inflight.add(core.Issue{ID: "iss-b", Role: "implement"}, past)
+	// A live lease — held by a running runner, not stranded.
+	o.inflight.add(core.Issue{ID: "iss-c", Role: "implement"}, time.Now().Add(time.Hour))
 
 	o.sweepLeases(context.Background())
 
 	_, released, _, _, _ := bd.snap()
 	if len(released) != 2 {
-		t.Errorf("released = %v, want both stranded issues", released)
+		t.Fatalf("released = %v, want the two expired-lease issues (not the live one)", released)
+	}
+	gotReleased := map[string]bool{released[0]: true, released[1]: true}
+	if !gotReleased["iss-a"] || !gotReleased["iss-b"] {
+		t.Errorf("released = %v, want iss-a and iss-b", released)
+	}
+	if o.inflight.has("iss-a") || o.inflight.has("iss-b") {
+		t.Error("a released stranded issue is still in the in-flight projection")
+	}
+	if !o.inflight.has("iss-c") {
+		t.Error("the live-lease issue was swept; only expired leases must be released")
 	}
 }
 

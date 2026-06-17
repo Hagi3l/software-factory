@@ -36,13 +36,14 @@ import (
 // mirroring buildBrief's discipline: an issue with no spec or no pin is skipped, and a slice that
 // fails to resolve (the file is mid-edit or was deleted) is logged and left alone rather than
 // disrupting live work on an ambiguous signal.
+//
+// The in_progress set comes from the in-flight projection, not a beads query (T3.13): the
+// projection holds each in-flight issue's snapshot WITH the spec hash scheduleReady pinned at
+// dispatch (recorded via updateIssue after the pin), so the drift diff needs no beads read. This
+// keeps the only beads read in the reconcile loop's in-flight reconcilers off the hot path,
+// reducing the Dolt read pressure that causes the write-visibility lag the projection tolerates.
 func (o *Orchestrator) recompileSpecDelta(ctx context.Context) {
-	inflight, err := o.bd.InProgress(ctx)
-	if err != nil {
-		o.log.Error("orchestrator: list in_progress for spec-drift sweep", "err", err)
-		return
-	}
-	for _, issue := range inflight {
+	for _, issue := range o.inflight.issues() {
 		// No spec reference (nothing to resolve) or no pin yet (dispatched before the slice
 		// could be pinned — degraded, not drifted): there is no version to diff against.
 		if issue.Spec == "" || issue.SpecHash == "" {

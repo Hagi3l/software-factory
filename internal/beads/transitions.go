@@ -405,42 +405,6 @@ func (c *Client) RecordApproval(ctx context.Context, id, approvedRef, approver s
 	return nil
 }
 
-// ListStranded returns the IDs of in_progress issues whose lease has expired as of
-// now (or that carry no lease at all). It is the input to the orchestrator's
-// reconcile sweep: a runner that died mid-task leaves its issue in_progress, and the
-// lease — not orchestrator memory — is the durable record of that, so a restarted
-// orchestrator re-derives the stranded set by reading beads (see
-// specs/components/orchestrator.md). The orchestrator releases each back to ready.
-func (c *Client) ListStranded(ctx context.Context, now time.Time) ([]string, error) {
-	out, err := c.run(ctx, []string{"list", "--status", "in_progress", "--json", "--limit", "0"})
-	if err != nil {
-		return nil, fmt.Errorf("beads: list in_progress: %w", err)
-	}
-	data := bytes.TrimSpace(out)
-	if len(data) == 0 {
-		return nil, nil
-	}
-	var raw []issueJSON
-	if err := json.Unmarshal(data, &raw); err != nil {
-		return nil, fmt.Errorf("beads: decode in_progress issues: %w", err)
-	}
-	var stranded []string
-	for _, r := range raw {
-		lease := metaString(r.Metadata, MetadataKeyLease)
-		if lease == "" {
-			// An in_progress issue with no lease is anomalous (Claim always stamps one);
-			// treat it as stranded so it cannot wedge in_progress forever.
-			stranded = append(stranded, r.ID)
-			continue
-		}
-		until, perr := time.Parse(time.RFC3339, lease)
-		if perr != nil || !until.After(now) {
-			stranded = append(stranded, r.ID)
-		}
-	}
-	return stranded, nil
-}
-
 func (c *Client) setStatus(ctx context.Context, id, status string, extra ...string) error {
 	if id == "" {
 		return fmt.Errorf("beads: empty issue id")

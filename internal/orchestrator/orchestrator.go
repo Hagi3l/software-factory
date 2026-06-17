@@ -30,6 +30,15 @@ const defaultTick = 2 * time.Second
 // specs/components/orchestrator.md).
 const defaultLeaseTTL = 30 * time.Minute
 
+// defaultSweepInterval paces the slow reconcile sweep — re-deriving already-merged work on a
+// human spec edit (recompileMergedDelta) — separately from the fast dispatch tick. That sweep
+// does a full-table beads ListAll every pass purely to detect minute-plus-granularity human
+// edits, so pacing it at the dispatch interval needlessly multiplies the Dolt read pressure that
+// is the very cause of the write-visibility lag the in-flight projection has to tolerate (T3.13).
+// It runs an order of magnitude less often than dispatch; the in-flight lease and spec-drift
+// sweeps stay on the fast tick because they now read the projection, not beads (see tickLoop).
+const defaultSweepInterval = 30 * time.Second
+
 // Beads is the orchestrator's single-writer view of the work store. It is the only
 // component that mutates the graph; concentrating every read and write the
 // reconcile loop needs behind one interface keeps that invariant enforceable and
@@ -47,7 +56,10 @@ type Beads interface {
 	// RecordApproval stamps a human's approval (who, which candidate sha) on a parked issue.
 	RecordApproval(ctx context.Context, id, approvedRef, approver string) error
 	Apply(ctx context.Context, proposals []core.Proposal) ([]core.Issue, error)
-	ListStranded(ctx context.Context, now time.Time) ([]string, error)
+	// InProgress returns every in_progress issue (with its pinned spec hash and durable lease).
+	// It is read once at startup to rebuild the in-flight projection (rebuildInflight); the live
+	// loop then reads the projection, not beads, for "what is in flight" — the lease sweep and the
+	// spec-drift sweep both iterate the projection (T3.13, specs/components/orchestrator.md).
 	InProgress(ctx context.Context) ([]core.Issue, error)
 	PinSpecHash(ctx context.Context, id, hash string) error
 	Reissue(ctx context.Context, id string) error
@@ -111,8 +123,14 @@ type Options struct {
 	// LeaseTTL is how long a claim holds an issue in_progress before the reconcile
 	// sweep considers it stranded. Defaults to defaultLeaseTTL.
 	LeaseTTL time.Duration
-	// Tick paces the schedule + sweep loop. Defaults to defaultTick.
+	// Tick paces the fast dispatch loop: scheduleReady plus the in-memory in-flight sweeps
+	// (lease recovery, spec-drift). Defaults to defaultTick.
 	Tick time.Duration
+	// SweepInterval paces the slow reconcile sweep (recompileMergedDelta, the full-table
+	// ListAll that tracks human spec edits to already-merged work) separately from the fast
+	// dispatch tick, so the heavy/rare beads read does not pace dispatch or add to the read
+	// pressure that causes write-visibility lag (T3.13). Defaults to defaultSweepInterval.
+	SweepInterval time.Duration
 	// Logger receives lifecycle logs. Defaults to a discard logger.
 	Logger *slog.Logger
 	// Telemetry receives the per-invocation cost metric (the orchestrator is the only
@@ -140,6 +158,7 @@ type Orchestrator struct {
 
 	leaseTTL time.Duration
 	tick     time.Duration
+	sweep    time.Duration
 	base     string
 	dlq      string
 
@@ -211,6 +230,7 @@ func New(opts Options, bd Beads, g Gate, merger Merger, nc *nats.Conn, js jetstr
 		tel:      tel,
 		leaseTTL: opts.LeaseTTL,
 		tick:     opts.Tick,
+		sweep:    opts.SweepInterval,
 		base:     opts.Base,
 		dlq:      messaging.SubjectDLQ,
 		inflight: newInflightProjection(),
@@ -220,6 +240,9 @@ func New(opts Options, bd Beads, g Gate, merger Merger, nc *nats.Conn, js jetstr
 	}
 	if o.tick <= 0 {
 		o.tick = defaultTick
+	}
+	if o.sweep <= 0 {
+		o.sweep = defaultSweepInterval
 	}
 	if o.base == "" {
 		o.base = "main"
@@ -247,10 +270,11 @@ func (o *Orchestrator) streamOptions() messaging.StreamOptions {
 }
 
 // Run starts the reconciliation loop and blocks until ctx is canceled. It ensures the
-// streams and the Result consumer exist (idempotent — safe on every startup, matching
-// the crash-and-resume model), then runs two concurrent loops: an event-driven Result
-// consumer, and a ticker that schedules ready work and sweeps stranded leases. It
-// returns the first non-shutdown error either loop reports.
+// streams and the consumers exist (idempotent — safe on every startup, matching the
+// crash-and-resume model), then runs concurrent loops: event-driven Result and approval
+// consumers, and a single tick loop that dispatches ready work and runs the reconcile
+// sweeps (the in-memory in-flight sweeps on a fast tick, the heavy merged-delta sweep on
+// a slower one — see tickLoop). It returns the first non-shutdown error any loop reports.
 func (o *Orchestrator) Run(ctx context.Context) error {
 	if err := messaging.SetupStreams(ctx, o.js, o.streamOptions()); err != nil {
 		return err
@@ -324,33 +348,55 @@ func (o *Orchestrator) rebuildInflight(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("orchestrator: rebuild in-flight projection: %w", err)
 	}
-	o.inflight.reset(inflight, o.leaseTTL)
+	o.inflight.reset(inflight)
 	o.log.Info("orchestrator: rebuilt in-flight projection from beads", "in_flight", len(inflight))
 	return nil
 }
 
-// tickLoop schedules ready work, recompiles the spec delta (in-flight and already-merged), and
-// sweeps stranded leases on each tick, plus an immediate pass at startup so dispatch is not
-// delayed by one interval. Every pass is idempotent: "already dispatched" is "in the in-flight
-// projection" (the single writer's read-your-writes record, NOT a lagging bd.ready() read —
-// that read paces faster than write-visibility under load and would re-dispatch in-flight work);
-// "stale in-flight" is "pinned spec hash no longer matches the re-resolved slice"; "stranded" is
-// "lease expired". The
-// in-flight reconcilers (recompileSpecDelta, sweepLeases) return affected in_progress issues to
-// the ready pool; recompileMergedDelta instead spawns a re-derivation plan for already-merged work
-// the spec edit reached. The next scheduleReady redispatches whatever they produced.
+// tickLoop is the single-goroutine reconcile loop, paced by two tickers so the heavy, rare sweep
+// does not pace dispatch (T3.13). Both fire an immediate pass at startup so neither is delayed by
+// one interval.
+//
+//   - The fast tick (o.tick) runs dispatchPass: schedule ready work, recover stranded leases, and
+//     re-derive spec drift on in-flight work. All three are now in-memory against the in-flight
+//     projection (the single writer's read-your-writes record) — scheduleReady's bd.ready() is the
+//     only beads read on this path and is just the candidate oracle.
+//   - The slow tick (o.sweep) runs recompileMergedDelta: a full-table beads ListAll that re-derives
+//     ALREADY-MERGED work after a human spec edit. It is the one remaining beads read off the hot
+//     path; pacing it slower cuts the Dolt read pressure that causes the write-visibility lag the
+//     projection has to tolerate, and human spec edits land at minute-plus granularity anyway.
+//
+// Both reconcilers run in the SAME goroutine (a select over the two tickers), so beads writes stay
+// serialized within the loop exactly as before — the split changes cadence, not concurrency. Every
+// pass is idempotent: "already dispatched" is "in the projection"; "stale in-flight" is "pinned
+// spec hash no longer matches the re-resolved slice"; "stranded" is "lease expired". The in-flight
+// reconcilers return affected work to the ready pool; recompileMergedDelta spawns a re-derivation
+// plan. The next scheduleReady redispatches whatever they produced.
 func (o *Orchestrator) tickLoop(ctx context.Context) error {
-	t := time.NewTicker(o.tick)
-	defer t.Stop()
+	dispatch := time.NewTicker(o.tick)
+	defer dispatch.Stop()
+	sweep := time.NewTicker(o.sweep)
+	defer sweep.Stop()
+	o.dispatchPass(ctx)
+	o.recompileMergedDelta(ctx)
 	for {
-		o.scheduleReady(ctx)
-		o.recompileSpecDelta(ctx)
-		o.recompileMergedDelta(ctx)
-		o.sweepLeases(ctx)
 		select {
 		case <-ctx.Done():
 			return nil
-		case <-t.C:
+		case <-dispatch.C:
+			o.dispatchPass(ctx)
+		case <-sweep.C:
+			o.recompileMergedDelta(ctx)
 		}
 	}
+}
+
+// dispatchPass is the fast tick's body: dispatch newly-ready work, then run the two in-memory
+// in-flight sweeps (lease recovery, spec drift) so a stranded or spec-drifted issue is returned to
+// the ready pool and the same pass's — or the next tick's — scheduleReady picks it up. Order is
+// deliberate: dispatch first (the latency-sensitive path), then the cheap projection scans.
+func (o *Orchestrator) dispatchPass(ctx context.Context) {
+	o.scheduleReady(ctx)
+	o.sweepLeases(ctx)
+	o.recompileSpecDelta(ctx)
 }

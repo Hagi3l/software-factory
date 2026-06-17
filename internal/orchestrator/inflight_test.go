@@ -162,6 +162,47 @@ func TestAcceptPlanIdempotentAcrossCloseFailure(t *testing.T) {
 	}
 }
 
+// TestInflightExpiredAndLeaseSeeding proves the in-memory lease sweep's source (T3.13). expired()
+// returns entries whose lease has elapsed (and an anomalous zero-lease entry) while excluding a
+// live lease — the in-memory replacement for the old beads stranded query. reset() seeds each
+// entry from the issue's OWN durable lease (decoded from beads' lease_until), so a restart recovers
+// pre-restart stranded work on its original deadline rather than resetting the clock to now+ttl.
+func TestInflightExpiredAndLeaseSeeding(t *testing.T) {
+	p := newInflightProjection()
+	now := time.Now().UTC()
+	p.add(core.Issue{ID: "live"}, now.Add(time.Hour))
+	p.add(core.Issue{ID: "expired"}, now.Add(-time.Minute))
+	p.add(core.Issue{ID: "nolease"}, time.Time{})
+
+	got := map[string]bool{}
+	for _, is := range p.expired(now) {
+		got[is.ID] = true
+	}
+	if got["live"] {
+		t.Error("a live lease was reported expired")
+	}
+	if !got["expired"] || !got["nolease"] {
+		t.Errorf("expired set = %v, want expired and nolease (zero lease is strandable)", got)
+	}
+
+	// reset seeds each entry from issue.Lease (the durable deadline), NOT now+ttl: an issue whose
+	// durable lease already passed is immediately strandable after a rebuild.
+	p.reset([]core.Issue{
+		{ID: "stale", Lease: now.Add(-time.Hour)},
+		{ID: "fresh", Lease: now.Add(time.Hour)},
+	})
+	exp := map[string]bool{}
+	for _, is := range p.expired(now) {
+		exp[is.ID] = true
+	}
+	if !exp["stale"] {
+		t.Error("reset ignored the durable (already-expired) lease; pre-restart stranded work would wait a fresh leaseTTL")
+	}
+	if exp["fresh"] {
+		t.Error("a future durable lease was reported expired after reset")
+	}
+}
+
 // TestRebuildInflightFromInProgressSet proves crash-safety: on restart the projection is rebuilt
 // from beads' durable in_progress set before the first dispatch, so a restarted orchestrator
 // resumes with an accurate live view (and does not re-dispatch genuinely in-flight work).

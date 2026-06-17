@@ -210,6 +210,11 @@ func (r issueJSON) toCore() core.Issue {
 		// status-changing write (setStatus/Claim); the board's time-in-state anchor. Zero
 		// (absent/unparsable) on an issue that has not transitioned since the field landed.
 		StateEnteredAt: metaTime(r.Metadata, MetadataKeyStateEntered),
+		// The claim lease expiry an in_progress issue carries (stamped by Claim, cleared by
+		// Release). The orchestrator seeds its in-flight projection from this on restart so the
+		// in-memory lease sweep recovers stranded work on the original deadline (T3.13). Zero
+		// (absent/unparsable) on an issue not in_progress; lenient like the other decoders.
+		Lease: metaTime(r.Metadata, MetadataKeyLease),
 		// Beads' own top-level created_at (not harness metadata) — the board's per-card
 		// "total time" anchor (T4.18). Lenient like the metadata decoders: an absent or
 		// malformed timestamp reads as the zero time, never failing the read.
@@ -333,12 +338,9 @@ func metaDuration(m map[string]json.RawMessage, key string) time.Duration {
 
 // metaTime returns the time.Time parsed from a metadata key's RFC3339 string value, or the
 // zero Time if absent, not a string, or unparsable. It backs state_entered_at (written by the
-// status-changing writes via stateEnteredNow); lenient for the same reason as metaString —
-// foreign or malformed metadata must never fail a read, it just reads as "not stamped".
-//
-//nolint:unparam // kept uniform with the meta<Type>(m, key) decoder family (metaString/Int/
-// Float/Duration); state_entered_at is its only key today, but collapsing the signature would
-// only have to be reverted the next time a time-valued metadata key is added.
+// status-changing writes via stateEnteredNow) and lease_until (written by Claim); lenient for
+// the same reason as metaString — foreign or malformed metadata must never fail a read, it just
+// reads as "not stamped".
 func metaTime(m map[string]json.RawMessage, key string) time.Time {
 	raw, ok := m[key]
 	if !ok {
