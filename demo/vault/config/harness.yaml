@@ -41,10 +41,13 @@ spec_depth: 1
 # conversation. Exploration is read-only; the planner still writes nothing but the consent-gated
 # spec + issues.
 requirements_planner:
-  model:           "deepseek/deepseek-v4-flash"
+  model:           "deepseek/deepseek-v4-pro"
   persona:         souls/prompts/requirements-planner.md
-  # deepseek-v4-flash has a 1M-token context window, so the planner can read deeply and hold a long
-  # conversation. max_tokens is the per-reply *output* ceiling (not the context window): 16k leaves
+  # Pinned to the stronger -pro tier: the wizard is the single human-in-the-loop conversation and
+  # the entire correctness lever, and it must reliably follow the ledger/draft tool protocol that
+  # drives the alignment ledger UI. Both deepseek tiers have a 1M-token context window, so the
+  # planner can read deeply and hold a long conversation. max_tokens is the per-reply *output*
+  # ceiling (not the context window): 16k leaves
   # ample room for prose + the full ledger + a complete draft (with inline spec markdown) without
   # truncating mid-block. max_tool_turns lets it explore the vault codebase across many reads;
   # turn_timeout is raised to match, so a deep exploration isn't cut short by the clock.
