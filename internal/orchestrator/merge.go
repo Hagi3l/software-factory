@@ -260,6 +260,80 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref, target string, prov co
 	return commit, nil
 }
 
+// MergeEpic lands a drained epic atomically: a two-parent merge commit advancing main exactly
+// once for the whole feature (specs/integration.md "The terminal merge is a merge commit"). The
+// orchestrator calls it on the slow sweep when an epic's subtree has drained — every issue closed
+// and nothing in flight (sweepEpicCompletion, T7.4) — having already verified the feature child by
+// child as each rebased onto the epic branch and re-gated (the whole-feature gate is emergent, so
+// the terminal step adds no gate in v1, where main is quiescent).
+//
+// The commit's first parent is the current main tip and its second parent is the epic branch tip,
+// so main's first-parent history reads as one commit per feature while every per-child provenance
+// commit stays reachable under the second parent (the two-tier provenance the spec requires). Its
+// tree is the epic branch's tree: in v1 the epic branch was cut from main and main has not moved,
+// so that tree already is the complete, re-gated feature — nothing new is introduced at the merge.
+// The subject is the feature's (epic root's) title and the trailer carries the whole-feature
+// provenance, signed with the harness key when one is configured, exactly like a per-item
+// provenance commit.
+//
+// It is idempotent on the epic id: a merge commit citing it already on main means a prior sweep
+// (or a redelivery) landed the feature, so it returns that commit with merged=false and writes
+// nothing — the sweep re-runs every slow tick against a root that stays closed, so this is the
+// steady state, not an error. merged=false with a nil error also covers the defensive case where
+// the epic branch never advanced past main (no child ever integrated), which a real drain cannot
+// produce but which must never write an empty merge commit.
+func (m *gitMerger) MergeEpic(ctx context.Context, repo, epicRef, target string, prov core.Provenance) (string, bool, error) {
+	if target == "" {
+		target = "refs/heads/main" // defensive: an unnamed target lands the feature on main
+	}
+	mainTip, err := m.run(ctx, repo, "rev-parse", "--verify", target)
+	if err != nil {
+		return "", false, fmt.Errorf("orchestrator: resolve terminal-merge target %q: %w", target, err)
+	}
+	epicTip, err := m.run(ctx, repo, "rev-parse", "--verify", epicRef)
+	if err != nil {
+		return "", false, fmt.Errorf("orchestrator: resolve epic branch %q for terminal merge: %w", epicRef, err)
+	}
+	// Already landed? A merge commit citing this epic id on main means a prior terminal merge ran;
+	// the slow sweep is at-least-once, so a repeat is expected — return that commit, write nothing.
+	if prov.Issue != "" {
+		if existing, _ := m.run(ctx, repo, "log", target, "--fixed-strings",
+			"--grep=Issue: "+prov.Issue+" |", "--format=%H", "-n", "1"); existing != "" {
+			return existing, false, nil
+		}
+	}
+	// Nothing to land (the epic branch never advanced past main): no-op rather than an empty merge
+	// commit. A genuine drain always landed at least one child onto the epic branch, so this is
+	// purely defensive against a misfire.
+	if epicTip == mainTip {
+		return mainTip, false, nil
+	}
+	tree, err := m.run(ctx, repo, "rev-parse", "--verify", epicRef+"^{tree}")
+	if err != nil {
+		return "", false, fmt.Errorf("orchestrator: resolve epic tree for terminal merge of %q: %w", epicRef, err)
+	}
+	// commit-tree with TWO parents builds the merge commit. Identity is forced via -c (the harness
+	// owns main's tip), and a configured key SSH-signs it — the same plumbing as the per-item
+	// provenance commit, only with a second -p for the epic branch tip.
+	args := []string{
+		"-c", "user.name=" + provenanceCommitterName,
+		"-c", "user.email=" + provenanceCommitterEmail,
+	}
+	commitArgs := []string{"commit-tree", tree, "-p", mainTip, "-p", epicTip, "-m", prov.CommitMessage()}
+	if m.signingKey != "" {
+		args = append(args, "-c", "gpg.format=ssh", "-c", "user.signingkey="+m.signingKey)
+		commitArgs = []string{"commit-tree", "-S", tree, "-p", mainTip, "-p", epicTip, "-m", prov.CommitMessage()}
+	}
+	commit, err := m.run(ctx, repo, append(args, commitArgs...)...)
+	if err != nil {
+		return "", false, fmt.Errorf("orchestrator: write epic terminal merge commit for %q: %w", epicRef, err)
+	}
+	if _, err := m.run(ctx, repo, "update-ref", target, commit); err != nil {
+		return "", false, fmt.Errorf("orchestrator: advance %q to epic terminal merge for %q: %w", target, epicRef, err)
+	}
+	return commit, true, nil
+}
+
 // rebaseOnto replays the candidate's commits onto the current target tip (refs/heads/main, or
 // the epic branch in epic mode — T7.3) in a scratch detached worktree, publishes the rebased
 // result under a temporary ref, and returns the rebased tip plus that ref. The worktree

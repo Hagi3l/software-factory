@@ -30,6 +30,18 @@ produced child inherits the verified candidate branch of its parent as its base 
 the implementor starts from the failing tests, qa starts from the implementation, and
 so on.
 
+**Where `integrate` lands** depends on [`integration.mode`](configuration.md). In the
+default **`per-item`** mode each child merges to `main` the moment its own chain is
+verified. Under **`epic`** mode the children of one feature integrate onto an
+`epic/<epic_id>` branch instead and `main` is held still; when the epic's subtree
+*drains* — every issue closed and nothing in flight — the orchestrator advances `main`
+exactly once with a single **terminal merge commit** of the epic branch (first parent
+`main`, second parent the epic tip, so each child's provenance stays reachable below).
+A feature lands whole or not at all: a dead-lettered child leaves the subtree undrained,
+so the terminal merge never fires and the epic branch is abandoned. Drain is detected on
+the orchestrator's slow sweep, not the dispatch path. See
+[integration.md](../specs/integration.md).
+
 ## The trust model in motion
 
 Every guarantee shows up as a concrete step here:

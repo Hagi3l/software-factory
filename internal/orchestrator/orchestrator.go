@@ -109,6 +109,17 @@ type Gate interface {
 // epic branch off main on first use, so the orchestrator need only name the target.
 type Merger interface {
 	Merge(ctx context.Context, repo, ref, target string, prov core.Provenance, regate ReGate, progress MergeProgress) (commit string, err error)
+	// MergeEpic performs an epic's terminal merge: the single, atomic landing of a whole feature
+	// on main (specs/integration.md "Atomic feature integration"). It writes a two-parent merge
+	// commit on target — first parent the current main, second parent the epic branch tip — so
+	// main's first-parent history reads as one commit per feature while every per-child provenance
+	// commit stays reachable under the merge (two-tier provenance). It is idempotent: a merge
+	// commit already citing the epic id on main means the terminal merge already landed, so it
+	// writes nothing and reports merged=false. merged=true means a fresh terminal merge was
+	// written (commit is the new main tip); merged=false with a nil error means nothing was done
+	// (already landed, or the epic branch never advanced past main). epicRef and target are
+	// fully-qualified refs (refs/heads/epic/<id>, refs/heads/main); the merger does not DWIM.
+	MergeEpic(ctx context.Context, repo, epicRef, target string, prov core.Provenance) (commit string, merged bool, err error)
 }
 
 // Options configures an Orchestrator. They are the instance knobs (which config it
@@ -367,10 +378,12 @@ func (o *Orchestrator) rebuildInflight(ctx context.Context) error {
 //     re-derive spec drift on in-flight work. All three are now in-memory against the in-flight
 //     projection (the single writer's read-your-writes record) — scheduleReady's bd.ready() is the
 //     only beads read on this path and is just the candidate oracle.
-//   - The slow tick (o.sweep) runs recompileMergedDelta: a full-table beads ListAll that re-derives
-//     ALREADY-MERGED work after a human spec edit. It is the one remaining beads read off the hot
-//     path; pacing it slower cuts the Dolt read pressure that causes the write-visibility lag the
-//     projection has to tolerate, and human spec edits land at minute-plus granularity anyway.
+//   - The slow tick (o.sweep) runs recompileMergedDelta (a full-table beads ListAll that re-derives
+//     ALREADY-MERGED work after a human spec edit) and, under integration.mode: epic,
+//     sweepEpicCompletion (the epic_id aggregate read that lands a drained feature's terminal merge,
+//     T7.4). These are the remaining beads reads off the hot path; pacing them slower cuts the Dolt
+//     read pressure that causes the write-visibility lag the projection has to tolerate, and both
+//     human spec edits and epic completion are minute-plus-granularity events anyway.
 //
 // Both reconcilers run in the SAME goroutine (a select over the two tickers), so beads writes stay
 // serialized within the loop exactly as before — the split changes cadence, not concurrency. Every
@@ -385,6 +398,7 @@ func (o *Orchestrator) tickLoop(ctx context.Context) error {
 	defer sweep.Stop()
 	o.dispatchPass(ctx)
 	o.recompileMergedDelta(ctx)
+	o.sweepEpicCompletion(ctx)
 	for {
 		select {
 		case <-ctx.Done():
@@ -393,6 +407,7 @@ func (o *Orchestrator) tickLoop(ctx context.Context) error {
 			o.dispatchPass(ctx)
 		case <-sweep.C:
 			o.recompileMergedDelta(ctx)
+			o.sweepEpicCompletion(ctx)
 		}
 	}
 }

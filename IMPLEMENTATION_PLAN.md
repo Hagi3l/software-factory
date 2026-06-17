@@ -46,8 +46,9 @@ autonomous implementation) — a later validation concern, never an engineering 
   isolation — the Firecracker backend T5.2 is hardware-blocked and deliberately last; the
   optional items are T5.5 gVisor and T5.11 warm pools + HA), and **Phase 7** (atomic
   feature integration / epic mode — net-new feature work, not hardware-blocked; T7.1 (the live
-  multi-child-rebase bug), T7.2 (`integration.mode` config), and T7.3 (merge-queue retargeting)
-  are done — T7.4 epic-completion + terminal merge is next).
+  multi-child-rebase bug), T7.2 (`integration.mode` config), T7.3 (merge-queue retargeting), and
+  T7.4 (epic-completion detection + terminal merge) are done — T7.5 (one-active-epic consent gate
+  + wizard creates the epic branch with the spec) is next).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -331,18 +332,37 @@ per epic, not new machinery. Spec contract:
   "an epic"); until then epic mode commits the spec to `main` and the epic branch inherits it, so
   the merge mechanics are correct but full spec-off-main atomicity awaits T7.5. *(spec)*
   [integration.md](specs/integration.md)
-- [ ] **T7.4 Epic-completion detection + terminal merge** *(needs T7.3)* — detect drain via
-  an `epic_id` aggregate read (subtree all-closed **and** zero in-flight in the subtree),
-  evaluated on the **slow sweep cadence** (like `epic_budget`, not the dispatch hot path); on
-  drain, advance the epic **root issue** to its terminal merge — a **merge commit** to `main`
-  (first parent `main`, second the epic branch tip), subject = feature title, **two-tier
-  provenance** (per-child commits preserved under the merge; whole-feature layer on the merge
-  commit). v1 (`main` quiescent — one epic) skips re-gating at the terminal step (the last
-  child's rebased re-gate already verified the whole feature); strict **all-or-nothing** — any
-  child dead-letter / `resolve` failure / `epic_budget` breach leaves the epic unmerged and the
-  branch abandoned, `main` untouched. Idempotent terminal merge (existing provenance-trailer
-  check). *(spec)* [integration.md](specs/integration.md),
-  [components/orchestrator.md](specs/components/orchestrator.md)
+- [x] **T7.4 Epic-completion detection + terminal merge** *(needs T7.3)* — *done.* New
+  `sweepEpicCompletion` (`internal/orchestrator/epic_completion.go`) runs **only under
+  `integration.mode: epic`**, on the **slow sweep cadence** alongside `recompileMergedDelta`
+  (wired into `tickLoop`'s startup pass + slow-tick branch). It does an `epic_id` **aggregate**
+  read (`ListAll` grouped by `core.EpicOf`) and lands a feature when its subtree has **drained**:
+  every issue `closed` **and** no member in the in-flight projection. The in-flight clause uses
+  `o.inflight.issues()` (the single writer's read-your-writes record) to close the window where a
+  just-spawned child is not yet visible in the eventually-consistent `ListAll` but its in-flight
+  parent is. **All-or-nothing falls out of the drain test**: a blocked (dead-lettered) or still-open
+  child means `drained=false`, so the terminal merge never fires and the epic branch is abandoned
+  (`main` untouched). On drain, `terminalMerge` calls the new `Merger.MergeEpic` — a **two-parent
+  merge commit** on `main` (first parent `main`, second the epic tip via `git commit-tree -p main
+  -p epic`, tree = epic tip's tree), subject = the epic **root's** title, trailer cites the **epic
+  id** (whole-feature layer; per-child provenance stays reachable under the second parent —
+  two-tier). v1 skips re-gating at the terminal step (`main` quiescent — the last child's rebased
+  re-gate already verified the whole feature). **Idempotent**: `MergeEpic` greps `main` for a commit
+  citing the epic id and returns `merged=false` if already landed, so the steady-state slow sweep is
+  a cheap silent re-check (the root stays closed, so drain is re-detected forever); a `merged=true`
+  landing announces `MergeStateLanded` keyed by the epic root (merge-queue view) and logs. Defensive
+  `epicTip == mainTip` no-op guards an empty merge. Tests: real-git
+  `TestGitMergerEpicTerminalMergeIntegration` (two children land on `epic/feat-1`, `main` quiescent,
+  terminal merge has the right two parents/tree/subject/trailer, per-child history reachable,
+  repeated call no-ops) + orchestrator sweep tests (`epic_completion_test.go`: drain lands with
+  whole-feature provenance, per-item no-op, all-or-nothing for blocked/open/in-progress children,
+  in-flight member waits, missing root waits, idempotent `merged=false` absorbed). Docs:
+  `docs/pipeline.md` gained a "Where `integrate` lands" epic-mode paragraph. Spec
+  ([components/orchestrator.md](specs/components/orchestrator.md) §7,
+  [integration.md](specs/integration.md) "Atomic feature integration") already documented this — no
+  spec change. **Deferred to T7.5:** the wizard creating `epic/<id>` with the spec as its first
+  commit + the one-active-epic consent gate; until then the merge mechanics are complete but the
+  spec rides in via `main` inheritance (T7.3's note).
 - [ ] **T7.5 One-active-epic consent gate + wizard creates the epic branch with the spec**
   *(needs T7.4)* — under `mode: epic` the wizard's approval refuses to seed a second epic while
   one is in flight, reporting the in-flight feature instead. Keeps `main` quiescent during an

@@ -329,6 +329,21 @@ type fakeMerger struct {
 	provs     []core.Provenance
 	err       error
 	regateRef string
+
+	// epic terminal-merge recording (T7.4): epicCalls captures every MergeEpic invocation;
+	// epicErr forces a failure; epicAlready makes MergeEpic report an idempotent no-op
+	// (merged=false), standing in for a feature already landed on main.
+	epicCalls   []epicMergeCall
+	epicErr     error
+	epicAlready bool
+}
+
+// epicMergeCall records one MergeEpic invocation so a sweep test can assert which epic branch was
+// landed onto main and with what whole-feature provenance.
+type epicMergeCall struct {
+	epicRef string
+	target  string
+	prov    core.Provenance
 }
 
 func (m *fakeMerger) Merge(ctx context.Context, _, ref, target string, prov core.Provenance, regate ReGate, progress MergeProgress) (string, error) {
@@ -380,6 +395,27 @@ func (m *fakeMerger) provenance() []core.Provenance {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]core.Provenance(nil), m.provs...)
+}
+
+func (m *fakeMerger) MergeEpic(_ context.Context, _, epicRef, target string, prov core.Provenance) (string, bool, error) {
+	m.mu.Lock()
+	m.epicCalls = append(m.epicCalls, epicMergeCall{epicRef: epicRef, target: target, prov: prov})
+	m.mu.Unlock()
+	if m.epicErr != nil {
+		return "", false, m.epicErr
+	}
+	if m.epicAlready {
+		return "cafef00d", false, nil // idempotent: already landed, nothing written
+	}
+	return "epicmerge", true, nil
+}
+
+// epicMerges returns the MergeEpic invocations in order — the assertion hook for the
+// epic-completion sweep (T7.4).
+func (m *fakeMerger) epicMerges() []epicMergeCall {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]epicMergeCall(nil), m.epicCalls...)
 }
 
 // --- helpers -----------------------------------------------------------------

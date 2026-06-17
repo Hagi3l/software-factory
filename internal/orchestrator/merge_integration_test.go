@@ -299,6 +299,127 @@ func TestGitMergerEpicTargetIntegration(t *testing.T) {
 	}
 }
 
+// TestGitMergerEpicTerminalMergeIntegration drives the real git binary through the epic's terminal
+// merge (T7.4): two children of one epic land on an epic/<id> branch (main held quiescent), then
+// MergeEpic advances main ONCE with a two-parent merge commit. It proves the atomic-landing
+// contract end-to-end — main moves exactly once for the whole feature; the merge commit's first
+// parent is the prior main and its second parent is the epic tip (so every per-child provenance
+// commit stays reachable below — two-tier provenance); its tree is the complete feature (both
+// children's work); its subject is the feature title and its trailer cites the epic id; and a
+// repeated sweep is an idempotent no-op (merged=false, main unmoved).
+func TestGitMergerEpicTerminalMergeIntegration(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH; skipping epic terminal-merge integration test")
+	}
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(cmd.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+
+	git("init", "-q")
+	git("checkout", "-q", "-b", "main")
+	write("base.txt", "base\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	m0 := git("rev-parse", "main")
+
+	// Two children of the epic, disjoint so B rebases cleanly over A on the epic branch.
+	git("checkout", "-q", "-b", "candidate/iss-1", m0)
+	write("a.txt", "A\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "A work")
+	git("checkout", "-q", "-b", "candidate/iss-2", m0)
+	write("b.txt", "B\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "B work")
+	git("checkout", "-q", "--detach", m0) // only update-ref may move refs now
+
+	const epicRef = "refs/heads/epic/feat-1"
+	m := NewGitMerger("")
+	provFor := func(id string) core.Provenance {
+		return core.Provenance{Soul: "implementor-go", Model: "claude-opus-4-7", Issue: id, PromptSHA: "sha256:9af", Verified: []string{"build"}}
+	}
+
+	// Land both children onto the epic branch (per-item merge retargeted to the epic — T7.3). main
+	// must stay put through both.
+	if _, err := m.Merge(context.Background(), repo, "candidate/iss-1", epicRef, provFor("iss-1"), nil, nil); err != nil {
+		t.Fatalf("merge child A onto epic: %v", err)
+	}
+	if _, err := m.Merge(context.Background(), repo, "candidate/iss-2", epicRef, provFor("iss-2"),
+		func(_ context.Context, _ string) (core.Provenance, bool, error) { return provFor("iss-2"), true, nil }, nil); err != nil {
+		t.Fatalf("merge child B onto epic: %v", err)
+	}
+	if git("rev-parse", "main") != m0 {
+		t.Fatal("main moved during child integration; it must stay quiescent until the terminal merge")
+	}
+	epicTip := git("rev-parse", epicRef)
+
+	// The terminal merge: main advances once, atomically, for the whole feature.
+	wholeProv := core.Provenance{Issue: "feat-1", Subject: "Add sharing"}
+	commit, merged, err := m.MergeEpic(context.Background(), repo, epicRef, "refs/heads/main", wholeProv)
+	if err != nil {
+		t.Fatalf("terminal merge: %v", err)
+	}
+	if !merged {
+		t.Fatal("terminal merge reported merged=false on a fresh epic landing")
+	}
+	if git("rev-parse", "main") != commit {
+		t.Errorf("main = %q, want the terminal merge commit %q", git("rev-parse", "main"), commit)
+	}
+	// Two parents, in order: first = prior main, second = epic tip.
+	if p1 := git("rev-parse", commit+"^1"); p1 != m0 {
+		t.Errorf("merge first parent = %q, want prior main %q", p1, m0)
+	}
+	if p2 := git("rev-parse", commit+"^2"); p2 != epicTip {
+		t.Errorf("merge second parent = %q, want epic tip %q", p2, epicTip)
+	}
+	// Tree is the complete, re-gated feature: both children's files present.
+	if git("rev-parse", commit+"^{tree}") != git("rev-parse", epicRef+"^{tree}") {
+		t.Error("terminal merge tree differs from the epic branch tree; it must land the complete feature unchanged")
+	}
+	if git("cat-file", "-t", commit+":a.txt") != "blob" || git("cat-file", "-t", commit+":b.txt") != "blob" {
+		t.Error("terminal merge tree is missing a child's work")
+	}
+	// Subject = feature title; trailer cites the epic id.
+	if subject := git("show", "--no-patch", "--format=%s", commit); subject != "Add sharing" {
+		t.Errorf("terminal merge subject = %q, want the feature title", subject)
+	}
+	if body := git("show", "--no-patch", "--format=%b", commit); !strings.Contains(body, "Issue: feat-1 |") {
+		t.Errorf("terminal merge trailer missing the epic id; body:\n%s", body)
+	}
+	// Per-child provenance stays reachable below the merge (via the second parent).
+	if log := git("log", "--format=%s", commit); !strings.Contains(log, "A work") || !strings.Contains(log, "B work") {
+		t.Errorf("per-child history not reachable under the merge:\n%s", log)
+	}
+
+	// Idempotent: a repeated sweep re-detects drain and calls MergeEpic again — it must no-op
+	// (the epic id is already on main) and leave main where it is.
+	commit2, merged2, err := m.MergeEpic(context.Background(), repo, epicRef, "refs/heads/main", wholeProv)
+	if err != nil {
+		t.Fatalf("idempotent terminal merge: %v", err)
+	}
+	if merged2 {
+		t.Error("repeated terminal merge reported merged=true; it must be an idempotent no-op")
+	}
+	if commit2 != commit || git("rev-parse", "main") != commit {
+		t.Errorf("repeated terminal merge moved main (%q → %q)", commit, git("rev-parse", "main"))
+	}
+}
+
 // TestGitMergerSignsProvenanceCommitIntegration drives the real git binary + ssh-keygen to
 // prove the end-to-end signing path (T5.10): a merger built WithSigningKey produces an
 // integration commit that git verifies (%G? = G) against an allowed-signers file mapping the
