@@ -64,16 +64,18 @@ docker info >/dev/null 2>&1   || { echo "error: docker daemon not reachable"; ex
 say "Building harness"
 ( cd "$REPO_ROOT" && make build )
 
-# ---- ensure the sandbox images exist ---------------------------------------------------
-# The vault image bases on the kernel go-toolchain image; build that first if missing.
-if ! docker image inspect "$BASE_IMAGE" >/dev/null 2>&1; then
-  say "Building the base '$BASE_IMAGE' image (first run only; downloads the Go base + vuln DB)"
-  docker build -f "$REPO_ROOT/deploy/go-toolchain.Dockerfile" -t "$BASE_IMAGE" "$REPO_ROOT"
-fi
-if ! docker image inspect "$IMAGE" >/dev/null 2>&1; then
-  say "Building the '$IMAGE' image (adds templ + Tailwind + the vault module cache)"
-  docker build -f "$DEMO_DIR/Dockerfile" -t "$IMAGE" "$APP_DIR"
-fi
+# ---- (re)build the sandbox images ------------------------------------------------------
+# Always build, even when the image already exists. Docker's layer cache makes an unchanged
+# rebuild near-instant, while building UNCONDITIONALLY guarantees a *stale* image — one built
+# before its Dockerfile gained, e.g., the gate tools (golangci-lint/gosec/govulncheck/
+# go-licenses) — is refreshed rather than silently reused (a stale base is what makes the qa
+# stage fail with `No such file or directory`). The vault image bases on the kernel
+# go-toolchain image, so build that first. Only the first base build is slow (it downloads
+# the Go base + the offline vuln DB); cached rebuilds are fast.
+say "Building the base '$BASE_IMAGE' image (cached rebuild is fast; first build downloads the Go base + vuln DB)"
+docker build -f "$REPO_ROOT/deploy/go-toolchain.Dockerfile" -t "$BASE_IMAGE" "$REPO_ROOT"
+say "Building the '$IMAGE' image (adds templ + Tailwind + the vault module cache)"
+docker build -f "$DEMO_DIR/Dockerfile" -t "$IMAGE" "$APP_DIR"
 
 # ---- materialize config (model/endpoint subs, and the Jaeger OTLP endpoint) ------------
 # Copy the tracked config to a temp dir whenever we need to rewrite it — for a MODEL/ENDPOINT

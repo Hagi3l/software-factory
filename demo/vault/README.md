@@ -85,9 +85,12 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
   for the deploy. Run with `VAULT_REMOTE=''` to stay purely local — the full pipeline still
   runs and merges, it just doesn't push or deploy.
 
-On first run the `go-toolchain` base image and then the `vault-toolchain` image are built
-automatically if missing. The base build downloads the Go image + the offline vuln DB and
-is slow; the vault layer on top is quick.
+On every run the `go-toolchain` base image and then the `vault-toolchain` image are
+(re)built automatically. Docker's layer cache makes an unchanged rebuild near-instant, so
+building unconditionally costs almost nothing while guaranteeing a stale image (one built
+before its Dockerfile gained the gate tools) is refreshed rather than silently reused. Only
+the first base build is slow — it downloads the Go image + the offline vuln DB; the vault
+layer on top is quick.
 
 ## Run it
 
