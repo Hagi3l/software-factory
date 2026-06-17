@@ -45,8 +45,8 @@ autonomous implementation) — a later validation concern, never an engineering 
 - **Open tasks (`- [ ]`) keep their full detail.** Two open lines: **Phase 5** (production
   isolation — the Firecracker backend T5.2 is hardware-blocked and deliberately last; the
   optional items are T5.5 gVisor and T5.11 warm pools + HA), and **Phase 7** (atomic
-  feature integration / epic mode — net-new feature work, not hardware-blocked; T7.1 is also
-  a live bug fix that unblocks any multi-child feature today).
+  feature integration / epic mode — net-new feature work, not hardware-blocked; T7.1, the live
+  bug that hung any multi-child rebase, is now fixed — T7.2 is next).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -287,19 +287,17 @@ per epic, not new machinery. Spec contract:
 "Epics on the board", [components/orchestrator.md](specs/components/orchestrator.md). The
 **vault demo exercises it** (T7.7).
 
-- [ ] **T7.1 Fix the re-gate ref form (unblocks any multi-child rebase)** — the merge
-  queue's step-3 re-gate seeds its sandbox with `git clone` + `git checkout <ref>`, where a
-  clone exposes branches only as remote-tracking refs. `rebaseOntoMain` hands the re-gate the
-  **fully-qualified** `refs/heads/integration/<id>` (`integrationRef`), which `git checkout`
-  cannot resolve in a clone (no local ref by that path; it does not DWIM) → the merge loops
-  forever on `pathspec … did not match`, classified transient and redelivered with no cap.
-  Return the **short** branch name (`integration/<id>`) for the re-gate's `BaseRef` (DWIM
-  resolves it to `origin/integration/<id>`, exactly as the candidate gate uses
-  `candidate/<id>`), keeping the fully-qualified form only for `update-ref`/`-d`. Bug fix to
-  intended behaviour (the code comment already states the intent) — **no spec change**. Also
-  fixes per-item multi-child features today, and is the foundation epic mode's per-child
-  re-gate leans on. Regression test: drive `Merge` down the rebase path and assert the re-gate
-  is called with `integration/<id>`. *(spec)* [integration.md](specs/integration.md)
+- [x] **T7.1 Fix the re-gate ref form (unblocks any multi-child rebase)** — *done.*
+  `rebaseOntoMain` now returns the **short** branch name `integration/<id>` (new
+  `integrationBranch` helper) as the re-gate's ref, while keeping the fully-qualified
+  `refs/heads/integration/<id>` (`integrationRef`, refactored to build on the short form) for
+  the `update-ref` publish + `update-ref -d` cleanup, which do not DWIM. The re-gate's sandbox
+  seeds by `git clone` + `git checkout <ref>`, and a clone has no local `refs/heads/*` (only
+  `origin/*`), so only the short name DWIM-resolves there — exactly as the candidate gate uses
+  `candidate/<id>`. Fixes the `pathspec … did not match` loop that hung any multi-child rebase,
+  and is the foundation epic mode's per-child re-gate leans on. Regression: `TestGitMergerReGatesRebasedResult`
+  now asserts the re-gate is called with `integration/iss-1`; the real-git `merge_integration_test.go`
+  rebase path exercises it end-to-end. No spec/doc change (bug fix to already-documented intent).
 - [ ] **T7.2 `integration.mode` config + validation** — parse the top-level
   `integration: { mode: per-item | epic }` block (default `per-item` when absent), thread it
   into the run config, and have `harness validate` reject any other value. *(spec)*

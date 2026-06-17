@@ -325,10 +325,14 @@ func TestGitMergerReGatesRebasedResult(t *testing.T) {
 	if len(states) != 2 || states[0] != core.MergeStateRebasing || states[1] != core.MergeStateReGating {
 		t.Errorf("progress = %v, want [%q %q]", states, core.MergeStateRebasing, core.MergeStateReGating)
 	}
-	// The re-gate graded the PUBLISHED ref (a clonable refs/heads/ branch a verification
-	// sandbox clone can fetch), not the original candidate.
-	if gotRef != "refs/heads/integration/iss-1" {
-		t.Errorf("re-gate ref = %q, want refs/heads/integration/iss-1 (the published rebased result)", gotRef)
+	// The re-gate graded the published rebased result, handed to it as the SHORT branch name
+	// (integration/iss-1), not the fully-qualified refs/heads/ form: the re-gate's sandbox
+	// clones the integration repo and runs `git checkout <ref>`, and a clone has no local
+	// refs/heads/* — only origin/* — so only the short name DWIM-resolves there, exactly as the
+	// candidate gate uses candidate/<id>. The fully-qualified form fed to checkout was the
+	// "pathspec did not match" loop that hung every multi-child rebase (T7.1).
+	if gotRef != "integration/iss-1" {
+		t.Errorf("re-gate ref = %q, want integration/iss-1 (the short DWIM-resolvable branch the clone can check out)", gotRef)
 	}
 
 	var commitTree, published, deletedRef []string

@@ -283,27 +283,46 @@ func (m *gitMerger) rebaseOntoMain(ctx context.Context, repo, ref, issueID strin
 		removeWorktree()
 		return "", "", nil, false, fmt.Errorf("orchestrator: resolve rebased tip for %q: %w", ref, err)
 	}
-	// Anchor the rebased commits under a clonable ref, then drop the worktree.
-	tmpRef = integrationRef(issueID)
-	if _, err := m.run(ctx, repo, "update-ref", tmpRef, landed); err != nil {
+	// Anchor the rebased commits under a clonable ref, then drop the worktree. The git
+	// plumbing here (update-ref, and the -d in cleanup) needs the *fully-qualified*
+	// refs/heads/integration/<id> form — update-ref does not DWIM. But the re-gate's sandbox
+	// seeds by cloning the integration repo and running `git checkout <ref>`, and a clone has
+	// no local refs/heads/* — only remote-tracking origin/* — so the verbatim fully-qualified
+	// form fails to resolve there (the "pathspec did not match" loop that hung any multi-child
+	// rebase). The *short* branch name integration/<id> DWIM-resolves to origin/integration/<id>
+	// in the clone, exactly as the candidate gate's candidate/<id> already does — so that is
+	// what we hand back as the re-gate's ref. (T7.1, specs/integration.md.)
+	fqRef := integrationRef(issueID)
+	if _, err := m.run(ctx, repo, "update-ref", fqRef, landed); err != nil {
 		removeWorktree()
-		return "", "", nil, false, fmt.Errorf("orchestrator: publish rebased result ref %q: %w", tmpRef, err)
+		return "", "", nil, false, fmt.Errorf("orchestrator: publish rebased result ref %q: %w", fqRef, err)
 	}
 	removeWorktree()
-	cleanup = func() { _, _ = m.run(ctx, repo, "update-ref", "-d", tmpRef) }
-	return landed, tmpRef, cleanup, false, nil
+	cleanup = func() { _, _ = m.run(ctx, repo, "update-ref", "-d", fqRef) }
+	return landed, integrationBranch(issueID), cleanup, false, nil
 }
 
-// integrationRef is the temporary branch the rebased result is published under so the
-// re-gate's sandbox clone (which fetches refs/heads/*) can check it out; it is deleted once
-// main has advanced. Keyed by issue id: integration is serialized so at most one is in
-// flight, but per-issue naming keeps a ref leaked by a crash self-identifying and lets the
-// next attempt for that issue overwrite it cleanly.
-func integrationRef(issueID string) string {
+// integrationBranch is the short branch name the rebased result is published under, keyed by
+// issue id: integration is serialized so at most one is in flight, but per-issue naming keeps
+// a ref leaked by a crash self-identifying and lets the next attempt for that issue overwrite
+// it cleanly. This short form (integration/<id>) is what the re-gate is handed: its sandbox
+// seeds by cloning the integration repo and running `git checkout`, and a clone exposes
+// branches only as remote-tracking origin/* refs, so the short name DWIM-resolves to
+// origin/integration/<id> there (the fully-qualified refs/heads/ form does not — T7.1),
+// exactly as the candidate gate uses candidate/<id>.
+func integrationBranch(issueID string) string {
 	if issueID == "" {
 		issueID = "pending"
 	}
-	return "refs/heads/integration/" + issueID
+	return "integration/" + issueID
+}
+
+// integrationRef is the fully-qualified ref the rebased result is published under (so the
+// clone, which fetches refs/heads/*, carries it as origin/integration/<id>). This form is for
+// git plumbing that does not DWIM — update-ref to publish it and update-ref -d to delete it
+// once main has advanced. The re-gate's checkout uses the short integrationBranch form instead.
+func integrationRef(issueID string) string {
+	return "refs/heads/" + integrationBranch(issueID)
 }
 
 func (m *gitMerger) exec(ctx context.Context, dir string, args ...string) (string, error) {
