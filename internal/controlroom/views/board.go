@@ -1,6 +1,7 @@
 package views
 
 import (
+	"hash/fnv"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,45 @@ import (
 // defense in depth against an untrusted id ever reaching a style attribute.
 func cardVTName(id string) templ.SafeCSS {
 	return templ.SafeCSS("view-transition-name: card-" + cssIdent(id))
+}
+
+// cardStyle is the card's inline style: always the view-transition-name (cardVTName) so a moved
+// card animates, plus — under epic mode (card.EpicID set) — a left-border tint whose hue is a
+// deterministic hash of the epic id (T7.6, control-room.md "Epics on the board"). The tint groups
+// a feature's work visually and disambiguates simultaneous epics with no central color registry,
+// stable across restarts. Color is never the *sole* channel (the epic badge text is the robust
+// identifier) — this is a redundant cue per the spec's accessibility note. It returns templ.SafeCSS
+// (bypassing templ's style sanitizer, which would strip view-transition-name): both interpolated
+// values are injection-free — the id is reduced to the CSS ident charset and the hue is an integer.
+func cardStyle(card query.IssueCard) templ.SafeCSS {
+	css := string(cardVTName(card.ID))
+	if card.EpicID != "" {
+		css += "; border-left-width: 3px; border-left-color: " + epicHue(card.EpicID)
+	}
+	return templ.SafeCSS(css)
+}
+
+// epicHue maps an epic id to a stable, well-distributed CSS hsl() color string. The hue is an
+// FNV-1a hash of the id modulo 360 (so it is deterministic and registry-free — the same epic is
+// the same color across restarts and across cards); saturation/lightness are fixed for a legible
+// tint on the dark surface. Only an integer 0..359 is interpolated, so the result is injection-free
+// for the SafeCSS path in cardStyle.
+func epicHue(epicID string) string {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(epicID))
+	return "hsl(" + strconv.Itoa(int(h.Sum32()%360)) + ", 70%, 60%)"
+}
+
+// epicProgressWidth renders the hero card's progress bar fill as a percent-width inline style —
+// integrated / total of an epic's issues (T7.6). Injection-free (only a clamped integer is
+// interpolated), so it is safe as SafeCSS. A zero-issue epic (impossible in practice — the root
+// itself counts) renders an empty bar rather than dividing by zero.
+func epicProgressWidth(e *query.EpicSummary) templ.SafeCSS {
+	pct := 0
+	if e != nil && e.Total > 0 {
+		pct = e.Integrated * 100 / e.Total
+	}
+	return templ.SafeCSS("width: " + strconv.Itoa(pct) + "%")
 }
 
 // cssIdent reduces a string to the CSS custom-ident charset (ASCII letters, digits, hyphen,

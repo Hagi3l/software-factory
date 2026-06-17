@@ -102,7 +102,7 @@ func TestBoardGroupsByStageInOrder(t *testing.T) {
 	}}
 	r := NewReader(issues, &fakeArts{}, &fakeProv{})
 
-	board, err := r.Board(context.Background(), []string{"plan", "implement", "qa", "integrate"})
+	board, err := r.Board(context.Background(), []string{"plan", "implement", "qa", "integrate"}, false, BudgetCaps{})
 	if err != nil {
 		t.Fatalf("Board: %v", err)
 	}
@@ -135,7 +135,7 @@ func TestBoardGroupsByStageInOrder(t *testing.T) {
 // of the factory at rest — specs/control-room.md "Columns are the pipeline, not the data".
 func TestBoardRendersFullPipelineWhenEmpty(t *testing.T) {
 	r := NewReader(&fakeIssues{}, &fakeArts{}, &fakeProv{})
-	board, err := r.Board(context.Background(), []string{"plan", "implement", "qa", "integrate"})
+	board, err := r.Board(context.Background(), []string{"plan", "implement", "qa", "integrate"}, false, BudgetCaps{})
 	if err != nil {
 		t.Fatalf("Board: %v", err)
 	}
@@ -164,7 +164,7 @@ func TestBoardCardCarriesTimerAnchors(t *testing.T) {
 		{ID: "h-1", Role: "implement", Status: "in_progress", StateEnteredAt: entered, CreatedAt: created},
 	}}
 	r := NewReader(issues, &fakeArts{}, &fakeProv{})
-	board, err := r.Board(context.Background(), []string{"implement"})
+	board, err := r.Board(context.Background(), []string{"implement"}, false, BudgetCaps{})
 	if err != nil {
 		t.Fatalf("Board: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestBoardFrontier(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			r := NewReader(&fakeIssues{all: tc.issues}, &fakeArts{}, &fakeProv{})
-			board, err := r.Board(context.Background(), stageOrder)
+			board, err := r.Board(context.Background(), stageOrder, false, BudgetCaps{})
 			if err != nil {
 				t.Fatalf("Board: %v", err)
 			}
@@ -254,7 +254,7 @@ func TestBoardFrontier(t *testing.T) {
 // TestBoardFrontierEmpty proves a board with no columns has no focus (and does not panic).
 func TestBoardFrontierEmpty(t *testing.T) {
 	r := NewReader(&fakeIssues{}, &fakeArts{}, &fakeProv{})
-	board, err := r.Board(context.Background(), nil)
+	board, err := r.Board(context.Background(), nil, false, BudgetCaps{})
 	if err != nil {
 		t.Fatalf("Board: %v", err)
 	}
@@ -267,7 +267,7 @@ func TestBoardFrontierEmpty(t *testing.T) {
 
 func TestBoardListAllError(t *testing.T) {
 	r := NewReader(&fakeIssues{allErr: errors.New("bd down")}, &fakeArts{}, &fakeProv{})
-	if _, err := r.Board(context.Background(), nil); err == nil {
+	if _, err := r.Board(context.Background(), nil, false, BudgetCaps{}); err == nil {
 		t.Fatal("Board swallowed a ListAll error")
 	}
 }
@@ -567,5 +567,118 @@ func TestInvocationGetError(t *testing.T) {
 	r := NewReader(&fakeIssues{getErr: errors.New("bd down")}, &fakeArts{}, &fakeProv{})
 	if _, err := r.Invocation(context.Background(), "h-1", BudgetCaps{}); err == nil {
 		t.Fatal("Invocation swallowed a Get error")
+	}
+}
+
+// --- Epic chrome on the board (T7.6) ---
+
+// findCard locates a card by id across all columns, or nil. The board scatters an epic's issues
+// across stage columns, so epic assertions must look the card up by id rather than by position.
+func findCard(b Board, id string) *IssueCard {
+	for ci := range b.Columns {
+		for i := range b.Columns[ci].Cards {
+			if b.Columns[ci].Cards[i].ID == id {
+				return &b.Columns[ci].Cards[i]
+			}
+		}
+	}
+	return nil
+}
+
+// epicBoardIssues is a single feature: a root seed (feat-1, no EpicID so it is its own epic) and
+// two children that thread the root's id — one integrated (closed), one still in flight. Marginal
+// Closing* spend is stamped so the hero's aggregate matches what the Budgets view sums.
+func epicBoardIssues() []core.Issue {
+	return []core.Issue{
+		{ID: "feat-1", Title: "Add the vault", Role: "plan", Status: "closed", ClosingTokens: 100, ClosingUSD: 1.0},
+		{ID: "feat-1.1", Title: "API", Role: "implement", Status: "closed", EpicID: "feat-1", ClosingTokens: 50, ClosingUSD: 0.5},
+		{ID: "feat-1.2", Title: "UI", Role: "qa", Status: "in_progress", EpicID: "feat-1", ClosingTokens: 0, ClosingUSD: 0},
+	}
+}
+
+// TestBoardEpicModeBadgeAndHero is T7.6's core contract under integration.mode: epic — every card
+// of a feature carries the shared epic identity (the badge/tint key), and only the epic *root*
+// card is the hero, carrying the children-integrated/total progress and the aggregate spend vs the
+// epic_budget cap. The feature is mid-flight (one child in_progress, nothing landed on main), so
+// the hero state is integrating.
+func TestBoardEpicModeBadgeAndHero(t *testing.T) {
+	r := NewReader(&fakeIssues{all: epicBoardIssues()}, &fakeArts{}, &fakeProv{})
+	caps := BudgetCaps{EpicTokens: 1000, EpicUSD: 10}
+	board, err := r.Board(context.Background(), []string{"plan", "implement", "qa"}, true, caps)
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	if !board.EpicMode {
+		t.Error("Board.EpicMode = false, want true")
+	}
+	// Every issue of the epic shares the root's id as its epic identity.
+	for _, id := range []string{"feat-1", "feat-1.1", "feat-1.2"} {
+		c := findCard(board, id)
+		if c == nil {
+			t.Fatalf("card %s missing", id)
+		}
+		if c.EpicID != "feat-1" {
+			t.Errorf("card %s EpicID = %q, want feat-1", id, c.EpicID)
+		}
+	}
+	// Only the root carries the hero summary.
+	root := findCard(board, "feat-1")
+	if root.Epic == nil {
+		t.Fatal("root card carries no Epic hero summary")
+	}
+	if child := findCard(board, "feat-1.1"); child.Epic != nil {
+		t.Error("child card must not carry a hero summary")
+	}
+	e := root.Epic
+	if e.Integrated != 2 || e.Total != 3 {
+		t.Errorf("progress = %d/%d, want 2/3", e.Integrated, e.Total)
+	}
+	if e.Tokens != 150 || e.USD != 1.5 {
+		t.Errorf("spend = %d tok / $%.2f, want 150 / $1.50", e.Tokens, e.USD)
+	}
+	if e.TokenCap != 1000 || e.USDCap != 10 {
+		t.Errorf("caps = %d / $%.2f, want 1000 / $10", e.TokenCap, e.USDCap)
+	}
+	if e.State != EpicStateIntegrating {
+		t.Errorf("state = %q, want integrating (nothing landed on main yet)", e.State)
+	}
+}
+
+// TestBoardEpicHeroDoneOnTerminalMerge proves the hero flips to done only when the epic's terminal
+// merge has landed on main — the durable provenance signal, not mere subtree drain. The fake
+// provenance reports the epic id (feat-1) as merged, so the hero reads done.
+func TestBoardEpicHeroDoneOnTerminalMerge(t *testing.T) {
+	prov := &fakeProv{byIssue: map[string]core.Provenance{"feat-1": {Issue: "feat-1"}}}
+	r := NewReader(&fakeIssues{all: epicBoardIssues()}, &fakeArts{}, prov)
+	board, err := r.Board(context.Background(), []string{"plan", "implement", "qa"}, true, BudgetCaps{})
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	root := findCard(board, "feat-1")
+	if root.Epic == nil {
+		t.Fatal("root card carries no Epic hero summary")
+	}
+	if root.Epic.State != EpicStateDone {
+		t.Errorf("state = %q, want done (terminal merge landed)", root.Epic.State)
+	}
+}
+
+// TestBoardPerItemModeNoEpicChrome proves per-item mode omits the epic chrome entirely: every
+// issue is its own epic there, so a badge on every card would be noise. No card carries an EpicID
+// or a hero summary even though the issues thread an epic_id.
+func TestBoardPerItemModeNoEpicChrome(t *testing.T) {
+	r := NewReader(&fakeIssues{all: epicBoardIssues()}, &fakeArts{}, &fakeProv{})
+	board, err := r.Board(context.Background(), []string{"plan", "implement", "qa"}, false, BudgetCaps{})
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	if board.EpicMode {
+		t.Error("Board.EpicMode = true in per-item mode")
+	}
+	for _, id := range []string{"feat-1", "feat-1.1", "feat-1.2"} {
+		c := findCard(board, id)
+		if c.EpicID != "" || c.Epic != nil {
+			t.Errorf("card %s has epic chrome in per-item mode (EpicID=%q, Epic=%v)", id, c.EpicID, c.Epic)
+		}
 	}
 }

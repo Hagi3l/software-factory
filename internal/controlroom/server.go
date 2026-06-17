@@ -275,6 +275,16 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// epicMode reports whether the attached factory is configured for atomic feature integration
+// (integration.mode: epic) — the single switch that turns on the board's epic chrome (per-card
+// badge/tint + the root hero card, T7.6). It reads the in-process config the same way the
+// orchestrator does (config.Harness.Mode), defaulting to per-item when no config is wired (a
+// standalone serve), so the board shows epic chrome exactly when the factory actually lands work
+// epic-atomically.
+func (s *Server) epicMode() bool {
+	return s.cfg != nil && s.cfg.Harness.Mode() == config.IntegrationEpic
+}
+
 // handleBoard renders the full kanban page. With no read model wired (standalone
 // `harness serve`) it shows a "not attached" notice rather than an empty board; a board
 // read error renders the same chrome with the error so the page never 500s blank. The
@@ -284,7 +294,7 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, views.BoardMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to see live work."))
 		return
 	}
-	board, err := s.reader.Board(r.Context(), s.stageOrder)
+	board, err := s.reader.Board(r.Context(), s.stageOrder, s.epicMode(), s.budgetCaps)
 	if err != nil {
 		s.log.Error("controlroom: board read failed", "err", err)
 		s.render(w, r, views.BoardMessage("Could not load the board: "+err.Error()))
@@ -303,7 +313,7 @@ func (s *Server) handleBoardCards(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "board unavailable: control room is not attached to a running factory\n", http.StatusServiceUnavailable)
 		return
 	}
-	board, err := s.reader.Board(r.Context(), s.stageOrder)
+	board, err := s.reader.Board(r.Context(), s.stageOrder, s.epicMode(), s.budgetCaps)
 	if err != nil {
 		s.log.Error("controlroom: board fragment read failed", "err", err)
 		http.Error(w, "could not refresh the board\n", http.StatusInternalServerError)

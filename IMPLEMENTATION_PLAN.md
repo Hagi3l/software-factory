@@ -47,8 +47,9 @@ autonomous implementation) — a later validation concern, never an engineering 
   optional items are T5.5 gVisor and T5.11 warm pools + HA), and **Phase 7** (atomic
   feature integration / epic mode — net-new feature work, not hardware-blocked; T7.1 (the live
   multi-child-rebase bug), T7.2 (`integration.mode` config), T7.3 (merge-queue retargeting), and
-  T7.4 (epic-completion detection + terminal merge), and T7.5 (one-active-epic consent gate +
-  wizard creates the epic branch with the spec) are done — T7.6 (board epic hero card) is next).
+  T7.4 (epic-completion detection + terminal merge), T7.5 (one-active-epic consent gate +
+  wizard creates the epic branch with the spec), and T7.6 (board epic hero card) are done —
+  T7.7 (vault demo exercises epic mode) is next).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -399,12 +400,23 @@ per epic, not new machinery. Spec contract:
   `TestSeedEpicGateTracksLanding` (drained-but-unlanded refused; admitted once a terminal-merge
   trailer is on main). *(spec)* [integration.md](specs/integration.md),
   [control-room.md](specs/control-room.md)
-- [ ] **T7.6 Board epic hero card** *(needs T7.4)* — render the epic on the
-  [board](specs/control-room.md): every card gets an **epic badge** (root id) + a left-border
-  tint hashed deterministically from `epic_id` (colour never the sole channel); the epic
-  **root card is the hero** — distinct treatment, a **progress indicator** (children
-  integrated / total) and live spend vs. `epic_budget`, carried through an `integrating` state
-  to `done` as the terminal merge lands. No new data (rides existing `epic_id`). *(spec)*
+- [x] **T7.6 Board epic hero card** *(needs T7.4)* — under `integration.mode: epic` the board
+  makes the feature legible with no new data (rides existing `epic_id` via `core.EpicOf`).
+  `query.Board` gained an `epicMode bool` + `query.BudgetCaps` param (server passes a new
+  `s.epicMode()` reading `cfg.Harness.Mode() == config.IntegrationEpic`, plus `s.budgetCaps`);
+  in epic mode every `IssueCard` carries its shared `EpicID` and the epic **root** card a new
+  `*query.EpicSummary` hero roll-up (Integrated/Total closed-vs-all, Tokens/USD summed marginal
+  Closing* spend matching Budgets + authorizeEpic, caps vs `epic_budget`, State). State is
+  `integrating`, flipping to `done` only when the terminal merge has landed on `main` — read
+  via the new `Reader.landedOnMain` (`prov.ByIssue(epicID)` greps `main`), best-effort. The
+  view (`board.templ`/`board.go`) renders an **epic badge** on every card, a hue-hashed
+  left-border tint (`cardStyle`/`epicHue`: FNV-1a → injection-free `hsl()` SafeCSS, colour
+  never the sole channel), and an `epicHero` block (state badge, integrated X/Y + progress bar
+  via `epicProgressWidth`, spend vs cap when capped); per-item mode renders none of it. `Board`
+  echoes an `EpicMode` field. Templ + Tailwind regenerated. Tests: `query_test.go` (badge+hero
+  2/3 progress + summed spend, done-on-terminal-merge via fake prov, per-item no-chrome) and
+  `board_test.go` (rendered badge/tint/hero/`2/3`/`integrating`, per-item no chrome). Docs:
+  `docs/control-room.md` Board row gained an epic-mode paragraph. *(spec)*
   [control-room.md](specs/control-room.md)
 - [ ] **T7.7 Vault demo exercises epic mode** *(needs T7.4)* — set `integration.mode: epic`
   in `demo/vault/config/harness.yaml`; confirm a wizard-drafted, multi-child feature lands as

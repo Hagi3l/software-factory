@@ -93,17 +93,28 @@ templ boardColumn(col query.BoardColumn) {
 // links onward to). It carries a stable id + view-transition-name keyed on the issue id (T4.18)
 // so the View Transitions API can tween the card to a new column on a live refresh, and a
 // per-card timer line ticked client-side.
+//
+// Under integration.mode: epic (card.EpicID set, T7.6) the card also wears its feature's
+// identity: a hue-hashed left-border tint (cardStyle) and an epic badge, so a feature's work
+// groups visually. The epic *root* card is additionally the hero (card.Epic set) — it renders
+// the whole-feature progress + spend + state block via epicHero. In per-item mode none of this
+// shows (EpicID/Epic are empty), so the card is unchanged.
 templ boardCard(card query.IssueCard) {
 	<a
 		id={ "card-" + card.ID }
 		href={ templ.URL("/invocation/" + card.ID) }
-		style={ cardVTName(card.ID) }
+		style={ cardStyle(card) }
 		class="block rounded-lg border border-border bg-raised p-3 shadow-card transition duration-150 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-card-hover"
 	>
 		<div class="flex items-center justify-between gap-2">
 			<span class="font-mono text-xs text-faint">{ card.ID }</span>
 			@statusBadge(card.Status)
 		</div>
+		if card.EpicID != "" {
+			<p class="mt-1">
+				<span class="inline-flex items-center gap-1 rounded-full bg-canvas px-2 py-0.5 text-xs font-medium text-muted" title="epic">epic { card.EpicID }</span>
+			</p>
+		}
 		<p class="mt-1.5 text-sm text-fg">{ card.Title }</p>
 		if card.Spec != "" {
 			<p class="mt-1 truncate font-mono text-xs text-faint">{ card.Spec }</p>
@@ -111,8 +122,51 @@ templ boardCard(card query.IssueCard) {
 		if card.Attempt > 1 {
 			<p class="mt-1 text-xs text-st-warn">attempt { strconv.Itoa(card.Attempt) }</p>
 		}
+		if card.Epic != nil {
+			@epicHero(card.Epic)
+		}
 		@cardTimer(card)
 	</a>
+}
+
+// epicHero is the whole-feature roll-up the epic root card renders under epic mode (T7.6,
+// control-room.md "The root card is the hero"): the feature's integrating→done state, a
+// children-integrated / total progress indicator + bar, and the aggregate spend against the
+// epic_budget cap (shown only when a cap is configured). It rides existing data — the
+// query.EpicSummary aggregate over the issues sharing the epic id — so the hero needs no new
+// store. It makes the *feature* (not just the work item) legible: the unit that lands and deploys.
+templ epicHero(e *query.EpicSummary) {
+	<div class="mt-2 space-y-1.5 rounded-md border border-border bg-canvas p-2">
+		<div class="flex items-center justify-between">
+			<span class="text-xs font-semibold uppercase tracking-wide text-muted">epic</span>
+			@epicStateBadge(e.State)
+		</div>
+		<div class="flex items-center justify-between text-xs text-muted">
+			<span>integrated</span>
+			<span class="tabular-nums text-fg">{ strconv.Itoa(e.Integrated) }/{ strconv.Itoa(e.Total) }</span>
+		</div>
+		<div class="h-1.5 w-full overflow-hidden rounded-full bg-surface">
+			<div class="h-full rounded-full bg-st-progress" style={ epicProgressWidth(e) }></div>
+		</div>
+		if e.USDCap > 0 || e.TokenCap > 0 {
+			<div class="flex items-center justify-between text-xs text-muted">
+				<span>spend</span>
+				<span class="tabular-nums text-fg">{ formatUSD(e.USD) } / { capUSD(e.USDCap) }</span>
+			</div>
+		}
+	</div>
+}
+
+// epicStateBadge tints the hero's feature state: integrating (in-progress accent) while children
+// finish, done (idle/settled accent) once the terminal merge has landed the feature on main. The
+// class literals are inline so the Tailwind scanner sees them (same reason as statusBadge).
+templ epicStateBadge(state string) {
+	switch state {
+		case "done":
+			<span class="inline-flex items-center gap-1 rounded-full bg-st-idle-bg px-2 py-0.5 text-xs font-medium text-st-idle"><span class="h-1.5 w-1.5 rounded-full bg-st-idle"></span>done</span>
+		default:
+			<span class="inline-flex items-center gap-1 rounded-full bg-st-progress-bg px-2 py-0.5 text-xs font-medium text-st-progress"><span class="h-1.5 w-1.5 rounded-full bg-st-progress"></span>integrating</span>
+	}
 }
 
 // cardTimer is the card's clock line (T4.18, control-room.md "The board, in motion"). For an

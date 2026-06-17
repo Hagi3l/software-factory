@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/controlroom/query"
 	"github.com/Loxstomper/harness/internal/core"
 )
@@ -327,4 +328,65 @@ func colOrder(body string) []string {
 		}
 	}
 	return out
+}
+
+// epicBoardServer builds a board server configured for integration.mode: epic, over a one-feature
+// fixture (root feat-1 + two children). It is the server-level (rendered-HTML) counterpart to the
+// query-layer epic tests — proving the epic chrome (badge, hero block, progress, state) actually
+// reaches the page when the factory lands work epic-atomically (T7.6).
+func epicBoardServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	issues := []core.Issue{
+		{ID: "feat-1", Title: "Add the vault", Role: "plan", Status: "closed"},
+		{ID: "feat-1.1", Title: "API", Role: "implementor", Status: "closed", EpicID: "feat-1"},
+		{ID: "feat-1.2", Title: "UI", Role: "test-author", Status: "in_progress", EpicID: "feat-1"},
+	}
+	s := New(Options{
+		Version:    "test",
+		Reader:     query.NewReader(&fakeIssues{all: issues}, fakeArts{}, fakeProv{}),
+		StageOrder: []string{"plan", "test-author", "implementor"},
+		Config:     &config.Config{Harness: &config.Harness{Integration: &config.Integration{Mode: config.IntegrationEpic}}},
+	})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// TestBoardEpicChromeRenders is T7.6's rendered-HTML contract under epic mode: every card shows the
+// shared epic badge, and the epic root renders the hero block — the integrating state and the
+// children-integrated/total progress (2 of 3 closed). The hue-hashed left-border tint rides the
+// card's inline style.
+func TestBoardEpicChromeRenders(t *testing.T) {
+	ts := epicBoardServer(t)
+	r := get(t, ts, "/board")
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	for _, want := range []string{
+		"epic feat-1",          // the shared epic badge text (the robust, non-color identifier)
+		"border-left-color",    // the hue-hashed tint on the card's inline style
+		"integrating",          // the hero's feature state (nothing landed on main in the fake prov)
+		"integrated",           // the hero's progress label
+		"2/3",                  // children integrated / total (feat-1 + feat-1.1 closed, feat-1.2 in flight)
+	} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("epic board missing %q", want)
+		}
+	}
+}
+
+// TestBoardNoEpicChromeInPerItem proves the default per-item server renders no epic chrome — the
+// shared fixture threads no epic_id and the mode is per-item, so neither a badge nor a hero block
+// appears. This guards against the epic chrome leaking into the kernel default.
+func TestBoardNoEpicChromeInPerItem(t *testing.T) {
+	ts := boardServer(t) // no Config → per-item
+	r := get(t, ts, "/board")
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	for _, unwanted := range []string{"epic ", "border-left-color", "integrating"} {
+		if strings.Contains(r.body, unwanted) {
+			t.Errorf("per-item board unexpectedly contains epic chrome %q", unwanted)
+		}
+	}
 }

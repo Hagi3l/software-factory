@@ -73,6 +73,19 @@ type IssueCard struct {
 	Spec           string
 	StateEnteredAt time.Time
 	CreatedAt      time.Time
+	// EpicID is the card's epic identity (core.EpicOf: the root seed's id, shared by every
+	// issue of one feature) — set only under integration.mode: epic, "" otherwise. The board
+	// renders it as a shared epic badge + a hue-hashed left-border tint so simultaneous epics
+	// read apart and a feature's work groups visually (T7.6, control-room.md "Epics on the
+	// board"). It is empty in per-item mode, where every issue is its own epic and the chrome
+	// would be noise.
+	EpicID string
+	// Epic is the whole-feature summary, set only on an epic's *root* card (the hero) under
+	// epic mode — nil on a child card and in per-item mode. It carries the progress indicator
+	// (children integrated / total), the aggregate spend vs the epic_budget cap, and the
+	// feature's integrating→done state, so the operator watches the feature land without
+	// reading commits (T7.6, control-room.md "The root card is the hero").
+	Epic *EpicSummary
 }
 
 func cardOf(i core.Issue) IssueCard {
@@ -88,6 +101,88 @@ func cardOf(i core.Issue) IssueCard {
 	}
 }
 
+// Epic hero states (IssueCard.Epic.State, control-room.md "The root card is the hero"). The hero
+// carries the feature through integrating while children finish and flips to done the moment the
+// single terminal merge lands it on main — the board's read of the atomic feature landing.
+const (
+	// EpicStateIntegrating: the feature is still building/landing — at least one issue is not yet
+	// integrated, or the subtree has drained but the terminal merge has not yet advanced main.
+	EpicStateIntegrating = "integrating"
+	// EpicStateDone: the epic's terminal merge has landed on main (a provenance commit citing the
+	// epic id). This is the durable signal — read from git, not from issue status — so a drained
+	// epic shows integrating until main actually moves, then flips to done.
+	EpicStateDone = "done"
+)
+
+// EpicSummary is the whole-feature roll-up the board's hero (epic root) card renders under
+// integration.mode: epic (T7.6, control-room.md "Epics on the board"). It needs no new data —
+// it is an aggregate over the issues sharing an epic_id (core.EpicOf), the same grouping the
+// epic budget enforces and the Budgets view shows: Integrated/Total is the closed-vs-all count
+// (a closed issue is one integrated onto the epic branch), Tokens/USD is the summed marginal
+// spend against the epic_budget cap, and State is the integrating→done lifecycle. So the hero
+// shows "bounded autonomy" — progress and spend vs cap — as the feature builds.
+type EpicSummary struct {
+	EpicID     string
+	Integrated int     // issues of this epic that are closed (integrated onto the epic branch)
+	Total      int     // all issues of this epic
+	State      string  // EpicStateIntegrating | EpicStateDone
+	Tokens     int     // summed marginal token spend across the epic (matches authorizeEpic)
+	TokenCap   int     // configured epic token cap, 0 when uncapped
+	TokenPct   int     // burn as a clamped 0..100% of cap for a meter; 0 when uncapped
+	USD        float64 // summed marginal USD spend across the epic
+	USDCap     float64 // configured epic USD cap, 0 when uncapped
+	USDPct     int     // burn as a clamped 0..100% of cap; 0 when uncapped
+}
+
+// epicSummaries rolls every issue up into its epic (core.EpicOf) for the board's hero cards.
+// It mirrors the Budgets view's epic aggregation (marginal Closing* spend, never cumulative
+// Spent*, which a fan-out would double-count) so the hero and the budget view can never
+// disagree on a feature's burn. State is integrating by default and flips to done only when the
+// terminal merge has landed the epic on main — read from provenance (landedOnMain), not from
+// issue status, because the subtree drains (all issues closed) a slow-sweep tick *before* main
+// actually advances; using the durable git signal keeps the hero honest across that window.
+func (r *Reader) epicSummaries(ctx context.Context, issues []core.Issue, caps BudgetCaps) map[string]*EpicSummary {
+	sums := make(map[string]*EpicSummary)
+	for _, i := range issues {
+		ep := core.EpicOf(i)
+		s := sums[ep]
+		if s == nil {
+			s = &EpicSummary{EpicID: ep, State: EpicStateIntegrating}
+			sums[ep] = s
+		}
+		s.Total++
+		if i.Status == statusClosed {
+			s.Integrated++
+		}
+		s.Tokens += i.ClosingTokens
+		s.USD += i.ClosingUSD
+	}
+	for ep, s := range sums {
+		s.TokenCap = caps.EpicTokens
+		s.USDCap = caps.EpicUSD
+		s.TokenPct = meterPct(float64(s.Tokens), float64(caps.EpicTokens))
+		s.USDPct = meterPct(s.USD, caps.EpicUSD)
+		if r.landedOnMain(ctx, ep) {
+			s.State = EpicStateDone
+		}
+	}
+	return sums
+}
+
+// landedOnMain reports whether an epic's terminal merge has landed on main — a provenance
+// commit on main citing the epic id (the root's id). In epic mode children integrate onto the
+// epic branch, so main carries only the single terminal merge; ByIssue (which greps main)
+// therefore returns merged=true exactly when the feature has atomically landed. Best-effort: a
+// missing provenance port or a git fault reads as "not landed" (the hero stays integrating)
+// rather than failing the board — the same posture as the status bar's last-merge lookup.
+func (r *Reader) landedOnMain(ctx context.Context, epicID string) bool {
+	if r.prov == nil {
+		return false
+	}
+	_, merged, err := r.prov.ByIssue(ctx, epicID)
+	return err == nil && merged
+}
+
 // BoardColumn is one stage's cards on the kanban board. Focus marks the single column the
 // board auto-scrolls to — the work frontier (control-room.md "Follow the frontier"): the
 // leftmost column holding incomplete work, else the rightmost when everything is closed. It
@@ -100,10 +195,13 @@ type BoardColumn struct {
 }
 
 // Board is the kanban projection: every issue grouped by stage (its role), columns in the
-// pipeline order the caller supplies.
+// pipeline order the caller supplies. EpicMode echoes whether epic chrome was assembled (the
+// cards carry EpicID/Epic) so the view can render the legend/affordance without re-reading
+// config — the same reason Budgets echoes its Caps.
 type Board struct {
-	Columns []BoardColumn
-	Total   int
+	Columns  []BoardColumn
+	Total    int
+	EpicMode bool
 }
 
 // unassignedStage is the column for issues with no role set (a freshly seeded epic before
@@ -119,10 +217,20 @@ const unassignedStage = "(unassigned)"
 // ad-hoc role the config never declared — is appended in stable alphabetical order, with
 // unassigned work last; those materialize only when they actually hold cards. Cards within
 // a column are ordered by id for a stable render.
-func (r *Reader) Board(ctx context.Context, stageOrder []string) (Board, error) {
+// Under integration.mode: epic (epicMode), every card is enriched with its epic identity (the
+// hue-hashed badge/tint) and each epic's root card carries the whole-feature EpicSummary hero
+// roll-up, measured against the supplied epic budget caps (T7.6, control-room.md "Epics on the
+// board"). In per-item mode (epicMode false) the epic chrome is omitted entirely — every issue
+// is its own epic there, so a badge on every card would be noise — and caps is ignored. caps is
+// the same query.BudgetCaps the Budgets view uses, so the hero's spend agrees with that view.
+func (r *Reader) Board(ctx context.Context, stageOrder []string, epicMode bool, caps BudgetCaps) (Board, error) {
 	issues, err := r.issues.ListAll(ctx)
 	if err != nil {
 		return Board{}, fmt.Errorf("query: board: %w", err)
+	}
+	var summaries map[string]*EpicSummary
+	if epicMode {
+		summaries = r.epicSummaries(ctx, issues, caps)
 	}
 	byStage := make(map[string][]IssueCard)
 	for _, i := range issues {
@@ -130,10 +238,20 @@ func (r *Reader) Board(ctx context.Context, stageOrder []string) (Board, error) 
 		if stage == "" {
 			stage = unassignedStage
 		}
-		byStage[stage] = append(byStage[stage], cardOf(i))
+		c := cardOf(i)
+		if epicMode {
+			ep := core.EpicOf(i)
+			c.EpicID = ep
+			// A card is its epic's root (the hero) exactly when its own id is the epic id; only
+			// the hero carries the whole-feature summary, children carry just the shared badge.
+			if i.ID == ep {
+				c.Epic = summaries[ep]
+			}
+		}
+		byStage[stage] = append(byStage[stage], c)
 	}
 
-	board := Board{Total: len(issues)}
+	board := Board{Total: len(issues), EpicMode: epicMode}
 	for _, stage := range orderedStages(stageOrder, byStage) {
 		cards := byStage[stage]
 		sort.Slice(cards, func(a, b int) bool { return cards[a].ID < cards[b].ID })
