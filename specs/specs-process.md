@@ -154,7 +154,7 @@ to reissue, and already-merged work may spawn new issues for the diff. Mental
 model: **the factory recompiles the delta** when the spec changes.
 
 This is realized as a **continuous reconcile sweep**, not an explicit edit-event hook:
-on each tick the orchestrator re-resolves every in-flight (in_progress) issue's slice
+the orchestrator periodically re-resolves every in-flight (in_progress) issue's slice
 and re-hashes it, so re-resolving *subsumes* "diff which issues referenced the edited
 file" — an issue whose slice does not include the edit re-hashes unchanged and is left
 alone. An issue whose hash no longer matches its pin is **reissued**: returned to the
@@ -167,7 +167,11 @@ rather than disrupting live work.
 
 Re-deriving **already-merged** work for a spec diff is handled per **(epic, spec-path)**
 unit, not per closed issue — which is precisely what dedupes one edit across an epic's many
-closed issues that share a path. On each sweep the orchestrator groups closed issues by
+closed issues that share a path. This is the heavier half of the recompile: it reads
+the full closed-issue table to catch minute-plus-granularity human edits, so it runs on
+its own slower cadence rather than at dispatch frequency (see
+[orchestrator](components/orchestrator.md#live-state-vs-durable-state--the-in-flight-projection)
+for the loop mechanism). The orchestrator groups closed issues by
 their `epic_id` and spec path, re-resolves and re-hashes that slice, and on a mismatch
 against the pinned hash spawns **one fresh `plan` issue** for that epic and path (carrying
 the epic's id and tags, branched from the epic's merged tip). Re-entry is at the

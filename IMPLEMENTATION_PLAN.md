@@ -319,8 +319,13 @@ Unwinds the kernel's single-stage, single-soul, trivial-merge simplifications.
   startup pass. **Kept in ONE goroutine on purpose:** the result consumer already writes beads concurrently with the tick
   loop, so a second sweep *goroutine* would add a new beads-write race; two tickers in one `select` change cadence, not
   concurrency — beads writes stay serialized within the loop exactly as before. `SweepInterval` stays an Options default
-  (not YAML) for parity with `Tick`/`LeaseTTL` — no config-shape/CLI/route/view change ⇒ no `docs/` change; the spec was
-  already correct, so none needed there either. TCB-touching (orchestrator), human-reviewed. Tests: `expired` returns
+  (not YAML) for parity with `Tick`/`LeaseTTL` — no config-shape/CLI/route/view change ⇒ no `docs/` change. The spec's
+  T3.13 *design* was already written ahead (orchestrator.md "Live state vs. durable state"), so the work was implementing
+  to it; the one spec gap this surfaced — the **intra-orchestrator concurrency model** (single writer = single *process*;
+  several loops write beads concurrently, kept safe by the projection gating same-issue contention + the store tolerating
+  concurrent writes to different issues, NOT a global lock — the constraint a future beads-writing loop must preserve) was
+  added to orchestrator.md "Crash safety", and specs-process.md's recompile wording was tightened so it no longer implies
+  both sweeps run at dispatch frequency. TCB-touching (orchestrator), human-reviewed. Tests: `expired` returns
   expired+zero-lease excludes live; `reset` seeds durable lease (pre-restart-expired ⇒ strandable, future ⇒ not);
   sweepLeases releases expired-only and drops them from the projection; scheduleReady→recompileSpecDelta drift fires via
   the recorded pin; beads `lease_until`→`core.Issue.Lease` round-trip; existing rebuild/dispatch-storm/idempotency tests

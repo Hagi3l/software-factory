@@ -145,6 +145,20 @@ the read pressure that causes the lag in the first place.
   recovery — the orchestrator's view *is* the truth. The projection never overrides
   beads; it only caches what the single writer already wrote.
 
+**Single writer means a single _process_, not a single loop.** Within the
+orchestrator several concurrent loops write beads — the event-driven Result and
+approval consumers, and the tick loop that dispatches and sweeps. This is safe not
+because writes are globally serialised behind a lock (there is none), but because (a)
+two loops never touch the *same* issue at once — the in-flight projection gates
+same-issue contention: a Result is acted on only while its issue is in the projection,
+a dispatch skips a projected issue, and serial Result handling removes an issue before
+the next is processed — and (b) the work store tolerates concurrent writes to
+*different* issues. The constraint this puts on future change: anything that adds
+another beads-writing loop must preserve (a) — it cannot assume a global write lock,
+because the coordination is the projection plus serial Result handling, not a mutex.
+This is why splitting dispatch's fast cadence from the slow full-table sweep keeps
+them on one loop's serialisation rather than introducing an independent writer.
+
 ---
 
 ## What it must never do
