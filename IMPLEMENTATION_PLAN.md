@@ -13,15 +13,16 @@ in-process orchestrator + runner carry a seed issue through implement → gate �
 merge to `main` with a provenance trailer. Verified end-to-end against a real model
 (local Ollama via `openai-compat`) and real Docker sandboxes.
 
-**Phases 2, 3, 4, and 6 are complete; only Phase 5 has live work, and all of it is
+**Phases 2, 3, 4, 6, and 7 are complete; only Phase 5 has live work, and all of it is
 optional or hardware-blocked.** Phase 2 (independent verification) is complete — only
 the optional T2.11 decision-note remains (resolved as configuration, not a build item).
 Phase 3 (full DAG, decomposition, merge queue) is complete (T3.13 landed). Phase 4
 (control room + Create/Resolve wizard) is complete. Phase 6 (agent semantic LSP tooling)
-is complete (T6.1–T6.3). The only remaining *engineering* of new substrate is Phase 5
-(production isolation & distribution), and within it every still-open item is either
-**optional** (T5.5 gVisor backend, T5.11 warm pools + HA orchestrator) or
-**hardware-blocked** (T5.2 Firecracker, needs KVM the dev box lacks).
+is complete (T6.1–T6.3). Phase 7 (atomic feature integration / epic mode) is complete
+(T7.1–T7.7; the vault demo now runs `integration.mode: epic`). The only remaining
+*engineering* of new substrate is Phase 5 (production isolation & distribution), and within
+it every still-open item is either **optional** (T5.5 gVisor backend, T5.11 warm pools + HA
+orchestrator) or **hardware-blocked** (T5.2 Firecracker, needs KVM the dev box lacks).
 
 **Development mode for Phases 2–6: built by hand with Claude Code, human-reviewed —
 not self-hosted.** Bootstrap's threshold (a) ("the harness builds itself as a
@@ -42,14 +43,14 @@ autonomous implementation) — a later validation concern, never an engineering 
   0–1, 2, 3, 4, and 6 are done; the verbose per-task findings were pruned once complete —
   that history lives in git, the code, and the specs they informed (each task updated its
   `(spec)` as it landed).
-- **Open tasks (`- [ ]`) keep their full detail.** Two open lines: **Phase 5** (production
+- **Open tasks (`- [ ]`) keep their full detail.** One open line remains: **Phase 5** (production
   isolation — the Firecracker backend T5.2 is hardware-blocked and deliberately last; the
-  optional items are T5.5 gVisor and T5.11 warm pools + HA), and **Phase 7** (atomic
-  feature integration / epic mode — net-new feature work, not hardware-blocked; T7.1 (the live
-  multi-child-rebase bug), T7.2 (`integration.mode` config), T7.3 (merge-queue retargeting), and
-  T7.4 (epic-completion detection + terminal merge), T7.5 (one-active-epic consent gate +
-  wizard creates the epic branch with the spec), and T7.6 (board epic hero card) are done —
-  T7.7 (vault demo exercises epic mode) is next).
+  optional items are T5.5 gVisor and T5.11 warm pools + HA). **Phase 7** (atomic feature
+  integration / epic mode) is **complete** — T7.1 (the live multi-child-rebase bug),
+  T7.2 (`integration.mode` config), T7.3 (merge-queue retargeting), T7.4 (epic-completion
+  detection + terminal merge), T7.5 (one-active-epic consent gate + wizard creates the epic
+  branch with the spec), T7.6 (board epic hero card), and T7.7 (vault demo exercises epic mode)
+  are all done.
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -418,12 +419,22 @@ per epic, not new machinery. Spec contract:
   `board_test.go` (rendered badge/tint/hero/`2/3`/`integrating`, per-item no chrome). Docs:
   `docs/control-room.md` Board row gained an epic-mode paragraph. *(spec)*
   [control-room.md](specs/control-room.md)
-- [ ] **T7.7 Vault demo exercises epic mode** *(needs T7.4)* — set `integration.mode: epic`
-  in `demo/vault/config/harness.yaml`; confirm a wizard-drafted, multi-child feature lands as
-  **one** merge commit and fires **one** deploy. The deploy path needs **zero** changes —
-  `run.sh`'s push watcher and `deploy.yml` already key on a `main` advance, which now happens
-  once per feature. Update `demo/vault/README.md`'s "How it maps to the real config" table to
-  note the epic-mode tuning. *(spec)* [integration.md](specs/integration.md)
+- [x] **T7.7 Vault demo exercises epic mode** *(needs T7.4)* — *done.* Added the
+  `integration:\n  mode: epic` block to `demo/vault/config/harness.yaml` (with a load-bearing
+  comment: the operator drafts a *feature*, so the feature is the unit of integration **and** of
+  deploy — children integrate onto `epic/<id>`, `main` advances once at the terminal merge when
+  the subtree drains, so `run.sh`'s push watcher fires **one** deploy per feature). The deploy
+  path needed **zero** code changes — `run.sh`'s `push_main_watcher` and `deploy.yml`'s
+  `on: push: branches: [main]` already key on a `main` advance, which epic mode makes happen
+  once per feature. Verified with `harness validate --config demo/vault/config` → `OK` (the lone
+  warning is the pre-existing T2.13 producer/verifier family-overlap advisory, unrelated). Docs:
+  `demo/vault/README.md` updated — the DAG diagram now shows children landing on the epic branch
+  + a terminal `land` step, the post-diagram paragraph explains epic mode + one-deploy-per-feature,
+  the draft-feature step notes the board epic hero card and the single epic-id provenance trailer,
+  the deploy bullet notes the once-per-feature push, and the "How it maps to the real config" table
+  gained a third row (per-item → `integration.mode: epic`). No spec change (integration.md already
+  specifies the demo exercises epic mode). **Phase 7 complete.** *(spec)*
+  [integration.md](specs/integration.md)
 
 ---
 

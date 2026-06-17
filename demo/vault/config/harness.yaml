@@ -5,7 +5,8 @@
 # can't disturb the real pipeline. Unlike the landing-page demo it exercises the whole DAG
 # — including decomposition and a real Go/security qa gate — on a non-trivial codebase. The
 # operator drafts a new feature requirement live in the control-room Create-Task wizard
-# (the `requirements` human stage), and the autonomous stages take it to a merge on `main`.
+# (the `requirements` human stage), and the autonomous stages take it to a single atomic
+# merge on `main` (epic mode — see `integration` below).
 #
 # Differences from the shipped config/harness.yaml, and why:
 #   - qa drops `mutation>=0.8`. Gremlins mutation testing is slow and flaky for a live demo
@@ -16,6 +17,12 @@
 #     throwaway repo (no harness TCB path), so integrate merges hands-free — no `harness
 #     approve` step. Flip to trusted-dev (+ tcb_paths + a `human-approved` postcondition on
 #     integrate) to demo the approval gate instead.
+#   - `integration.mode: epic`. The shipped config is per-item (the kernel default — each work
+#     item lands on `main` as it verifies). Here the wizard-drafted feature lands ATOMICALLY:
+#     every child integrates onto an `epic/<id>` branch and `main` advances exactly once, by
+#     the terminal merge, when the subtree drains — so the public-repo push + VPS deploy fires
+#     once per feature, not once per child. The unit of integration is the feature the human
+#     drafted, which is also the unit of deploy.
 #   - `checks` resolve to the *vault app's* make targets (its Makefile travels in the seed
 #     repo), not the harness's. That is the whole point: the gate runs the target project's
 #     own QA in a clean sandbox.
@@ -140,6 +147,18 @@ checks:
 # proof-shaped tests-pass stays fail-fast (no metric here to keep fail-fast). See
 # specs/verification.md.
 independent_checks: [golangci-lint, gosec, govulncheck, license-scan]
+
+# Atomic feature integration (epic mode). The operator drafts a *feature* in the wizard, not a
+# work item, so the feature is the unit of integration: every child integrates onto an
+# `epic/<epic_id>` branch (cut from `main` when the wizard's spec is approved), `main` stays
+# quiescent while the subtree builds, and the orchestrator's terminal merge advances `main`
+# exactly ONCE when the epic drains. Because run.sh's push watcher keys on a `main` advance,
+# that means one push to the public repo and one VPS deploy per feature — not one per child.
+# v1 runs one epic at a time (a second wizard Approve is refused while the feature is in
+# flight). Set `mode: per-item` (or drop the block) to land each child on `main` as it
+# verifies and deploy per child. See specs/integration.md "Atomic feature integration".
+integration:
+  mode: epic
 
 policy:
   max_retries: 3

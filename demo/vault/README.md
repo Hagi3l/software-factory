@@ -25,14 +25,19 @@ requirements   you draft a feature in the Create-Task wizard (/create) — the o
        └─ author-tests   a soul writes FAILING Go tests from the spec (proven RED)
             └─ implement   a *different* soul makes them pass (proven RED→GREEN, clean sandbox)
                  └─ qa       a *different* soul re-runs tests + lint + gosec + govulncheck + license-scan
-                      └─ integrate   the orchestrator merges to main (autonomous; no approval step)
-                           └─ deploy   the merge is pushed to a public GitHub repo → CI deploys it to your VPS
+                      └─ integrate   each verified child lands on the epic/<id> branch (autonomous; no approval)
+                           └─ land    when every child has drained, one terminal merge advances `main` ONCE
+                                └─ deploy   that single push to the public GitHub repo → CI deploys it to your VPS
 ```
 
-The merged commit on `main` is authored by **`harness`** (the trusted layer, never the
-agent) with its provenance trailer, and its subject is the feature's title — so the public
-repo's history reads like an ordinary project's, with a machine author and a full audit
-trail. See "Push to a public repo + deploy" below.
+This runs in **epic mode** (`integration.mode: epic`): the feature you drafted is the unit of
+integration, so its children integrate onto an `epic/<id>` branch while `main` stays quiescent,
+and the orchestrator's **terminal merge advances `main` exactly once** when the whole subtree
+drains. That single commit is authored by **`harness`** (the trusted layer, never the agent)
+with its provenance trailer, and its subject is the **feature's** title — so the public repo's
+history reads like an ordinary project's (a machine author, a full audit trail) and the push
+watcher fires **one** deploy per feature, not one per child. See "Push to a public repo +
+deploy" below.
 
 ## What's here
 
@@ -108,8 +113,11 @@ Then open the control room at <http://127.0.0.1:8080>.
    and once intent has converged it drafts a **spec + seed issue(s)**.
 2. Click **Approve**. That consent gate seeds a `plan` issue; everything after is autonomous.
 3. Watch the **Board** and **Activity** views as the planner fans the work out and each
-   child flows author-tests → implement → qa → integrate. When it lands, `git -C <scratch>
-   log` shows the provenance trailer and the diff is your feature.
+   child flows author-tests → implement → qa → integrate onto the epic branch. The board's
+   **epic hero card** rolls up the feature's progress (integrated X/Y, spend vs the epic
+   budget). When the last child drains, the terminal merge lands the whole feature on `main`
+   in **one** commit; `git -C <scratch> log` shows that single provenance trailer (citing the
+   epic id) and the diff is your feature.
 
 ### Push to a public repo + deploy
 
@@ -121,8 +129,10 @@ access — a deploy key or SSH key).
 - **At startup**, `run.sh` resets the public repo to the green baseline: it force-pushes the
   seed to `main` and to an immutable `seed` ref. Every run starts from an identical pristine
   state, so the demo is repeatable on stage.
-- **On merge**, a watcher pushes the harness's verified, machine-authored commit to the
-  public `main`. This is a *trusted-layer egress* — the sandboxed agents never touch the
+- **On the terminal merge**, a watcher pushes the harness's verified, machine-authored
+  commit to the public `main`. In epic mode `main` advances exactly once per feature (when the
+  epic drains), so the watcher pushes once and the deploy fires once — for the whole feature,
+  not each child. This is a *trusted-layer egress* — the sandboxed agents never touch the
   network; only this post-merge push of an already-gate-verified commit does.
 - **The push fires the deploy.** [`app/.github/workflows/deploy.yml`](app/.github/workflows/deploy.yml)
   builds a single static binary (pure-Go SQLite + embedded assets — no runtime deps) and
@@ -189,13 +199,15 @@ rotation reminders, an audit-log viewer with anomaly flagging, or reused-secret 
 
 ## How it maps to the real config
 
-This demo runs the **same full DAG** as the shipped `config/harness.yaml`, with two
-deliberate tunings for a live run (neither changes the architecture):
+This demo runs the **same full DAG** as the shipped `config/harness.yaml`, with three
+deliberate tunings for a live run (none changes the architecture — epic mode just retargets
+the same merge queue per feature):
 
 | Shipped | Demo | Why |
 |---|---|---|
 | `qa`/`resolve` include `mutation>=0.8` | dropped | gremlins mutation testing is slow and flaky live; the security-relevant scanners (gosec/govulncheck/license-scan) + lint + the red→green proof carry the story |
 | `trusted-dev` profile + `human-approved` + `tcb_paths` | `autonomous`, no TCB globs | the diff is ordinary app code in a throwaway repo, so integrate merges hands-free — flip to `trusted-dev` (+ a `human-approved` postcondition on integrate) to demo the approval gate |
+| per-item integration (no `integration` block) | `integration.mode: epic` | the operator drafts a *feature*, so the whole thing lands as **one** commit on `main` — children integrate onto an `epic/<id>` branch and the terminal merge advances `main` once when the subtree drains, so the public-repo push + VPS deploy fires once per feature, not per child. v1 runs one epic at a time |
 
 Everything else — the zero-network sandbox, broker-mediated model calls, decomposition,
 the red→green producer ≠ verifier proofs, the independent security re-gate, single-writer
