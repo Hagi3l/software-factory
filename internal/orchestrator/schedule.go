@@ -136,6 +136,11 @@ func (o *Orchestrator) buildBrief(issue core.Issue, stage config.Stage, soul cor
 		Base:     base,
 		Criteria: stage.Postcondition,
 		Soul:     soul,
+		// The branch the verified candidate will be integrated onto — main, or the issue's epic
+		// branch in epic mode (T7.3). Informational for most roles, but the rebase target the
+		// merge-resolver soul reads from its brief, so a conflicting candidate is rebased onto the
+		// epic branch (where its colliding sibling lives), not main.
+		IntegrationBase: o.integrationBranchName(issue),
 	}
 }
 

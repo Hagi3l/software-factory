@@ -227,6 +227,14 @@ func buildContext(brief core.Brief) string {
 	fmt.Fprintf(&b, "\n# Base\nBranch from: %s\nCommit your work onto branch %q before calling submit; only that branch can be pushed.\n",
 		brief.Base, core.CandidateBranch(brief.Issue.ID))
 
+	// The integration branch the trusted merge queue will land this candidate onto — `main`,
+	// or the epic branch in epic mode (specs/integration.md). It is informational for most
+	// roles (they branch from Base and never touch it), but load-bearing for the merge-resolver,
+	// whose whole job is rebasing a conflicting candidate onto exactly this branch; surfacing it
+	// here is what lets that soul target the epic branch without a per-mode persona.
+	fmt.Fprintf(&b, "\n# Integration branch\nThe trusted merge queue integrates your verified candidate onto %q. You never push it.\n",
+		brief.IntegrationBaseOrMain())
+
 	if brief.Spec != "" {
 		b.WriteString("\n# Specification (resolved slice)\n")
 		b.WriteString(brief.Spec)

@@ -45,8 +45,9 @@ autonomous implementation) — a later validation concern, never an engineering 
 - **Open tasks (`- [ ]`) keep their full detail.** Two open lines: **Phase 5** (production
   isolation — the Firecracker backend T5.2 is hardware-blocked and deliberately last; the
   optional items are T5.5 gVisor and T5.11 warm pools + HA), and **Phase 7** (atomic
-  feature integration / epic mode — net-new feature work, not hardware-blocked; T7.1, the live
-  bug that hung any multi-child rebase, is now fixed — T7.2 is next).
+  feature integration / epic mode — net-new feature work, not hardware-blocked; T7.1 (the live
+  multi-child-rebase bug), T7.2 (`integration.mode` config), and T7.3 (merge-queue retargeting)
+  are done — T7.4 epic-completion + terminal merge is next).
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -305,12 +306,30 @@ per epic, not new machinery. Spec contract:
   policy profile). The full `Config` is already threaded to the orchestrator (`Options.Config`),
   so `cfg.Harness.Mode()` is reachable for T7.3. Docs: `docs/configuration.md` gained an
   `integration` section. Tests: valid/empty/epic accepted, unknown rejected, `Mode()` default.
-- [ ] **T7.3 Retarget the merge queue per epic** *(needs T7.1, T7.2)* — under
-  `mode: epic`: create `epic/<epic_id>` off `main` when the epic begins and commit the
-  [wizard](specs/control-room.md)'s approved spec onto it (its first commit, **not** `main`);
-  retarget every child-level integration op — rebase target, fast-forward check, re-gate base,
-  conflict detection, and the `resolve` stage's rebase — from `main` to the epic branch.
-  Everywhere the per-item queue reads "`main`", read "the epic branch." *(spec)*
+- [x] **T7.3 Retarget the merge queue per epic** *(needs T7.1, T7.2)* — *done (merge-queue
+  retargeting; the wizard spec-commit-onto-branch rides with T7.5).* The `Merger.Merge`
+  signature gained a fully-qualified `target` ref; everywhere the queue read `refs/heads/main`
+  it now reads `target` — rebase target, fast-forward/ancestor check, idempotency log grep,
+  conflict detection, and the advance `update-ref` (all inside `Merge`, so one parameter covers
+  the spec's first four retarget points). The orchestrator computes the per-issue target via
+  `integrationTargetRef`/`integrationBranchName` (new `internal/orchestrator/epic.go`):
+  `refs/heads/main` in per-item, `refs/heads/epic/<core.EpicOf(issue)>` in epic mode. `Merge`
+  **creates the epic branch off `main` on first use** (idempotent — the only writer of
+  integration branches), so child integration works without a pre-existing branch. The
+  **resolve-stage rebase** is retargeted in both phases: the trusted re-rebase rides the `target`
+  param, and the merge-resolver **agent** now reads its rebase target from a new
+  `core.Brief.IntegrationBase` (short branch name, surfaced in the agent prompt's
+  `# Integration branch` section) — so a conflicting candidate rebases onto the epic branch
+  (where its colliding sibling lives), not `main`. The merge-resolver persona (config + demo)
+  was generalized from literal `main` to "the integration branch named in your Brief". Tests:
+  `epic.go` helpers (both modes incl. root-folds-into-own-epic), `buildBrief` IntegrationBase,
+  agent `buildContext` surfacing, an orchestrator merge-flow test asserting the epic target, and
+  a real-git `TestGitMergerEpicTargetIntegration` (two siblings land on an auto-created epic
+  branch; **`main` never moves**). Spec note added (merge queue idempotently creates the branch).
+  **Deferred to T7.5:** committing the wizard's approved spec *onto* the epic branch as its first
+  commit (needs the epic-root id at seed time + the one-active-epic consent gate that defines
+  "an epic"); until then epic mode commits the spec to `main` and the epic branch inherits it, so
+  the merge mechanics are correct but full spec-off-main atomicity awaits T7.5. *(spec)*
   [integration.md](specs/integration.md)
 - [ ] **T7.4 Epic-completion detection + terminal merge** *(needs T7.3)* — detect drain via
   an `epic_id` aggregate read (subtree all-closed **and** zero in-flight in the subtree),
@@ -324,11 +343,16 @@ per epic, not new machinery. Spec contract:
   branch abandoned, `main` untouched. Idempotent terminal merge (existing provenance-trailer
   check). *(spec)* [integration.md](specs/integration.md),
   [components/orchestrator.md](specs/components/orchestrator.md)
-- [ ] **T7.5 One-active-epic consent gate** *(needs T7.4)* — under `mode: epic` the wizard's
-  approval refuses to seed a second epic while one is in flight, reporting the in-flight
-  feature instead. Keeps `main` quiescent during an epic (which is what lets T7.4 skip the
-  terminal re-gate). *(spec)* [control-room.md](specs/control-room.md),
-  [integration.md](specs/integration.md)
+- [ ] **T7.5 One-active-epic consent gate + wizard creates the epic branch with the spec**
+  *(needs T7.4)* — under `mode: epic` the wizard's approval refuses to seed a second epic while
+  one is in flight, reporting the in-flight feature instead. Keeps `main` quiescent during an
+  epic (which is what lets T7.4 skip the terminal re-gate). **Also owns the deferred T7.3 piece:**
+  the wizard, knowing the epic-root id post-`Apply` (the consent gate defines what constitutes
+  "an epic" — single root for v1), creates `epic/<epic_id>` off `main` and commits the approved
+  spec onto it as its **first commit, not `main`** (load-bearing for atomicity — see
+  integration.md "The epic branch"). The merge queue's idempotent branch-create (T7.3) then
+  becomes a no-op for an epic the wizard already opened. *(spec)*
+  [control-room.md](specs/control-room.md), [integration.md](specs/integration.md)
 - [ ] **T7.6 Board epic hero card** *(needs T7.4)* — render the epic on the
   [board](specs/control-room.md): every card gets an **epic badge** (root id) + a left-border
   tint hashed deterministically from `epic_id` (colour never the sole channel); the epic

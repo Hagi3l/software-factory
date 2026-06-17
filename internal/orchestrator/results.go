@@ -584,20 +584,24 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 	// regate-failed), so every step a candidate passes through is visible in the merge-queue view.
 	o.announceMergeState(issue, core.MergeStateQueued, "")
 	progress := func(state string) { o.announceMergeState(issue, state, "") }
-	commit, err := o.merger.Merge(ctx, o.opts.Repo, candidateRef, prov, o.reGate(issue, srcStage, res), progress)
+	// The branch the candidate integrates onto: refs/heads/main in per-item mode, or the issue's
+	// epic branch in epic mode, where children land atomically and main advances only at the
+	// epic's terminal merge (T7.3). The merger creates the epic branch off main on first use.
+	target := o.integrationTargetRef(issue)
+	commit, err := o.merger.Merge(ctx, o.opts.Repo, candidateRef, target, prov, o.reGate(issue, srcStage, res), progress)
 	if err != nil {
 		if errors.Is(err, errRebaseConflict) {
 			o.announceMergeState(issue, core.MergeStateConflicted, "")
-			// The verified candidate cannot be cleanly rebased onto the current main tip:
-			// another branch landed first and they textually collide. Retrying the same
+			// The verified candidate cannot be cleanly rebased onto the current integration
+			// target: another branch landed first and they textually collide. Retrying the same
 			// candidate cannot help (the conflict is deterministic), so spawn a sandboxed
-			// conflict-resolution issue — a merge-resolver agent rebases the candidate onto
-			// main and resolves the conflicts, producing a new candidate that loops back
-			// through integrate, re-gated like any other (specs/integration.md step 2). The
+			// conflict-resolution issue — a merge-resolver agent rebases the candidate onto the
+			// integration branch and resolves the conflicts, producing a new candidate that loops
+			// back through integrate, re-gated like any other (specs/integration.md step 2). The
 			// loop is bounded by the retry cap and budget; with no resolve stage configured
 			// it falls back to dead-lettering. resolveConflict closes (or blocks) this issue,
 			// so signal the caller to stop without closing it again.
-			if transient, rerr := o.resolveConflict(ctx, issue, res, "integrate: candidate conflicts with current main; rebase needs resolution"); rerr != nil {
+			if transient, rerr := o.resolveConflict(ctx, issue, res, "integrate: candidate conflicts with the current integration branch; rebase needs resolution"); rerr != nil {
 				return transient, rerr
 			}
 			return false, errMergeConflictHandled

@@ -86,7 +86,7 @@ func TestGitMergerIntegration(t *testing.T) {
 	}
 
 	// --- A: base unmoved → fast-forward-able; a trusted provenance commit on the candidate.
-	cA, err := m.Merge(context.Background(), repo, "candidate/iss-1", provFor("iss-1"), nil, nil)
+	cA, err := m.Merge(context.Background(), repo, "candidate/iss-1", "refs/heads/main", provFor("iss-1"), nil, nil)
 	if err != nil {
 		t.Fatalf("merge A: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestGitMergerIntegration(t *testing.T) {
 	var regatedRef, regatedBase string
 	regateProvB := provFor("iss-2")
 	regateProvB.Verified = []string{"build@sha256:re", "test@sha256:re"} // the re-gate's own checks
-	cB, err := m.Merge(context.Background(), repo, "candidate/iss-2", provFor("iss-2"),
+	cB, err := m.Merge(context.Background(), repo, "candidate/iss-2", "refs/heads/main", provFor("iss-2"),
 		func(_ context.Context, landedRef string) (core.Provenance, bool, error) {
 			regatedRef = git("rev-parse", "--verify", landedRef) // must resolve: the rebased result is published
 			regatedBase = git("show", landedRef+":base.txt")     // must be the combined tree
@@ -153,7 +153,7 @@ func TestGitMergerIntegration(t *testing.T) {
 
 	// --- C: edits base.txt where B already did → rebase conflict, reported not retried, and
 	// main is left untouched.
-	if _, err := m.Merge(context.Background(), repo, "candidate/iss-3", provFor("iss-3"), nil, nil); !errors.Is(err, errRebaseConflict) {
+	if _, err := m.Merge(context.Background(), repo, "candidate/iss-3", "refs/heads/main", provFor("iss-3"), nil, nil); !errors.Is(err, errRebaseConflict) {
 		t.Fatalf("merge C err = %v, want errRebaseConflict", err)
 	}
 	if got := git("rev-parse", "refs/heads/main"); got != cB {
@@ -163,7 +163,7 @@ func TestGitMergerIntegration(t *testing.T) {
 	// --- D: rebases cleanly over main (disjoint file) but the re-gate REJECTS the rebased
 	// result (the two-green-branches case). Merge returns errReGateFailed, main is untouched,
 	// and the published temp ref is cleaned up — the orchestrator routes a fix from here.
-	if _, err := m.Merge(context.Background(), repo, "candidate/iss-4", provFor("iss-4"),
+	if _, err := m.Merge(context.Background(), repo, "candidate/iss-4", "refs/heads/main", provFor("iss-4"),
 		func(_ context.Context, _ string) (core.Provenance, bool, error) {
 			return core.Provenance{}, false, nil // the combination broke something
 		}, nil); !errors.Is(err, errReGateFailed) {
@@ -179,7 +179,7 @@ func TestGitMergerIntegration(t *testing.T) {
 	// --- Idempotent: re-merging A (whose provenance commit is still in main's history below
 	// B) is a no-op that returns the current main, even though A's tip is no longer an
 	// ancestor of main via a simple chain.
-	again, err := m.Merge(context.Background(), repo, "candidate/iss-1", provFor("iss-1"), nil, nil)
+	again, err := m.Merge(context.Background(), repo, "candidate/iss-1", "refs/heads/main", provFor("iss-1"), nil, nil)
 	if err != nil {
 		t.Errorf("re-merge of an already-merged candidate failed: %v", err)
 	}
@@ -188,6 +188,114 @@ func TestGitMergerIntegration(t *testing.T) {
 	}
 	if got := git("rev-parse", "refs/heads/main"); got != cB {
 		t.Errorf("main moved on a redundant re-merge: %s != %s", got, cB)
+	}
+}
+
+// TestGitMergerEpicTargetIntegration drives the real git binary through the merge queue in
+// epic mode (T7.3): two sibling candidates of one epic integrate onto an epic/<id> branch that
+// does not exist yet, and the real `main` must NEVER move. It proves the full retargeting — the
+// merger creates the epic branch off main on first use, fast-forwards the first child onto it,
+// then rebases + lands the second onto the moved epic branch — all while main stays put (the
+// real main advances only at the epic's terminal merge, T7.4). This is the atomic-landing
+// invariant: child integration touches the epic branch, never main.
+func TestGitMergerEpicTargetIntegration(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH; skipping epic merge integration test")
+	}
+	repo := t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", repo}, args...)...)
+		cmd.Env = append(cmd.Environ(),
+			"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t", "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	write := func(name, content string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(repo, name), []byte(content), 0o644); err != nil {
+			t.Fatalf("write %s: %v", name, err)
+		}
+	}
+	exists := func(ref string) bool {
+		return exec.Command("git", "-C", repo, "rev-parse", "--verify", "--quiet", ref).Run() == nil
+	}
+
+	git("init", "-q")
+	git("checkout", "-q", "-b", "main")
+	write("base.txt", "base\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "base")
+	m0 := git("rev-parse", "main")
+
+	// Two children of the same epic, both off main: A adds a file, B edits base.txt. Disjoint,
+	// so B rebases cleanly over A on the epic branch.
+	git("checkout", "-q", "-b", "candidate/iss-1", m0)
+	write("a.txt", "A\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "A work")
+	git("checkout", "-q", "-b", "candidate/iss-2", m0)
+	write("base.txt", "base\nfrom B\n")
+	git("add", "-A")
+	git("commit", "-q", "-m", "B work")
+	git("checkout", "-q", "--detach", m0) // only update-ref may move refs now
+
+	const epicRef = "refs/heads/epic/feat-1"
+	if exists(epicRef) {
+		t.Fatal("epic branch unexpectedly exists before any integration")
+	}
+
+	m := NewGitMerger("")
+	provFor := func(id string) core.Provenance {
+		return core.Provenance{Soul: "implementor-go", Model: "claude-opus-4-7", Issue: id, PromptSHA: "sha256:9af", Verified: []string{"build", "test"}}
+	}
+
+	// Child A onto the not-yet-existent epic branch: the merger creates epic/feat-1 off main and
+	// lands a provenance commit on it. main must not move.
+	cA, err := m.Merge(context.Background(), repo, "candidate/iss-1", epicRef, provFor("iss-1"), nil, nil)
+	if err != nil {
+		t.Fatalf("merge A onto epic: %v", err)
+	}
+	if !exists(epicRef) {
+		t.Fatal("epic branch was not created off main on first integration")
+	}
+	if git("rev-parse", "main") != m0 {
+		t.Error("main advanced during child integration; epic-mode children must touch only the epic branch")
+	}
+	if git("rev-parse", epicRef) != cA {
+		t.Errorf("epic branch tip = %q, want the child-A provenance commit %q", git("rev-parse", epicRef), cA)
+	}
+
+	// Child B rebases onto the moved epic branch (A already landed) and re-gates; the re-gate
+	// must see the COMBINED tree (A's a.txt + B's base.txt edit), and only the epic branch moves.
+	var regatedBase, regatedHasA string
+	cB, err := m.Merge(context.Background(), repo, "candidate/iss-2", epicRef, provFor("iss-2"),
+		func(_ context.Context, landedRef string) (core.Provenance, bool, error) {
+			regatedBase = git("show", landedRef+":base.txt") // B's edit
+			regatedHasA = git("show", landedRef+":a.txt")    // A's file, present after rebase
+			return provFor("iss-2"), true, nil
+		}, nil)
+	if err != nil {
+		t.Fatalf("merge B onto epic: %v", err)
+	}
+	if regatedBase != "base\nfrom B" {
+		t.Errorf("re-gate saw base.txt = %q, want B's edit on the combined tree", regatedBase)
+	}
+	if regatedHasA != "A" {
+		t.Errorf("re-gate combined tree missing A's file; a.txt = %q", regatedHasA)
+	}
+	if git("rev-parse", "main") != m0 {
+		t.Error("main advanced during the second child integration; it must stay quiescent during an epic")
+	}
+	if git("rev-parse", epicRef) != cB {
+		t.Error("epic branch did not advance to the child-B provenance commit")
+	}
+	// The epic branch now carries both children linearly; main is still the lone base commit.
+	if log := git("log", "--oneline", epicRef); !strings.Contains(log, "A work") || !strings.Contains(log, "B work") {
+		t.Errorf("epic branch missing a child's work:\n%s", log)
 	}
 }
 
@@ -270,7 +378,7 @@ func TestGitMergerSignsProvenanceCommitIntegration(t *testing.T) {
 
 	// Signed merger: the integration commit verifies.
 	signed := NewGitMerger("", WithSigningKey(keyPath))
-	cSigned, err := signed.Merge(context.Background(), repo, "candidate/iss-1", prov("iss-1"), nil, nil)
+	cSigned, err := signed.Merge(context.Background(), repo, "candidate/iss-1", "refs/heads/main", prov("iss-1"), nil, nil)
 	if err != nil {
 		t.Fatalf("signed merge: %v", err)
 	}
@@ -287,7 +395,7 @@ func TestGitMergerSignsProvenanceCommitIntegration(t *testing.T) {
 
 	// Unsigned merger: the integration commit carries no signature.
 	unsigned := NewGitMerger("")
-	cUnsigned, err := unsigned.Merge(context.Background(), repo, "candidate/iss-2", prov("iss-2"), nil, nil)
+	cUnsigned, err := unsigned.Merge(context.Background(), repo, "candidate/iss-2", "refs/heads/main", prov("iss-2"), nil, nil)
 	if err != nil {
 		t.Fatalf("unsigned merge: %v", err)
 	}

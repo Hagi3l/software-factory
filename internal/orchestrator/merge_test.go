@@ -78,7 +78,7 @@ func TestGitMergerWritesProvenanceCommit(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, nil)
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", "refs/heads/main", testProvenance(), nil, nil)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -153,7 +153,7 @@ func TestGitMergerSignsProvenanceCommit(t *testing.T) {
 	// Signed: the key configured → signing flags present.
 	m, calls := scriptedGit(reply)
 	m.signingKey = "/keys/harness_ed25519"
-	if _, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, nil); err != nil {
+	if _, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", "refs/heads/main", testProvenance(), nil, nil); err != nil {
 		t.Fatalf("Merge (signed): %v", err)
 	}
 	ct := commitTreeCall(t, *calls)
@@ -173,7 +173,7 @@ func TestGitMergerSignsProvenanceCommit(t *testing.T) {
 
 	// Unsigned: no key → no signing flags, no -S.
 	m2, calls2 := scriptedGit(reply)
-	if _, err := m2.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, nil); err != nil {
+	if _, err := m2.Merge(context.Background(), "/repo", "candidate/iss-1", "refs/heads/main", testProvenance(), nil, nil); err != nil {
 		t.Fatalf("Merge (unsigned): %v", err)
 	}
 	ct2 := commitTreeCall(t, *calls2)
@@ -233,7 +233,7 @@ func TestGitMergerRebasesWhenBaseMoved(t *testing.T) {
 
 	var states []string
 	progress := func(s string) { states = append(states, s) }
-	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, progress)
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", "refs/heads/main", testProvenance(), nil, progress)
 	if err != nil {
 		t.Fatalf("Merge: %v", err)
 	}
@@ -309,7 +309,7 @@ func TestGitMergerReGatesRebasedResult(t *testing.T) {
 	regateProv.Verified = []string{"regate-build", "regate-test"} // distinct from the branch gate
 	var gotRef string
 	var states []string
-	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(),
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", "refs/heads/main", testProvenance(),
 		func(_ context.Context, landedRef string) (core.Provenance, bool, error) {
 			gotRef = landedRef
 			return regateProv, true, nil
@@ -391,7 +391,7 @@ func TestGitMergerReGateRejectionAbortsMerge(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(),
+	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", "refs/heads/main", testProvenance(),
 		func(_ context.Context, _ string) (core.Provenance, bool, error) {
 			return core.Provenance{}, false, nil // the combination failed the re-gate
 		}, nil)
@@ -440,7 +440,7 @@ func TestGitMergerRebaseConflictReported(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, nil)
+	_, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", "refs/heads/main", testProvenance(), nil, nil)
 	if !errors.Is(err, errRebaseConflict) {
 		t.Fatalf("Merge err = %v, want errRebaseConflict", err)
 	}
@@ -472,7 +472,7 @@ func TestGitMergerIdempotentReMerge(t *testing.T) {
 		return "", errors.New("unexpected")
 	})
 
-	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", testProvenance(), nil, nil)
+	commit, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", "refs/heads/main", testProvenance(), nil, nil)
 	if err != nil {
 		t.Fatalf("Merge (idempotent): %v", err)
 	}

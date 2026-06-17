@@ -16,4 +16,22 @@ type Brief struct {
 	Base     string   // git ref to branch from
 	Criteria []string // postconditions this node must satisfy
 	Soul     Soul     // the identity that will execute this Brief
+	// IntegrationBase is the short branch name the verified candidate will be integrated onto
+	// by the trusted merge queue: `main` in per-item mode, or the epic branch `epic/<epic_id>`
+	// in epic mode (specs/integration.md, T7.3). It is the rebase target the merge-resolver
+	// soul must rebase a conflicting candidate onto — distinct from Base (where the candidate
+	// branched from). The short form is DWIM-resolvable in the agent's sandbox clone (only the
+	// default branch is a local ref there; an epic branch is reachable as origin/epic/<id>),
+	// exactly like the gate's candidate/<id> ref. Empty defaults to `main` at render.
+	IntegrationBase string
+}
+
+// IntegrationBaseOrMain returns the branch the candidate integrates onto, defaulting to `main`
+// when unset so a brief built before epic mode (or by a pure-per-item path) renders identically
+// to the historical behavior. It is the rebase target surfaced to the merge-resolver soul.
+func (b Brief) IntegrationBaseOrMain() string {
+	if b.IntegrationBase == "" {
+		return "main"
+	}
+	return b.IntegrationBase
 }

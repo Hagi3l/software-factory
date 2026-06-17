@@ -181,7 +181,10 @@ the merge queue is simply *retargeted* per epic.
 commit** — *not* onto `main`. This is load-bearing for atomicity: if the spec landed
 on `main` at approval, `main` would move (and a deploy would fire) before the feature
 existed. With the spec on the epic branch, `main` moves exactly once, at the terminal
-merge, which brings the spec and all child code together.
+merge, which brings the spec and all child code together. The merge queue itself
+also creates the branch off `main` on the first child integration if it does not yet
+exist (idempotent — the only place integration branches are written), so child
+integration is robust whether the wizard pre-created the branch with the spec or not.
 
 **Completion.** The epic is done when its subtree has **drained**: every issue
 sharing the `epic_id` is closed (integrated onto the epic branch) **and zero

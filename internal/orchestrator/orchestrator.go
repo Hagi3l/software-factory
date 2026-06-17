@@ -101,8 +101,14 @@ type Gate interface {
 // the default implementation (see specs/integration.md, specs/bootstrap.md). The progress
 // callback announces the merge train's internal steps (rebasing, re-gating) as they happen
 // (T4.24, see MergeProgress); a nil callback skips it.
+// target is the fully-qualified ref the candidate integrates onto and the merge train advances:
+// refs/heads/main in per-item mode, or the epic branch refs/heads/epic/<epic_id> in epic mode
+// (specs/integration.md, T7.3). Everywhere the per-item queue read "main", it now reads target;
+// in epic mode the candidate rebases onto, re-gates against, and lands on the epic branch, and
+// the real main advances only later at the epic's terminal merge (T7.4). The merger creates the
+// epic branch off main on first use, so the orchestrator need only name the target.
 type Merger interface {
-	Merge(ctx context.Context, repo, ref string, prov core.Provenance, regate ReGate, progress MergeProgress) (commit string, err error)
+	Merge(ctx context.Context, repo, ref, target string, prov core.Provenance, regate ReGate, progress MergeProgress) (commit string, err error)
 }
 
 // Options configures an Orchestrator. They are the instance knobs (which config it

@@ -102,72 +102,95 @@ func NewGitMerger(bin string, opts ...MergerOption) Merger {
 	return m
 }
 
-// Merge lands a verified candidate on main and returns the new main commit.
+// Merge lands a verified candidate on the integration target and returns the new target tip
+// commit. target is the fully-qualified branch the candidate integrates onto: refs/heads/main
+// in per-item mode, or the epic branch refs/heads/epic/<id> in epic mode (specs/integration.md,
+// T7.3). Everywhere this used to read "main", it now reads target; the epic branch is created
+// off main on first use (the only place integration branches are written). The real main
+// advances only later, at the epic's terminal merge (T7.4).
 //
-// The serialized queue means main may have moved since the candidate branched (another
-// candidate merged first). So the candidate is rebased onto the current main tip, then a
+// The serialized queue means the target may have moved since the candidate branched (another
+// candidate merged first). So the candidate is rebased onto the current target tip, then a
 // trusted provenance commit is written on top of the rebased result — same tree (no file
 // changes), parent the rebased tip, authored by the harness identity, with the provenance
-// trailer as its message — and main is advanced to it. main's tip is therefore always a
-// trusted, attributable commit, and advancing to it stays within fast-forward semantics
-// by construction: after the rebase, main is an ancestor of the rebased tip (a plain
-// fast-forward would move main to the agent's own commit, leaving no trusted commit to
-// carry provenance — hence the provenance commit; see specs/security.md,
+// trailer as its message — and the target is advanced to it. The target's tip is therefore
+// always a trusted, attributable commit, and advancing to it stays within fast-forward
+// semantics by construction: after the rebase, the target is an ancestor of the rebased tip (a
+// plain fast-forward would move the target to the agent's own commit, leaving no trusted commit
+// to carry provenance — hence the provenance commit; see specs/security.md,
 // specs/integration.md).
 //
 // A rebase conflict (the candidate textually collides with what already merged) returns
 // errRebaseConflict — it needs resolution, not a retry.
 //
-// It is idempotent: a provenance commit for this issue already in main's history means a
+// It is idempotent: a provenance commit for this issue already in the target's history means a
 // prior accept already landed it (whether by a clean fast-forward or a rebase), so a
-// redelivered accept is a no-op that returns the current main. Keying idempotency on the
+// redelivered accept is a no-op that returns the current target tip. Keying idempotency on the
 // issue id in the trailer is robust where an ancestor check is not: a rebase rewrites the
 // candidate's commits to new SHAs, so the original candidate tip is not an ancestor of a
-// main it merged onto via rebase.
+// target it merged onto via rebase.
 //
 // When a rebase occurs, the rebased result is re-gated before it lands (specs/integration.md
 // step 3) via the regate callback: the merger publishes the rebased tree under a temporary
 // ref and asks regate to verify it, landing only an accepted result and recording the
 // provenance regate returns. A fast-forward skips the re-gate — it lands the exact tree the
 // branch gate already verified, so there is nothing new to grade. A nil regate also skips it.
-func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov core.Provenance, regate ReGate, progress MergeProgress) (string, error) {
+func (m *gitMerger) Merge(ctx context.Context, repo, ref, target string, prov core.Provenance, regate ReGate, progress MergeProgress) (string, error) {
 	if progress == nil {
 		progress = func(string) {} // no-op so the emit sites below need no nil guard
 	}
-	mainTip, err := m.run(ctx, repo, "rev-parse", "--verify", "refs/heads/main")
+	if target == "" {
+		target = "refs/heads/main" // defensive: a caller that names no target lands on main (per-item)
+	}
+	// Ensure the integration target exists. In per-item mode target is refs/heads/main, which
+	// always exists (no-op). In epic mode it is the epic branch refs/heads/epic/<id>, created
+	// off main the first time a child of the epic integrates — this is the only place
+	// integration branches are written, so branch creation lives here with the rest of the
+	// merge-queue git plumbing (specs/integration.md, T7.3). Idempotent: once the branch exists
+	// the rev-parse succeeds and nothing is created.
+	if _, err := m.run(ctx, repo, "rev-parse", "--verify", "--quiet", target+"^{commit}"); err != nil {
+		mainTip, berr := m.run(ctx, repo, "rev-parse", "--verify", "refs/heads/main")
+		if berr != nil {
+			return "", fmt.Errorf("orchestrator: resolve main tip to create integration target %q: %w", target, berr)
+		}
+		if _, cerr := m.run(ctx, repo, "update-ref", target, mainTip); cerr != nil {
+			return "", fmt.Errorf("orchestrator: create integration target %q off main: %w", target, cerr)
+		}
+	}
+	targetTip, err := m.run(ctx, repo, "rev-parse", "--verify", target)
 	if err != nil {
-		return "", fmt.Errorf("orchestrator: resolve main tip: %w", err)
+		return "", fmt.Errorf("orchestrator: resolve integration target %q tip: %w", target, err)
 	}
 	tip, err := m.run(ctx, repo, "rev-parse", "--verify", ref)
 	if err != nil {
 		return "", fmt.Errorf("orchestrator: resolve candidate ref %q: %w", ref, err)
 	}
 
-	// Already merged? A provenance commit citing this issue in main's history means a prior
-	// accept landed it; re-accepting must not stack a second provenance commit.
+	// Already merged? A provenance commit citing this issue in the target's history means a
+	// prior accept landed it; re-accepting must not stack a second provenance commit.
 	if prov.Issue != "" {
-		if existing, _ := m.run(ctx, repo, "log", "refs/heads/main", "--fixed-strings",
+		if existing, _ := m.run(ctx, repo, "log", target, "--fixed-strings",
 			"--grep=Issue: "+prov.Issue+" |", "--format=%H", "-n", "1"); existing != "" {
-			return mainTip, nil
+			return targetTip, nil
 		}
 	}
 
-	// The tip to land: if main is already an ancestor of the candidate, the candidate sits
-	// on top of main and lands as-is. Otherwise main moved under it — rebase the candidate
-	// onto the current main so the result is, again, a fast-forward of main.
+	// The tip to land: if the target is already an ancestor of the candidate, the candidate
+	// sits on top of the target and lands as-is. Otherwise the target moved under it — rebase
+	// the candidate onto the current target so the result is, again, a fast-forward of it.
 	landed := tip
 	landedRef := ref
 	rebased := false
-	if _, ffErr := m.run(ctx, repo, "merge-base", "--is-ancestor", "refs/heads/main", ref); ffErr != nil {
-		// main moved under the candidate: it must be rebased onto the current tip before it can
-		// land. Announce the step before the (potentially slow, possibly conflicting) rebase so
-		// the merge-queue view shows it in flight, not only after it resolves.
+	if _, ffErr := m.run(ctx, repo, "merge-base", "--is-ancestor", target, ref); ffErr != nil {
+		// The target moved under the candidate: it must be rebased onto the current tip before
+		// it can land. Announce the step before the (potentially slow, possibly conflicting)
+		// rebase so the merge-queue view shows it in flight, not only after it resolves.
 		progress(core.MergeStateRebasing)
-		rebasedTip, tmpRef, cleanup, conflict, rerr := m.rebaseOntoMain(ctx, repo, ref, prov.Issue)
+		rebasedTip, tmpRef, cleanup, conflict, rerr := m.rebaseOnto(ctx, repo, ref, target, prov.Issue)
 		if cleanup != nil {
-			// Defer the temp-ref deletion until after main is advanced, so the rebased
+			// Defer the temp-ref deletion until after the target is advanced, so the rebased
 			// commits stay anchored (reachable) through the re-gate, commit-tree and
-			// update-ref below; once main reaches them the ref is redundant.
+			// update-ref below; once the target reaches them the ref is redundant.
 			defer cleanup()
 		}
 		if conflict {
@@ -181,17 +204,17 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov core.Prove
 		rebased = true
 	}
 
-	// Nothing new to integrate (the candidate's changes are already in main, e.g. a rebase
-	// that replayed only already-applied commits): no-op rather than an empty provenance
-	// commit.
-	if landed == mainTip {
-		return mainTip, nil
+	// Nothing new to integrate (the candidate's changes are already in the target, e.g. a
+	// rebase that replayed only already-applied commits): no-op rather than an empty
+	// provenance commit.
+	if landed == targetTip {
+		return targetTip, nil
 	}
 
 	// Step 3: re-gate the rebased result against the tree that will actually land before
-	// advancing main. Only a rebase can make the landed tree differ from the one the branch
-	// gate already graded (a fast-forward lands that exact tree), so re-gating is confined to
-	// the rebase path — that is where the two-green-branches breakage can hide.
+	// advancing the target. Only a rebase can make the landed tree differ from the one the
+	// branch gate already graded (a fast-forward lands that exact tree), so re-gating is
+	// confined to the rebase path — that is where the two-green-branches breakage can hide.
 	if rebased && regate != nil {
 		// Announce the re-gate before running it: this is the step where two independently-green
 		// branches can break together, the one the merge-queue view most wants to surface live.
@@ -213,8 +236,8 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov core.Prove
 	// commit-tree writes a commit with the rebased tree and the rebased tip as its sole
 	// parent. Identity is forced via -c so the integration commit is the harness's, not
 	// whatever git config the host carries; when a signing key is configured the same
-	// command SSH-signs the commit, so main's tip is cryptographically attributable to the
-	// harness, not merely labeled with its name (T5.10, specs/security.md).
+	// command SSH-signs the commit, so the target's tip is cryptographically attributable to
+	// the harness, not merely labeled with its name (T5.10, specs/security.md).
 	args := []string{
 		"-c", "user.name=" + provenanceCommitterName,
 		"-c", "user.email=" + provenanceCommitterEmail,
@@ -231,26 +254,27 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref string, prov core.Prove
 	if err != nil {
 		return "", fmt.Errorf("orchestrator: write provenance commit for %q: %w", ref, err)
 	}
-	if _, err := m.run(ctx, repo, "update-ref", "refs/heads/main", commit); err != nil {
-		return "", fmt.Errorf("orchestrator: advance main to provenance commit for %q: %w", ref, err)
+	if _, err := m.run(ctx, repo, "update-ref", target, commit); err != nil {
+		return "", fmt.Errorf("orchestrator: advance integration target %q to provenance commit for %q: %w", target, ref, err)
 	}
 	return commit, nil
 }
 
-// rebaseOntoMain replays the candidate's commits onto the current main tip in a scratch
-// detached worktree, publishes the rebased result under a temporary ref, and returns the
-// rebased tip plus that ref. The worktree isolates the rebase from the integration repo's
-// own checkout (main is moved by ref update, never by checkout). On any rebase failure it
-// aborts and reports conflict=true (the candidate collides with what already merged).
+// rebaseOnto replays the candidate's commits onto the current target tip (refs/heads/main, or
+// the epic branch in epic mode — T7.3) in a scratch detached worktree, publishes the rebased
+// result under a temporary ref, and returns the rebased tip plus that ref. The worktree
+// isolates the rebase from the integration repo's own checkout (the target is moved by ref
+// update, never by checkout). On any rebase failure it aborts and reports conflict=true (the
+// candidate collides with what already merged onto the target).
 //
 // The rebased result is published as a branch under refs/heads/ so the re-gate's sandbox —
 // which seeds by cloning the integration repo, and a clone fetches only refs/heads/* and
 // tags — can check it out; this is also what keeps the rebased commits reachable after the
 // scratch worktree is removed (done eagerly here, since the ref now anchors them). cleanup
 // deletes that temp ref and is returned only on the success path; the caller defers it
-// until after main has advanced, at which point main reaches the commits and the ref is
-// redundant. On conflict/error the worktree is torn down internally and no ref is left.
-func (m *gitMerger) rebaseOntoMain(ctx context.Context, repo, ref, issueID string) (landed, tmpRef string, cleanup func(), conflict bool, err error) {
+// until after the target has advanced, at which point the target reaches the commits and the
+// ref is redundant. On conflict/error the worktree is torn down internally and no ref is left.
+func (m *gitMerger) rebaseOnto(ctx context.Context, repo, ref, target, issueID string) (landed, tmpRef string, cleanup func(), conflict bool, err error) {
 	parent, err := os.MkdirTemp("", "harness-rebase-")
 	if err != nil {
 		return "", "", nil, false, fmt.Errorf("orchestrator: create rebase worktree dir: %w", err)
@@ -267,13 +291,13 @@ func (m *gitMerger) rebaseOntoMain(ctx context.Context, repo, ref, issueID strin
 		removeWorktree()
 		return "", "", nil, false, fmt.Errorf("orchestrator: add rebase worktree for %q: %w", ref, err)
 	}
-	// Rebase onto main. Identity is forced because rebase re-commits. A failure is treated
+	// Rebase onto the target. Identity is forced because rebase re-commits. A failure is treated
 	// as a conflict: abort so the worktree carries no half-applied state, tear it down, then
 	// signal.
 	if _, rerr := m.run(ctx, wt,
 		"-c", "user.name="+provenanceCommitterName,
 		"-c", "user.email="+provenanceCommitterEmail,
-		"rebase", "refs/heads/main"); rerr != nil {
+		"rebase", target); rerr != nil {
 		_, _ = m.run(ctx, wt, "rebase", "--abort")
 		removeWorktree()
 		return "", "", nil, true, nil //nolint:nilerr // a rebase failure is a conflict, signaled via conflict=true, not the error channel (which is reserved for infrastructure faults)

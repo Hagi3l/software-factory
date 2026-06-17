@@ -167,6 +167,24 @@ func TestSubmitTerminatesAndFirstRequestShape(t *testing.T) {
 	}
 }
 
+// TestBuildContextSurfacesIntegrationBranch checks the opening user turn names the branch the
+// merge queue will land the candidate on — the rebase target the merge-resolver soul reads (T7.3).
+// It defaults to "main" when unset (per-item / a pre-epic brief) and shows the epic branch when
+// the orchestrator set IntegrationBase.
+func TestBuildContextSurfacesIntegrationBranch(t *testing.T) {
+	def := buildContext(testBrief()) // IntegrationBase unset → defaults to main
+	if !strings.Contains(def, "# Integration branch") || !strings.Contains(def, "main") {
+		t.Errorf("default context missing the integration-branch section:\n%s", def)
+	}
+
+	b := testBrief()
+	b.IntegrationBase = "epic/feat-1"
+	got := buildContext(b)
+	if !strings.Contains(got, "# Integration branch") || !strings.Contains(got, "epic/feat-1") {
+		t.Errorf("context did not surface the epic integration branch:\n%s", got)
+	}
+}
+
 // A non-terminal tool's result is appended as a RoleTool message and the loop continues;
 // the second request carries the assistant tool-call turn and the tool result.
 func TestToolResultAppendedAndLoopContinues(t *testing.T) {

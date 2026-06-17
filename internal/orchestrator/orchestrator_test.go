@@ -325,14 +325,16 @@ func (g *fakeGate) called() []gate.Candidate {
 type fakeMerger struct {
 	mu        sync.Mutex
 	refs      []string
+	targets   []string
 	provs     []core.Provenance
 	err       error
 	regateRef string
 }
 
-func (m *fakeMerger) Merge(ctx context.Context, _, ref string, prov core.Provenance, regate ReGate, progress MergeProgress) (string, error) {
+func (m *fakeMerger) Merge(ctx context.Context, _, ref, target string, prov core.Provenance, regate ReGate, progress MergeProgress) (string, error) {
 	m.mu.Lock()
 	m.refs = append(m.refs, ref)
+	m.targets = append(m.targets, target)
 	m.mu.Unlock()
 	if m.err != nil {
 		return "", m.err
@@ -363,6 +365,15 @@ func (m *fakeMerger) merged() []string {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return append([]string(nil), m.refs...)
+}
+
+// mergeTargets returns the integration targets Merge was called with, in order — the assertion
+// hook for epic-mode retargeting (T7.3): per-item lands on refs/heads/main, epic on the epic
+// branch.
+func (m *fakeMerger) mergeTargets() []string {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]string(nil), m.targets...)
 }
 
 func (m *fakeMerger) provenance() []core.Provenance {
