@@ -267,6 +267,44 @@ func TestValidateIndependentChecksRejections(t *testing.T) {
 	}
 }
 
+// An absent integration block, an explicit per-item, and an explicit epic are all sound; the
+// default (absent) and explicit per-item must behave identically (Mode() == per-item).
+func TestValidateIntegrationModeValid(t *testing.T) {
+	for name, mode := range map[string]*Integration{
+		"absent":           nil,
+		"empty":            {Mode: ""},
+		"explicit peritem": {Mode: IntegrationPerItem},
+		"explicit epic":    {Mode: IntegrationEpic},
+	} {
+		t.Run(name, func(t *testing.T) {
+			c := validConfig()
+			c.Souls = fullSouls(t)
+			c.Harness.Integration = mode
+			if err := c.Validate(); err != nil {
+				t.Fatalf("valid integration.mode rejected: %v", err)
+			}
+		})
+	}
+}
+
+// Default and explicit per-item resolve to the same mode; an unset block must not read as epic.
+func TestHarnessModeDefaultsPerItem(t *testing.T) {
+	if got := (&Harness{}).Mode(); got != IntegrationPerItem {
+		t.Errorf("absent integration block Mode() = %q, want %q", got, IntegrationPerItem)
+	}
+	if got := (&Harness{Integration: &Integration{Mode: IntegrationEpic}}).Mode(); got != IntegrationEpic {
+		t.Errorf("explicit epic Mode() = %q, want %q", got, IntegrationEpic)
+	}
+}
+
+// An unrecognized mode is a loud config fault, not a silent fall-through to per-item.
+func TestValidateIntegrationModeUnknown(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Harness.Integration = &Integration{Mode: "epics"}
+	mustContain(t, problems(t, c), `integration.mode "epics" is unknown`)
+}
+
 // A produces self-loop is a depth cycle and must fail.
 func TestValidateProducesSelfLoop(t *testing.T) {
 	c := validConfig()

@@ -87,6 +87,7 @@ func (c *Config) Validate() error {
 	} else {
 		c.validateDAG(add)
 		c.validatePolicy(add)
+		c.validateIntegration(add)
 	}
 	c.validateSouls(add)
 	c.validateRequirementsPlanner(add)
@@ -374,6 +375,23 @@ func (c *Config) validatePolicy(add func(string, ...any)) {
 				add("policy.profile is %q but trusted-merge stage %q has no %q postcondition; trusted-dev requires human approval on every integrate", ProfileTrustedDev, name, core.PostconditionHumanApproved)
 			}
 		}
+	}
+}
+
+// validateIntegration checks the integration block: Mode, if present, must be one of
+// per-item / epic. An unrecognized mode would otherwise fall through to per-item semantics
+// silently (a typo'd "epics" would not get the atomic landing the operator asked for), so it
+// is a loud config fault caught at startup like the policy profile (specs/configuration.md,
+// specs/integration.md). An absent block defaults to per-item and is sound.
+func (c *Config) validateIntegration(add func(string, ...any)) {
+	if c.Harness.Integration == nil {
+		return
+	}
+	switch c.Harness.Integration.Mode {
+	case "", IntegrationPerItem, IntegrationEpic:
+		// "" defaults to per-item; both named modes are valid.
+	default:
+		add("integration.mode %q is unknown (want %q or %q)", c.Harness.Integration.Mode, IntegrationPerItem, IntegrationEpic)
 	}
 }
 

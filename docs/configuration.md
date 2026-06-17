@@ -127,6 +127,25 @@ How many cross-link hops of the spec tree each agent receives: `1` = the issue's
 referenced spec file plus its direct neighbours. Bounds the agent's context to the
 relevant contract rather than the whole `specs/` tree.
 
+### `integration` — how work reaches `main`
+
+```yaml
+integration:
+  mode: per-item     # per-item (default) | epic
+```
+
+`mode` selects how verified work becomes commits on `main` (see
+[integration.md](../specs/integration.md)):
+
+- **`per-item`** (default — the kernel behaviour): each work item lands on `main` as its own
+  chain verifies.
+- **`epic`**: a whole feature lands **atomically** — children integrate onto an
+  `epic/<epic_id>` branch and `main` advances exactly once, by the epic's terminal merge, when
+  the epic's subtree drains. v1 runs **one epic at a time**.
+
+Omitting the block defaults to `per-item`. `harness validate` rejects any `mode` outside
+`{per-item, epic}`.
+
 ### `requirements_planner` — the wizard's model
 
 ```yaml

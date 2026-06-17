@@ -298,10 +298,13 @@ per epic, not new machinery. Spec contract:
   and is the foundation epic mode's per-child re-gate leans on. Regression: `TestGitMergerReGatesRebasedResult`
   now asserts the re-gate is called with `integration/iss-1`; the real-git `merge_integration_test.go`
   rebase path exercises it end-to-end. No spec/doc change (bug fix to already-documented intent).
-- [ ] **T7.2 `integration.mode` config + validation** — parse the top-level
-  `integration: { mode: per-item | epic }` block (default `per-item` when absent), thread it
-  into the run config, and have `harness validate` reject any other value. *(spec)*
-  [configuration.md](specs/configuration.md)
+- [x] **T7.2 `integration.mode` config + validation** — *done.* Added the optional top-level
+  `integration: { mode: per-item | epic }` block (`config.Integration`, `Harness.Mode()`
+  accessor defaulting to `per-item` so an absent block and explicit `per-item` are identical).
+  `validateIntegration` rejects any mode outside `{per-item, epic}` (same enum pattern as the
+  policy profile). The full `Config` is already threaded to the orchestrator (`Options.Config`),
+  so `cfg.Harness.Mode()` is reachable for T7.3. Docs: `docs/configuration.md` gained an
+  `integration` section. Tests: valid/empty/epic accepted, unknown rejected, `Mode()` default.
 - [ ] **T7.3 Retarget the merge queue per epic** *(needs T7.1, T7.2)* — under
   `mode: epic`: create `epic/<epic_id>` off `main` when the epic begins and commit the
   [wizard](specs/control-room.md)'s approved spec onto it (its first commit, **not** `main`);

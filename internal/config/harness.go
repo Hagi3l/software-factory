@@ -48,6 +48,46 @@ type Harness struct {
 	// like a soul (its model must resolve in the infra registry; its persona file must
 	// exist). See RequirementsPlanner and validateRequirementsPlanner.
 	RequirementsPlanner *RequirementsPlanner `yaml:"requirements_planner,omitempty"`
+
+	// Integration selects how verified work reaches `main` (specs/integration.md): per-item
+	// (the default kernel behavior — each work item lands on `main` as its own chain
+	// verifies) or epic (a whole feature lands atomically — children integrate onto an
+	// `epic/<epic_id>` branch and `main` advances exactly once, by the epic's terminal merge,
+	// when the subtree drains). Omitting the block defaults to per-item. Optional pointer so an
+	// absent block is distinguishable from an explicit one and defaults cleanly; the
+	// orchestrator reads Mode() rather than the raw field. Validated by validateIntegration.
+	Integration *Integration `yaml:"integration,omitempty"`
+}
+
+// Integration configures how verified work becomes commits on `main` (specs/integration.md,
+// specs/configuration.md). Its single knob, Mode, picks per-item (default) vs epic landing.
+type Integration struct {
+	// Mode is "per-item" (default) or "epic". Empty defaults to per-item; validation rejects
+	// any other value. See IntegrationPerItem / IntegrationEpic.
+	Mode string `yaml:"mode,omitempty"`
+}
+
+// Integration modes for Integration.Mode (specs/integration.md, specs/configuration.md).
+const (
+	// IntegrationPerItem lands each verified work item on `main` as its own chain verifies —
+	// the kernel behavior. It is the default when the integration block is absent or Mode is
+	// empty.
+	IntegrationPerItem = "per-item"
+	// IntegrationEpic lands a whole feature atomically: children integrate onto an
+	// `epic/<epic_id>` branch (which is "main" for child-level integration) and the real
+	// `main` advances exactly once, by the epic's terminal merge, when the epic's subtree
+	// drains. v1 admits one active epic at a time.
+	IntegrationEpic = "epic"
+)
+
+// Mode returns the configured integration mode, defaulting to per-item when the integration
+// block is absent or its mode is empty. It is the single source of truth the orchestrator
+// reads so an unset config and an explicit `per-item` behave identically.
+func (h *Harness) Mode() string {
+	if h == nil || h.Integration == nil || h.Integration.Mode == "" {
+		return IntegrationPerItem
+	}
+	return h.Integration.Mode
 }
 
 // RequirementsPlanner is the requirements-stage planner config: the interactive,
