@@ -270,7 +270,10 @@ them); only the *order of attention* changes.
   selection are fully unit-tested via the existing `run` seam (no daemon needed). Tests:
   `TestGVisorProvisionPinsRunscRuntime`, `TestDockerProvisionHasNoRuntimeFlag`,
   `TestNewBackendSelectsByConfig`, `TestNewBackendThreadsOptions`. docs/configuration.md
-  updated (sandbox.backend now honored, firecracker fails closed). ([components/sandbox.md](specs/components/sandbox.md))
+  updated (sandbox.backend now honored, firecracker fails closed); the **fail-closed
+  contract is now in the spec too** — components/sandbox.md "Selection is honored, and
+  fails closed" + a configuration.md validation note (the learning had landed only in
+  docs/ at first). ([components/sandbox.md](specs/components/sandbox.md))
 - [x] **T5.6 Package proxy on the broker allowlist** — *done.*
 - [x] **T5.6a Gate-verifier package egress** — *done.*
 - [x] **T5.7 Scoped short-lived secret minting** — *done.*
@@ -490,4 +493,6 @@ language — are now recorded in the specs they informed, not duplicated here.)
   moved `main` + re-gating the whole feature at its terminal merge). Deferred; spec'd as OPEN
   in [integration.md](specs/integration.md).
 - Exact module set in the TCB boundary — operationally the `policy.tcb_paths` globs (T2.10);
-  the concrete list must still be reviewed and pinned before autonomy is switched on for harness work.
+  the concrete list must still be reviewed and pinned before autonomy is switched on for harness
+  work. Now formally tracked as an **OPEN question in configuration.md** (was only prose in
+  bootstrap.md + this plan).

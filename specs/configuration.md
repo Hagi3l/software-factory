@@ -323,6 +323,12 @@ validate` step must run before anything executes and check:
 - the DAG `produces:` transitions don't create an unreachable or trivially-looping
   definition;
 - `integration.mode`, if present, is one of `per-item` / `epic`.
+- `sandbox.backend`, if present, is one of `docker` / `gvisor` / `firecracker`.
+  Validation checks only that the value is *well-formed*; whether the selected backend
+  is **available on this host** is a runtime concern, resolved when the backend is
+  bound. An unavailable backend (e.g. `firecracker` without KVM) **fails closed** at
+  that point — a fatal startup error, never a silent downgrade to a weaker backend than
+  was asked for (see [components/sandbox.md](components/sandbox.md#selection-is-honored-and-fails-closed)).
 
 > Treat config validation as a gate on startup, not a nicety.
 
@@ -362,6 +368,14 @@ factory. A clean config produces no advisories.
 
 ## OPEN questions
 
+- **TCB module boundary — the exact `policy.tcb_paths` glob set.** The set of paths
+  whose changes stay human-reviewed even after autonomy is switched on (operationally
+  the orchestrator, runner/broker, sandbox, and gate harness — see
+  [bootstrap.md](bootstrap.md)) is **not** a hardcoded kernel default; it is a
+  per-deployment policy value. The concrete globs must be **reviewed and pinned for the
+  target repository before autonomy is enabled for harness work** — too narrow lets an
+  agent edit the very code that enforces the guarantees; too broad needlessly blocks
+  autonomous progress. Tracked as OPEN until that review happens.
 - Config format: YAML assumed; HCL/CUE are candidates if stronger typing/validation
   is wanted.
 - Hot-reload vs. restart on config change — restart is fine for v1.

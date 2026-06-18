@@ -50,6 +50,25 @@ sandbox:
   limits:  { cpu: 2, mem: 2Gi, disk: 8Gi, wall: 30m }
 ```
 
+### Selection is honored, and fails closed
+
+"Config, not code" is only true if the configured backend is actually the one that
+runs. The runtime resolves `sandbox.backend` to a concrete backend **at startup**, and
+a request it cannot satisfy is a **fatal startup error — never a silent downgrade**.
+Selecting a backend the host cannot provide (e.g. `firecracker` without KVM) must fail
+closed rather than degrade to a weaker one: running untrusted code under *less*
+isolation than the operator asked for is a security regression, and a silent fallback
+hides it. The mapping is exact — `docker` (or empty) → the Docker backend; `gvisor` →
+gVisor (Docker pinned to the `runsc` OCI runtime); `firecracker` → the microVM backend,
+or a clear error where unavailable; any other value → a configuration error. gVisor is
+not a distinct provisioning path but the Docker backend with the runtime pinned, so
+zero-network, worktree seeding, and teardown are identical across the two.
+
+This is a startup contract, not just validation: [`harness validate`](../configuration.md)
+checks the value is *well-formed*, but whether the selected backend is *available on
+this host* can only be known when the runtime binds it, so the fail-closed check lives
+there.
+
 ---
 
 ## Profile → image resolution
