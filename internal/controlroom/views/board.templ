@@ -200,12 +200,15 @@ templ cardTimer(card query.IssueCard) {
 		</div>
 	} else {
 		<div
-			class="mt-2 flex items-center justify-between text-xs text-faint"
+			class={ timerRowClass(card) }
 			data-state-since={ epochAttr(card.StateEnteredAt) }
 			data-created={ epochAttr(card.CreatedAt) }
+			if card.WallCapped {
+				title={ wallTitle(card) }
+			}
 			x-data="cardTicker()"
 		>
-			<span>{ stateLabel(card.Status) } <span x-ref="state" class="tabular-nums text-muted">—</span></span>
+			<span>{ stateLabel(card.Status) } <span x-ref="state" class={ timerStateNumClass(card) }>—</span></span>
 			<span class="tabular-nums" x-ref="total">—</span>
 		</div>
 	}

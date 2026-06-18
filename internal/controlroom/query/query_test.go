@@ -177,6 +177,55 @@ func TestBoardCardCarriesTimerAnchors(t *testing.T) {
 	}
 }
 
+// TestBoardCardWallBudget is the data half of control-room.md's "the in-progress timer tints
+// toward its budget.wall ceiling": Board stamps each card's cumulative wall burn (core.Issue.SpentWall,
+// the cross-loop wall the orchestrator enforces) against the per-issue wall cap, using the same
+// meterPct/meterOver as the Budgets view — so the board tint and the budget table can never disagree.
+// A breach (over the cap) and a near-cap (≥ the warn line) both surface; the view tints off these.
+func TestBoardCardWallBudget(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{
+		{ID: "h-ok", Role: "implement", Status: "in_progress", SpentWall: 30 * time.Minute},    // 25% of 2h
+		{ID: "h-warn", Role: "implement", Status: "in_progress", SpentWall: 105 * time.Minute}, // 87% of 2h
+		{ID: "h-over", Role: "implement", Status: "in_progress", SpentWall: 150 * time.Minute}, // 125% of 2h → over
+	}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+	board, err := r.Board(context.Background(), []string{"implement"}, false, BudgetCaps{IssueWall: 2 * time.Hour})
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	cards := map[string]IssueCard{}
+	for _, c := range board.Columns[0].Cards {
+		cards[c.ID] = c
+	}
+	if c := cards["h-ok"]; !c.WallCapped || c.WallOver || c.WallPct != 25 {
+		t.Errorf("h-ok = capped %v over %v pct %d, want true/false/25", c.WallCapped, c.WallOver, c.WallPct)
+	}
+	if c := cards["h-warn"]; !c.WallCapped || c.WallOver || c.WallPct != 87 {
+		t.Errorf("h-warn = capped %v over %v pct %d, want true/false/87", c.WallCapped, c.WallOver, c.WallPct)
+	}
+	if c := cards["h-over"]; !c.WallCapped || !c.WallOver {
+		t.Errorf("h-over = capped %v over %v, want true/true", c.WallCapped, c.WallOver)
+	}
+}
+
+// TestBoardCardWallUncapped proves an unconfigured budget.wall leaves the card untinted: a percent
+// of no cap is meaningless, so WallCapped is false and the timer never tints — the same uncapped-
+// dimension behavior the Budgets view has, kept consistent so the board never invents a breach.
+func TestBoardCardWallUncapped(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{
+		{ID: "h-1", Role: "implement", Status: "in_progress", SpentWall: 99 * time.Hour},
+	}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+	board, err := r.Board(context.Background(), []string{"implement"}, false, BudgetCaps{}) // no IssueWall
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	c := board.Columns[0].Cards[0]
+	if c.WallCapped || c.WallOver || c.WallPct != 0 {
+		t.Errorf("uncapped card tinted: capped %v over %v pct %d", c.WallCapped, c.WallOver, c.WallPct)
+	}
+}
+
 // TestBoardFrontier exercises the work-frontier rule that drives the board's auto-scroll
 // (control-room.md "Follow the frontier", T4.30): exactly one column is Focus, and it is the
 // leftmost column holding any incomplete (non-closed) card — blocked counts, so a blocked card

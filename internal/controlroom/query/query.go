@@ -73,6 +73,17 @@ type IssueCard struct {
 	Spec           string
 	StateEnteredAt time.Time
 	CreatedAt      time.Time
+	// WallCapped / WallPct / WallOver drive the live timer's budget.wall tint (control-room.md
+	// "The board, in motion": the in-progress timer tints toward its budget.wall ceiling — a live
+	// "about to breach" signal). They are the per-issue cumulative wall burn (core.Issue.SpentWall,
+	// the cross-loop wall the orchestrator already enforces, T3.8b) against the configured per-issue
+	// wall cap (caps.IssueWall), the same meterPct/meterOver the Budgets view uses — so the board
+	// tint and the Budgets table can never disagree on a wall breach. WallCapped is false when no
+	// budget.wall is configured (caps.IssueWall == 0), and the card then never tints (a percent of
+	// no cap is meaningless), mirroring the Budgets view's uncapped-dimension behavior.
+	WallCapped bool
+	WallPct    int
+	WallOver   bool
 	// EpicID is the card's epic identity (core.EpicOf: the root seed's id, shared by every
 	// issue of one feature). It is set whenever the issue belongs to a *multi-issue* epic — a
 	// real decomposition fan-out (the epic's issue count > 1) — in per-item and epic modes
@@ -260,6 +271,14 @@ func (r *Reader) Board(ctx context.Context, stageOrder []string, epicMode bool, 
 			stage = unassignedStage
 		}
 		c := cardOf(i)
+		// budget.wall tint for the live timer: the cumulative wall burn the orchestrator enforces
+		// against the per-issue wall cap, computed with the same meters as the Budgets view. Only
+		// when a wall cap is configured (uncapped → no tint, like the Budgets view).
+		if caps.IssueWall > 0 {
+			c.WallCapped = true
+			c.WallPct = meterPct(float64(i.SpentWall), float64(caps.IssueWall))
+			c.WallOver = meterOver(float64(i.SpentWall), float64(caps.IssueWall))
+		}
 		ep := core.EpicOf(i)
 		// Grouping chrome rides a real multi-issue epic, in either mode: the shared badge/tint
 		// (EpicID) and the lineage thread's edge target (ParentID).

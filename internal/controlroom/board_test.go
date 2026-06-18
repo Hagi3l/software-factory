@@ -317,6 +317,92 @@ func TestTickerAssetServed(t *testing.T) {
 	}
 }
 
+// wallBoardServer builds a board with a budget.wall configured over three in-flight cards — one
+// comfortably under, one near the cap, one over — so the rendered live timer tints toward the
+// ceiling (control-room.md "The board, in motion"). All three are in_progress with the default
+// attempt so the only source of a warn/blocked color in a card is the wall tint (the blocked
+// status badge and the attempt>1 line, the other users of those tokens, are absent).
+func wallBoardServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	issues := []core.Issue{
+		{ID: "wall-ok", Title: "Plenty of wall", Role: "implementor", Status: "in_progress", SpentWall: 10 * time.Minute, StateEnteredAt: cardEntered, CreatedAt: cardEntered.Add(-20 * time.Minute)},
+		{ID: "wall-warn", Title: "Almost out of wall", Role: "implementor", Status: "in_progress", SpentWall: 108 * time.Minute, StateEnteredAt: cardEntered, CreatedAt: cardEntered.Add(-2 * time.Hour)},
+		{ID: "wall-over", Title: "Over wall", Role: "implementor", Status: "in_progress", SpentWall: 3 * time.Hour, StateEnteredAt: cardEntered, CreatedAt: cardEntered.Add(-3 * time.Hour)},
+	}
+	s := New(Options{
+		Version:    "test",
+		Reader:     query.NewReader(&fakeIssues{all: issues}, fakeArts{}, fakeProv{}),
+		StageOrder: []string{"implementor"},
+		BudgetCaps: query.BudgetCaps{IssueWall: 2 * time.Hour},
+	})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// isolateCard slices the rendered HTML for one card out of the board fragment, so an assertion
+// about that card's timer tint does not false-pass on a sibling card.
+func isolateCard(t *testing.T, body, id string) string {
+	t.Helper()
+	start := strings.Index(body, `id="card-`+id+`"`)
+	if start < 0 {
+		t.Fatalf("card %q not rendered", id)
+	}
+	rest := body[start+len(`id="card-`+id+`"`):]
+	if j := strings.Index(rest, `id="card-`); j >= 0 {
+		return body[start : start+len(`id="card-`+id+`"`)+j]
+	}
+	return body[start:]
+}
+
+// TestBoardWallTimerTint is the render half of control-room.md's "the in-progress timer tints
+// toward its budget.wall ceiling — a live 'about to breach' signal". A near-cap card's live timer
+// goes amber, an over-cap card's goes rose, an under-cap card stays the default faint, and every
+// capped card carries the wall-percent tooltip so the signal is carried by text too, not color
+// alone. The tint reuses the Budgets view's color tokens, so the two surfaces read the same.
+func TestBoardWallTimerTint(t *testing.T) {
+	ts := wallBoardServer(t)
+	r := get(t, ts, "/board/cards")
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+
+	warn := isolateCard(t, r.body, "wall-warn")
+	if !strings.Contains(warn, "text-st-warn") {
+		t.Errorf("near-cap card timer not amber-tinted: %q", warn)
+	}
+	if !strings.Contains(warn, `title="wall 90% of budget"`) {
+		t.Errorf("near-cap card missing the wall tooltip: %q", warn)
+	}
+
+	over := isolateCard(t, r.body, "wall-over")
+	if !strings.Contains(over, "text-st-blocked") {
+		t.Errorf("over-cap card timer not rose-tinted: %q", over)
+	}
+
+	ok := isolateCard(t, r.body, "wall-ok")
+	if strings.Contains(ok, "text-st-warn") || strings.Contains(ok, "text-st-blocked") {
+		t.Errorf("under-cap card timer should stay faint (no tint): %q", ok)
+	}
+	if !strings.Contains(ok, `title="wall 8% of budget"`) {
+		t.Errorf("under-cap (but capped) card missing the wall tooltip: %q", ok)
+	}
+}
+
+// TestBoardWallNoTintWhenUncapped proves the default board (no budget.wall configured) renders no
+// wall tint or tooltip at all — the uncapped-dimension behavior, so the board never invents a
+// breach signal where no cap exists.
+func TestBoardWallNoTintWhenUncapped(t *testing.T) {
+	ts := boardServer(t) // no BudgetCaps
+	r := get(t, ts, "/board/cards")
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	if strings.Contains(r.body, "of budget") {
+		t.Errorf("uncapped board rendered a wall tooltip: %q", r.body)
+	}
+}
+
 func pos(s, sub string) int { return strings.Index(s, sub) }
 
 // colOrder is a tiny debugging aid: the role headers in document order.

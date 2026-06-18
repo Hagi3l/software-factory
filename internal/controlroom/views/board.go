@@ -143,6 +143,58 @@ func pad2(n int) string {
 	return strconv.Itoa(n)
 }
 
+// wallTimerWarnPct is the near-cap threshold (percent) at which a card's live timer tints amber
+// toward its budget.wall ceiling — the same 80% warn line the Budgets view's budgetPct uses, so
+// the two surfaces agree on what counts as "about to breach".
+const wallTimerWarnPct = 80
+
+// timerRowClass is the live timer row's class, tinting it toward the card's budget.wall ceiling
+// (control-room.md "The board, in motion": the in-progress timer tints toward its budget.wall
+// ceiling — a live "about to breach" signal). It stays the default faint until the cumulative wall
+// burn nears its cap — amber at the 80% warn line, rose once over — so a card about to be
+// dead-lettered on wall stands out at a glance. An uncapped wall (no budget.wall configured) never
+// tints. The tint reads off the same meters as the Budgets view (WallPct/WallOver), so the board
+// and the budget table can never disagree on a breach.
+func timerRowClass(card query.IssueCard) string {
+	const base = "mt-2 flex items-center justify-between text-xs "
+	return base + wallTint(card)
+}
+
+// timerStateNumClass is the time-in-state duration span's class. It normally reads text-muted (a
+// shade brighter than the faint row, to emphasize the number), but drops the override when the row
+// is wall-tinted so the duration inherits the amber/rose alert color rather than fighting it.
+func timerStateNumClass(card query.IssueCard) string {
+	if wallTint(card) == "text-faint" {
+		return "tabular-nums text-muted"
+	}
+	return "tabular-nums"
+}
+
+// wallTint maps a card's wall-budget burn to a text color token: text-faint (default — uncapped,
+// or comfortably under), text-st-warn (amber, ≥80% of cap), text-st-blocked (rose, over cap). The
+// class literals are returned as plain strings the templ class attribute concatenates; they are
+// also written verbatim in budgets.templ's budgetPct, so the Tailwind scanner already compiles them.
+func wallTint(card query.IssueCard) string {
+	if !card.WallCapped {
+		return "text-faint"
+	}
+	switch {
+	case card.WallOver:
+		return "text-st-blocked"
+	case card.WallPct >= wallTimerWarnPct:
+		return "text-st-warn"
+	default:
+		return "text-faint"
+	}
+}
+
+// wallTitle is the live timer's hover tooltip when a wall cap is configured — "wall NN% of
+// budget" — so the budget.wall burn is legible on inspection and the tint's meaning is carried
+// by text too, not color alone (the spec's accessibility note). Only rendered when WallCapped.
+func wallTitle(card query.IssueCard) string {
+	return "wall " + strconv.Itoa(card.WallPct) + "% of budget"
+}
+
 // stateLabel maps a beads status to the word the card's time-in-state timer is prefixed with
 // (control-room.md "The board, in motion": working/queued/blocked). It lives server-side so
 // the status→label mapping has one home and the Alpine ticker need only advance the duration.
