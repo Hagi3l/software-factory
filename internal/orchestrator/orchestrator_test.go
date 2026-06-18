@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
-	"sort"
 	"sync"
 	"testing"
 	"time"
@@ -167,22 +166,6 @@ func (f *fakeBeads) Apply(_ context.Context, proposals []core.Proposal) ([]core.
 		f.applied = append(f.applied, p)
 	}
 	return created, nil
-}
-
-func (f *fakeBeads) InProgress(context.Context) ([]core.Issue, error) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	// Derive the in_progress set from the issue map, like a real `bd list --status in_progress` —
-	// this is what lets the in-flight projection rebuild (newOrch/rebuildInflight) seed itself from
-	// the issues a test put with the inProgress() helper.
-	var out []core.Issue
-	for _, is := range f.issues {
-		if is.Status == statusInProgress {
-			out = append(out, is)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
 }
 
 func (f *fakeBeads) Reissue(_ context.Context, id string) error {

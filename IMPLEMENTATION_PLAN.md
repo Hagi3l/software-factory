@@ -322,12 +322,21 @@ addresses cost; T8.6–T8.7 are clarity/hardening. **TCB note:** T8.1/T8.2 touch
 + scheduler (TCB) — stay human-reviewed; land behind tests, keep the beads-backed reader
 switchable to de-risk rollout.
 
-- [ ] **T8.1 Full work-graph projection + cold-start rebuild** — generalize the in-flight
-  projection (`internal/orchestrator/inflight.go`, `inflightProjection`, currently in-progress
-  only) into the single-writer's authoritative view of *every* known issue (status, role,
-  attempt, epic, spend, `state_entered_at`, **integrated** flag), maintained at the `o.transition`
-  choke point and rebuilt from beads on startup (extend `rebuildInflight`). beads = durable log,
-  not the hot read path. The spine the rest of Phase 8 reads. **Spec first.**
+- [x] **T8.1 Full work-graph projection + cold-start rebuild** — *done.* Generalized the
+  in-flight cache (`internal/orchestrator/inflight.go`, `inflightProjection`) into the single
+  writer's authoritative view of *every* known issue. Each `projectedEntry` now carries
+  `{issue, status, lease}`; the `o.transition` choke point `settle`s an issue AWAY from in_progress
+  (retains it under its new status) instead of dropping it; `rebuildInflight` hydrates the **full
+  graph** from `bd.ListAll` (one heavy read at cold start, not the hot path) instead of
+  `InProgress`. The in-flight accessors (`has`/`issues`/`expired`/`size`) preserve their old meaning
+  by filtering to `in_progress`; new readers `statusOf(id)` (the spine **T8.2** reads to skip
+  just-settled candidates) and `snapshot()` (the whole-graph read **T8.4** consumes snapshot-then-
+  stream) expose settled state. Removed the now-orphaned `InProgress` from the orchestrator `Beads`
+  seam (and its fake); `beads.Client.InProgress` stays (own test). **No spec change needed** — the
+  specs were already written ahead (orchestrator.md "Live state vs. durable state — the work-graph
+  projection", observability.md "The live read model", glossary "Projection"). Tests:
+  `TestRebuildHydratesFullWorkGraph` (full-graph cold-start parity + idempotent re-rebuild),
+  `TestProjectionRetainsSettledIssue` (settle-not-delete; `statusOf`/`snapshot`).
   ([observability.md](specs/observability.md), [components/orchestrator.md](specs/components/orchestrator.md) "Live state vs. durable state", [glossary.md](specs/glossary.md))
 - [ ] **T8.2 Scheduler dispatches off projection status** *(fixes #2)* — `schedule.go` dispatch
   filter consults the projection, not just `bd.Ready()`: `bd.Ready()` stays the candidate oracle

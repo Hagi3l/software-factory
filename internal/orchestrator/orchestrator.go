@@ -56,16 +56,14 @@ type Beads interface {
 	// RecordApproval stamps a human's approval (who, which candidate sha) on a parked issue.
 	RecordApproval(ctx context.Context, id, approvedRef, approver string) error
 	Apply(ctx context.Context, proposals []core.Proposal) ([]core.Issue, error)
-	// InProgress returns every in_progress issue (with its pinned spec hash and durable lease).
-	// It is read once at startup to rebuild the in-flight projection (rebuildInflight); the live
-	// loop then reads the projection, not beads, for "what is in flight" — the lease sweep and the
-	// spec-drift sweep both iterate the projection (T3.13, specs/components/orchestrator.md).
-	InProgress(ctx context.Context) ([]core.Issue, error)
 	PinSpecHash(ctx context.Context, id, hash string) error
 	Reissue(ctx context.Context, id string) error
-	// ListAll returns every issue regardless of status (including closed) — the input to the
-	// cross-issue epic-budget aggregate read (sum the per-issue closing spend over all issues
-	// sharing an epic id; see authorizeEpic, specs/workflow.md).
+	// ListAll returns every issue regardless of status (including closed). It is the cold-start
+	// hydration source for the work-graph projection (rebuildInflight reads the whole graph once at
+	// startup, then the live loop reads the projection, not beads — the lease sweep, the spec-drift
+	// sweep, and dispatch/result gating all consult it; T3.13, T8.1, specs/components/orchestrator.md
+	// "Live state vs. durable state"). It also backs the cross-issue epic-budget aggregate read (sum
+	// the per-issue closing spend over all issues sharing an epic id; see authorizeEpic).
 	ListAll(ctx context.Context) ([]core.Issue, error)
 	// StampClosingSpend records an issue's own invocation marginal (tokens, USD) so the epic
 	// budget can be summed across all issues of an epic (see core.Issue.ClosingTokens).
@@ -183,12 +181,12 @@ type Orchestrator struct {
 	base     string
 	dlq      string
 
-	// inflight is the in-memory in-flight projection: the single writer's read-your-writes
-	// consistent record of which issues are in_progress, maintained at the transition choke
-	// point and consulted by dispatch + result gating instead of a lagging beads read. It is
-	// derived from beads and rebuilt from the in_progress set at startup (rebuildInflight), so
-	// it is a consistency cache, never a source of truth (specs/components/orchestrator.md
-	// "Live state vs. durable state").
+	// inflight is the in-memory work-graph projection: the single writer's read-your-writes
+	// consistent record of the live state of every issue it knows — in_progress AND settled —
+	// maintained at the transition choke point and consulted by dispatch + result gating instead
+	// of a lagging beads read. It is derived from beads and rebuilt from the full graph at startup
+	// (rebuildInflight), so it is a consistency cache, never a source of truth
+	// (specs/components/orchestrator.md "Live state vs. durable state").
 	inflight *inflightProjection
 
 	// diffFiles returns the repo-relative paths a candidate ref changed relative to base.
@@ -354,23 +352,28 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	return nil
 }
 
-// rebuildInflight seeds the in-flight projection from beads' durable in_progress set. It runs
-// once at startup, before the first dispatch or result is handled, so a restarted orchestrator
-// resumes with an accurate live view of which issues are claimed. Crash-safety is unchanged
-// because the projection is derived from beads, never a second source of truth: a crash loses
-// only the cache, which this rebuilds (specs/components/orchestrator.md "Crash safety"). The
-// caller (Run) treats a read failure as best-effort — it logs and continues with an empty
-// projection rather than crashing — because the loop's other beads reads are best-effort too and
-// a missed seed self-heals: bd.ready() never returns in_progress work, so an empty projection
-// cannot re-dispatch it; the only effect is that a result for pre-restart in-flight work is
-// briefly ignored until the lease sweep restrands and redispatches it.
+// rebuildInflight hydrates the work-graph projection from beads' FULL graph (ListAll, every status)
+// — generalizing the original in_progress-only seed. It runs once at startup, before the first
+// dispatch or result is handled, so a restarted orchestrator resumes with an accurate live view of
+// every issue it knows: which are in flight (with their durable leases, so the lease sweep recovers
+// stranded work on its original deadline) AND which are already settled (so the scheduler will not
+// re-dispatch a just-closed/just-blocked issue a lagging bd.ready() still lists, and the control
+// room reads a consistent surface). This is the one heavy beads read, paid once at cold start rather
+// than on the hot path — beads stays the durable log + hydration source, the projection the read
+// model (specs/components/orchestrator.md "Live state vs. durable state"). Crash-safety is unchanged
+// because the projection is derived from beads, never a second source of truth: a crash loses only
+// the cache, which this rebuilds. The caller (Run) treats a read failure as best-effort — it logs
+// and continues with an empty projection rather than crashing — because the loop's other beads reads
+// are best-effort too and a missed seed self-heals: bd.ready() never returns in_progress work, so an
+// empty projection cannot re-dispatch it; the only effect is that a result for pre-restart in-flight
+// work is briefly ignored until the lease sweep restrands and redispatches it.
 func (o *Orchestrator) rebuildInflight(ctx context.Context) error {
-	inflight, err := o.bd.InProgress(ctx)
+	all, err := o.bd.ListAll(ctx)
 	if err != nil {
-		return fmt.Errorf("orchestrator: rebuild in-flight projection: %w", err)
+		return fmt.Errorf("orchestrator: rebuild work-graph projection: %w", err)
 	}
-	o.inflight.reset(inflight)
-	o.log.Info("orchestrator: rebuilt in-flight projection from beads", "in_flight", len(inflight))
+	o.inflight.reset(all)
+	o.log.Info("orchestrator: rebuilt work-graph projection from beads", "issues", len(all), "in_flight", o.inflight.size())
 	return nil
 }
 

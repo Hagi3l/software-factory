@@ -74,8 +74,9 @@ func TestHandleResultIgnoresResultNotInflight(t *testing.T) {
 	g := &fakeGate{report: gate.Report{Passed: true}}
 	m := &fakeMerger{}
 	o, _ := newOrch(t, kernelConfig(2), bd, g, m)
-	// ...but the single writer no longer considers it in flight (already disposed / never claimed).
-	o.inflight.remove("iss-1")
+	// ...but the single writer no longer considers it in flight: a terminal transition settled it
+	// (retained in the projection under a closed status, not in_progress), so has() reports false.
+	o.inflight.settle(core.Issue{ID: "iss-1", Role: "implement"}, statusClosed)
 
 	res := core.Result{IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: core.CandidateBranch("iss-1")}}
 	if transient, err := o.handleResult(context.Background(), res); err != nil || transient {
@@ -186,10 +187,11 @@ func TestInflightExpiredAndLeaseSeeding(t *testing.T) {
 	}
 
 	// reset seeds each entry from issue.Lease (the durable deadline), NOT now+ttl: an issue whose
-	// durable lease already passed is immediately strandable after a rebuild.
+	// durable lease already passed is immediately strandable after a rebuild. Only in_progress
+	// entries are sweepable, so the recovered work carries the in_progress status it had in beads.
 	p.reset([]core.Issue{
-		{ID: "stale", Lease: now.Add(-time.Hour)},
-		{ID: "fresh", Lease: now.Add(time.Hour)},
+		{ID: "stale", Status: statusInProgress, Lease: now.Add(-time.Hour)},
+		{ID: "fresh", Status: statusInProgress, Lease: now.Add(time.Hour)},
 	})
 	exp := map[string]bool{}
 	for _, is := range p.expired(now) {
@@ -203,32 +205,80 @@ func TestInflightExpiredAndLeaseSeeding(t *testing.T) {
 	}
 }
 
-// TestRebuildInflightFromInProgressSet proves crash-safety: on restart the projection is rebuilt
-// from beads' durable in_progress set before the first dispatch, so a restarted orchestrator
-// resumes with an accurate live view (and does not re-dispatch genuinely in-flight work).
-func TestRebuildInflightFromInProgressSet(t *testing.T) {
+// TestRebuildHydratesFullWorkGraph proves the T8.1 cold-start contract: on restart the work-graph
+// projection is rebuilt from beads' FULL graph (every status, not just in_progress) before the first
+// dispatch, so a restarted orchestrator resumes with an accurate live view of every issue it knows.
+// In-flight work seeds has()/size() (crash-safe resume, no re-dispatch of genuinely in-flight work);
+// settled work is RETAINED too (statusOf knows it) so the scheduler will not re-dispatch a
+// just-closed issue a lagging bd.ready() still lists and the control room reads a consistent surface.
+func TestRebuildHydratesFullWorkGraph(t *testing.T) {
 	bd := newFakeBeads()
 	bd.put(inProgress("iss-1", "implement", 0))
 	bd.put(inProgress("iss-2", "implement", 0))
-	bd.put(core.Issue{ID: "iss-3", Role: "implement", Status: "open"}) // not in flight
+	bd.put(core.Issue{ID: "iss-3", Role: "implement", Status: "open"})           // ready, not in flight
+	bd.put(core.Issue{ID: "iss-4", Role: "implement", Status: statusClosed})     // settled (integrated/closed)
 	o, _ := newOrch(t, kernelConfig(2), bd, &fakeGate{}, &fakeMerger{})
 
-	// newOrch already rebuilt; assert the in_progress set seeded the projection and `open` did not.
+	// newOrch already rebuilt; the in_progress set seeds the in-flight accessors, `open`/`closed` do not.
 	if !o.inflight.has("iss-1") || !o.inflight.has("iss-2") {
-		t.Error("rebuild did not seed the in-flight projection from the in_progress set")
+		t.Error("rebuild did not seed the in-flight set from the in_progress issues")
 	}
-	if o.inflight.has("iss-3") {
-		t.Error("rebuild seeded an open (not-in-flight) issue into the projection")
+	if o.inflight.has("iss-3") || o.inflight.has("iss-4") {
+		t.Error("has() reported a settled (open/closed) issue as in flight")
 	}
 	if got := o.inflight.size(); got != 2 {
-		t.Errorf("projection size = %d, want 2", got)
+		t.Errorf("in-flight size = %d, want 2", got)
+	}
+
+	// The generalization: settled issues are KNOWN to the projection with their real status, so the
+	// whole graph (4 issues) is hydrated, not only the in_progress set.
+	for id, want := range map[string]string{"iss-1": statusInProgress, "iss-2": statusInProgress, "iss-3": "open", "iss-4": statusClosed} {
+		if got, ok := o.inflight.statusOf(id); !ok || got != want {
+			t.Errorf("statusOf(%s) = (%q,%v), want (%q,true)", id, got, ok, want)
+		}
+	}
+	if got := len(o.inflight.snapshot()); got != 4 {
+		t.Errorf("snapshot size = %d, want 4 (the whole graph)", got)
 	}
 
 	// A restart re-derives the same set: rebuild again is idempotent (reset replaces contents).
 	if err := o.rebuildInflight(context.Background()); err != nil {
 		t.Fatalf("rebuildInflight: %v", err)
 	}
-	if o.inflight.size() != 2 {
-		t.Errorf("projection size after re-rebuild = %d, want 2", o.inflight.size())
+	if o.inflight.size() != 2 || len(o.inflight.snapshot()) != 4 {
+		t.Errorf("after re-rebuild: in-flight=%d snapshot=%d, want 2 and 4", o.inflight.size(), len(o.inflight.snapshot()))
+	}
+}
+
+// TestProjectionRetainsSettledIssue proves the choke-point generalization: a transition AWAY from
+// in_progress settles the issue in the projection (retained under its new status) rather than
+// deleting it. has() then reports false (no longer in flight) but statusOf still knows it, and the
+// snapshot carries the settled status. This is what closes the just-settled re-dispatch window (the
+// scheduler can see a candidate is already closed) and lets the control room read settled state.
+func TestProjectionRetainsSettledIssue(t *testing.T) {
+	p := newInflightProjection()
+	p.add(core.Issue{ID: "iss-1", Role: "implement"}, testLease())
+	if !p.has("iss-1") || p.size() != 1 {
+		t.Fatalf("after add: has=%v size=%d, want true and 1", p.has("iss-1"), p.size())
+	}
+
+	p.settle(core.Issue{ID: "iss-1", Role: "implement"}, statusClosed)
+	if p.has("iss-1") {
+		t.Error("a settled issue still reads as in flight via has()")
+	}
+	if p.size() != 0 {
+		t.Errorf("in-flight size after settle = %d, want 0", p.size())
+	}
+	if got, ok := p.statusOf("iss-1"); !ok || got != statusClosed {
+		t.Errorf("statusOf after settle = (%q,%v), want (closed,true) — settled issues are retained", got, ok)
+	}
+	snap := p.snapshot()
+	if len(snap) != 1 || snap[0].ID != "iss-1" || snap[0].Status != statusClosed {
+		t.Errorf("snapshot = %+v, want one iss-1 with status closed", snap)
+	}
+
+	// An unknown id is unknown — statusOf distinguishes "settled" from "never seen".
+	if _, ok := p.statusOf("nope"); ok {
+		t.Error("statusOf reported an unknown id as known")
 	}
 }

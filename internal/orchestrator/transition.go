@@ -40,18 +40,20 @@ func (o *Orchestrator) transition(ctx context.Context, issue core.Issue, to stri
 	if err := write(ctx); err != nil {
 		return err
 	}
-	// Maintain the in-flight projection here — the one place every status write funnels through —
+	// Maintain the work-graph projection here — the one place every status write funnels through —
 	// so it can never silently drift from beads (specs/components/orchestrator.md "Live state vs.
 	// durable state"): a transition TO in_progress records the just-claimed issue (under a lease
 	// approximated from the configured TTL; the authoritative lease lives in beads), and any
-	// transition AWAY (open/closed/blocked) drops it. The two hot paths read this projection, not
-	// a lagging beads status, to decide "already dispatched" (scheduleReady) and "is this a live
-	// result" (handleResult). Updated only after a successful write, so the cache mirrors what was
-	// actually persisted.
+	// transition AWAY (open/closed/blocked) SETTLES it — retaining the issue under its new status
+	// (not dropping it) so the scheduler can skip a just-settled candidate a lagging bd.ready()
+	// still lists, and the control room can read closed/blocked state from a consistent surface. The
+	// hot paths read this projection, not a lagging beads status, to decide "already dispatched" /
+	// "already settled" (scheduleReady) and "is this a live result" (handleResult). Updated only
+	// after a successful write, so the cache mirrors what was actually persisted.
 	if to == statusInProgress {
 		o.inflight.add(issue, time.Now().UTC().Add(o.leaseTTL))
 	} else {
-		o.inflight.remove(issue.ID)
+		o.inflight.settle(issue, to)
 	}
 	o.announceState(issue, to)
 	return nil
