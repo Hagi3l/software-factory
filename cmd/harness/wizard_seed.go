@@ -58,6 +58,13 @@ type wizardSeeder struct {
 	log   *slog.Logger
 	// git runs a git subcommand in the repo; a seam so tests drive a temp repo deterministically.
 	git func(ctx context.Context, args ...string) (string, error)
+	// track, when set, records the wizard's just-written issues into the orchestrator's work-graph
+	// projection (orchestrator.Track), so a co-located control room's projection-backed board shows
+	// a seed the instant it lands and the scheduler re-dispatches a reopened dead-letter instead of
+	// skipping it (T8.4). The wizard write bypasses the reconcile loop (it writes beads directly,
+	// like `harness seed`), so without this the projection would not learn of the change until the
+	// issue was claimed. nil under standalone serve (no orchestrator) or in tests — then a no-op.
+	track func(issues ...core.Issue)
 }
 
 // newWizardSeeder builds a seeder over the run's repo, beads client, and artifact store. It is
@@ -357,6 +364,13 @@ func (s *wizardSeeder) createIssues(ctx context.Context, req wizard.SeedRequest,
 	created, err := s.bd.Apply(ctx, proposals)
 	if err != nil {
 		return nil, err
+	}
+	// Record the seeds into the orchestrator's work-graph projection so a co-located board shows
+	// them immediately rather than only once the orchestrator first claims them (T8.4). bd.Apply
+	// returns the created issues with their assigned ids and the open status they carry; track
+	// defaults their time anchors.
+	if s.track != nil {
+		s.track(created...)
 	}
 	out := make([]wizard.SeededIssue, len(created))
 	for i, is := range created {

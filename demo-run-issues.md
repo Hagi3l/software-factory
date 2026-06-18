@@ -133,5 +133,20 @@ Tracking issues to discuss after the run completes (terminal merge → push → 
   (vault-ubk→x90→vault-76z) was in implement when stopped. Terminal merge to main never
   reached (epic didn't drain). Spend ~$2 (board showed $1.02 at 12:33, pre vault-x90's 1.35M).
 
+## #4 / #6 / #8 — RESOLVED by T8.4 (control-room projection-backed read model)
+- The control room's LIVE work-state views (board, DAG, dead-letter, status bar) now read the
+  orchestrator's in-memory **work-graph projection** instead of polling `bd list --all`/`bd show`:
+  - **#4** (card reads `open`/`queued` while worked): the projection is the single writer's own
+    read-your-writes-consistent view, so a card never lags its agent.
+  - **#8** (`signal: killed` bd reads, stale board): the hot-path board/DAG/status reads place
+    **zero `bd list` load** on Dolt — they read in-memory. Forensic pages still read beads (durable
+    truth), but they are on-demand, not polled. Answers #8(a) "yes — the control room consumes the
+    projection, not a beads poll."
+  - **#6** (closed retry shows as a live "duplicate"): was a symptom of #8's stale read showing a
+    closed issue as `in_progress`; with the projection the board reflects the close immediately.
+- Latent companion bug fixed: the Resolve wizard reopens a dead-letter via `bd.Reissue` directly, so
+  the projection (now the T8.2 scheduler's dispatch oracle) would have skipped it forever — the
+  Resolve/Seed paths now `orchestrator.Track(...)` their writes into the projection.
+
 ---
 (append new issues below as the run proceeds)

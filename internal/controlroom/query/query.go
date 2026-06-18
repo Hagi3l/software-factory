@@ -45,17 +45,38 @@ type ProvenanceReader interface {
 	Recent(ctx context.Context, limit int) ([]MergedCommit, error)
 }
 
-// Reader assembles the render-ready views. Its three ports map one-to-one to the three
-// stores; a view method reads from whichever it needs and returns a presentation struct.
+// Reader assembles the render-ready views. Its ports map to the three stores; a view method reads
+// from whichever it needs and returns a presentation struct.
+//
+// It holds TWO issue readers, deliberately. live backs the LIVE work-state views — board, DAG,
+// dead-letter, status bar, epic roll-up — which the spec routes through the orchestrator's
+// work-graph projection (the consistent, in-memory read model that never lags the single writer and
+// adds no `bd list` load — specs/observability.md "The live read model", T8.4). issues backs the
+// FORENSIC pages — issue/invocation detail, replay, verification, budgets, merge queue — which the
+// spec renders from beads, the durable truth (specs/control-room.md "Historical/forensic"). When
+// co-located the two differ (live = projection, issues = beads); standalone, NewReader points both
+// at the same beads reader so there is no behavior change without an attached orchestrator.
 type Reader struct {
+	live   IssueReader
 	issues IssueReader
 	arts   ArtifactReader
 	prov   ProvenanceReader
 }
 
-// NewReader wires the read model to its three stores.
+// NewReader wires the read model to its stores with a single issue reader serving both the live and
+// the forensic reads. It is the standalone shape (harness serve) and the default for tests: with no
+// attached orchestrator there is no projection, so the live views read beads too — the same way the
+// live SSE feed degrades there (specs/observability.md "The live read model").
 func NewReader(issues IssueReader, arts ArtifactReader, prov ProvenanceReader) *Reader {
-	return &Reader{issues: issues, arts: arts, prov: prov}
+	return &Reader{live: issues, issues: issues, arts: arts, prov: prov}
+}
+
+// NewReaderWithLive wires the read model with a distinct LIVE reader for the work-state views (the
+// projection-backed reader, NewProjectionIssueReader) and a durable beads reader for the forensic
+// pages. It is the co-located shape (harness run --serve-addr), where the orchestrator's work-graph
+// projection is the live read model (T8.4).
+func NewReaderWithLive(live, issues IssueReader, arts ArtifactReader, prov ProvenanceReader) *Reader {
+	return &Reader{live: live, issues: issues, arts: arts, prov: prov}
 }
 
 // IssueCard is the compact projection of an issue for the board and dead-letter lists —
@@ -269,7 +290,7 @@ const unassignedStage = "(unassigned)"
 // caps is the same query.BudgetCaps the Budgets view uses, so the hero's spend agrees with that
 // view; it is ignored in per-item mode.
 func (r *Reader) Board(ctx context.Context, stageOrder []string, epicMode bool, caps BudgetCaps) (Board, error) {
-	issues, err := r.issues.ListAll(ctx)
+	issues, err := r.live.ListAll(ctx)
 	if err != nil {
 		return Board{}, fmt.Errorf("query: board: %w", err)
 	}
@@ -422,7 +443,7 @@ type DeadLetter struct {
 // exhausted retry cap, or a needs-spec-clarification escalation. Ordered by id for a
 // stable render.
 func (r *Reader) DeadLetters(ctx context.Context) ([]DeadLetter, error) {
-	issues, err := r.issues.List(ctx, "blocked")
+	issues, err := r.live.List(ctx, "blocked")
 	if err != nil {
 		return nil, fmt.Errorf("query: dead-letters: %w", err)
 	}
@@ -756,7 +777,15 @@ func (r *Reader) Budgets(ctx context.Context, caps BudgetCaps) (Budgets, error) 
 	if err != nil {
 		return Budgets{}, fmt.Errorf("query: budgets: %w", err)
 	}
+	return aggregateBudgets(issues, caps), nil
+}
 
+// aggregateBudgets folds a set of issues into the epic and per-issue burn-vs-cap view. It is the
+// shared core of the Budgets view (which feeds it beads' durable spend — the forensic cost surface)
+// and the Status bar (which feeds it the live projection's issues, so the bar's queue depth /
+// escalation / budget-health glance agrees with the live board, T8.4). Keeping the math in one place
+// is why the bar and the budget table can never disagree on a breach.
+func aggregateBudgets(issues []core.Issue, caps BudgetCaps) Budgets {
 	// Epic aggregation: sum each member's marginal Closing* under its epic id.
 	type epicAgg struct {
 		tokens int
@@ -797,7 +826,7 @@ func (r *Reader) Budgets(ctx context.Context, caps BudgetCaps) (Budgets, error) 
 		out.Issues = append(out.Issues, buildIssueBudgetRow(i, caps))
 	}
 	sort.Slice(out.Issues, func(x, y int) bool { return issueBudgetLess(out.Issues[x], out.Issues[y]) })
-	return out, nil
+	return out
 }
 
 // buildIssueBudgetRow projects one issue's cumulative burn against the per-issue caps. It is the
@@ -927,10 +956,15 @@ const statusBlocked = "blocked"
 // impossible. The last-merge lookup is best-effort: a git fault leaves LastMergeIssue empty rather
 // than failing the whole bar (the bar is a glance, not a gate).
 func (r *Reader) Status(ctx context.Context, caps BudgetCaps) (Status, error) {
-	b, err := r.Budgets(ctx, caps)
+	// The status bar is a LIVE view, so it reads the projection (r.live), not beads — its queue
+	// depth / escalation count / budget-health dot are exactly the live board's numbers, derived
+	// through the same burn math (aggregateBudgets) the forensic Budgets view uses, so the two can
+	// never disagree (T8.4, specs/observability.md "The live read model").
+	issues, err := r.live.ListAll(ctx)
 	if err != nil {
 		return Status{}, fmt.Errorf("query: status: %w", err)
 	}
+	b := aggregateBudgets(issues, caps)
 	st := Status{BudgetHealth: StatusHealthOK}
 	for _, row := range b.Issues {
 		switch row.Status {

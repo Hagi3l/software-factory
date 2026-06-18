@@ -85,12 +85,14 @@ A thin status bar rides every page (it's part of the layout chrome, not a destin
 the "is the factory healthy?" glance: **queue depth** (work still in flight) · **active
 agents** · **open escalations** (the dead-letter count, tinted when non-zero) · a
 **budget-health dot** (emerald healthy / amber ≥80% of a cap / rose breach, matching the
-Budgets view) · **last merge**. It's assembled from the same beads/provenance reads that
-back the board, dead-letter, and budget views — so it agrees with them by construction —
-and refreshes live off the existing `issue-state` and `agent-event` streams (no new
-stream), with a periodic backstop. *Active agents* is derived from the distinct agent ids
-seen on the live activity buffer within a recent window — no new registry. With no read
-model wired (standalone `harness serve`) it degrades to a neutral static bar.
+Budgets view) · **last merge**. It reads the same source that backs the board and
+dead-letter — the orchestrator's live [work-graph projection](../specs/observability.md#the-live-read-model)
+when co-located, beads when standalone — and the same burn math the Budgets view uses, so
+it agrees with them by construction; it refreshes live off the existing `issue-state` and
+`agent-event` streams (no new stream), with a periodic backstop. *Active agents* is derived
+from the distinct agent ids seen on the live activity buffer within a recent window — no new
+registry. With no read model wired (standalone `harness serve`) it degrades to a neutral
+static bar.
 
 The open-escalation count is also a **push**: the control room tails the durable
 [`harness.dlq`](../specs/messaging.md) subject and fires a **browser notification** when a
@@ -182,7 +184,13 @@ already-integrated work and rides to `main` only when the epic lands. In the def
 ## A note on liveness
 
 Live views refresh over SSE, each with a slow periodic backstop so a settled board
-still converges. The **Board, DAG, and DLQ** refetch on the orchestrator's typed
+still converges. The **Board, DAG, DLQ, and status bar** read the orchestrator's live
+[work-graph projection](../specs/observability.md#the-live-read-model) — the single
+writer's own in-memory view of every issue, consistent the instant a status is written —
+instead of polling beads, so a card never lags as `open` while its agent runs and the page
+adds no `bd list` load (co-located only; standalone `harness serve` has no projection and
+reads beads). beads stays the durable source the forensic pages render from. The **Board,
+DAG, and DLQ** refetch on the orchestrator's typed
 [issue-state event](../specs/messaging.md) — they care about *transitions*, so they
 update precisely when work moves between stages (and the board animates the move). The
 **Activity** feed instead refreshes on the finer-grained agent-event stream, since its

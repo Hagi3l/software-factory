@@ -24,11 +24,14 @@ is complete (T6.1–T6.3). Phase 7 (atomic feature integration / epic mode) is c
 it every still-open item is either **optional** (T5.5 gVisor backend, T5.11 warm pools + HA
 orchestrator) or **hardware-blocked** (T5.2 Firecracker, needs KVM the dev box lacks).
 
-**Phase 8 (demo-hardening) is newly opened and has live work.** The 2026-06-18 live vault-demo
-run surfaced read-model consistency bugs (scheduler + control room read beads directly) and a
-planner over-bundling cost issue; T8.1–T8.7 fix them via a systemic read-model refactor +
-decomposition-granularity tuning. See Phase 8 below, [`demo-run-issues.md`](demo-run-issues.md),
-and [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md).
+**Phase 8 (demo-hardening) has live work.** The 2026-06-18 live vault-demo run surfaced read-model
+consistency bugs (scheduler + control room read beads directly) and a planner over-bundling cost
+issue. The **read-model spine is complete** (T8.1–T8.4, T8.6): the orchestrator's work-graph
+projection is now the authoritative live read model — the scheduler dispatches off it (T8.2), it is
+durable-stamped + correctly rolled up (T8.3), and the control room's live work-state views read it
+instead of polling beads (T8.4). Remaining: **T8.5** (planner decomposition granularity — the cost
+driver) and **T8.7** (wizard one-root-in-epic hardening). See Phase 8 below,
+[`demo-run-issues.md`](demo-run-issues.md), and [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md).
 
 **Development mode for Phases 2–6: built by hand with Claude Code, human-reviewed —
 not self-hosted.** Bootstrap's threshold (a) ("the harness builds itself as a
@@ -372,13 +375,38 @@ switchable to de-risk rollout.
   `TestMergeCandidateStampsIntegratedMarker` (write-side: stamped on land, survives close),
   `TestBoardEpicProgressExcludesRootAndSupersededBeads` (1/2 not 4/6; spend unaffected); existing
   epic-hero fixtures updated to the marker. ([integration.md](specs/integration.md), [glossary.md](specs/glossary.md))
-- [ ] **T8.4 Control-room projection-backed read model** *(fixes #4, #6, #8)* — back the
-  `IssueReader` seam (`internal/controlroom/query`, `NewReader`) with a projection-backed reader
-  when co-located, fed by **snapshot-then-stream** over the existing `internal/controlroom/live`
-  Hub (gap-free: snapshot at connect, then events). Keep the beads-backed `IssueReader` as the
-  **standalone fallback** (`harness serve` with no NATS → beads snapshot, no live — mirrors how
-  `/events` already 503s). **Open for impl:** reuse vs. extend `live.Hub`; co-located-only live
-  for v1 (distributed reads revisited with Phase 5). (needs T8.1)
+- [x] **T8.4 Control-room projection-backed read model** *(fixes #4, #6, #8)* — *done.* The LIVE
+  work-state views now read the orchestrator's in-memory work-graph projection; the FORENSIC pages
+  keep reading beads (the durable truth) — a deliberate **two-reader split** in `query.Reader`
+  (`live` vs `issues`), spec-faithful (observability.md "live read model" vs control-room.md
+  "Historical/forensic"). Realized as a **co-located direct in-process read**, not a second
+  delta-applied copy (single source of truth, no drift): `orchestrator.Snapshot(ctx)` exposes the
+  projection (`inflight.snapshot()`); `query.NewProjectionIssueReader(WorkGraphSnapshot, fallback)`
+  is the projection-backed `IssueReader` (ListAll→snapshot, List→status-filter incl. comma sets,
+  Get→scan-then-beads-fallback). `NewReaderWithLive` wires it for **Board, DAG, DeadLetters, Status**
+  (Status decoupled from Budgets via the shared `aggregateBudgets`); everything else stays beads.
+  Standalone `harness serve` keeps `NewReader` (live==issues==beads). The browser still refetches on
+  the existing `issue-state` SSE nudge (T4.17/T4.18) + periodic backstop, now rendering from the
+  projection — so "snapshot-then-stream" is realized as re-snapshot-on-nudge (strictly gap-free).
+  **Projection completeness (the load-bearing write-side work):** the projection was only maintained
+  at status `transition()`; it now also captures (a) **creation** — `applyTracked` wraps every
+  `bd.Apply` site (accept/acceptPlan/advance/route/resolveConflict) and records created issues as
+  `open` (else a freshly created child is invisible until first claimed); (b) **fresh render fields
+  on settle** — `transition` stamps `StateEnteredAt` (board timers), `handleResult` mirrors closing
+  spend (hero roll-up), `deadLetter` mirrors the DLQ reason, and `mergeCandidate`→`markIntegrated`
+  + a **monotonic `settle` preserve** carries the `Integrated` marker through the close (hero
+  progress); (c) **external human-approved writes** — public `orchestrator.Track(...)` keeps the
+  projection in step with the two wizard write paths that bypass the reconcile loop. **Latent T8.2
+  bug fixed here:** the Resolve wizard reopens a dead-letter via `bd.Reissue` (blocked→open) directly,
+  so the projection still read it `blocked` and the **T8.2 scheduler would skip it forever** — the
+  Resolve path now `Track`s the reopen as open. run.go late-binds the projection into the reader
+  (the orchestrator is built after the control room, needing the in-block log bridge) and sets the
+  wizard's track callback post-construction. **No spec change** — observability.md/control-room.md
+  were written ahead and already say co-located reads the in-process projection live; docs/control-room.md
+  updated (status bar + liveness note). Tests: `TestProjectionTrackRecordsCreatedOpenIssue`,
+  `TestProjectionMarkIntegratedSurvivesSettle`, `TestApplyTrackedRecordsCreatedIssues`,
+  `TestOrchestratorTrackAndSnapshot`, `TestTransitionStampsStateEnteredIntoProjection`,
+  `TestProjectionIssueReader`, `TestReaderLiveVsForensicSplit`.
   ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md), [messaging.md](specs/messaging.md))
 - [ ] **T8.5 Planner decomposition granularity** *(fixes #5 — the cost driver)* — edit both
   planner personas (`config/souls/prompts/planner.md` + `demo/vault/config/souls/prompts/planner.md`)

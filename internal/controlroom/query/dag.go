@@ -18,7 +18,10 @@ import (
 // stable render. The graph types live in package dag; this returns dag.Graph directly with
 // no intermediate type.
 func (r *Reader) DAG(ctx context.Context) (dag.Graph, error) {
-	issues, err := r.issues.ListAll(ctx)
+	// The DAG is a LIVE work-state view, so it reads the projection (r.live), not beads — the
+	// dependency graph reflects the single writer's current view without a `bd list` poll (T8.4,
+	// specs/observability.md "The live read model").
+	issues, err := r.live.ListAll(ctx)
 	if err != nil {
 		return dag.Graph{}, fmt.Errorf("query: dag: %w", err)
 	}

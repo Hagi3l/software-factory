@@ -162,9 +162,16 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 	// not use it pays no extra write (see specs/workflow.md "epic_budget"). A failed stamp is
 	// transient — leave the issue in_progress for redelivery rather than under-count the epic.
 	if o.epicBudgetConfigured() {
-		if err := o.bd.StampClosingSpend(ctx, issue.ID, res.Usage.TotalTokens(), o.priceUsage(issue, res.Usage)); err != nil {
+		closingTokens := res.Usage.TotalTokens()
+		closingUSD := o.priceUsage(issue, res.Usage)
+		if err := o.bd.StampClosingSpend(ctx, issue.ID, closingTokens, closingUSD); err != nil {
 			return true, fmt.Errorf("stamp closing spend on %s: %w", issue.ID, err)
 		}
+		// Mirror onto the in-memory issue so the settle transition below caches the marginal spend
+		// into the work-graph projection — the board's epic hero rolls it up from there (T8.4), and
+		// the cached snapshot must not read 0 for a closed issue that just burned tokens.
+		issue.ClosingTokens = closingTokens
+		issue.ClosingUSD = closingUSD
 	}
 
 	// Record the most-recent invocation's transcript hash on the issue so the decision trail is
@@ -354,7 +361,7 @@ func (o *Orchestrator) reGate(issue core.Issue, srcStage config.Stage, res core.
 // to Phase 3.
 func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result, report gate.Report) (bool, error) {
 	if len(res.Proposes) > 0 {
-		if _, err := o.bd.Apply(ctx, res.Proposes); err != nil {
+		if _, err := o.applyTracked(ctx, res.Proposes); err != nil {
 			return true, fmt.Errorf("apply proposals for issue %s: %w", issue.ID, err)
 		}
 		o.log.Info("orchestrator: applied agent proposals", "issue", issue.ID, "count", len(res.Proposes))
@@ -468,7 +475,7 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage c
 		p.DependsOn = append(append([]string{}, p.DependsOn...), issue.ID)
 		proposes[i] = p
 	}
-	if _, err := o.bd.Apply(ctx, proposes); err != nil {
+	if _, err := o.applyTracked(ctx, proposes); err != nil {
 		return true, fmt.Errorf("apply planner proposals for issue %s: %w", issue.ID, err)
 	}
 	if err := o.transition(ctx, issue, statusClosed, func(ctx context.Context) error {
@@ -567,7 +574,7 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage c
 	// below): stampProducingSoul recorded this issue's own soul onto the in-memory issue earlier
 	// in handleResult, so the produced child inherits the author-tests / implement identities and
 	// the producer≠verifier split survives to integrate and the verification view (T4.22).
-	created, err := o.bd.Apply(ctx, []core.Proposal{{
+	created, err := o.applyTracked(ctx, []core.Proposal{{
 		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: tstage.Role, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: traceMap, Tags: issue.Tags, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
 	}})
 	if err != nil {
@@ -643,6 +650,13 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 	// and the roll-up is a progress hint, not a correctness gate.
 	if err := o.bd.StampIntegrated(ctx, issue.ID); err != nil {
 		o.log.Warn("orchestrator: stamp integrated marker failed (merge already landed)", "issue", issue.ID, "err", err)
+	} else {
+		// Mirror the durable marker into the work-graph projection so the control room's
+		// projection-backed epic hero counts this integration without re-reading beads (T8.4).
+		// settle (the close transition that follows in accept) carries it forward — the marker is
+		// monotonic. Only on a successful durable stamp, so the projection never claims an
+		// integration beads does not record.
+		o.inflight.markIntegrated(issue.ID)
 	}
 	// Name the real integration target: in epic mode a child lands on epic/<epic_id>, not main —
 	// main advances only at the epic's terminal merge (T8.6, specs/integration.md).
@@ -688,7 +702,7 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 		return false, fmt.Errorf("issue %s on_failure target %q undefined", issue.ID, stage.OnFailure)
 	}
 
-	created, err := o.bd.Apply(ctx, []core.Proposal{{
+	created, err := o.applyTracked(ctx, []core.Proposal{{
 		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
 	}})
 	if err != nil {
@@ -797,7 +811,7 @@ func (o *Orchestrator) resolveConflict(ctx context.Context, issue core.Issue, re
 	// route so the conflict loop counts against the same caps; Spec/Tags/TraceMap/EpicID ride
 	// along so the resolution stays on the epic's souls, keeps the traceability chain intact,
 	// and stays attributed to the same epic.
-	created, err := o.bd.Apply(ctx, []core.Proposal{{
+	created, err := o.applyTracked(ctx, []core.Proposal{{
 		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: rstage.Role, Attempt: issue.Attempt + 1, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
 	}})
 	if err != nil {
@@ -956,6 +970,10 @@ func (o *Orchestrator) deadLetter(ctx context.Context, issue core.Issue, reason 
 	if _, err := o.js.Publish(ctx, o.dlq, data); err != nil {
 		return true, fmt.Errorf("publish dlq alert for %s: %w", issue.ID, err)
 	}
+	// Mirror the reason onto the in-memory issue so the settle transition caches it into the
+	// work-graph projection — the control room's projection-backed dead-letter queue shows the
+	// cause from there (Block stamps the same MetadataKeyDLQReason durably; T8.4).
+	issue.DeadLetterReason = reason
 	if err := o.transition(ctx, issue, statusBlocked, func(ctx context.Context) error {
 		return o.bd.Block(ctx, issue.ID, reason)
 	}); err != nil {
@@ -963,6 +981,28 @@ func (o *Orchestrator) deadLetter(ctx context.Context, issue core.Issue, reason 
 	}
 	o.log.Warn("orchestrator: dead-lettered", "issue", issue.ID, "role", issue.Role, "attempt", issue.Attempt, "reason", reason)
 	return false, nil
+}
+
+// applyTracked writes validated proposals through the single-writer beads path (bd.Apply) and
+// records the created issues into the work-graph projection. It is the creation counterpart to the
+// transition choke point: transition() keeps the projection current on status CHANGES, applyTracked
+// on CREATION, so together they make the projection the whole-graph read model the control room's
+// projection-backed board reads (T8.4, specs/observability.md "The live read model"). Without it a
+// freshly created child/fix/decomposition issue would be absent from the projection — invisible to
+// the board — until it was first claimed. The issues are durably in beads on return, so a projection
+// that somehow missed one self-heals on the next cold-start rebuild; tracking runs on every success.
+// bd.Apply returns the proposal fields plus the assigned id but no status/timestamps, so the tracked
+// entries take the open status and now-stamped time anchors track() supplies.
+func (o *Orchestrator) applyTracked(ctx context.Context, proposals []core.Proposal) ([]core.Issue, error) {
+	created, err := o.bd.Apply(ctx, proposals)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	for _, is := range created {
+		o.inflight.track(is, now)
+	}
+	return created, nil
 }
 
 // The dead-letter payload is core.DLQAlert — a single source shared by this write side and

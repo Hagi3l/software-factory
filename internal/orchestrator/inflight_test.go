@@ -330,3 +330,110 @@ func TestProjectionRetainsSettledIssue(t *testing.T) {
 		t.Error("statusOf reported an unknown id as known")
 	}
 }
+
+// TestProjectionTrackRecordsCreatedOpenIssue proves track() (T8.4) records a CREATED issue — one
+// the orchestrator never transitioned — into the projection as open, with the board's time anchors
+// stamped when beads supplied none (a bd.Apply-created issue carries no created_at/state_entered_at).
+// Without this a freshly created child/seed is absent from the projection until first claimed, so
+// the projection-backed board would not show it.
+func TestProjectionTrackRecordsCreatedOpenIssue(t *testing.T) {
+	p := newInflightProjection()
+	now := time.Now().UTC()
+	p.track(core.Issue{ID: "child-1", Role: "implement"}, now) // no Status, no timestamps
+
+	if got, ok := p.statusOf("child-1"); !ok || got != statusOpen {
+		t.Fatalf("statusOf = (%q,%v), want (open,true) — a tracked created issue is open", got, ok)
+	}
+	if p.has("child-1") || p.size() != 0 {
+		t.Errorf("a tracked open issue must not count as in flight (has=%v size=%d)", p.has("child-1"), p.size())
+	}
+	snap := p.snapshot()
+	if len(snap) != 1 || snap[0].ID != "child-1" || snap[0].Status != statusOpen {
+		t.Fatalf("snapshot = %+v, want one open child-1", snap)
+	}
+	if snap[0].StateEnteredAt.IsZero() || snap[0].CreatedAt.IsZero() {
+		t.Errorf("track must stamp the board's time anchors when beads supplied none (state=%v created=%v)",
+			snap[0].StateEnteredAt, snap[0].CreatedAt)
+	}
+}
+
+// TestProjectionMarkIntegratedSurvivesSettle proves the durable integration marker (T8.4) is
+// mirrored into the projection in the merge path (markIntegrated, while the bead is still
+// in_progress) and CARRIED FORWARD by the close transition that settles it — so the board hero's
+// projection-backed roll-up counts the integration. The issue passed to settle carries
+// Integrated=false (accept never learned it landed), so without the monotonic preserve the marker
+// would be lost.
+func TestProjectionMarkIntegratedSurvivesSettle(t *testing.T) {
+	p := newInflightProjection()
+	p.add(core.Issue{ID: "iss-1", Role: "qa"}, testLease())
+	p.markIntegrated("iss-1")
+	p.settle(core.Issue{ID: "iss-1", Role: "qa"}, statusClosed) // Integrated unset on the incoming value
+
+	snap := p.snapshot()
+	if len(snap) != 1 || !snap[0].Integrated || snap[0].Status != statusClosed {
+		t.Fatalf("snapshot = %+v, want one closed iss-1 with Integrated=true", snap)
+	}
+}
+
+// TestApplyTrackedRecordsCreatedIssues proves the orchestrator's applyTracked (T8.4) records every
+// issue it creates through bd.Apply into the work-graph projection, so the control room's
+// projection-backed board sees a freshly created child the instant it exists.
+func TestApplyTrackedRecordsCreatedIssues(t *testing.T) {
+	bd := newFakeBeads()
+	o, _ := newOrch(t, kernelConfig(2), bd, &fakeGate{}, &fakeMerger{})
+
+	created, err := o.applyTracked(context.Background(), []core.Proposal{
+		{Issue: core.Issue{Title: "child", Role: "implement"}},
+	})
+	if err != nil || len(created) != 1 {
+		t.Fatalf("applyTracked = (%v, %v), want one created issue and no error", created, err)
+	}
+	if got, ok := o.inflight.statusOf(created[0].ID); !ok || got != statusOpen {
+		t.Fatalf("created issue not tracked open in the projection: (%q,%v)", got, ok)
+	}
+}
+
+// TestOrchestratorTrackAndSnapshot proves the public Track/Snapshot surface (T8.4): Track records an
+// externally-written issue (the wizard's seed/reopen path) into the projection, and Snapshot exposes
+// it as the control room's live read model.
+func TestOrchestratorTrackAndSnapshot(t *testing.T) {
+	bd := newFakeBeads()
+	o, _ := newOrch(t, kernelConfig(2), bd, &fakeGate{}, &fakeMerger{})
+
+	o.Track(core.Issue{ID: "seed-1", Role: "plan", Status: statusOpen})
+	snap, err := o.Snapshot(context.Background())
+	if err != nil {
+		t.Fatalf("Snapshot: %v", err)
+	}
+	var found bool
+	for _, is := range snap {
+		if is.ID == "seed-1" && is.Status == statusOpen {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("Snapshot = %+v, want it to include the tracked open seed-1", snap)
+	}
+}
+
+// TestTransitionStampsStateEnteredIntoProjection proves transition() mirrors state_entered_at onto
+// the projection's cached snapshot (T8.4), so the projection-backed board's per-card timer anchors
+// on the right instant rather than the zero time.
+func TestTransitionStampsStateEnteredIntoProjection(t *testing.T) {
+	bd := newFakeBeads()
+	bd.put(core.Issue{ID: "iss-1", Role: "implement", Status: "open"})
+	o, _ := newOrch(t, kernelConfig(2), bd, &fakeGate{}, &fakeMerger{})
+
+	err := o.transition(context.Background(), core.Issue{ID: "iss-1", Role: "implement"}, statusClosed,
+		func(ctx context.Context) error { return bd.Close(ctx, "iss-1") })
+	if err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+	snap := o.inflight.snapshot()
+	if len(snap) != 1 || snap[0].ID != "iss-1" || snap[0].Status != statusClosed {
+		t.Fatalf("snapshot = %+v, want one closed iss-1", snap)
+	}
+	if snap[0].StateEnteredAt.IsZero() {
+		t.Error("transition did not stamp state_entered_at into the projection snapshot")
+	}
+}

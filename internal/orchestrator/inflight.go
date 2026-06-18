@@ -73,10 +73,67 @@ func (p *inflightProjection) add(issue core.Issue, lease time.Time) {
 // new settled status (and no lease), so the scheduler can skip a just-settled candidate a lagging
 // bd.ready() still lists, and the control room can read closed/blocked state from a consistent
 // surface. Called from transition on every non-in_progress target.
+//
+// It carries a prior Integrated marker forward: the marker is monotonic (false→true) and is stamped
+// out-of-band by markIntegrated in the merge path the instant a candidate lands — which is BEFORE
+// the close transition that settles the bead here. Overwriting the entry wholesale would lose that
+// marker (the in-memory issue accept passes to close never learned it landed), so the board hero's
+// projection-backed roll-up would under-count integrations (T8.4). Preserving a prior true is safe
+// because the marker never un-sets.
 func (p *inflightProjection) settle(issue core.Issue, status string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	if prev, ok := p.m[issue.ID]; ok && prev.issue.Integrated {
+		issue.Integrated = true
+	}
 	p.m[issue.ID] = projectedEntry{issue: issue, status: status}
+}
+
+// track records an issue the orchestrator did NOT transition into the projection: a newly CREATED
+// issue (the children/fixes bd.Apply writes, the Create-Task wizard's human-approved seeds) or one
+// an external human-approved write reopened (the Resolve wizard's Reissue, blocked→open). It is the
+// other half of keeping the projection the whole-graph read model (specs/observability.md "The live
+// read model"): transition() covers status CHANGES, track() covers CREATION and external reopens.
+// Without it the projection would not know an issue exists until it is first claimed, so the control
+// room's projection-backed board would not show a freshly created/seeded issue, and — worse — a
+// reopened dead-letter would be skipped forever by the scheduler (which consults statusOf, T8.2)
+// because the projection still read it as blocked.
+//
+// It records the issue under its own status, defaulting to open (the status a created/reopened issue
+// carries), and stamps the board's time anchors when beads has not supplied them — a just-created
+// issue from bd.Apply carries no created_at / state_entered_at, so the board's per-card timers would
+// otherwise read from the zero time. It overwrites any prior entry so a reopen cleanly supersedes a
+// stale settled state. No lease: a tracked issue is open/ready, not in_progress.
+func (p *inflightProjection) track(issue core.Issue, now time.Time) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	status := issue.Status
+	if status == "" {
+		status = statusOpen
+	}
+	if issue.StateEnteredAt.IsZero() {
+		issue.StateEnteredAt = now
+	}
+	if issue.CreatedAt.IsZero() {
+		issue.CreatedAt = now
+	}
+	p.m[issue.ID] = projectedEntry{issue: issue, status: status}
+}
+
+// markIntegrated sets the durable Integrated marker on a known issue's cached snapshot in place,
+// preserving its status and lease. The orchestrator calls it in the merge path the instant a
+// candidate lands (right after the beads StampIntegrated), so the projection mirrors the durable
+// marker before the bead is closed; settle then carries it forward onto the closed entry (the
+// marker is monotonic — see settle). A no-op for an unknown id. It is what lets the control room's
+// projection-backed epic hero count integrations without re-reading beads (T8.4, specs/integration.md
+// "Integrated vs. closed").
+func (p *inflightProjection) markIntegrated(id string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if e, ok := p.m[id]; ok {
+		e.issue.Integrated = true
+		p.m[id] = e
+	}
 }
 
 // has reports whether the orchestrator considers the issue in-flight (projected status

@@ -109,6 +109,21 @@ func (s *wizardSeeder) Resolve(ctx context.Context, req wizard.ResolveRequest) (
 		if err := s.bd.Reissue(ctx, req.IssueID); err != nil {
 			return res, fmt.Errorf("reopen dead-lettered issue %s (spec already committed as %s): %w", req.IssueID, short(commit), err)
 		}
+		// Mirror the reopen into the orchestrator's work-graph projection. Critical, not cosmetic:
+		// the scheduler now gates dispatch on the projection (T8.2), so a reissued issue the
+		// projection still reads as `blocked` would be skipped FOREVER. Force open (the status
+		// Reissue just wrote) regardless of what a lagging beads read returns, carrying the issue's
+		// stable identity fields so the board renders it; the next dispatch re-pins its spec slice.
+		if s.track != nil {
+			reopened, gerr := s.bd.Get(ctx, req.IssueID)
+			if gerr != nil {
+				reopened = core.Issue{ID: req.IssueID}
+			}
+			reopened.Status = "open"
+			reopened.DeadLetterReason = ""
+			reopened.SpecHash = ""
+			s.track(reopened)
+		}
 		res.ReopenedIssue = req.IssueID
 	}
 	return res, nil

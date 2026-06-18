@@ -50,8 +50,14 @@ func (o *Orchestrator) transition(ctx context.Context, issue core.Issue, to stri
 	// hot paths read this projection, not a lagging beads status, to decide "already dispatched" /
 	// "already settled" (scheduleReady) and "is this a live result" (handleResult). Updated only
 	// after a successful write, so the cache mirrors what was actually persisted.
+	// Stamp the entry instant onto the cached snapshot so the control room's projection-backed
+	// board ticks its time-in-state timer from the right anchor (T8.4). beads stamps its own
+	// state_entered_at inside the same write (setStatus/Claim, see MetadataKeyStateEntered); this
+	// mirrors it to within milliseconds so the in-memory read model agrees with the durable one.
+	now := time.Now().UTC()
+	issue.StateEnteredAt = now
 	if to == statusInProgress {
-		o.inflight.add(issue, time.Now().UTC().Add(o.leaseTTL))
+		o.inflight.add(issue, now.Add(o.leaseTTL))
 	} else {
 		o.inflight.settle(issue, to)
 	}

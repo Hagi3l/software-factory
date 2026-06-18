@@ -383,6 +383,35 @@ func (o *Orchestrator) rebuildInflight(ctx context.Context) error {
 	return nil
 }
 
+// Snapshot returns the work-graph projection — every issue the orchestrator knows, with its live
+// status and lease stamped on — as the control room's projection-backed live read model (T8.4,
+// specs/observability.md "The live read model"). When co-located (harness run) the control room
+// reads this in-memory, read-your-writes-consistent surface for its board / DAG / dead-letter /
+// status views instead of polling beads, so they never lag the single writer (no card showing
+// `open` while its agent runs) and add no `bd list` load — the read overload the demo run hit. ctx
+// is unused (a pure in-memory read) but kept so this satisfies the same ctx-taking shape the
+// beads-backed reader has. Safe for concurrent calls from control-room HTTP handlers (the
+// projection is mutex-guarded).
+func (o *Orchestrator) Snapshot(_ context.Context) ([]core.Issue, error) {
+	return o.inflight.snapshot(), nil
+}
+
+// Track records externally-written issues into the work-graph projection, keeping it consistent
+// with the harness's two discrete human-approved write paths that intentionally bypass the
+// reconcile loop (like `harness seed`): the Create-Task wizard's seed (new open issues) and the
+// Resolve wizard's reopen of a dead-letter (Reissue, blocked→open). Both write beads directly, so
+// without this the projection — which is now both the scheduler's dispatch oracle (T8.2) and the
+// control room's board (T8.4) — would not see a seed until it was claimed, and would keep reading a
+// reopened dead-letter as blocked (the scheduler would then skip it forever, and the board would
+// mis-show it). The projection is a derived cache, so this only keeps it in step with an authorized
+// durable write; it is mutex-guarded for the cross-goroutine call from the control room.
+func (o *Orchestrator) Track(issues ...core.Issue) {
+	now := time.Now().UTC()
+	for _, is := range issues {
+		o.inflight.track(is, now)
+	}
+}
+
 // tickLoop is the single-goroutine reconcile loop, paced by two tickers so the heavy, rare sweep
 // does not pace dispatch (T3.13). Both fire an immediate pass at startup so neither is delayed by
 // one interval.

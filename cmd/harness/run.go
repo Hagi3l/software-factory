@@ -24,6 +24,7 @@ import (
 	"github.com/Loxstomper/harness/internal/controlroom/live"
 	"github.com/Loxstomper/harness/internal/controlroom/query"
 	"github.com/Loxstomper/harness/internal/controlroom/wizard"
+	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/gate"
 	"github.com/Loxstomper/harness/internal/messaging"
 	"github.com/Loxstomper/harness/internal/model/registry"
@@ -277,6 +278,13 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// it here keeps buildRunComponents network-free and testable. The pump's unsubscribe
 	// joins the teardown stack.
 	var server *controlroom.Server
+	// Late-bound seams for the co-located control room: the orchestrator is constructed after this
+	// block (it needs the log bridge set up inside it), but the projection-backed reader and the
+	// wizard's projection-tracking callback both need it. workGraph carries the projection snapshot
+	// into the reader; wizSeeder is the wizard write seam whose seeds/reopens must update the
+	// projection. Both are wired to orch once it exists (see below).
+	workGraph := &lateWorkGraph{}
+	var wizSeeder *wizardSeeder
 	if opts.serveAddr != "" {
 		hub := live.NewHub()
 		activity := live.NewActivity(200)
@@ -317,8 +325,17 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			return nil, mergeErr
 		}
 		releases = append(releases, mergePumpStop)
-		reader := query.NewReader(
-			beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)),
+		// The live work-state views (board, DAG, dead-letter, status bar, epic roll-up) read the
+		// orchestrator's in-memory work-graph projection — the consistent live read model that never
+		// lags the single writer and adds no `bd list` load (T8.4, specs/observability.md "The live
+		// read model") — while the forensic pages keep reading beads (the durable truth). The
+		// orchestrator is constructed below (it needs the log bridge set up in this block), so the
+		// projection source is late-bound through workGraph and wired once orch exists. beadsReader
+		// backs both the forensic reads and the projection reader's Get fallback.
+		beadsReader := beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo))
+		reader := query.NewReaderWithLive(
+			query.NewProjectionIssueReader(workGraph, beadsReader),
+			beadsReader,
 			store,
 			query.NewGitProvenance(repo, query.WithAllowedSigners(cfg.Infra.Signing.AllowedSigners)),
 		)
@@ -377,9 +394,9 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			// write paths sharing the spec-write machinery. It uses a fresh read-only-by-convention
 			// beads client (the orchestrator stays the sole long-lived writer; the wizard write is a
 			// discrete human-approved seed/resolve, like `harness seed`).
-			ws := newWizardSeeder(cfg, repo, beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)), store, log)
-			seeder = ws
-			resolver = ws
+			wizSeeder = newWizardSeeder(cfg, repo, beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)), store, log)
+			seeder = wizSeeder
+			resolver = wizSeeder
 		}
 
 		server = controlroom.New(controlroom.Options{
@@ -468,7 +485,31 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		return nil, err
 	}
 
+	// Wire the late-bound control-room seams now that the orchestrator exists. workGraph feeds the
+	// projection-backed live reader (T8.4); the wizard's track callback keeps the projection in step
+	// with the two human-approved write paths that bypass the reconcile loop (seed creates open
+	// issues; Resolve reopens a dead-letter), so a seed shows on the board immediately and a reopened
+	// dead-letter is re-dispatchable rather than skipped. Both are no-ops when not co-located.
+	workGraph.o = orch
+	if wizSeeder != nil {
+		wizSeeder.track = orch.Track
+	}
+
 	return &runComponents{orch: orch, rnr: rnr, server: server, cleanup: cleanupAll}, nil
+}
+
+// lateWorkGraph adapts the orchestrator's work-graph projection to query.WorkGraphSnapshot with
+// late binding: buildRunComponents builds the control-room reader before the orchestrator (which
+// needs the in-block log bridge), so the reader holds this holder and o is set once orch exists. A
+// nil o (pre-wiring, or a never-co-located run) reads as an empty graph rather than panicking — the
+// board would briefly show empty, but o is always set before ListenAndServe serves any request.
+type lateWorkGraph struct{ o *orchestrator.Orchestrator }
+
+func (l *lateWorkGraph) Snapshot(ctx context.Context) ([]core.Issue, error) {
+	if l.o == nil {
+		return nil, nil
+	}
+	return l.o.Snapshot(ctx)
 }
 
 // defaultBranch returns the repo's current branch name, used as the base ref the planner's
