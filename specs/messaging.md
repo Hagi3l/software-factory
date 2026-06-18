@@ -63,12 +63,19 @@ harness.control.*            core NATS — orchestrator control/health
   typed announcement of an issue *state transition* — it publishes one whenever it
   changes an issue's status (and the stamped `state_entered_at`; see
   [orchestrator.md](components/orchestrator.md)), carrying `{id, status, role, epic,
-  ts}`. They let the [board / DAG / dead-letter views](control-room.md) refresh
+  attempt, integrated, state_entered_at, ts}`. They serve two consumers off the one
+  emit: they let the [board / DAG / dead-letter views](control-room.md) refresh
   *crisply on the actual transition* — a card moves columns the moment the
-  orchestrator advances it — rather than polling around agent activity. They are
-  best-effort core NATS like agent events: a dropped one is harmless because the
-  views keep a slow periodic backstop that reconverges them. They are an *additive
-  observability emit* (publish-only, no behaviour change) — beads stays the
+  orchestrator advances it — rather than polling around agent activity; and they are
+  the **delta stream** that keeps the control room's
+  [live read model](observability.md) (a snapshot of the orchestrator's work-graph
+  projection, then these events applied gap-free) consistent without a `bd` poll. The
+  payload carries the fields those views render — including the
+  [`integrated`](integration.md) marker and `state_entered_at` — so a consumer updates
+  its projected card from the event alone. They are best-effort core NATS like agent
+  events: a dropped one is harmless because the views keep a slow periodic backstop
+  that reconverges them (and the snapshot re-baselines on reconnect). They are an
+  *additive observability emit* (publish-only, no behaviour change) — beads stays the
   authoritative state, never reconstructed from these events.
 - **Merge-state events** (`merge.<id>.state`) are the same pattern applied to the
   [serialized merge queue](integration.md): the orchestrator publishes one whenever

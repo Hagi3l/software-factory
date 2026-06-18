@@ -170,7 +170,7 @@ unit, not per closed issue — which is precisely what dedupes one edit across a
 closed issues that share a path. This is the heavier half of the recompile: it reads
 the full closed-issue table to catch minute-plus-granularity human edits, so it runs on
 its own slower cadence rather than at dispatch frequency (see
-[orchestrator](components/orchestrator.md#live-state-vs-durable-state--the-in-flight-projection)
+[orchestrator](components/orchestrator.md#live-state-vs-durable-state--the-work-graph-projection)
 for the loop mechanism). The orchestrator groups closed issues by
 their `epic_id` and spec path, re-resolves and re-hashes that slice, and on a mismatch
 against the pinned hash spawns **one fresh `plan` issue** for that epic and path (carrying

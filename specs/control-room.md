@@ -47,6 +47,12 @@ of the build (`go generate`), not the runtime.
 
 ### Rendering
 - **Live:** NATS → SSE → htmx swaps; the board and feed update without refresh.
+  The work-state views (board, DAG, dead-letter, status bar, epic roll-up) read the
+  orchestrator's [work-graph projection](observability.md#the-live-read-model) — the
+  consistent live **read model** — not a direct beads poll, so they never lag the single
+  writer (no card showing `open` while its agent runs) and add no `bd list` load;
+  [`issue-state` events](messaging.md) stream the deltas onto a snapshot taken at
+  connect. beads is the durable/forensic source the historical pages render from.
   The live pattern is **server-render-a-fragment + htmx re-fetch**, *not* DOM
   `sse-swap`: a live view wraps its content in an SSE-connected element and
   re-fetches a bare server-rendered fragment on `hx-trigger="sse:<event>
@@ -186,7 +192,10 @@ single-issue epic) gets none of this — the chrome would only be noise.
   under *Graph viz* above.
 - **The root card is the hero (epic mode).** Under [`integration.mode: epic`](integration.md) the
   epic root renders distinctly from its children, with a **progress indicator** (children
-  integrated / total) and the live `budget` against the [`epic_budget`](workflow.md) cap, so
+  **integrated** / total — counting the durable [`integrated`](integration.md) marker, and
+  excluding the epic root and any superseded retry attempt, so it reads *true* progress
+  rather than any closed bead; see [integration.md](integration.md) "Integrated vs.
+  closed") and the live `budget` against the [`epic_budget`](workflow.md) cap, so
   "bounded autonomy" is visible as the feature builds. It carries the feature through an
   **`integrating`** state while children finish and flips to **`done`** as the single terminal
   merge lands — the board's read of the atomic feature landing, so the operator watches the
@@ -436,11 +445,15 @@ human → APPROVE
         single-writer path (validated, never written directly)
 ```
 
-Under [`integration.mode: epic`](integration.md) the consent gate has two extra
-behaviours: the drafted spec is committed onto the feature's **`epic/<epic_id>`
-branch** (its first commit), not `main`, so `main` moves only at the atomic terminal
-merge; and the gate **refuses a second approval** while an epic is in flight (v1 runs
-one epic at a time), reporting the in-flight feature instead of seeding a second.
+Under [`integration.mode: epic`](integration.md) the consent gate has three extra
+behaviours: the draft must seed **exactly one** root issue — the epic is keyed on that
+single root's id and the [decomposition planner](workflow.md) fans it into children, so a
+draft proposing two or more roots is refused with a prompt to consolidate (see
+[integration.md](integration.md)); the drafted spec is committed onto the feature's
+**`epic/<epic_id>` branch** (its first commit), not `main`, so `main` moves only at the
+atomic terminal merge; and the gate **refuses a second approval** while an epic is in
+flight (v1 runs one epic at a time), reporting the in-flight feature instead of seeding a
+second.
 
 The planner's conversation and its spec/issue authoring run host-side and write no untrusted
 code; its only *read* of untrusted code is sandbox-confined and network-isolated, so a

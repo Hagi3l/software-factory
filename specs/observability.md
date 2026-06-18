@@ -99,6 +99,25 @@ The control room must show both "everything going on" and the full past:
 The UI stitches these so a human can go **live event → drill into its trace →
 replay** (below), and browse history by epic / issue / soul / time.
 
+### The live read model
+
+The control room's *live* views (board, DAG, dead-letter, status bar, epic roll-up) do
+**not** read work state by polling beads. beads is the **durable log**; the live **read
+model** is the orchestrator's
+[work-graph projection](components/orchestrator.md#live-state-vs-durable-state--the-work-graph-projection)
+— the single writer's own in-memory view of every issue's current state, which is
+consistent the instant a status is written. The control room consumes it
+**snapshot-then-stream**: a snapshot of the projection at connect, then the
+[`issue-state` events](messaging.md) applied as gap-free deltas. This is why the board
+agrees with the single writer's reality (no "card shows `open` while its agent runs")
+and why it adds no `bd list` load to the store. The read model is the consistent
+*surface*; beads stays the durable *truth* and the cold-start hydration source.
+
+The model binds to topology: **co-located** (`harness run`, the default) the control
+room reads the in-process projection live; **standalone** (`harness serve`, no attached
+orchestrator) there is no projection, so it degrades to a static **beads snapshot** — the
+same way [`/events`](control-room.md) has no live feed without in-process NATS.
+
 ---
 
 ## Replayability — the differentiator

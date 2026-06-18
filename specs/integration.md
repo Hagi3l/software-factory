@@ -176,6 +176,15 @@ threaded forward across every issue of the epic (the same field
 [`epic_budget`](workflow.md) aggregates over), so no new primitive is introduced;
 the merge queue is simply *retargeted* per epic.
 
+Because the epic is keyed on that **single root id** (the `epic/<epic_id>` branch and
+the terminal merge both derive from it), an epic-mode [wizard](control-room.md) draft
+must seed **exactly one** root issue — the autonomous [decomposition
+planner](workflow.md) fans it into children. A draft proposing two or more roots would
+mint multiple epics, each its own branch and terminal merge, defeating
+one-feature-one-landing; the consent gate **refuses** it and asks the human to
+consolidate into a single seed (the children come from decomposition, not from multiple
+seeds).
+
 **The epic branch.** It is created off `main` when the epic begins, and the
 [wizard's approval](control-room.md) commits the drafted spec as its **first
 commit** — *not* onto `main`. This is load-bearing for atomicity: if the spec landed
@@ -201,6 +210,22 @@ orchestrator computes this as an **`epic_id` aggregate read** (like `epic_budget
 [components/orchestrator.md](components/orchestrator.md)), on its slow sweep cadence,
 not the dispatch hot path. On drain, the **epic root issue** advances to its terminal
 merge.
+
+**Integrated vs. closed (progress accounting).** A bead reaches `closed` for several
+reasons — its candidate integrated onto the epic branch, it was superseded by an
+[`on_failure`](workflow.md) retry, or (the epic root) it closed at decomposition — so
+`closed` alone does not mean "contributed to the feature." Integration therefore stamps
+a durable [`integrated`](glossary.md#integrated) marker on a child when its verified
+candidate lands on the epic branch (step 4 of the queue, retargeted per epic). The epic
+**roll-up** the [board hero](control-room.md) shows counts *that marker*, not `closed`:
+**integrated** = children marked integrated; **total** = those plus the still-active
+(`open`/`in_progress`/`blocked`) children — **excluding** the epic root (its id ==
+`epic_id`) and any closed-but-not-integrated bead (a superseded retry attempt). So a
+feature split into two children that has landed neither reads `0/2`, never `1/4` from
+counting the closed root and a failed attempt. Drain detection above is unaffected — it
+keys on *all-closed-and-none-in-flight*, which a superseded attempt and the closed root
+satisfy correctly; the marker refines only what counts as *progress*, not what counts as
+*done*.
 
 **The terminal merge is a merge commit.** First parent = the current `main`, second
 parent = the epic branch tip; subject = the feature's (epic root's) title; trailer =

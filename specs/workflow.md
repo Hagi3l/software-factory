@@ -108,6 +108,22 @@ unchecked external reference, so a hostile proposal naming a fabricated id would
 otherwise plant a dangling edge — the orchestrator resolves every non-sibling target
 against the store itself, prefix-blind, before applying the batch.
 
+**Granularity is a correctness property, not just style.** Breadth is emergent, but each
+emitted child must be a **single, coherent unit** the downstream stages can carry in one
+pass — implementable in one `implement` invocation and pinned by one `author-tests` pass.
+Bundling several concerns into one child (multiple subsystems, handlers, and their tests
+in a single work item) is the planner's most damaging failure mode: it pushes a stage
+past what one bounded invocation can do, so the agent churns to its turn/token ceiling and
+then dead-letters or routes a costly retry (see [termination](#the-feedback-loop-and-termination)) —
+the per-invocation [budget](#the-feedback-loop-and-termination) bounds the damage but does
+not prevent the waste, and the retry typically repeats it. The planner therefore prefers
+**more, smaller, single-concern children** with explicit dependency edges over fewer coarse
+ones: finer breadth costs a little more fixed per-stage overhead but avoids the far larger
+cost of a runaway invocation. This is a **binding principle** the planner persona carries
+and a decomposition-quality review weighs; it is deliberately *not* a hard structural check
+(the orchestrator cannot mechanically judge "one concern"), so unlike DAG-legality it is
+enforced by persona + review, not by the validation gate.
+
 The `plan` stage has **no postcondition** and runs **no gate**: a planner produces no
 candidate to verify in a sandbox, so its *acceptance is exactly this structural
 validation*. The orchestrator additionally requires the planner produced at least one

@@ -69,6 +69,15 @@ fail, so the [verification view](control-room.md) can render the trust argument 
 the fact. Distinct from the per-check *evidence* it indexes. See
 [verification.md](verification.md).
 
+### Integrated
+The durable state of a child work item whose verified candidate has **landed on the
+[epic](#epic) branch** (under [`integration.mode: epic`](integration.md)) — distinct from
+merely `closed`. A bead is `closed` for several reasons (integrated, superseded by an
+`on_failure` retry, or — for the epic root — closed at decomposition); only an *integrated*
+child actually contributed code to the feature. Recorded durably (a marker stamped at the
+`integrate` step), so the epic roll-up counts *real* progress rather than any closed bead.
+See [integration.md](integration.md), [control-room.md](control-room.md).
+
 ### Invocation
 A single run of one [agent](#agent) against one work item: boot → agentic loop →
 terminate, inside one ephemeral [sandbox](#sandbox). The unit a [trace](#trace) and a
@@ -96,6 +105,17 @@ children the orchestrator validates. Distinct from the
 The principle that whoever produces an artifact never grades it. Applied to tests
 vs. code, results vs. producer, and mutations vs. proposer. See
 [verification.md](verification.md).
+
+### Projection (work-graph read model)
+The orchestrator's volatile in-memory view of the live state of **every** issue it knows —
+status, role, attempt, epic, spend, `state_entered_at`, and the [Integrated](#integrated)
+marker. The single writer maintains it at its one transition choke point, so it is current
+the instant a status is written; it is **derived, never authoritative** (rebuilt from beads
+on restart). It is the **read model** both hot paths use instead of polling beads: the
+scheduler reads it to skip already-dispatched or just-settled work, and the
+[control room](control-room.md) reads it (snapshot-then-stream) for its live views. beads
+stays the durable log. Generalizes the original in-flight (in-progress-only) cache. See
+[components/orchestrator.md](components/orchestrator.md), [observability.md](observability.md).
 
 ### Provider adapter
 A thin translator (held by the runner, over the official Go SDK) between the

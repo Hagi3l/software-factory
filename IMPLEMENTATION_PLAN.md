@@ -24,6 +24,12 @@ is complete (T6.1–T6.3). Phase 7 (atomic feature integration / epic mode) is c
 it every still-open item is either **optional** (T5.5 gVisor backend, T5.11 warm pools + HA
 orchestrator) or **hardware-blocked** (T5.2 Firecracker, needs KVM the dev box lacks).
 
+**Phase 8 (demo-hardening) is newly opened and has live work.** The 2026-06-18 live vault-demo
+run surfaced read-model consistency bugs (scheduler + control room read beads directly) and a
+planner over-bundling cost issue; T8.1–T8.7 fix them via a systemic read-model refactor +
+decomposition-granularity tuning. See Phase 8 below, [`demo-run-issues.md`](demo-run-issues.md),
+and [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md).
+
 **Development mode for Phases 2–6: built by hand with Claude Code, human-reviewed —
 not self-hosted.** Bootstrap's threshold (a) ("the harness builds itself as a
 trusted dev tool, human reviews diffs") assumes a capable model drives the
@@ -295,6 +301,72 @@ per epic, not new machinery. Spec contract:
 - [x] **T7.6 Board epic hero card** — *done.*
 - [x] **T7.7 Vault demo exercises epic mode** — *done.*
 - [x] **T7.8 Board epic-lineage thread + decoupled grouping chrome** — *done.*
+
+---
+
+## Phase 8 — Demo-hardening: authoritative read model + decomposition granularity
+
+Opened from the **2026-06-18 live vault-demo run** (findings: [`demo-run-issues.md`](demo-run-issues.md);
+design: [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md)). The run worked end-to-end (one child went
+spec→red→implement→qa→integrate onto the epic branch with full provenance) but surfaced two root
+causes: **(1)** the scheduler *and* control room read beads/Dolt directly, and those reads are
+neither read-your-writes consistent nor scalable under polling — producing a redundant planner
+re-dispatch, an "open" card on work-in-progress, a retry that looked like a duplicate, an
+integrated-count miscount, and `signal: killed` read overloads; **(2)** the planner bundled four
+concerns into one child, so the test-author flailed ~1.35M tokens twice (~80% of run cost).
+
+The fix is **systemic, not surgical** (decided this session): promote the orchestrator's
+in-flight projection into the authoritative work-graph read model; beads becomes the durable log
++ cold-start hydration. T8.1–T8.4 are the read-model spine (do their spec work first); T8.5
+addresses cost; T8.6–T8.7 are clarity/hardening. **TCB note:** T8.1/T8.2 touch the orchestrator
++ scheduler (TCB) — stay human-reviewed; land behind tests, keep the beads-backed reader
+switchable to de-risk rollout.
+
+- [ ] **T8.1 Full work-graph projection + cold-start rebuild** — generalize the in-flight
+  projection (`internal/orchestrator/inflight.go`, `inflightProjection`, currently in-progress
+  only) into the single-writer's authoritative view of *every* known issue (status, role,
+  attempt, epic, spend, `state_entered_at`, **integrated** flag), maintained at the `o.transition`
+  choke point and rebuilt from beads on startup (extend `rebuildInflight`). beads = durable log,
+  not the hot read path. The spine the rest of Phase 8 reads. **Spec first.**
+  ([observability.md](specs/observability.md), [components/orchestrator.md](specs/components/orchestrator.md) "Live state vs. durable state", [glossary.md](specs/glossary.md))
+- [ ] **T8.2 Scheduler dispatches off projection status** *(fixes #2)* — `schedule.go` dispatch
+  filter consults the projection, not just `bd.Ready()`: `bd.Ready()` stays the candidate oracle
+  (no open blockers + precondition), but a candidate the projection knows is `in_progress` **or
+  settled (closed/blocked)** is skipped — so a just-closed/just-decomposed issue is not
+  re-dispatched before beads' read catches up. Generalizes today's `o.inflight.has()` skip.
+  (needs T8.1) ([components/orchestrator.md](specs/components/orchestrator.md))
+- [ ] **T8.3 `integrated` as a durable state + correct epic rollup** *(fixes #7)* — stamp an
+  `integrated` tag/label on a child's bead when the integrate stage merges it onto the epic
+  branch (`results.go` integrate path / `epic*.go`); `epicSummaries`
+  (`internal/controlroom/query/query.go:166`) counts **integrated**, not any `closed`, and
+  excludes the epic root (id == epic id) and failure-routed beads. Cold-start re-derives the flag
+  from the tag (durable, no git read). Removes the misleading `1/N`.
+  ([integration.md](specs/integration.md), [glossary.md](specs/glossary.md))
+- [ ] **T8.4 Control-room projection-backed read model** *(fixes #4, #6, #8)* — back the
+  `IssueReader` seam (`internal/controlroom/query`, `NewReader`) with a projection-backed reader
+  when co-located, fed by **snapshot-then-stream** over the existing `internal/controlroom/live`
+  Hub (gap-free: snapshot at connect, then events). Keep the beads-backed `IssueReader` as the
+  **standalone fallback** (`harness serve` with no NATS → beads snapshot, no live — mirrors how
+  `/events` already 503s). **Open for impl:** reuse vs. extend `live.Hub`; co-located-only live
+  for v1 (distributed reads revisited with Phase 5). (needs T8.1)
+  ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md), [messaging.md](specs/messaging.md))
+- [ ] **T8.5 Planner decomposition granularity** *(fixes #5 — the cost driver)* — edit both
+  planner personas (`config/souls/prompts/planner.md` + `demo/vault/config/souls/prompts/planner.md`)
+  to require each child be a **single, independently testable concern** (discourage bundling
+  multiple subsystems/handlers; prefer more, smaller children with explicit deps), and add the
+  decomposition-granularity principle to the spec (breadth stays emergent; each child must be a
+  coherent, independently-verifiable unit). Optional turn-budget backstop for test-author left to
+  decide after a re-run. Tradeoff to note: smaller children = more fixed per-stage overhead (net
+  cheaper than a runaway). ([workflow.md](specs/workflow.md))
+- [ ] **T8.6 Name the real merge target in the log** *(fixes #9)* — `results.go:637`
+  `orchestrator: merged to main` is wrong in epic mode (a child merges onto `epic/<id>`, not
+  main). Name the actual target. Trivial; fold into T8.3's `results.go` pass. (No spec change —
+  log wording reflects [integration.md](specs/integration.md) epic semantics.)
+- [ ] **T8.7 Wizard one-root-in-epic hardening** *(fixes #1)* — harden the requirements-planner
+  persona (`config/souls/prompts/requirements-planner.md`) to always seed exactly one root issue
+  in epic mode, and clarify the wizard error (`cmd/harness/wizard_seed.go:197`). Spec touch only
+  if the one-root-in-epic rule isn't already stated.
+  ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md))
 
 ---
 

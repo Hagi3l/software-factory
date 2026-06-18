@@ -58,8 +58,8 @@ restart at any point and re-derive everything. Conceptually:
 ```
 loop:
   candidates := bd.ready()                     # no open blockers + precondition ok (may be stale)
-  for issue in candidates and not in inflight: # inflight = the in-flight projection (below)
-      bd.set(issue, in_progress, lease=ttl)    # single-writer transition; also records into inflight
+  for issue in candidates if projection says neither in-flight nor settled:  # projection = the work-graph projection (below)
+      bd.set(issue, in_progress, lease=ttl)    # single-writer transition; also updates the projection
       publish work.<role>  { brief(issue) }    # JetStream, at-least-once
 
   for result in completions:                   # agents' Result envelopes
@@ -76,75 +76,127 @@ loop:
 ```
 
 **Idempotency is mandatory.** Every step must be safe to repeat, because a
-restart re-runs it. "Already dispatched" is read from the **in-flight projection**
-(below), *not* from a fresh beads query — see why next.
+restart re-runs it. "Already dispatched (or already settled)" is read from the
+**work-graph projection** (below), *not* from a fresh beads query — see why next.
 
 Every status write above (`in_progress`, `advance`, `on_failure`, `dead_letter`,
 `reset`) routes through the single transition choke point that stamps
 `state_entered_at`, publishes the [issue-state event](../messaging.md), **and updates
-the in-flight projection** — so the counter anchor, the live nudge, and the live
-read surface are all maintained at the same place, exactly once per real transition,
-and a redelivered result that lands on an already-settled issue neither re-stamps nor
-re-announces nor re-dispatches (idempotent, like every other step).
+the work-graph projection** — so the counter anchor, the live nudge, and the live
+read surface (both the scheduler's and the control room's) are all maintained at the
+same place, exactly once per real transition, and a redelivered result that lands on an
+already-settled issue neither re-stamps nor re-announces nor re-dispatches (idempotent,
+like every other step).
 
 ---
 
-## Live state vs. durable state — the in-flight projection
+## Live state vs. durable state — the work-graph projection
 
 beads is the **durable** source of truth. It is **not** a strongly read-your-writes
 consistent **read surface** under load: the orchestrator's own reconcile loop (plus
 the [control room](../control-room.md)) drives enough concurrent traffic that a fresh
-`bd.ready()` issued moments after a `set(in_progress)` write may not yet observe that
-write. Treating `bd.ready()` as the authority for "already dispatched" therefore
-**re-dispatches in-flight work** — the same issue is claimed and published every tick
-until the write becomes visible, multiplying agent invocations and corrupting the
-graph with duplicate proposals. Polling cadence faster than write-visibility makes a
-storm, not progress.
+read issued moments after a status write may not yet observe that write, and a heavy
+poll (`bd list` over the whole graph) can saturate or time out under that traffic. This
+lag bites in three places:
+
+1. **Re-dispatching in-flight work.** Treating `bd.ready()` as the authority for
+   "already dispatched" re-dispatches a just-claimed issue every tick until the
+   `in_progress` write becomes visible — multiplying invocations and corrupting the
+   graph with duplicate proposals. Polling faster than write-visibility makes a storm.
+2. **Re-dispatching just-*settled* work.** The same window reopens after a *terminal*
+   write: a `plan` issue the orchestrator just closed at decomposition (or any
+   just-closed/dead-lettered issue) can still come back from a lagging `bd.ready()` and
+   be dispatched again before the close is visible — a redundant second invocation that
+   is wasteful even when an idempotency guard later discards its output.
+3. **Stale / failing control-room reads.** The control room polling beads directly
+   shows a card as `open` while its agent runs, or a `closed` card as still in flight,
+   and its `bd` reads can be killed under load — the board disagreeing with reality.
+
+All three are the same root cause: a direct beads read is not a consistent, scalable
+*read surface*. The fix is one **read model**.
 
 The orchestrator is the **single writer**, so it already knows the live status of
-every issue at the instant it writes it. It therefore keeps a small **in-flight
-projection**: a volatile in-memory record of the issues it currently considers
-`in_progress` (with their leases). Two rules make it correct and cheap:
+every issue at the instant it writes it. It therefore keeps a **work-graph
+projection**: a volatile in-memory view of the live state of **every** issue it knows —
+status, role, attempt, epic, spend, `state_entered_at`, lease, and the
+[`integrated`](../integration.md) marker. (This generalizes the original *in-flight*
+cache, which held only `in_progress` issues; retaining settled issues too is what closes
+re-dispatch case 2 and lets the control room read closed/blocked state.) Two rules make
+it correct and cheap:
 
 - **It is derived, never authoritative.** It holds nothing that is not recoverable
-  from beads. On restart it is rebuilt from the `in_progress` set (and their leases)
-  before the first dispatch, so the crash-safety guarantees are unchanged — beads
-  remains the truth; the projection is a consistency *cache* over it.
+  from beads. On restart it is rebuilt from beads (the in-flight set with their leases,
+  plus the surrounding graph state) before the first dispatch, so the crash-safety
+  guarantees are unchanged — beads remains the truth; the projection is a consistency
+  *cache* over it.
 - **It is maintained at the one transition choke point.** Every status write updates
-  it in the same place it writes beads: a transition *to* `in_progress` adds the
-  issue; any transition away from it (`open`, `closed`, `blocked`) removes it. Because
-  every status mutation already routes through that choke point, the projection cannot
+  the issue's projected state in the same place it writes beads — a transition *to*
+  `in_progress`, *to* `closed`, *to* `blocked`, *to* `open` all update the entry's
+  status (rather than only adding/removing an in-flight membership). Because every
+  status mutation already routes through that choke point, the projection cannot
   silently drift from beads.
 
-How the two hot paths use it:
+How the hot paths use it:
 
 - **Dispatch.** `bd.ready()` remains the **candidate oracle** — it still computes
   "no open blockers + precondition holds", so the dependency graph is *not*
-  re-implemented in memory. The orchestrator then **skips any candidate already in
-  the projection.** A stale `bd.ready()` that returns a just-claimed issue is now
-  harmless: the projection knows it is in flight.
-- **Result gating.** A returning Result is processed only if its issue is in the
-  projection; otherwise it is a stale/duplicate redelivery and is ignored. This is
-  read from the projection, not a (possibly lagging) beads status read, so a valid
-  result is never discarded as "not in progress" because beads had not caught up, and
-  a duplicate cannot be applied twice (the first result removes the issue from the
-  projection before the next is processed — result handling is serial).
+  re-implemented in memory. The orchestrator then **skips any candidate the projection
+  knows is `in_progress` *or* already settled (`closed`/`blocked`).** A stale
+  `bd.ready()` that returns a just-claimed *or* just-closed issue is now harmless: the
+  projection knows its real state (closes re-dispatch cases 1 and 2).
+- **Result gating.** A returning Result is processed only if the projection shows its
+  issue `in_progress`; otherwise it is a stale/duplicate redelivery and is ignored.
+  This is read from the projection, not a (possibly lagging) beads status read, so a
+  valid result is never discarded because beads had not caught up, and a duplicate
+  cannot be applied twice (result handling is serial, and the first result transitions
+  the issue out of `in_progress` in the projection before the next is processed).
+- **Control-room reads.** The control room consumes the projection as its **live read
+  model** rather than polling beads — see [the read model](../observability.md) and
+  [snapshot-then-stream](#the-projection-is-the-control-rooms-read-model) below.
 
-Because the projection (not beads) answers "in flight?", the **lease sweep** scans
-it in memory, and the **in-flight spec-drift check** iterates it and re-resolves
-specs from the worktree — neither needs a beads query. The slow, full-table sweeps
-that *do* read beads (e.g. re-deriving already-merged work on a spec edit) run on a
-**separate, slower cadence** than dispatch, so they neither pace dispatch nor add to
+Because the projection (not beads) answers "what state is this issue in?", the **lease
+sweep** scans it in memory, and the **in-flight spec-drift check** iterates it and
+re-resolves specs from the worktree — neither needs a beads query. The slow, full-table
+sweeps that *do* read beads (e.g. re-deriving already-merged work on a spec edit) run on
+a **separate, slower cadence** than dispatch, so they neither pace dispatch nor add to
 the read pressure that causes the lag in the first place.
+
+### The projection is the control room's read model
+
+The [control room](../control-room.md)'s live views (board, DAG, dead-letter, status
+bar, epic roll-up) read the **work-graph projection**, not direct `bd` polling — so they
+never disagree with the single writer's own view, and they place no `bd list` load on
+the store. The sync is **snapshot-then-stream**: on connect the control room takes a
+*snapshot* of the projection, then applies the [`issue-state` events](../messaging.md)
+the same choke point already emits, gap-free (the snapshot is the baseline; subsequent
+transitions stream as deltas). Because the emit is already part of every transition,
+this is the *same* additive observability path, now also feeding a consistent read
+surface — beads remains the durable log and the cold-start hydration source, never the
+hot read path.
+
+This binds the projection's two consumers to the deployment topology:
+
+- **Co-located** (`harness run` with the control room in-process — the default): the
+  control room reads the in-process projection directly and streams transitions over
+  SSE. This is the live, consistent surface.
+- **Standalone** (`harness serve` with no attached orchestrator): there is no live
+  projection, so the control room **degrades to a beads snapshot** — static, no live
+  updates — exactly as `/events` already 503s with no in-process NATS. Distributed
+  (cross-host) live reads are a later concern (see OPEN questions); v1 live reads are
+  co-located.
+
+The **[`integrated`](../integration.md) marker** rides the projection so the epic
+roll-up counts genuinely-integrated children, not any `closed` bead — see
+[integration.md](../integration.md) "Atomic feature integration".
 
 ---
 
 ## Crash safety
 
 - The orchestrator holds **no authoritative in-memory state**. Its only in-memory
-  state is the in-flight projection, which is **derived from beads and rebuilt from
-  the `in_progress` set on restart** before the first dispatch — so a crash loses
-  nothing. On restart it reads beads to find ready and in-flight work and resumes.
+  state is the work-graph projection, which is **derived from beads and rebuilt from it
+  on restart** before the first dispatch — so a crash loses nothing. On restart it reads
+  beads to find ready and in-flight work and resumes.
 - In-flight work is protected by a **lease/TTL** on the `in_progress` status plus
   JetStream `AckWait`: if the runner that owned an issue dies, its work message is
   redelivered and the orchestrator's sweep resets the stranded issue.
@@ -156,10 +208,11 @@ the read pressure that causes the lag in the first place.
 orchestrator several concurrent loops write beads — the event-driven Result and
 approval consumers, and the tick loop that dispatches and sweeps. This is safe not
 because writes are globally serialised behind a lock (there is none), but because (a)
-two loops never touch the *same* issue at once — the in-flight projection gates
-same-issue contention: a Result is acted on only while its issue is in the projection,
-a dispatch skips a projected issue, and serial Result handling removes an issue before
-the next is processed — and (b) the work store tolerates concurrent writes to
+two loops never touch the *same* issue at once — the work-graph projection gates
+same-issue contention: a Result is acted on only while the projection shows its issue
+`in_progress`, a dispatch skips an issue the projection shows in-flight or settled, and
+serial Result handling transitions an issue out of `in_progress` before the next is
+processed — and (b) the work store tolerates concurrent writes to
 *different* issues. The constraint this puts on future change: anything that adds
 another beads-writing loop must preserve (a) — it cannot assume a global write lock,
 because the coordination is the projection plus serial Result handling, not a mutex.
