@@ -287,12 +287,14 @@ func TestCreateLedgerAnswerRecordsTurn(t *testing.T) {
 // was handed and returns a canned result or error, so the handler is tested without touching git,
 // beads, or the artifact store (those are exercised by the cmd-side seeder integration test).
 type fakeSeeder struct {
-	got *wizard.SeedRequest
-	res wizard.SeedResult
-	err error
+	got   *wizard.SeedRequest
+	res   wizard.SeedResult
+	err   error
+	calls int
 }
 
 func (f *fakeSeeder) Seed(_ context.Context, req wizard.SeedRequest) (wizard.SeedResult, error) {
+	f.calls++
 	f.got = &req
 	return f.res, f.err
 }
@@ -486,6 +488,54 @@ func TestCreateApproveSuccess(t *testing.T) {
 	}
 	if len(seeder.got.Transcript) == 0 {
 		t.Error("Seeder got no transcript")
+	}
+}
+
+// TestCreateApproveIsIdempotent proves the double-submit guard: a second POST /create/approve for
+// the same session does NOT seed again (the commit is one-shot and not idempotent), and instead
+// re-renders the prior outcome — so a double-click / resubmit / second tab can never write the spec
+// or seed the issues twice. The Seeder is called exactly once across both POSTs.
+func TestCreateApproveIsIdempotent(t *testing.T) {
+	seeder := &fakeSeeder{res: wizard.SeedResult{
+		Commit: "abc123def4567",
+		Issues: []wizard.SeededIssue{{ID: "harness-7", Title: "Add CSV export", Role: "planner"}},
+	}}
+	p := wizard.NewPlanner(draftAdapter(), "persona", wizard.WithTurnTimeout(5*time.Second))
+	s := New(Options{Planner: p, Seeder: seeder})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+	sess := p.New()
+
+	if !sess.Send("build a CSV exporter") {
+		t.Fatal("Send returned false")
+	}
+	waitFor(t, func() bool { return !sess.Busy() && !sess.Draft().Empty() }, "draft not produced")
+
+	approve := func() string {
+		pr, err := http.PostForm(ts.URL+"/create/approve", url.Values{"session": {sess.ID}})
+		if err != nil {
+			t.Fatalf("POST approve: %v", err)
+		}
+		data, _ := io.ReadAll(pr.Body)
+		_ = pr.Body.Close()
+		if pr.StatusCode != http.StatusOK {
+			t.Fatalf("approve status = %d, want 200", pr.StatusCode)
+		}
+		return string(data)
+	}
+
+	first := approve()
+	if !strings.Contains(first, "work seeded") || !strings.Contains(first, "harness-7") {
+		t.Errorf("first approve missing the seeded result: %s", first)
+	}
+
+	// Second approve on the now-consumed session: must re-render the SAME outcome, without re-seeding.
+	second := approve()
+	if !strings.Contains(second, "work seeded") || !strings.Contains(second, "harness-7") {
+		t.Errorf("second approve did not re-render the prior outcome: %s", second)
+	}
+	if seeder.calls != 1 {
+		t.Errorf("Seeder.Seed called %d times across two approves, want exactly 1", seeder.calls)
 	}
 }
 

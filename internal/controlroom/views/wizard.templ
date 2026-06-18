@@ -415,10 +415,18 @@ templ DraftPanel(session string, draft wizard.Draft, specs []wizard.SpecFileDiff
 				</div>
 			}
 			if canApprove {
+				// The consent commit is one-shot and not idempotent (commit + seed), so the form
+				// guards the double-click on the client too: hx-disabled-elt disables the button
+				// for the in-flight request and hx-sync drops a duplicate submit while one is in
+				// flight. The .htmx-indicator "Seeding…" line gives an immediate pending state
+				// (not an optimistic success — the swapped-in fragment shows the real outcome). The
+				// server-side BeginCommit guard is the durable backstop (survives reload / two tabs).
 				<form
 					hx-post="/create/approve"
 					hx-target="#wizard-result"
 					hx-swap="innerHTML"
+					hx-disabled-elt="find button"
+					hx-sync="this:drop"
 					class="flex flex-col gap-2 border-t border-border pt-3"
 				>
 					<input type="hidden" name="session" value={ session }/>
@@ -427,10 +435,11 @@ templ DraftPanel(session string, draft wizard.Draft, specs []wizard.SpecFileDiff
 						conversation, and creates the seed issues. This is the consent boundary —
 						everything after it is autonomous.
 					</p>
-					<div class="flex justify-end">
+					<div class="flex items-center justify-end gap-3">
+						<span class="htmx-indicator text-xs text-muted">Seeding…</span>
 						<button
 							type="submit"
-							class="rounded-md bg-st-ok px-4 py-2 text-sm font-medium text-white transition hover:bg-st-ok"
+							class="rounded-md bg-st-ok px-4 py-2 text-sm font-medium text-white transition hover:bg-st-ok disabled:cursor-not-allowed disabled:opacity-60"
 						>Approve &amp; seed</button>
 					</div>
 				</form>

@@ -497,20 +497,20 @@ func ResolvePanel(session string, draft wizard.Draft, specs []wizard.SpecFileDif
 				return templ_7745c5c3_Err
 			}
 			if canResolve {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "<form hx-post=\"/resolve/approve\" hx-target=\"#wizard-result\" hx-swap=\"innerHTML\" class=\"flex flex-col gap-2 border-t border-border pt-3\"><input type=\"hidden\" name=\"session\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 39, "   <form hx-post=\"/resolve/approve\" hx-target=\"#wizard-result\" hx-swap=\"innerHTML\" hx-disabled-elt=\"find button\" hx-sync=\"this:drop\" class=\"flex flex-col gap-2 border-t border-border pt-3\"><input type=\"hidden\" name=\"session\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var22 string
 				templ_7745c5c3_Var22, templ_7745c5c3_Err = templ.JoinStringErrs(session)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 139, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 144, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var22))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\"><p class=\"text-xs text-st-warn\">Approving commits the spec refinement, stores this conversation, and returns the dead-lettered issue to the ready pool. The factory then re-pins and reissues the affected work shown above. This is the consent boundary.</p><div class=\"flex justify-end\"><button type=\"submit\" class=\"rounded-md bg-st-ok px-4 py-2 text-sm font-medium text-white transition hover:bg-st-ok\">Approve &amp; resolve</button></div></form>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 40, "\"><p class=\"text-xs text-st-warn\">Approving commits the spec refinement, stores this conversation, and returns the dead-lettered issue to the ready pool. The factory then re-pins and reissues the affected work shown above. This is the consent boundary.</p><div class=\"flex items-center justify-end gap-3\"><span class=\"htmx-indicator text-xs text-muted\">Resolving…</span> <button type=\"submit\" class=\"rounded-md bg-st-ok px-4 py-2 text-sm font-medium text-white transition hover:bg-st-ok disabled:cursor-not-allowed disabled:opacity-60\">Approve &amp; resolve</button></div></form>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -572,7 +572,7 @@ func blastRadius(br query.BlastRadius) templ.Component {
 				var templ_7745c5c3_Var24 string
 				templ_7745c5c3_Var24, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(len(br.InFlight)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 174, Col: 90}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 180, Col: 90}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var24))
 				if templ_7745c5c3_Err != nil {
@@ -590,7 +590,7 @@ func blastRadius(br query.BlastRadius) templ.Component {
 					var templ_7745c5c3_Var25 templ.SafeURL
 					templ_7745c5c3_Var25, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL("/issue/" + it.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 178, Col: 46}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 184, Col: 46}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var25))
 					if templ_7745c5c3_Err != nil {
@@ -603,7 +603,7 @@ func blastRadius(br query.BlastRadius) templ.Component {
 					var templ_7745c5c3_Var26 string
 					templ_7745c5c3_Var26, templ_7745c5c3_Err = templ.JoinStringErrs(it.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 178, Col: 130}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 184, Col: 130}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var26))
 					if templ_7745c5c3_Err != nil {
@@ -621,7 +621,7 @@ func blastRadius(br query.BlastRadius) templ.Component {
 						var templ_7745c5c3_Var27 string
 						templ_7745c5c3_Var27, templ_7745c5c3_Err = templ.JoinStringErrs(" · " + it.Role)
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 180, Col: 33}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 186, Col: 33}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var27))
 						if templ_7745c5c3_Err != nil {
@@ -639,7 +639,7 @@ func blastRadius(br query.BlastRadius) templ.Component {
 					var templ_7745c5c3_Var28 string
 					templ_7745c5c3_Var28, templ_7745c5c3_Err = templ.JoinStringErrs(" · " + shortHash(it.SpecHash))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 182, Col: 76}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 188, Col: 76}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var28))
 					if templ_7745c5c3_Err != nil {
@@ -667,7 +667,7 @@ func blastRadius(br query.BlastRadius) templ.Component {
 				var templ_7745c5c3_Var29 string
 				templ_7745c5c3_Var29, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(len(br.Merged)))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 190, Col: 77}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 196, Col: 77}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var29))
 				if templ_7745c5c3_Err != nil {
@@ -685,7 +685,7 @@ func blastRadius(br query.BlastRadius) templ.Component {
 					var templ_7745c5c3_Var30 string
 					templ_7745c5c3_Var30, templ_7745c5c3_Err = templ.JoinStringErrs(g.Spec)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 194, Col: 40}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 200, Col: 40}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var30))
 					if templ_7745c5c3_Err != nil {
@@ -698,7 +698,7 @@ func blastRadius(br query.BlastRadius) templ.Component {
 					var templ_7745c5c3_Var31 string
 					templ_7745c5c3_Var31, templ_7745c5c3_Err = templ.JoinStringErrs(" · epic " + g.Epic + " · " + strconv.Itoa(g.Members) + " closed")
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 195, Col: 102}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 201, Col: 102}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var31))
 					if templ_7745c5c3_Err != nil {
@@ -756,7 +756,7 @@ func ResolveApproveResult(res wizard.ResolveResult, err string) templ.Component 
 			var templ_7745c5c3_Var33 string
 			templ_7745c5c3_Var33, templ_7745c5c3_Err = templ.JoinStringErrs(err)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 212, Col: 8}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 218, Col: 8}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var33))
 			if templ_7745c5c3_Err != nil {
@@ -779,7 +779,7 @@ func ResolveApproveResult(res wizard.ResolveResult, err string) templ.Component 
 				var templ_7745c5c3_Var34 string
 				templ_7745c5c3_Var34, templ_7745c5c3_Err = templ.JoinStringErrs(shortHash(res.Commit))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 220, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 226, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var34))
 				if templ_7745c5c3_Err != nil {
@@ -802,7 +802,7 @@ func ResolveApproveResult(res wizard.ResolveResult, err string) templ.Component 
 				var templ_7745c5c3_Var35 templ.SafeURL
 				templ_7745c5c3_Var35, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL("/issue/" + res.ReopenedIssue))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 227, Col: 55}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 233, Col: 55}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var35))
 				if templ_7745c5c3_Err != nil {
@@ -815,7 +815,7 @@ func ResolveApproveResult(res wizard.ResolveResult, err string) templ.Component 
 				var templ_7745c5c3_Var36 string
 				templ_7745c5c3_Var36, templ_7745c5c3_Err = templ.JoinStringErrs(res.ReopenedIssue)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 227, Col: 132}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 233, Col: 132}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var36))
 				if templ_7745c5c3_Err != nil {
@@ -878,7 +878,7 @@ func ResolveMessage(msg string) templ.Component {
 			var templ_7745c5c3_Var39 string
 			templ_7745c5c3_Var39, templ_7745c5c3_Err = templ.JoinStringErrs(msg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 242, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/resolve.templ`, Line: 248, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var39))
 			if templ_7745c5c3_Err != nil {

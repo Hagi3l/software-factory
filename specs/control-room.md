@@ -431,7 +431,9 @@ threefold:
    seed issues and approves *before* anything is written. **That approval is the
    consent boundary** — everything past it is autonomous. Approval is itself gated
    on a converged [alignment ledger](#the-alignment-ledger) (no fork left `open` or
-   `discussing`).
+   `discussing`). The commit it triggers is **one-shot**: a spec is committed and its
+   seed issues created at most once per draft, so a double-click, a resubmit, or a
+   second tab re-renders the original outcome rather than seeding the feature twice.
 
 Data flow:
 

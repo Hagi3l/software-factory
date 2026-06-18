@@ -1026,6 +1026,18 @@ func (s *Server) handleCreateApprove(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, views.CreateApproveResult(wizard.SeedResult{}, ledgerBlockedMessage(blocked)))
 		return
 	}
+	// Consent commit is one-shot and not idempotent (it commits a spec + seeds issues), so guard
+	// against a double-click / resubmit: a duplicate re-renders the prior outcome, a concurrent
+	// one is told to wait, and only the first actually seeds. See Session.BeginCommit.
+	prior, done, inFlight := sess.BeginCommit()
+	if done {
+		s.render(w, r, views.CreateApproveResult(prior.(wizard.SeedResult), ""))
+		return
+	}
+	if inFlight {
+		s.render(w, r, views.CreateApproveResult(wizard.SeedResult{}, "This draft is already being approved — give it a moment."))
+		return
+	}
 	res, err := s.seeder.Seed(r.Context(), wizard.SeedRequest{
 		Summary:    draft.Summary,
 		Specs:      draft.Specs,
@@ -1033,6 +1045,7 @@ func (s *Server) handleCreateApprove(w http.ResponseWriter, r *http.Request) {
 		Decisions:  decisions,
 		Transcript: sess.Transcript(),
 	})
+	sess.FinishCommit(res, err)
 	if err != nil {
 		s.log.Warn("controlroom: wizard approval failed", "session", sess.ID, "err", err)
 		s.render(w, r, views.CreateApproveResult(wizard.SeedResult{}, "Could not commit the draft: "+err.Error()))
@@ -1144,6 +1157,16 @@ func (s *Server) handleResolveApprove(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, views.ResolveApproveResult(wizard.ResolveResult{}, ledgerBlockedMessage(blocked)))
 		return
 	}
+	// One-shot, non-idempotent consent commit — guard the double-click exactly as Create does.
+	prior, done, inFlight := sess.BeginCommit()
+	if done {
+		s.render(w, r, views.ResolveApproveResult(prior.(wizard.ResolveResult), ""))
+		return
+	}
+	if inFlight {
+		s.render(w, r, views.ResolveApproveResult(wizard.ResolveResult{}, "This resolution is already being approved — give it a moment."))
+		return
+	}
 	res, err := s.resolver.Resolve(r.Context(), wizard.ResolveRequest{
 		IssueID:    sess.ResolveIssue(),
 		Summary:    draft.Summary,
@@ -1151,6 +1174,7 @@ func (s *Server) handleResolveApprove(w http.ResponseWriter, r *http.Request) {
 		Decisions:  decisions,
 		Transcript: sess.Transcript(),
 	})
+	sess.FinishCommit(res, err)
 	if err != nil {
 		s.log.Warn("controlroom: resolve approval failed", "session", sess.ID, "issue", sess.ResolveIssue(), "err", err)
 		s.render(w, r, views.ResolveApproveResult(wizard.ResolveResult{}, "Could not commit the resolution: "+err.Error()))

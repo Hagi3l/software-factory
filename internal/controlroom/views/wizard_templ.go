@@ -1019,20 +1019,20 @@ func DraftPanel(session string, draft wizard.Draft, specs []wizard.SpecFileDiff,
 				}
 			}
 			if canApprove {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "<form hx-post=\"/create/approve\" hx-target=\"#wizard-result\" hx-swap=\"innerHTML\" class=\"flex flex-col gap-2 border-t border-border pt-3\"><input type=\"hidden\" name=\"session\" value=\"")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 65, "      <form hx-post=\"/create/approve\" hx-target=\"#wizard-result\" hx-swap=\"innerHTML\" hx-disabled-elt=\"find button\" hx-sync=\"this:drop\" class=\"flex flex-col gap-2 border-t border-border pt-3\"><input type=\"hidden\" name=\"session\" value=\"")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 				var templ_7745c5c3_Var42 string
 				templ_7745c5c3_Var42, templ_7745c5c3_Err = templ.JoinStringErrs(session)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 424, Col: 56}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 432, Col: 56}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var42))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "\"><p class=\"text-xs text-st-warn\">Approving commits the spec to git, writes the decisions record, stores this conversation, and creates the seed issues. This is the consent boundary — everything after it is autonomous.</p><div class=\"flex justify-end\"><button type=\"submit\" class=\"rounded-md bg-st-ok px-4 py-2 text-sm font-medium text-white transition hover:bg-st-ok\">Approve &amp; seed</button></div></form>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 66, "\"><p class=\"text-xs text-st-warn\">Approving commits the spec to git, writes the decisions record, stores this conversation, and creates the seed issues. This is the consent boundary — everything after it is autonomous.</p><div class=\"flex items-center justify-end gap-3\"><span class=\"htmx-indicator text-xs text-muted\">Seeding…</span> <button type=\"submit\" class=\"rounded-md bg-st-ok px-4 py-2 text-sm font-medium text-white transition hover:bg-st-ok disabled:cursor-not-allowed disabled:opacity-60\">Approve &amp; seed</button></div></form>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1093,7 +1093,7 @@ func draftSpecFiles(files []wizard.SpecFileDiff) templ.Component {
 				var templ_7745c5c3_Var44 string
 				templ_7745c5c3_Var44, templ_7745c5c3_Err = templ.JoinStringErrs(f.Path)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 461, Col: 14}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 470, Col: 14}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var44))
 				if templ_7745c5c3_Err != nil {
@@ -1126,7 +1126,7 @@ func draftSpecFiles(files []wizard.SpecFileDiff) templ.Component {
 					var templ_7745c5c3_Var45 string
 					templ_7745c5c3_Var45, templ_7745c5c3_Err = templ.JoinStringErrs(f.Content)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 469, Col: 131}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 478, Col: 131}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var45))
 					if templ_7745c5c3_Err != nil {
@@ -1195,7 +1195,7 @@ func specDiff(lines []wizard.DiffLine) templ.Component {
 				var templ_7745c5c3_Var47 string
 				templ_7745c5c3_Var47, templ_7745c5c3_Err = templ.JoinStringErrs("+ " + ln.Text)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 488, Col: 82}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 497, Col: 82}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var47))
 				if templ_7745c5c3_Err != nil {
@@ -1213,7 +1213,7 @@ func specDiff(lines []wizard.DiffLine) templ.Component {
 				var templ_7745c5c3_Var48 string
 				templ_7745c5c3_Var48, templ_7745c5c3_Err = templ.JoinStringErrs("- " + ln.Text)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 490, Col: 92}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 499, Col: 92}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var48))
 				if templ_7745c5c3_Err != nil {
@@ -1231,7 +1231,7 @@ func specDiff(lines []wizard.DiffLine) templ.Component {
 				var templ_7745c5c3_Var49 string
 				templ_7745c5c3_Var49, templ_7745c5c3_Err = templ.JoinStringErrs("  " + ln.Text)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 492, Col: 70}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 501, Col: 70}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var49))
 				if templ_7745c5c3_Err != nil {
@@ -1282,7 +1282,7 @@ func draftIssueRow(is wizard.DraftIssue) templ.Component {
 		var templ_7745c5c3_Var51 string
 		templ_7745c5c3_Var51, templ_7745c5c3_Err = templ.JoinStringErrs(is.Title)
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 504, Col: 55}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 513, Col: 55}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var51))
 		if templ_7745c5c3_Err != nil {
@@ -1300,7 +1300,7 @@ func draftIssueRow(is wizard.DraftIssue) templ.Component {
 			var templ_7745c5c3_Var52 string
 			templ_7745c5c3_Var52, templ_7745c5c3_Err = templ.JoinStringErrs(is.Role)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 506, Col: 118}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 515, Col: 118}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var52))
 			if templ_7745c5c3_Err != nil {
@@ -1323,7 +1323,7 @@ func draftIssueRow(is wizard.DraftIssue) templ.Component {
 			var templ_7745c5c3_Var53 string
 			templ_7745c5c3_Var53, templ_7745c5c3_Err = templ.JoinStringErrs(is.Spec)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 510, Col: 45}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 519, Col: 45}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var53))
 			if templ_7745c5c3_Err != nil {
@@ -1342,7 +1342,7 @@ func draftIssueRow(is wizard.DraftIssue) templ.Component {
 			var templ_7745c5c3_Var54 string
 			templ_7745c5c3_Var54, templ_7745c5c3_Err = templ.JoinStringErrs(is.Body)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 513, Col: 62}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 522, Col: 62}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var54))
 			if templ_7745c5c3_Err != nil {
@@ -1394,7 +1394,7 @@ func CreateApproveResult(res wizard.SeedResult, err string) templ.Component {
 			var templ_7745c5c3_Var56 string
 			templ_7745c5c3_Var56, templ_7745c5c3_Err = templ.JoinStringErrs(err)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 525, Col: 8}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 534, Col: 8}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var56))
 			if templ_7745c5c3_Err != nil {
@@ -1417,7 +1417,7 @@ func CreateApproveResult(res wizard.SeedResult, err string) templ.Component {
 				var templ_7745c5c3_Var57 string
 				templ_7745c5c3_Var57, templ_7745c5c3_Err = templ.JoinStringErrs(shortHash(res.Commit))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 533, Col: 37}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 542, Col: 37}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var57))
 				if templ_7745c5c3_Err != nil {
@@ -1445,7 +1445,7 @@ func CreateApproveResult(res wizard.SeedResult, err string) templ.Component {
 					var templ_7745c5c3_Var58 templ.SafeURL
 					templ_7745c5c3_Var58, templ_7745c5c3_Err = templ.JoinURLErrs(templ.URL("/issue/" + is.ID))
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 541, Col: 45}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 550, Col: 45}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var58))
 					if templ_7745c5c3_Err != nil {
@@ -1458,7 +1458,7 @@ func CreateApproveResult(res wizard.SeedResult, err string) templ.Component {
 					var templ_7745c5c3_Var59 string
 					templ_7745c5c3_Var59, templ_7745c5c3_Err = templ.JoinStringErrs(is.ID)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 541, Col: 100}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 550, Col: 100}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var59))
 					if templ_7745c5c3_Err != nil {
@@ -1471,7 +1471,7 @@ func CreateApproveResult(res wizard.SeedResult, err string) templ.Component {
 					var templ_7745c5c3_Var60 string
 					templ_7745c5c3_Var60, templ_7745c5c3_Err = templ.JoinStringErrs(" " + is.Title)
 					if templ_7745c5c3_Err != nil {
-						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 542, Col: 45}
+						return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 551, Col: 45}
 					}
 					_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var60))
 					if templ_7745c5c3_Err != nil {
@@ -1489,7 +1489,7 @@ func CreateApproveResult(res wizard.SeedResult, err string) templ.Component {
 						var templ_7745c5c3_Var61 string
 						templ_7745c5c3_Var61, templ_7745c5c3_Err = templ.JoinStringErrs(" (" + is.Role + ")")
 						if templ_7745c5c3_Err != nil {
-							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 544, Col: 63}
+							return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 553, Col: 63}
 						}
 						_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var61))
 						if templ_7745c5c3_Err != nil {
@@ -1563,7 +1563,7 @@ func CreateMessage(msg string) templ.Component {
 			var templ_7745c5c3_Var64 string
 			templ_7745c5c3_Var64, templ_7745c5c3_Err = templ.JoinStringErrs(msg)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 562, Col: 35}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/wizard.templ`, Line: 571, Col: 35}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var64))
 			if templ_7745c5c3_Err != nil {

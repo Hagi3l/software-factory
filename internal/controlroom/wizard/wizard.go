@@ -438,6 +438,16 @@ type Session struct {
 	ledger      []LedgerItem // latest-wins alignment-ledger snapshot (T4.13), guarded by mu
 	draft       Draft        // latest-wins drafted spec + seed issues (T4.14), guarded by mu
 
+	// The consent commit (APPROVE) is one-shot per session and not idempotent — it commits a
+	// spec to git and writes seed issues through the single-writer path — so it must survive a
+	// double-click, a resubmit, or two tabs without writing twice. committing guards an
+	// in-flight commit; committed marks the session permanently consumed once one succeeds;
+	// outcome holds that success (a SeedResult or ResolveResult) for an idempotent re-render.
+	// All guarded by mu; see BeginCommit / FinishCommit.
+	committing bool
+	committed  bool
+	outcome    any
+
 	// readCount counts the read tool calls executed within the current turn, used only to label
 	// the live activity line ("reading the codebase · 3 read"). Touched solely by the turn
 	// goroutine (reset in run, incremented in dispatch), so it needs no lock.
@@ -547,6 +557,43 @@ func (s *Session) Draft() Draft {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.draft.clone()
+}
+
+// BeginCommit claims the session's one-shot consent commit (the APPROVE write). Because that
+// write commits a spec to git and seeds issues — expensive, side-effecting, and NOT idempotent
+// — a double-click or resubmit must never run it twice. The caller checks the return before
+// doing any work:
+//   - done==true: the session was already committed; render prior (the earlier outcome) and stop.
+//   - inFlight==true: a concurrent commit is in progress; ask the human to wait and stop.
+//   - both false: the caller now owns the commit and MUST call FinishCommit exactly once.
+//
+// A failed commit clears the claim (see FinishCommit), so the human can retry; only success
+// consumes the session.
+func (s *Session) BeginCommit() (prior any, done, inFlight bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.committed {
+		return s.outcome, true, false
+	}
+	if s.committing {
+		return nil, false, true
+	}
+	s.committing = true
+	return nil, false, false
+}
+
+// FinishCommit releases the in-flight claim taken by BeginCommit. On success (err==nil) it marks
+// the session permanently consumed and stores outcome for an idempotent re-render of a later
+// duplicate APPROVE; on failure it clears the claim so the human can correct and retry. Must be
+// called exactly once by whoever BeginCommit handed ownership to.
+func (s *Session) FinishCommit(outcome any, err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.committing = false
+	if err == nil {
+		s.committed = true
+		s.outcome = outcome
+	}
 }
 
 // Transcript returns the conversation as JSON — the replayable provenance record the Seeder

@@ -261,6 +261,43 @@ func TestNewSessionsUniqueAndBounded(t *testing.T) {
 	}
 }
 
+// TestBeginCommitIsOneShot proves the consent-commit guard: the first claim is granted, a
+// concurrent claim is told the commit is in flight, a successful FinishCommit consumes the
+// session (later claims return the stored outcome, never a fresh grant), and a *failed*
+// FinishCommit releases the claim so the human can retry.
+func TestBeginCommitIsOneShot(t *testing.T) {
+	sess := wizard.NewPlanner(&fakeAdapter{reply: "x"}, "persona").New()
+
+	// First claim is granted (not done, not in-flight).
+	if prior, done, inFlight := sess.BeginCommit(); prior != nil || done || inFlight {
+		t.Fatalf("first BeginCommit = (%v, done=%v, inFlight=%v), want a fresh grant", prior, done, inFlight)
+	}
+	// While that claim is open, a concurrent claim is refused as in-flight.
+	if _, done, inFlight := sess.BeginCommit(); done || !inFlight {
+		t.Fatalf("concurrent BeginCommit = (done=%v, inFlight=%v), want inFlight", done, inFlight)
+	}
+
+	// A failed commit releases the claim — the human may retry.
+	sess.FinishCommit(nil, errors.New("git commit failed"))
+	prior, done, inFlight := sess.BeginCommit()
+	if prior != nil || done || inFlight {
+		t.Fatalf("BeginCommit after failure = (%v, done=%v, inFlight=%v), want a fresh grant for retry", prior, done, inFlight)
+	}
+
+	// A successful commit consumes the session: every later claim returns the stored outcome
+	// and never grants a fresh commit (so a duplicate APPROVE re-renders, it does not re-seed).
+	sess.FinishCommit("seeded-outcome", nil)
+	for i := 0; i < 3; i++ {
+		prior, done, inFlight := sess.BeginCommit()
+		if !done || inFlight {
+			t.Fatalf("BeginCommit after success = (done=%v, inFlight=%v), want done", done, inFlight)
+		}
+		if prior != "seeded-outcome" {
+			t.Fatalf("BeginCommit prior = %v, want the stored outcome", prior)
+		}
+	}
+}
+
 // TestLedgerTurnParsesAndStreamsClean proves a turn whose scripted reply emits the ledger as an
 // update_ledger TOOL CALL (T4.29): the harvested ledger is stored on the session, the recorded
 // transcript holds only the clean prose (the structured state rode the tool channel, never the

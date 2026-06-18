@@ -130,10 +130,15 @@ templ ResolvePanel(session string, draft wizard.Draft, specs []wizard.SpecFileDi
 			@draftSpecFiles(specs)
 			@blastRadius(br)
 			if canResolve {
+				// One-shot, non-idempotent consent commit — same double-click guard as Create:
+				// hx-disabled-elt + hx-sync stop a duplicate submit, the .htmx-indicator shows a
+				// pending state, and Session.BeginCommit is the durable server-side backstop.
 				<form
 					hx-post="/resolve/approve"
 					hx-target="#wizard-result"
 					hx-swap="innerHTML"
+					hx-disabled-elt="find button"
+					hx-sync="this:drop"
 					class="flex flex-col gap-2 border-t border-border pt-3"
 				>
 					<input type="hidden" name="session" value={ session }/>
@@ -142,10 +147,11 @@ templ ResolvePanel(session string, draft wizard.Draft, specs []wizard.SpecFileDi
 						dead-lettered issue to the ready pool. The factory then re-pins and reissues the
 						affected work shown above. This is the consent boundary.
 					</p>
-					<div class="flex justify-end">
+					<div class="flex items-center justify-end gap-3">
+						<span class="htmx-indicator text-xs text-muted">Resolving…</span>
 						<button
 							type="submit"
-							class="rounded-md bg-st-ok px-4 py-2 text-sm font-medium text-white transition hover:bg-st-ok"
+							class="rounded-md bg-st-ok px-4 py-2 text-sm font-medium text-white transition hover:bg-st-ok disabled:cursor-not-allowed disabled:opacity-60"
 						>Approve &amp; resolve</button>
 					</div>
 				</form>
