@@ -38,6 +38,73 @@ func configTestCfg() *config.Config {
 	}
 }
 
+// warningConfigCfg is a validated config that trips the producer/verifier model-diversity advisory
+// (T2.13): the implementor and its downstream security gate both resolve to the anthropic family,
+// so config.Warnings() is non-empty and the Config view must surface an advisories section.
+func warningConfigCfg() *config.Config {
+	return &config.Config{
+		Root: "/srv/harness/config",
+		Harness: &config.Harness{
+			DAG: map[string]config.Stage{
+				"implement": {Role: "implementor", Postcondition: []string{"tests-red-then-green"}, Produces: []string{"qa"}},
+				"qa":        {Role: "security", Postcondition: []string{"tests-pass"}, Produces: []string{"integrate"}},
+				"integrate": {Kind: config.StageKindTrustedMerge, Postcondition: []string{"human-approved"}},
+			},
+			Checks: map[string]string{"tests-pass": "make test-unit"},
+			Policy: config.Policy{MaxRetries: 3, Profile: config.ProfileTrustedDev, TCBPaths: []string{"config/**"}},
+		},
+		Souls: []core.Soul{
+			{Name: "implementor-go", Role: "implementor", Model: "claude-opus-4-8", Sandbox: "go-toolchain", Persona: "/srv/harness/config/souls/prompts/impl.md"},
+			{Name: "security-go", Role: "security", Model: "claude-sonnet-4-6", Sandbox: "go-toolchain", Persona: "/srv/harness/config/souls/prompts/sec.md"},
+		},
+		Infra: &config.Infra{
+			Sandbox:   config.SandboxConfig{Backend: config.BackendDocker, Egress: "broker-only", Profiles: map[string]config.SandboxProfile{"go-toolchain": {Image: "harness/go-toolchain@sha256:abc"}}},
+			Broker:    config.BrokerConfig{Allowlist: []string{"llm-api"}},
+			Artifacts: config.ArtifactsConfig{Backend: "files", Path: "/var/artifacts"},
+			Models: map[string]config.ModelProvider{
+				"claude-opus-4-8":   {Provider: "anthropic", Cost: config.ModelCost{InputPerMTok: 15, OutputPerMTok: 75}},
+				"claude-sonnet-4-6": {Provider: "anthropic", Cost: config.ModelCost{InputPerMTok: 3, OutputPerMTok: 15}},
+			},
+		},
+	}
+}
+
+// TestConfigSurfacesAdvisories: a config that trips a non-fatal advisory (here producer/verifier
+// model-family overlap, T2.13) renders an advisories section with the warning text — the same
+// signal `harness validate` prints at startup, now visible in the control room where the operator
+// inspects the running factory. A clean config (configTestCfg) renders no such section.
+func TestConfigSurfacesAdvisories(t *testing.T) {
+	s := New(Options{Config: warningConfigCfg(), Env: "dev"})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	r := get(t, ts, "/config")
+	if r.status != http.StatusOK {
+		t.Fatalf("/config status = %d, want 200", r.status)
+	}
+	for _, want := range []string{
+		"advisories",                          // the section heading
+		"producer role",                       // the diversity advisory
+		"verifier role",                       // names the verifier role
+		"implementor",                         // the producer role
+		"security",                            // the verifier role
+		"weakening the N-version independent",  // the rationale
+	} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("/config missing advisory content %q", want)
+		}
+	}
+
+	// A clean config renders no advisories section at all.
+	clean := New(Options{Config: configTestCfg(), Env: "dev"})
+	cts := httptest.NewServer(clean.Handler())
+	t.Cleanup(cts.Close)
+	cr := get(t, cts, "/config")
+	if strings.Contains(cr.body, "advisories") {
+		t.Errorf("clean config should render no advisories section, got: %s", cr.body)
+	}
+}
+
 // TestConfigNotAttached: with no in-process config (a standalone `harness serve`) the page is a
 // notice inside the chrome (200), mirroring the Reader-backed views' graceful degradation.
 func TestConfigNotAttached(t *testing.T) {

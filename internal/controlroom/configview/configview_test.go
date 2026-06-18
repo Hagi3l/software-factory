@@ -97,6 +97,43 @@ func TestBuildIdentityAndStages(t *testing.T) {
 	}
 }
 
+// TestBuildSurfacesWarnings: Build projects config.Warnings() onto the view so the control room
+// can render the same advisories `harness validate` prints. The sample config's implementor
+// (anthropic) and its downstream security gate (anthropic) share a model family, so the
+// producer/verifier diversity advisory (T2.13) must appear — the safety signal reaching the UI.
+func TestBuildSurfacesWarnings(t *testing.T) {
+	v := Build(sampleConfig(), "dev")
+	if len(v.Warnings) == 0 {
+		t.Fatal("Warnings empty — same-family producer/verifier should advise (T2.13)")
+	}
+	var found bool
+	for _, w := range v.Warnings {
+		if strings.Contains(w, `producer role "implementor"`) && strings.Contains(w, `provider "anthropic"`) {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("no model-diversity advisory in %v", v.Warnings)
+	}
+}
+
+// TestBuildNoWarningsWhenClean: a config with no advisory condition projects no Warnings, so the
+// view renders no advisories section — a quiet page means a quiet config.
+func TestBuildNoWarningsWhenClean(t *testing.T) {
+	cfg := sampleConfig()
+	// Point the security verifier at a different model family than the implementor, removing the
+	// only overlap; with no proxy/remote misconfig either, Warnings is then empty.
+	cfg.Infra.Models["local-llama"] = config.ModelProvider{Provider: "openai-compat", Endpoint: "http://gpu-box:11434/v1"}
+	for i := range cfg.Souls {
+		if cfg.Souls[i].Role == "security" {
+			cfg.Souls[i].Model = "local-llama"
+		}
+	}
+	if v := Build(cfg, "dev"); len(v.Warnings) != 0 {
+		t.Errorf("clean config should have no warnings, got %v", v.Warnings)
+	}
+}
+
 // TestSoulSpecificityOrdering: a role with several souls orders most-specific-first, with the
 // empty-selector soul flagged catch-all; each soul is resolved against the infra registry.
 func TestSoulSpecificityOrdering(t *testing.T) {

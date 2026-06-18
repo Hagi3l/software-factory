@@ -306,6 +306,15 @@ What it renders, in flow order:
 - **Identity strip** — the config root, the active infra overlay (the `infra.<env>.yaml`
   in force), the `policy.profile` (`trusted-dev`/`autonomous`), and that the config passed
   startup validation. *Which* factory is this.
+- **Advisories** — the non-fatal warnings `harness validate` surfaces (the
+  [`Warnings`](configuration.md) channel, distinct from validation faults that fail startup):
+  chiefly producer/verifier **model-family overlap** (a same-family producer and verifier share
+  correlated blind spots, weakening the N-version independence
+  [verification.md](verification.md) recommends — model choice is the operator's, so it is
+  *advised*, never forced), plus a package-proxy or git-remote named but not allowlisted (dead
+  config the broker would deny). Surfacing them here puts the same safety signal where the
+  operator inspects the running factory, not only in the launch logs. Shown only when the config
+  trips one — a clean config renders no section.
 - **Pipeline graph** — the role-flow rendered **server-side to SVG** (the same renderer the
   [DAG view](#rendering) uses, fed the declared stages instead of issues), with `produces`
   and `on_failure` edges styled distinctly so the happy path and the retry/branch edges

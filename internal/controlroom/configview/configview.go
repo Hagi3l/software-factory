@@ -61,6 +61,14 @@ type ConfigView struct {
 	Policy     PolicyView
 	Infra      InfraView
 
+	// Warnings are the non-fatal config advisories config.Warnings() returns (T2.13) — the same
+	// list `harness validate` prints to stderr at startup: producer/verifier model-family overlap
+	// weakening N-version independence, or a package-proxy / git-remote named but not allowlisted.
+	// Surfacing them here makes the safety signal visible where an operator inspects the running
+	// factory, not only in the launch logs. nil/empty when the config is clean — the view then
+	// renders no advisories section (a quiet page means a quiet config).
+	Warnings []string
+
 	// Per-section raw folds: the effective config re-serialized to YAML with redaction
 	// applied (InfraYAML), or verbatim where the section holds no secrets (the rest).
 	StagesYAML string
@@ -199,6 +207,7 @@ func Build(cfg *config.Config, env string) ConfigView {
 		return v
 	}
 	v.Identity = Identity{Root: cfg.Root, Env: env, Validated: true}
+	v.Warnings = cfg.Warnings() // non-fatal advisories (T2.13); nil when the config is clean
 
 	if h := cfg.Harness; h != nil {
 		v.Identity.Profile = profileLabel(h.Policy.Profile)

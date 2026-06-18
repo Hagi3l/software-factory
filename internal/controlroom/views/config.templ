@@ -1,6 +1,10 @@
 package views
 
-import "github.com/Loxstomper/harness/internal/controlroom/configview"
+import (
+	"strconv"
+
+	"github.com/Loxstomper/harness/internal/controlroom/configview"
+)
 
 // ConfigPage is the Config view (specs/control-room.md, "The config view", T4.26): the
 // declared factory at rest — role-flow pipeline, gate checks, the resolved soul roster,
@@ -24,6 +28,7 @@ templ ConfigPage(v configview.ConfigView) {
 				<h1 class="text-xl font-semibold tracking-tight">Config</h1>
 				<a href="/dag" class="text-xs text-st-progress hover:underline">issue DAG →</a>
 			</div>
+			@configWarnings(v.Warnings)
 			@configIdentity(v.Identity)
 			@configPipeline(v)
 			@configChecks(v)
@@ -31,6 +36,33 @@ templ ConfigPage(v configview.ConfigView) {
 			@configPolicy(v)
 			@configInfra(v)
 		</div>
+	}
+}
+
+// configWarnings surfaces config.Warnings() (T2.13) — the non-fatal advisories `harness validate`
+// prints to stderr at startup, brought into the control room so the same safety signal is visible
+// where an operator inspects the running factory, not only in the launch logs. The chief advisory
+// is producer/verifier model-family overlap, which weakens the N-version independence
+// verification.md recommends (model choice is the operator's, so it is advised, never forced). It
+// reuses the warn color tokens (bg-st-warn-bg / text-st-warn) the rest of the view already uses,
+// and renders nothing when the config is clean (Warnings empty) — a quiet page means a quiet config.
+templ configWarnings(warnings []string) {
+	if len(warnings) > 0 {
+		<section class="rounded-lg border border-st-warn/40 bg-st-warn-bg p-4">
+			<h2 class="flex items-center gap-2 text-sm font-semibold uppercase tracking-wide text-st-warn">
+				advisories
+				<span class="rounded-full bg-st-warn px-1.5 py-0.5 text-xs font-medium tabular-nums text-st-warn-bg">{ strconv.Itoa(len(warnings)) }</span>
+			</h2>
+			<ul class="mt-3 space-y-2">
+				for _, w := range warnings {
+					<li class="flex gap-2 text-sm">
+						<span class="text-st-warn" aria-hidden="true">⚠</span>
+						<span class="text-fg">{ w }</span>
+					</li>
+				}
+			</ul>
+			<p class="mt-3 text-xs text-muted">Non-fatal — the same advisories <code class="font-mono">harness validate</code> prints at startup. The config is valid; these are recommendations to heed or ignore.</p>
+		</section>
 	}
 }
 
