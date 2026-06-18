@@ -70,7 +70,13 @@ of the build (`go generate`), not the runtime.
   detail tier: nothing that has *finished* is ever shown as a feed.
 - **Graph viz:** render the DAG **server-side to SVG** (Go → DOT/Graphviz or d2)
   and embed it; hover/click-to-drill via Alpine + htmx on the SVG nodes. No
-  client-side graph library.
+  client-side graph **library**. The board's epic-lineage overlay (see *Epics on the
+  board* below) is the one deliberate exception: a small **bespoke** client-side SVG
+  layer drawn over the live kanban. It pulls in no graph library, and this rule still
+  governs the DAG view. The exception is principled — connectors *between the moving
+  kanban cards* are inherently a client-side, layout-dependent job (card positions are
+  known only in the browser, and they animate), so the rule's real intent (no
+  heavyweight client graph engine) holds while the board still gets its threads.
 - **Serving artifacts:** artifact bytes are untrusted agent output, served
   `text/plain` + `nosniff` and never interpreted as markup — see
   [security.md](security.md) Control 7.
@@ -143,26 +149,51 @@ for operators who ask for it); the first paint snaps to the frontier, later move
 smoothly. This is a *viewport* convenience only — it never moves work, just where the
 operator is looking.
 
-**Epics on the board (epic integration).** When [`integration.mode: epic`](integration.md)
-is in force, the board makes the *feature* legible, not just the work items, since the
-feature is now the unit that lands and deploys. Every card already carries its
-`epic_id` (the root seed's id, threaded across the epic — [workflow.md](workflow.md)),
-so this needs no new data:
+**Epics on the board.** The board makes the *feature* legible, not just the work items —
+a feature is what lands and deploys. This rides the `epic_id` every card already carries
+(the root seed's id, threaded across the epic — [workflow.md](workflow.md)), so it needs **no
+new data**. The two **grouping** cues below — the epic badge/tint and the lineage thread — are
+pure observability and render **independent of [`integration.mode`](integration.md)**: they
+appear whenever an issue belongs to a **multi-issue epic** (a real decomposition fan-out), under
+`per-item` and `epic` modes alike. The **hero** roll-up is the exception — it is epic-mode-only,
+because its lifecycle is defined by the atomic merge. A lone, directly-seeded issue (its own
+single-issue epic) gets none of this — the chrome would only be noise.
 
-- **Shared identity.** Each card shows an **epic badge** (the root id, optionally the
-  abbreviated feature title) and a left-border tint whose hue is a **deterministic hash
-  of `epic_id`** — no central colour registry, stable across restarts, and it
-  distinguishes simultaneous epics for free once concurrency lands. Colour is never the
-  *sole* channel (projector wash-out, colour-blindness): the badge text is the robust
-  identifier. With v1's single active epic the live payoff is **history/audit legibility**
-  (completed and abandoned epics stay grouped); the disambiguation value arrives with
-  concurrency.
-- **The root card is the hero.** The epic root renders distinctly from its children, with
-  a **progress indicator** (children integrated / total) and the live `budget` against the
-  [`epic_budget`](workflow.md) cap, so "bounded autonomy" is visible as the feature builds.
-  It carries the feature through an **`integrating`** state while children finish and flips
-  to **`done`** as the single terminal merge lands — the board's read of the atomic feature
-  landing, so the operator watches the *feature* complete without reading commits.
+- **Shared identity (colour).** Each card shows an **epic badge** (the root id, optionally the
+  abbreviated feature title) and a left-border tint whose hue is a **deterministic hash of
+  `epic_id`**, computed **server-side** and exposed as a CSS custom property (`--epic`) on the
+  card so the badge, the tint, and the lineage thread (below) all read **one** colour source —
+  no central registry, stable across restarts. Colour is never the *sole* channel (projector
+  wash-out, colour-blindness): the badge text is the robust identifier. With v1's single active
+  epic the live payoff is **history/audit legibility** (completed and abandoned epics stay
+  grouped and distinctly coloured); the disambiguation value compounds once concurrency lands.
+- **Lineage thread (curved connectors).** A bespoke client-side SVG layer over the kanban draws a
+  **curved connector from each card to the card that produced it**, so a feature reads as a tree
+  threading left-to-right through the pipeline: root → its author-tests children → each child's
+  implement → qa. The producer link is recoverable from data the cards already carry (the
+  predecessor's verified candidate is the next stage's `base`; the decomposition's children point
+  back at the root), so it needs **no new edge**. The thread terminates at the **qa** card —
+  `integrate` is an inline trusted-merge with no card of its own (under epic mode the landing
+  instead shows as the root reaching `done` and the hero completing). Each connector is drawn in
+  its epic colour (`var(--epic)`) and is **faint by default**; hovering or focusing a card
+  **highlights the whole path through it** (its ancestors *and* descendants) and **dims** the
+  rest, so relationships are explorable without the board ever looking busy. Connectors **settle
+  after** a card's View-Transitions move rather than chasing it mid-tween, and the layer redraws
+  from the cards' stable ids on each live refetch; it draws statically under
+  `prefers-reduced-motion`. Sibling-ordering edges (a planner's inter-child `blocked-by`) are
+  **not** drawn as lineage — the thread stays a clean producer tree; they may later surface as a
+  distinct (dashed) "waits-for" edge. This overlay is the one client-side-graph exception noted
+  under *Graph viz* above.
+- **The root card is the hero (epic mode).** Under [`integration.mode: epic`](integration.md) the
+  epic root renders distinctly from its children, with a **progress indicator** (children
+  integrated / total) and the live `budget` against the [`epic_budget`](workflow.md) cap, so
+  "bounded autonomy" is visible as the feature builds. It carries the feature through an
+  **`integrating`** state while children finish and flips to **`done`** as the single terminal
+  merge lands — the board's read of the atomic feature landing, so the operator watches the
+  *feature* complete without reading commits. The hero is epic-mode-only by design: in `per-item`
+  mode the root closes at decomposition and never tracks the live feature, so its
+  `integrating → done` state (read from git, not issue status) would be meaningless — there the
+  grouping cues above carry the feature's legibility on their own.
 
 Note what stays absent **by design**: there is no drag-to-move. Humans never move
 work — the orchestrator is the single writer and the human's only levers are the

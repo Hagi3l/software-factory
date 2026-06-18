@@ -433,8 +433,42 @@ per epic, not new machinery. Spec contract:
   the draft-feature step notes the board epic hero card and the single epic-id provenance trailer,
   the deploy bullet notes the once-per-feature push, and the "How it maps to the real config" table
   gained a third row (per-item → `integration.mode: epic`). No spec change (integration.md already
-  specifies the demo exercises epic mode). **Phase 7 complete.** *(spec)*
+  specifies the demo exercises epic mode). **Phase 7 core complete** (T7.1–T7.7); the board
+  epic-lineage enhancement is tracked as **T7.8** below. *(spec)*
   [integration.md](specs/integration.md)
+- [ ] **T7.8 Board epic-lineage thread + decoupled grouping chrome** *(needs T7.6)* — make the
+  board show *which work items belong to one feature and how they descend*, building on T7.6's
+  hero/chrome. Three moves (control-room.md "Epics on the board", updated):
+  1. **Decouple grouping from `integration.mode`.** Today `query.Board` only sets `IssueCard.EpicID`
+     (and so the badge + tint) under epic mode. Drive the **badge + tint + lineage thread** off the
+     data instead: populate `EpicID = core.EpicOf(i)` whenever the issue belongs to a **multi-issue
+     epic** (a real decomposition fan-out — gate on the epic's issue count > 1, which `epicSummaries`
+     already knows), in `per-item` and `epic` modes alike. A lone, directly-seeded issue (its own
+     single-issue epic) stays bare. The **hero** roll-up (`IssueCard.Epic`/`EpicSummary`) stays
+     **epic-mode-only** — its `integrating → done` state is git-derived and meaningless in per-item,
+     where the root closes at decomposition.
+  2. **One colour source.** Refactor `cardStyle`/`epicHue` (board.go) to emit the hashed hue as a
+     CSS custom property `--epic` on the card; the left-border tint, the badge dot, and the new
+     thread strokes all read `var(--epic)` — so the JS overlay never re-implements the Go FNV hash.
+  3. **Lineage thread (bespoke client overlay).** Add `ParentID` to `IssueCard`, derived with **no
+     new beads data**: `base == candidate/<id>` → parent `<id>` (the stage producer); else a
+     top-level decomposition child → parent = the epic root (`core.EpicOf`); the root → none.
+     Emit `data-parent` + `data-epic` on each card. A new embedded `lineage.js` (loaded like
+     `ticker.js`/`board-autoscroll.js`) draws an SVG layer **inside the horizontal scroll
+     container** (content-space coords, so it scrolls with the cards): a curved bézier from each
+     card's parent (right edge) to the card (left edge), stroked `var(--epic)`, **faint by default**;
+     hover/focus a card **highlights the whole path through it** (ancestors + descendants) and
+     **dims** the rest. Redraw on `htmx:afterSwap` and after the View-Transition settles (not
+     mid-tween) and on resize; draw statically under `prefers-reduced-motion`. The thread terminates
+     at the **qa** card (`integrate` has no card). Sibling-ordering `blocked-by` edges are **not**
+     drawn (clean producer tree). This is the one client-side-graph exception (control-room.md
+     *Graph viz*) — a bespoke overlay, no graph library; the DAG view stays server-side SVG.
+  Tests: `query_test.go` for `ParentID` derivation + the >1-issue decouple gate (per-item decomposed
+  epic now carries `EpicID`; single-issue issue stays bare; hero still per-item-suppressed);
+  `board_test.go` for the `--epic` var + `data-parent`/`data-epic` attributes. The `lineage.js`
+  overlay has no Go-side unit test (no JS harness in-repo) — verified by visual/manual check; note
+  this rather than imply coverage. Docs: `docs/control-room.md` Board row. *(spec)*
+  [control-room.md](specs/control-room.md)
 
 ---
 
