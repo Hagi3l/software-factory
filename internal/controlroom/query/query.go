@@ -810,15 +810,16 @@ type Invocation struct {
 	Spec            string
 	Body            string
 	Terminal        bool
-	ReplayAvailable bool // merged with a retained transcript — the /replay drill resolves
+	ReplayAvailable bool // a transcript is resolvable (merge trailer or issue stamp) — the /replay drill lands
 	Budget          IssueBudgetRow
 }
 
 // Invocation assembles the live-invocation view for one issue: its header identity and the
 // budget meter (the same per-issue burn the Budgets view shows, via the shared row builder), plus
 // whether it is terminal and whether Replay can reconstruct its decision trail. The replay handoff
-// is gated on merged-with-transcript exactly like the issue-detail page (T4.7b) — Replay resolves
-// the transcript off the merge trailer, so the link surfaces only where it will land somewhere.
+// surfaces wherever Replay will land: a merge trailer with a transcript, OR the hash stamped on the
+// issue itself (every disposition) — so a dead-lettered invocation, the most useful handoff target,
+// links through too, not only merged work.
 func (r *Reader) Invocation(ctx context.Context, id string, caps BudgetCaps) (Invocation, error) {
 	issue, err := r.issues.Get(ctx, id)
 	if err != nil {
@@ -834,9 +835,12 @@ func (r *Reader) Invocation(ctx context.Context, id string, caps BudgetCaps) (In
 		Terminal: issue.Status == statusClosed || issue.Status == statusBlocked,
 		Budget:   buildIssueBudgetRow(issue, caps),
 	}
-	// Best-effort, like IssueDetail's provenance read: a git fault leaves ReplayAvailable false
-	// rather than failing the page. ByIssue returns merged=false cheaply for in-flight work.
+	// Best-effort, like IssueDetail's provenance read: a git fault leaves the trailer source
+	// unresolved rather than failing the page. ByIssue returns merged=false cheaply for in-flight
+	// work. The issue stamp is the merge-independent fallback, so a dead-lettered run still links.
 	if prov, merged, perr := r.prov.ByIssue(ctx, id); perr == nil && merged && prov.Transcript != "" {
+		inv.ReplayAvailable = true
+	} else if issue.Transcript != "" {
 		inv.ReplayAvailable = true
 	}
 	return inv, nil
@@ -1163,12 +1167,16 @@ type Replay struct {
 }
 
 // Replay reconstructs an invocation's decision trail from its broker-captured transcript.
-// It resolves the transcript hash off the merge provenance (the only place it is retained),
-// streams the JSON []model.TranscriptTurn from the artifact store, and folds it into the
-// per-turn presentation the replay view renders. The issue itself is the only hard
-// dependency — a missing/unmerged/unharvested transcript or a flaky store yields a rendered
-// page with Available=false and a notice, never an error, mirroring the detail page's
-// best-effort posture. Only an inability to read the issue or its provenance is fatal.
+// It resolves the transcript hash — preferring the merge trailer (the immutable, authoritative
+// record of what landed), then falling back to the hash stamped on the issue itself
+// (core.Issue.Transcript) — streams the JSON []model.TranscriptTurn from the artifact store,
+// and folds it into the per-turn presentation the replay view renders. The issue stamp is the
+// load-bearing fallback: the orchestrator records the most-recent invocation's transcript on
+// the issue for *every* disposition (accepted, routed, dead-lettered), so a failed or escalated
+// run is replayable too — the case where the forensic trail matters most, not only merged work.
+// The issue itself is the only hard dependency — a missing/unharvested transcript or a flaky
+// store yields a rendered page with Available=false and a notice, never an error, mirroring the
+// detail page's best-effort posture. Only an inability to read the issue or its provenance is fatal.
 func (r *Reader) Replay(ctx context.Context, id string) (Replay, error) {
 	issue, err := r.issues.Get(ctx, id)
 	if err != nil {
@@ -1181,15 +1189,22 @@ func (r *Reader) Replay(ctx context.Context, id string) (Replay, error) {
 		return Replay{}, fmt.Errorf("query: replay %s provenance: %w", id, err)
 	}
 	rep.Merged = merged
-	if !merged || prov.Transcript == "" || r.arts == nil {
+
+	// Prefer the merge trailer's hash so merged replay is unchanged; fall back to the issue's
+	// own stamp so unmerged work (in-flight, or dead-lettered after an escalation) replays too.
+	hash := prov.Transcript
+	if hash == "" {
+		hash = issue.Transcript
+	}
+	if hash == "" || r.arts == nil {
 		return rep, nil // nothing to replay — the view renders the no-transcript notice
 	}
-	rep.Hash = prov.Transcript
+	rep.Hash = hash
 
 	// Best-effort from here: the transcript is the spine of the page, but a store fault or a
 	// corrupt artifact degrades to "couldn't load" (with the raw-bytes link still offered)
 	// rather than blanking the issue header and notice.
-	rc, err := r.arts.Get(ctx, prov.Transcript)
+	rc, err := r.arts.Get(ctx, hash)
 	if err != nil {
 		return rep, nil
 	}

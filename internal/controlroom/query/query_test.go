@@ -549,8 +549,8 @@ func TestInvocationTerminalMergedOffersReplay(t *testing.T) {
 	}
 }
 
-// A blocked (dead-lettered) invocation is terminal but, lacking a merge transcript, offers no
-// Replay handoff — the page points at issue detail instead.
+// A blocked (dead-lettered) invocation with no transcript stamped yet is terminal but offers no
+// Replay handoff — there is nothing to resolve, so the page points at issue detail instead.
 func TestInvocationBlockedNoReplay(t *testing.T) {
 	issues := &fakeIssues{all: []core.Issue{{ID: "h-3", Status: "blocked", Role: "qa"}}}
 	r := NewReader(issues, &fakeArts{}, &fakeProv{})
@@ -560,6 +560,21 @@ func TestInvocationBlockedNoReplay(t *testing.T) {
 	}
 	if !inv.Terminal || inv.ReplayAvailable {
 		t.Errorf("blocked invocation Terminal=%v ReplayAvailable=%v, want true/false", inv.Terminal, inv.ReplayAvailable)
+	}
+}
+
+// A blocked (dead-lettered) invocation whose transcript was stamped on the issue (every
+// disposition) is terminal AND offers the Replay handoff — the most useful target, since the
+// human is here to understand why the run escalated. The handoff surfaces without a merge trailer.
+func TestInvocationBlockedWithStampOffersReplay(t *testing.T) {
+	issues := &fakeIssues{all: []core.Issue{{ID: "h-4", Status: "blocked", Role: "qa", Transcript: "sha256:stamped"}}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{}) // never merged
+	inv, err := r.Invocation(context.Background(), "h-4", BudgetCaps{})
+	if err != nil {
+		t.Fatalf("Invocation: %v", err)
+	}
+	if !inv.Terminal || !inv.ReplayAvailable {
+		t.Errorf("blocked-with-stamp Terminal=%v ReplayAvailable=%v, want true/true", inv.Terminal, inv.ReplayAvailable)
 	}
 }
 

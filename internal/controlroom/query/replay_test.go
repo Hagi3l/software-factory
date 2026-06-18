@@ -133,8 +133,8 @@ func TestReplayNoTranscriptCited(t *testing.T) {
 	}
 }
 
-// TestReplayNotMerged covers in-flight work: no provenance, so no transcript is reachable
-// (the hash is only retained on the merge trailer).
+// TestReplayNotMerged covers in-flight work with nothing stamped yet: no provenance and no
+// issue transcript, so there is no hash to resolve and the page degrades to the notice.
 func TestReplayNotMerged(t *testing.T) {
 	issues := &fakeIssues{all: []core.Issue{{ID: "h-2", Status: "in_progress"}}}
 	r := NewReader(issues, &fakeArts{}, &fakeProv{}) // ByIssue returns ok=false
@@ -144,7 +144,55 @@ func TestReplayNotMerged(t *testing.T) {
 		t.Fatalf("Replay: %v", err)
 	}
 	if rep.Available || rep.Merged || rep.Hash != "" {
-		t.Errorf("in-flight work should have no reachable trail: %+v", rep)
+		t.Errorf("in-flight work with nothing stamped should have no reachable trail: %+v", rep)
+	}
+}
+
+// TestReplayNonMergedFromIssueStamp is the T4.11/T4.15 follow-up's core contract: an unmerged
+// issue (here dead-lettered) whose transcript was stamped onto the issue itself — the
+// orchestrator does this for every disposition — replays in full, even though no merge trailer
+// exists. This is the case the forensic trail matters most for: explaining why a run escalated
+// or failed, not just inspecting work that already landed.
+func TestReplayNonMergedFromIssueStamp(t *testing.T) {
+	const hash = "sha256:stampedonissue"
+	issues := &fakeIssues{all: []core.Issue{{ID: "h-3", Title: "Widget", Status: "blocked", Transcript: hash}}}
+	arts := &fakeArts{present: map[string]string{hash: twoTurnTranscript(t)}}
+	r := NewReader(issues, arts, &fakeProv{}) // no provenance — never merged
+
+	rep, err := r.Replay(context.Background(), "h-3")
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if !rep.Available {
+		t.Fatal("Available = false, want a reconstructed trail from the issue stamp")
+	}
+	if rep.Merged {
+		t.Error("Merged should be false — this issue never landed on main")
+	}
+	if rep.Hash != hash {
+		t.Errorf("Hash = %q, want the issue-stamped hash %q", rep.Hash, hash)
+	}
+	if len(rep.Turns) != 2 || rep.System != "you are an implementor" {
+		t.Errorf("trail not reconstructed: %d turns, system=%q", len(rep.Turns), rep.System)
+	}
+}
+
+// TestReplayPrefersMergeTrailer proves the merge trailer wins when both sources cite a hash, so
+// merged replay is unchanged: the authoritative record of what landed is the trailer, while the
+// issue stamp tracks the *most-recent* invocation (which may post-date the merge).
+func TestReplayPrefersMergeTrailer(t *testing.T) {
+	const trailerHash, issueHash = "sha256:fromtrailer", "sha256:fromissue"
+	issues := &fakeIssues{all: []core.Issue{{ID: "h-1", Status: "closed", Transcript: issueHash}}}
+	arts := &fakeArts{present: map[string]string{trailerHash: twoTurnTranscript(t), issueHash: twoTurnTranscript(t)}}
+	prov := &fakeProv{byIssue: map[string]core.Provenance{"h-1": {Issue: "h-1", Transcript: trailerHash}}}
+	r := NewReader(issues, arts, prov)
+
+	rep, err := r.Replay(context.Background(), "h-1")
+	if err != nil {
+		t.Fatalf("Replay: %v", err)
+	}
+	if rep.Hash != trailerHash {
+		t.Errorf("Hash = %q, want the merge trailer's %q (trailer takes precedence)", rep.Hash, trailerHash)
 	}
 }
 

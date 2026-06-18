@@ -68,8 +68,9 @@ templ ReplayPage(rep query.Replay) {
 }
 
 // replayNotice explains why there is no trail to render. A known hash that could not be
-// loaded points the human at the raw bytes; no hash at all means none was retained (the
-// trail lives only on the merge trailer — unmerged or unharvested work has none).
+// loaded points the human at the raw bytes; no hash at all means none was retained — the
+// transcript is stamped on an issue once an invocation completes (any disposition, merged or
+// not), so the absence means this issue has not run yet, or no transcript was harvested.
 templ replayNotice(rep query.Replay) {
 	<div class="rounded-lg border border-border bg-surface p-6">
 		if rep.Hash != "" {
@@ -77,7 +78,7 @@ templ replayNotice(rep query.Replay) {
 			<p class="mt-1 text-xs text-muted">Its content address is <span class="font-mono">{ rep.Hash }</span> — try the raw-bytes link above.</p>
 		} else {
 			<p class="text-sm text-fg">No decision trail was captured for this invocation.</p>
-			<p class="mt-1 text-xs text-muted">The transcript is retained only for work merged to main; this issue has not merged, or no transcript was harvested.</p>
+			<p class="mt-1 text-xs text-muted">A transcript is stamped once an invocation completes; this issue has not run yet, or none was harvested.</p>
 		}
 	</div>
 }
