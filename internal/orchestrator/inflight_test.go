@@ -35,6 +35,54 @@ func TestScheduleReadySkipsInflightCandidate(t *testing.T) {
 	}
 }
 
+// TestScheduleReadySkipsSettledCandidate proves the second half of the read-lag fix (T8.2):
+// re-dispatching a just-*settled* candidate. After a terminal write, a lagging bd.ready() can still
+// return an issue the orchestrator already closed or blocked (e.g. a plan closed at decomposition,
+// or a dead-lettered issue) before that terminal write is visible. The old skip consulted only
+// has() (in_progress), so a settled candidate slipped through and was dispatched a second time —
+// a wasted invocation even when an idempotency guard later discards it. statusOf knows the issue is
+// settled, so scheduleReady must skip it. An issue the projection reads back as `open` is the only
+// genuinely dispatchable known candidate (re-derived ready, e.g. after a release).
+func TestScheduleReadySkipsSettledCandidate(t *testing.T) {
+	for _, st := range []string{statusClosed, statusBlocked} {
+		t.Run(st, func(t *testing.T) {
+			bd := newFakeBeads()
+			// A stale bd.ready() still lists iss-1, even though it was settled on a prior tick.
+			bd.ready = []core.Issue{{ID: "iss-1", Title: "do it", Role: "implement"}}
+			o, _ := newOrch(t, kernelConfig(2), bd, &fakeGate{}, &fakeMerger{})
+
+			// The single writer's own record: it already settled iss-1 (closed/blocked).
+			o.inflight.settle(core.Issue{ID: "iss-1", Role: "implement"}, st)
+
+			o.scheduleReady(context.Background())
+
+			if claimed, _, _, _, _ := bd.snap(); len(claimed) != 0 {
+				t.Fatalf("claimed = %v, want none — a settled (%s) candidate must not be re-dispatched", claimed, st)
+			}
+		})
+	}
+}
+
+// TestScheduleReadyDispatchesKnownOpenCandidate guards the inverse of the settled-skip: a candidate
+// the projection knows about but reads back as `open` (re-derived ready, e.g. released after a failed
+// publish, or hydrated open at cold start) is still genuinely dispatchable. The statusOf skip must
+// fire only for in_progress/settled, never for open — otherwise a legitimately-ready known issue
+// would wedge forever, never re-dispatched.
+func TestScheduleReadyDispatchesKnownOpenCandidate(t *testing.T) {
+	bd := newFakeBeads()
+	bd.ready = []core.Issue{{ID: "iss-1", Title: "do it", Role: "implement"}}
+	o, _ := newOrch(t, kernelConfig(2), bd, &fakeGate{}, &fakeMerger{})
+
+	// Known to the projection but open (not in flight, not settled).
+	o.inflight.settle(core.Issue{ID: "iss-1", Role: "implement"}, statusOpen)
+
+	o.scheduleReady(context.Background())
+
+	if claimed, _, _, _, _ := bd.snap(); len(claimed) != 1 || claimed[0] != "iss-1" {
+		t.Fatalf("claimed = %v, want [iss-1] — a known-but-open candidate must still be dispatched", claimed)
+	}
+}
+
 // TestHandleResultAcceptsValidResultDespiteLaggingOpenStatus proves the result-gating half of
 // T3.12: a valid Result must be processed when its issue is in the in-flight projection, even if
 // the lagging beads read still shows the issue as `open` (the claim write not yet visible). The old

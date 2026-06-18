@@ -338,12 +338,19 @@ switchable to de-risk rollout.
   `TestRebuildHydratesFullWorkGraph` (full-graph cold-start parity + idempotent re-rebuild),
   `TestProjectionRetainsSettledIssue` (settle-not-delete; `statusOf`/`snapshot`).
   ([observability.md](specs/observability.md), [components/orchestrator.md](specs/components/orchestrator.md) "Live state vs. durable state", [glossary.md](specs/glossary.md))
-- [ ] **T8.2 Scheduler dispatches off projection status** *(fixes #2)* — `schedule.go` dispatch
-  filter consults the projection, not just `bd.Ready()`: `bd.Ready()` stays the candidate oracle
-  (no open blockers + precondition), but a candidate the projection knows is `in_progress` **or
-  settled (closed/blocked)** is skipped — so a just-closed/just-decomposed issue is not
-  re-dispatched before beads' read catches up. Generalizes today's `o.inflight.has()` skip.
-  (needs T8.1) ([components/orchestrator.md](specs/components/orchestrator.md))
+- [x] **T8.2 Scheduler dispatches off projection status** *(fixes #2)* — *done.* `scheduleReady`
+  (`internal/orchestrator/schedule.go`) now filters candidates through the work-graph projection via
+  `o.inflight.statusOf(issue.ID)` instead of the in_progress-only `o.inflight.has()`: `bd.Ready()`
+  stays the candidate oracle (no open blockers + precondition), but a candidate the projection knows
+  is `in_progress` **or settled (`closed`/`blocked`)** is skipped (`known && st != statusOpen`) — so a
+  just-closed/just-decomposed issue (e.g. a plan closed at decomposition, or a dead-lettered one) is
+  not re-dispatched before beads' lagging read catches up (closes demo finding #2's redundant
+  re-dispatch). A known-but-`open` candidate (re-derived ready, e.g. released after a failed publish,
+  or hydrated open at cold start) still dispatches; a not-known issue is new and dispatches. No spec
+  change — orchestrator.md "Live state vs. durable state" already specified the in_progress-*or*-settled
+  skip. Tests: `TestScheduleReadySkipsSettledCandidate` (closed + blocked sub-tests),
+  `TestScheduleReadyDispatchesKnownOpenCandidate` (inverse guard — open known candidate still dispatches).
+  ([components/orchestrator.md](specs/components/orchestrator.md))
 - [ ] **T8.3 `integrated` as a durable state + correct epic rollup** *(fixes #7)* — stamp an
   `integrated` tag/label on a child's bead when the integrate stage merges it onto the epic
   branch (`results.go` integrate path / `epic*.go`); `epicSummaries`

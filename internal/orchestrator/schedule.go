@@ -24,14 +24,23 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 		return
 	}
 	for _, issue := range ready {
-		// Skip work already in flight. bd.ready() is the candidate oracle — it computes "no open
-		// blockers + precondition holds", so the DAG is not re-implemented in memory — but it is
-		// NOT read-your-writes consistent under load: a candidate claimed on a prior tick can
-		// still appear ready until the in_progress write propagates. The in-flight projection is
-		// the single writer's own live record, so it knows the claim already happened; skipping
-		// keeps a stale ready from re-dispatching in-flight work (the dispatch-storm fix, T3.12,
-		// specs/components/orchestrator.md "Live state vs. durable state").
-		if o.inflight.has(issue.ID) {
+		// Skip any candidate whose real state the work-graph projection already knows is NOT a
+		// fresh ready issue. bd.ready() stays the candidate oracle — it computes "no open blockers
+		// + precondition holds", so the DAG is not re-implemented in memory — but it is NOT
+		// read-your-writes consistent under load, so it lags behind the single writer's own status
+		// writes in two ways the projection corrects (specs/components/orchestrator.md "Live state
+		// vs. durable state"):
+		//   (1) in_progress — a candidate claimed on a prior tick can still appear ready until the
+		//       in_progress write propagates (the dispatch-storm fix, T3.12); and
+		//   (2) settled (closed/blocked) — a just-closed or just-decomposed issue (e.g. a plan the
+		//       orchestrator closed at decomposition, or a dead-lettered one) can still come back
+		//       from a lagging bd.ready() before its terminal write is visible, a wasted second
+		//       invocation even when an idempotency guard later discards its output (T8.2).
+		// The projection is the single writer's live record, so a candidate it knows about is only
+		// genuinely dispatchable when it reads back `open` (re-derived ready, e.g. after a release).
+		// A not-known issue is new — dispatch it. statusOf generalizes the old has() (in_progress-
+		// only) skip to cover the just-settled case too.
+		if st, known := o.inflight.statusOf(issue.ID); known && st != statusOpen {
 			continue
 		}
 		stage, ok := o.stageForRole(issue.Role)
