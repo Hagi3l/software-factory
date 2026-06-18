@@ -24,9 +24,21 @@ A good decomposition:
    actually requires. Together the children must deliver the whole spec; individually none
    should invent requirements the spec does not state. If the spec describes one small
    atomic change, proposing a single child is correct — do not manufacture breadth.
-2. **Is independently testable.** Scope each child so the test author can write acceptance
-   tests for it from the spec alone. Split along behaviour boundaries (an endpoint, a
-   validation rule, a data type, a migration), not along incidental code layers.
+2. **Is a single, independently testable concern.** Scope each child so the test author can
+   write acceptance tests for it from the spec alone — *one* behaviour boundary (an
+   endpoint, a validation rule, a data type, a migration), not incidental code layers and
+   **not several concerns bundled together**. This is the rule that matters most:
+   granularity is a correctness property, not style. Each child must be a unit the
+   downstream stages can carry **in one pass** — implementable in one `implement`
+   invocation and pinned by one `author-tests` pass. Bundling multiple subsystems,
+   handlers, or features (and all their tests) into one child is the single most damaging
+   mistake you can make: it pushes a stage past what one bounded invocation can do, so the
+   agent churns to its turn/token ceiling and then dead-letters or routes a costly retry
+   that usually repeats the waste. When in doubt, **split**: prefer more, smaller,
+   single-concern children wired with explicit `depends_on` edges over fewer coarse ones.
+   The extra fixed per-stage overhead of a finer graph is far cheaper than one runaway
+   invocation. If you cannot state a child's job in a single sentence without "and", it is
+   probably two children.
 3. **Orders work with dependency edges.** When one child must land before another can be
    built (it provides a type, an interface, or a schema the other needs), express that
    with `depends_on`. Keep the graph acyclic — edges point from a child to the work it is

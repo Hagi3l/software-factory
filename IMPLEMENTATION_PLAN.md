@@ -29,8 +29,9 @@ consistency bugs (scheduler + control room read beads directly) and a planner ov
 issue. The **read-model spine is complete** (T8.1–T8.4, T8.6): the orchestrator's work-graph
 projection is now the authoritative live read model — the scheduler dispatches off it (T8.2), it is
 durable-stamped + correctly rolled up (T8.3), and the control room's live work-state views read it
-instead of polling beads (T8.4). Remaining: **T8.5** (planner decomposition granularity — the cost
-driver) and **T8.7** (wizard one-root-in-epic hardening). See Phase 8 below,
+instead of polling beads (T8.4). The cost-driver fix has also landed: **T8.5** hardened both
+decomposition-planner personas to require single-concern children (closing the spec↔persona gap —
+the spec already mandated it). Remaining: **T8.7** (wizard one-root-in-epic hardening). See Phase 8 below,
 [`demo-run-issues.md`](demo-run-issues.md), and [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md).
 
 **Development mode for Phases 2–6: built by hand with Claude Code, human-reviewed —
@@ -408,14 +409,23 @@ switchable to de-risk rollout.
   `TestOrchestratorTrackAndSnapshot`, `TestTransitionStampsStateEnteredIntoProjection`,
   `TestProjectionIssueReader`, `TestReaderLiveVsForensicSplit`.
   ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md), [messaging.md](specs/messaging.md))
-- [ ] **T8.5 Planner decomposition granularity** *(fixes #5 — the cost driver)* — edit both
-  planner personas (`config/souls/prompts/planner.md` + `demo/vault/config/souls/prompts/planner.md`)
-  to require each child be a **single, independently testable concern** (discourage bundling
-  multiple subsystems/handlers; prefer more, smaller children with explicit deps), and add the
-  decomposition-granularity principle to the spec (breadth stays emergent; each child must be a
-  coherent, independently-verifiable unit). Optional turn-budget backstop for test-author left to
-  decide after a re-run. Tradeoff to note: smaller children = more fixed per-stage overhead (net
-  cheaper than a runaway). ([workflow.md](specs/workflow.md))
+- [x] **T8.5 Planner decomposition granularity** *(fixes #5 — the cost driver)* — *done.* Both
+  decomposition-planner personas (`config/souls/prompts/planner.md` +
+  `demo/vault/config/souls/prompts/planner.md`, kept byte-identical) now carry the binding
+  granularity principle in their "A good decomposition" list: point 2 was promoted from a soft
+  "Is independently testable" to **"Is a single, independently testable concern"** — *one*
+  behaviour boundary, **not** several concerns bundled; each child must be carryable **in one
+  pass** (one `implement` invocation, one `author-tests` pass); bundling multiple
+  subsystems/handlers/features is named as the single most damaging mistake (it drives the
+  turn/token-ceiling churn → dead-letter/retry that was ~80% of the demo-run cost); the rule
+  closes with **"when in doubt, split"** + the one-sentence-without-"and" heuristic and the
+  tradeoff (finer breadth's fixed overhead ≪ one runaway). The **spec was already written ahead**
+  — `specs/workflow.md` "Emergent within a stage…" already states granularity-is-a-correctness-
+  property as "a binding principle the planner persona carries"; this task is what makes the
+  persona actually carry it (closing the spec↔persona gap), so **no spec change needed**. No
+  test asserts persona text (only existence/readability is validated — confirmed by repo search);
+  both configs still `validate` OK. Optional test-author turn-budget backstop deferred — decide
+  after a re-run measures whether finer decomposition alone tames the cost. ([workflow.md](specs/workflow.md))
 - [x] **T8.6 Name the real merge target in the log** *(fixes #9)* — *done* (folded into T8.3's
   `results.go` pass). The `mergeCandidate` success log is now `orchestrator: merged candidate` with a
   `target=<integrationBranchName(issue)>` field — `epic/<id>` in epic mode, `main` in per-item — so
