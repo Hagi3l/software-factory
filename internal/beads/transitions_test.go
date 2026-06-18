@@ -1018,6 +1018,27 @@ func TestStampGateVerdictRoundTripIntegration(t *testing.T) {
 	}
 }
 
+func TestStampTransformLogRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+	ctx := context.Background()
+
+	id := quickCreate(t, dir, "transformed candidate")
+	if err := c.StampTransformLog(ctx, id, ""); err != nil {
+		t.Fatalf("StampTransformLog(empty): %v", err)
+	}
+	if got := mustGetIssue(t, c, id); got.TransformLog != "" {
+		t.Errorf("TransformLog = %q, want empty after the empty-hash no-op", got.TransformLog)
+	}
+	if err := c.StampTransformLog(ctx, id, "sha256:transform"); err != nil {
+		t.Fatalf("StampTransformLog: %v", err)
+	}
+	if got := mustGetIssue(t, c, id); got.TransformLog != "sha256:transform" {
+		t.Errorf("TransformLog = %q, want sha256:transform (round-tripped via metadata)", got.TransformLog)
+	}
+}
+
 // mustGetIssue is a small Get helper for the round-trip assertions.
 func mustGetIssue(t *testing.T, c *Client, id string) core.Issue {
 	t.Helper()

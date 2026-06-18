@@ -304,7 +304,6 @@ per epic, not new machinery. Spec contract:
 - Consolidate the status bar's 2–3 per-page SSE connections (page content + status bar + alerts.js) onto one connection or h2c *(from T4.19)*.
 - Client-side live wall/token ticker on the invocation budget meter (mid-invocation spend isn't persisted to beads) *(from T4.21)*.
 - Decomposition-preview dry-run before APPROVE (control-room.md OPEN, "leaning defer"; seed issues stay coarse and the autonomous planner decomposes) *(from T4.14)*.
-- Control-room surface for the transform log (e.g. a verification-view row weighing text-fallback renames) — the record is harvested onto Evidence; only the read/render is a follow-up *(from T6.3)*.
 
 ## Open decisions affecting the plan
 

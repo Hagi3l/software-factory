@@ -65,10 +65,16 @@ Drill-through pages (not in the nav):
   souls side by side, with the `qa` gate marked as running independently in the clean
   [verification sandbox](../specs/glossary.md#verification-sandbox) — no verifier soul,
   and that is the point), the red→green proof per check, the mutation score vs threshold,
-  the scanners, and the test↔spec traceability map. Reconstructed from the persisted
-  [`gate-verdict` record](../specs/components/artifact-store.md) (recorded for *every* gate
-  run), so it renders for **rejected** candidates too — exactly what a dead-letter triager
-  needs. A forensic snapshot (no live refresh). Drilled into from issue detail and the DLQ.
+  the scanners, the test↔spec traceability map, and — when the issue ran semantic write
+  tools — the **transformation log** (T6.3): each `rename`/`code_action` tagged with the
+  mechanism it ran through (**semantic**, the language server's own edit, vs **text fallback**,
+  the degraded word-boundary floor that can rewrite comments and string literals), with the
+  count of text fallbacks and each fallback's precision note surfaced so the imprecise edits
+  read as a caution at a glance. Reconstructed from the persisted
+  [`gate-verdict` record](../specs/components/artifact-store.md) and the issue-stamped
+  transform log (both recorded for *every* gate run / disposition), so it renders for
+  **rejected** candidates too — exactly what a dead-letter triager needs. A forensic snapshot
+  (no live refresh). Drilled into from issue detail and the DLQ.
 - **Raw artifact** (`/artifact/{hash}`) — streams artifact content as `text/plain` with
   `nosniff` (artifact bytes are untrusted agent output and must never be interpreted as
   HTML/script).

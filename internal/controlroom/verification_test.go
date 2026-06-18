@@ -42,6 +42,46 @@ func TestVerificationPageRenders(t *testing.T) {
 	}
 }
 
+// TestVerificationRendersTransformLog is the T6.3 follow-up's contract: a gated issue that ran
+// semantic write tools surfaces its transformation log — each transformation with its mechanism
+// (semantic vs text fallback), a header count of the text fallbacks (the imprecise ones), the
+// fallback's precision note, and the raw-bytes link to the canonical record. harness-1 carries one
+// semantic and one text-fallback rename.
+func TestVerificationRendersTransformLog(t *testing.T) {
+	ts := detailServer(t)
+	r := get(t, ts, "/verification/harness-1")
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	for _, want := range []string{
+		"Transformations",                                  // the section heading
+		"semantic",                                         // the precise-mechanism badge
+		"text fallback",                                    // the imprecise-mechanism badge
+		"1 via text fallback",                              // the header count of fallbacks
+		"greet → hello at a.go:3:6",                        // the semantic transform's target
+		"2 files · 4 edits",                                // its blast radius
+		"inside comments or string literals",              // the fallback's precision note
+		"/artifact/" + transformHash,                      // the raw-bytes link to the log
+	} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("verification page missing transform-log content %q", want)
+		}
+	}
+}
+
+// TestVerificationNoTransformSection proves an issue that ran no semantic write tools (no stamped
+// transform log) renders no Transformations section at all — the common case stays uncluttered.
+func TestVerificationNoTransformSection(t *testing.T) {
+	ts := detailServer(t)
+	r := get(t, ts, "/verification/harness-2") // in flight, no TransformLog stamp
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	if strings.Contains(r.body, "Transformations") {
+		t.Errorf("an issue with no transform log should render no Transformations section")
+	}
+}
+
 // TestVerificationNoVerdictNotice covers a known issue whose candidate has not been gated
 // (harness-2 is in flight, no stamped verdict): the page still renders the issue header and
 // the soul split, but shows the "no verdict recorded" notice instead of a check list, and

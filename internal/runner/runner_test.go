@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"reflect"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -479,29 +480,20 @@ func TestHarvestStoresTransformLog(t *testing.T) {
 	}
 	defer rc.Close()
 	stored, _ := io.ReadAll(rc)
-	if !bytes.Equal(stored, formatTransformLog(records)) {
-		t.Errorf("stored log =\n%s\nwant\n%s", stored, formatTransformLog(records))
+	// The log is harvested as JSON (the canonical []core.TransformRecord), so the verification
+	// view can read it back structurally — the same content-addressed discipline the gate verdict
+	// uses. Assert it round-trips exactly to the records the invoker produced.
+	var decoded []core.TransformRecord
+	if err := json.Unmarshal(stored, &decoded); err != nil {
+		t.Fatalf("stored transform log is not valid JSON: %v\n%s", err, stored)
+	}
+	if !reflect.DeepEqual(decoded, records) {
+		t.Errorf("decoded log = %+v\nwant %+v", decoded, records)
 	}
 
 	cancel()
 	if err := <-done; err != nil {
 		t.Errorf("Run returned error: %v", err)
-	}
-}
-
-// formatTransformLog renders a stable, human-readable document — one block per applied
-// transformation in order — so the same log content-addresses to one hash and the
-// mechanism (semantic vs text floor) of each rename/code_action is auditable.
-func TestFormatTransformLog(t *testing.T) {
-	out := string(formatTransformLog([]core.TransformRecord{
-		{Tool: "rename", Target: "a.go:3:6 → hello", Mechanism: core.TransformMechanismSemantic, Files: 2, Edits: 4},
-		{Tool: "code_action", Target: "Organize Imports", Mechanism: core.TransformMechanismSemantic, Files: 1, Edits: 1, Note: "n/a"},
-	}))
-	want := "# Transformation log\n" +
-		"\ntool: rename\ntarget: a.go:3:6 → hello\nmechanism: semantic\nfiles: 2\nedits: 4\n" +
-		"\ntool: code_action\ntarget: Organize Imports\nmechanism: semantic\nfiles: 1\nedits: 1\nnote: n/a\n"
-	if out != want {
-		t.Errorf("formatTransformLog =\n%q\nwant\n%q", out, want)
 	}
 }
 

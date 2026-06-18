@@ -1062,6 +1062,17 @@ type GateVerdictView struct {
 	// threaded stamp (issue.TraceMap), the same principled source as the souls; an empty hash
 	// renders as "not recorded" rather than a dead link.
 	Trace ArtifactLink
+	// Transforms is this issue's transformation log (T6.3), read back from the hash stamped on
+	// the issue (issue.TransformLog) — one entry per semantic write tool recording the MECHANISM
+	// it ran through (semantic vs the degraded text floor). It lets the verification view weigh
+	// the text-fallback transformations — the imprecise ones that can rewrite comments and string
+	// literals — alongside the gate verdict. Nil when the invocation ran no semantic write tools
+	// (the common case) or the log could not be fetched/parsed; TransformLog.Available reflects
+	// which, and the view renders the transformations section only when there is a hash.
+	Transforms []core.TransformRecord
+	// TransformLog is the raw-bytes link to the harvested log (Available = fetched + parsed), so a
+	// human can open the canonical record behind the rendered rows. Hash empty when none was stamped.
+	TransformLog ArtifactLink
 }
 
 // GateVerdict reconstructs one issue's verification verdict: the assembled gate-verdict record
@@ -1088,6 +1099,15 @@ func (r *Reader) GateVerdict(ctx context.Context, id string) (GateVerdictView, e
 		ImplementSoul: issue.ImplementSoul,
 		Hash:          issue.GateVerdict,
 		Trace:         r.link(ctx, "Traceability map", core.ArtifactKindTraceabilityMap, issue.TraceMap),
+		TransformLog:  ArtifactLink{Label: "Transformation log", Kind: core.ArtifactKindTransformLog, Hash: issue.TransformLog},
+	}
+
+	// The transformation log (T6.3) is resolved independently of the verdict: an issue can carry
+	// one without a verdict (and vice versa). A successful fetch+parse marks the link Available
+	// and supplies the structured rows the view weighs; a degraded read leaves just the link.
+	if recs, ok := r.readTransformLog(ctx, issue.TransformLog); ok {
+		view.Transforms = recs
+		view.TransformLog.Available = true
 	}
 
 	// Merged is a presentation flag (has this landed?); the souls come from the issue stamps
@@ -1118,6 +1138,30 @@ func (r *Reader) GateVerdict(ctx context.Context, id string) (GateVerdictView, e
 	view.Available = true
 	view.Verdict = rec
 	return view, nil
+}
+
+// readTransformLog fetches and decodes an issue's transformation log (T6.3) — the JSON
+// []core.TransformRecord the runner harvested under ArtifactKindTransformLog. Best-effort: an
+// empty hash, no store, a fetch fault, or a corrupt record yields ok=false (the verification
+// view then degrades to the raw-bytes link), never an error — the same posture as the verdict read.
+func (r *Reader) readTransformLog(ctx context.Context, hash string) ([]core.TransformRecord, bool) {
+	if hash == "" || r.arts == nil {
+		return nil, false
+	}
+	rc, err := r.arts.Get(ctx, hash)
+	if err != nil {
+		return nil, false
+	}
+	defer func() { _ = rc.Close() }()
+	data, err := io.ReadAll(rc)
+	if err != nil {
+		return nil, false
+	}
+	var recs []core.TransformRecord
+	if err := json.Unmarshal(data, &recs); err != nil {
+		return nil, false
+	}
+	return recs, true
 }
 
 // ReplayToolCall is one tool the model asked to invoke on a turn: the tool name and its

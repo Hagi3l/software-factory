@@ -46,3 +46,24 @@ func metricSummary(m *core.GateMetricOutcome) string {
 func fmtScore(v float64) string {
 	return strconv.FormatFloat(v, 'f', 2, 64)
 }
+
+// transformFallbackCount counts the transformations (T6.3) that fell back to the text floor — the
+// imprecise ones the verification view flags. It is the "how much of this candidate's editing was
+// done blind to the AST" number, surfaced in the section header so a reviewer sees it before
+// scanning the rows. Semantic transformations (the language server's own edits) are not counted.
+func transformFallbackCount(recs []core.TransformRecord) int {
+	n := 0
+	for _, r := range recs {
+		if r.Mechanism == core.TransformMechanismText {
+			n++
+		}
+	}
+	return n
+}
+
+// transformBlast renders a transformation's blast radius — the files it touched and edits it made —
+// as a compact "N files · M edits" string for the row's right rail, so the scale of each change
+// reads at a glance alongside its mechanism.
+func transformBlast(t core.TransformRecord) string {
+	return strconv.Itoa(t.Files) + " files · " + strconv.Itoa(t.Edits) + " edits"
+}

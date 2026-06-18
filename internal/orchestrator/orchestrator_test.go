@@ -281,6 +281,21 @@ func (f *fakeBeads) StampGateVerdict(_ context.Context, id, hash string) error {
 	return nil
 }
 
+func (f *fakeBeads) StampTransformLog(_ context.Context, id, hash string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if hash == "" {
+		return nil
+	}
+	// Mirror the real client: durable on the issue so a later Get/ListAll sees it (the
+	// verification view's read of the transformation log).
+	if is, ok := f.issues[id]; ok {
+		is.TransformLog = hash
+		f.issues[id] = is
+	}
+	return nil
+}
+
 // snapshot accessors (copy under lock).
 func (f *fakeBeads) snap() (claimed, released, closed, blocked []string, applied []core.Proposal) {
 	f.mu.Lock()

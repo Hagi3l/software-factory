@@ -69,6 +69,39 @@ templ VerificationPage(v query.GateVerdictView) {
 					@evidenceItem(v.Trace)
 				</ul>
 			</section>
+			// The transformation log (T6.3): which of this candidate's writes were precise
+			// (semantic, language-server WorkspaceEdits) and which fell back to the text floor — an
+			// imprecise rename can rewrite comments/string literals, so a text fallback warrants a
+			// closer look. Shown only when the issue ran a semantic write tool (a hash is stamped).
+			if v.TransformLog.Hash != "" {
+				<section class="space-y-3">
+					<div class="flex items-baseline justify-between">
+						<h2 class="text-sm font-medium text-muted">Transformations</h2>
+						if v.TransformLog.Available {
+							<span class="text-xs text-muted">
+								{ strconv.Itoa(len(v.Transforms)) } applied
+								if n := transformFallbackCount(v.Transforms); n > 0 {
+									· <span class="text-st-warn">{ strconv.Itoa(n) } via text fallback</span>
+								}
+							</span>
+						}
+					</div>
+					if v.TransformLog.Available && len(v.Transforms) > 0 {
+						<ul class="flex flex-col gap-2">
+							for _, tr := range v.Transforms {
+								@transformRow(tr)
+							}
+						</ul>
+					} else if v.TransformLog.Available {
+						<p class="text-sm text-muted">The transformation log recorded no entries.</p>
+					} else {
+						<p class="text-sm text-muted">The transformation log could not be loaded from the artifact store — try the raw-bytes link.</p>
+					}
+					<ul class="flex flex-col gap-2">
+						@evidenceItem(v.TransformLog)
+					</ul>
+				</section>
+			}
 			if !v.Available {
 				@verdictNotice(v)
 			} else {
@@ -190,6 +223,44 @@ templ verdictNotice(v query.GateVerdictView) {
 			<p class="mt-1 text-xs text-muted">A verdict is harvested for every gate run, pass or fail; this issue's candidate has not been gated.</p>
 		}
 	</div>
+}
+
+// transformRow renders one transformation (T6.3): its mechanism (semantic vs text fallback), the
+// tool, what it acted on, the blast radius (files/edits), and — for a text fallback — the precision
+// note the tool emitted (e.g. "N match(es); M inside comments"). A text-fallback row reads as a
+// caution at a glance, which is the whole point: the gate and a human weigh it more suspiciously
+// than a server-precise one.
+templ transformRow(t core.TransformRecord) {
+	<li class="space-y-1.5 rounded-md border border-border bg-surface px-3 py-2.5 text-sm">
+		<div class="flex flex-wrap items-center justify-between gap-3">
+			<div class="flex items-center gap-3">
+				@transformMechanismBadge(t.Mechanism)
+				<span class="font-mono text-fg">{ orDash(t.Tool) }</span>
+			</div>
+			<span class="text-xs text-muted">{ transformBlast(t) }</span>
+		</div>
+		if t.Target != "" {
+			<div class="font-mono text-xs break-words text-muted">{ t.Target }</div>
+		}
+		if t.Note != "" {
+			<div class="text-xs text-st-warn">{ t.Note }</div>
+		}
+	</li>
+}
+
+// transformMechanismBadge tints a transformation's mechanism: semantic (the language server's own
+// WorkspaceEdit — precise) reads ok, text (the degraded word-boundary floor — can corrupt comments
+// and string literals) reads warn. The cases reference the core constants so the badge and the
+// producer agree on the vocabulary; the class literals stay inline so the Tailwind scanner sees them.
+templ transformMechanismBadge(mech string) {
+	switch mech {
+		case core.TransformMechanismSemantic:
+			<span class="rounded-full bg-st-ok-bg px-2 py-0.5 text-xs text-st-ok">semantic</span>
+		case core.TransformMechanismText:
+			<span class="rounded-full bg-st-warn-bg px-2 py-0.5 text-xs text-st-warn">text fallback</span>
+		default:
+			<span class="rounded-full bg-canvas px-2 py-0.5 text-xs text-muted">{ orDash(mech) }</span>
+	}
 }
 
 // VerificationNotAttached renders the verification chrome with a single notice instead of a

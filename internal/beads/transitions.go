@@ -138,6 +138,13 @@ const (
 // the verification view, not only a merged one (see specs/verification.md, the plan's T4.22).
 const MetadataKeyGateVerdict = "gate_verdict"
 
+// MetadataKeyTransformLog holds the artifact-store hash of an issue's transformation log
+// (core.Issue.TransformLog). Like MetadataKeyGateVerdict it is stamped post-hoc (via
+// StampTransformLog) for every disposition and NOT threaded forward — each issue records its
+// own run's semantic-write mechanisms — so the verification view can weigh a candidate's
+// text-fallback transformations, for a rejected candidate as much as a merged one (T6.3).
+const MetadataKeyTransformLog = "transform_log"
+
 // MetadataKeyDLQReason holds the orchestrator's one-line classification of why an issue
 // dead-lettered (core.Issue.DeadLetterReason) — the same reason published on the DLQ alert.
 // It is written in the same transition that blocks the issue (Block) so the dead-letter queue
@@ -324,6 +331,28 @@ func (c *Client) StampGateVerdict(ctx context.Context, id, hash string) error {
 	args := []string{"update", id, "--set-metadata", MetadataKeyGateVerdict + "=" + hash}
 	if _, err := c.run(ctx, args); err != nil {
 		return fmt.Errorf("beads: stamp gate verdict on %s: %w", id, err)
+	}
+	return nil
+}
+
+// StampTransformLog records the artifact-store hash of an issue's transformation log, merged
+// into its metadata without touching status or other keys (like StampGateVerdict). The
+// orchestrator calls it when it processes the issue's Result — for every disposition — so the
+// semantic-vs-text-fallback record of the issue's writes is reachable from the issue for the
+// verification view, including for dead-lettered work. It is a set, not an append, so
+// re-stamping the same hash under at-least-once redelivery is idempotent. An empty hash is a
+// no-op: the invocation ran no semantic write tools, so there is nothing to cite (see
+// core.Issue.TransformLog).
+func (c *Client) StampTransformLog(ctx context.Context, id, hash string) error {
+	if id == "" {
+		return fmt.Errorf("beads: empty issue id")
+	}
+	if hash == "" {
+		return nil
+	}
+	args := []string{"update", id, "--set-metadata", MetadataKeyTransformLog + "=" + hash}
+	if _, err := c.run(ctx, args); err != nil {
+		return fmt.Errorf("beads: stamp transform log on %s: %w", id, err)
 	}
 	return nil
 }

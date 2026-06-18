@@ -81,6 +81,21 @@ func transcriptHash(res core.Result) string {
 	return ""
 }
 
+// transformLogHash returns the artifact-store hash of a Result's harvested transformation log
+// — the JSON []core.TransformRecord the runner stores under core.ArtifactKindTransformLog,
+// recording the mechanism (semantic vs text floor) of each semantic write (T6.3) — or "" if
+// the invocation ran no semantic write tools (most Results) or the runner could not persist it.
+// Stamped onto the issue (StampTransformLog) so the verification view can weigh a candidate's
+// text-fallback transformations, the same way traceMapHash/transcriptHash are surfaced.
+func transformLogHash(res core.Result) string {
+	for _, a := range res.Evidence.Artifacts {
+		if a.Kind == core.ArtifactKindTransformLog {
+			return a.Hash
+		}
+	}
+	return ""
+}
+
 // verifiedChecks renders the checks that passed in the gate report for the trailer's
 // "Verified:" field. The report's Passed is already true at this point (the candidate
 // was accepted), so every recorded check passed. Each is cited as name@<evidence-hash>

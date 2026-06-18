@@ -476,12 +476,16 @@ func (r *Runner) harvest(ctx context.Context, issueID string, rel *relay, res *c
 	}
 	// The transformation log (T6.3) records the MECHANISM of every semantic write — semantic
 	// vs the degraded text floor — so a text-fallback rename can be weighed more suspiciously
-	// than a server-precise one. Persisted like the trace map: harvested by hash, structured
-	// form cleared on success; a store failure keeps it inline so the orchestrator still sees it.
+	// than a server-precise one. Persisted as JSON (the canonical []core.TransformRecord), the
+	// same content-addressed discipline the gate-verdict record uses, so the verification view
+	// can read it back structurally and render each transformation with its mechanism. Harvested
+	// by hash, the structured form cleared on success; a marshal or store failure keeps it inline
+	// so the orchestrator still sees it.
 	if len(res.Transforms) > 0 {
-		ref, err := r.store.Put(ctx, core.ArtifactKindTransformLog, bytes.NewReader(formatTransformLog(res.Transforms)))
-		if err != nil {
-			r.log.Error("runner: harvest transform log", "issue", issueID, "err", err)
+		if data, err := json.Marshal(res.Transforms); err != nil {
+			r.log.Error("runner: marshal transform log", "issue", issueID, "err", err)
+		} else if ref, perr := r.store.Put(ctx, core.ArtifactKindTransformLog, bytes.NewReader(data)); perr != nil {
+			r.log.Error("runner: harvest transform log", "issue", issueID, "err", perr)
 		} else {
 			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
 			res.Transforms = nil
@@ -517,26 +521,6 @@ func formatTraceabilityMap(entries []core.TraceEntry) []byte {
 	return []byte(b.String())
 }
 
-// formatTransformLog renders the transformation log (T6.3) as a stable, human-readable
-// document, one block per record in the order the agent applied them. Determinism matters
-// for the same reason the traceability map's does: identical logs content-address to the
-// same hash. It is the auditable record of which transformations were precise (semantic)
-// and which fell back to the text floor (see specs/components/agent.md "Mechanism is recorded").
-func formatTransformLog(records []core.TransformRecord) []byte {
-	var b strings.Builder
-	b.WriteString("# Transformation log\n")
-	for _, t := range records {
-		fmt.Fprintf(&b, "\ntool: %s\n", t.Tool)
-		fmt.Fprintf(&b, "target: %s\n", t.Target)
-		fmt.Fprintf(&b, "mechanism: %s\n", t.Mechanism)
-		fmt.Fprintf(&b, "files: %d\n", t.Files)
-		fmt.Fprintf(&b, "edits: %d\n", t.Edits)
-		if t.Note != "" {
-			fmt.Fprintf(&b, "note: %s\n", t.Note)
-		}
-	}
-	return []byte(b.String())
-}
 
 // publishResult sends the harvested Result back on the role's result subject for the
 // orchestrator to consume and validate. Large evidence is referenced by hash into

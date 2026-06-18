@@ -204,6 +204,18 @@ type Issue struct {
 	// until the issue's candidate has been gated (see specs/verification.md, the plan's T4.22).
 	GateVerdict string
 
+	// TransformLog is the artifact-store hash of this issue's transformation log — the JSON
+	// []core.TransformRecord the semantic write tools emit (Phase 6, T6.3,
+	// ArtifactKindTransformLog), one entry per rename/code_action recording the MECHANISM it ran
+	// through (semantic vs the degraded text floor). Like GateVerdict the orchestrator stamps it
+	// onto the issue for **every** disposition and does NOT thread it forward (each issue records
+	// its own latest run's transforms), so the verification view can weigh a candidate's
+	// text-fallback transformations — the imprecise ones that can rewrite comments/string
+	// literals — forensically, for a rejected candidate as much as a merged one. It rides in
+	// beads metadata and is empty until the issue's invocation ran a semantic write tool (see
+	// core.TransformRecord, specs/components/agent.md "Mechanism is recorded").
+	TransformLog string
+
 	// DeadLetterReason is the orchestrator's one-line classification of *why* an issue
 	// dead-lettered — the same reason published on the DLQ alert (an escalation it cannot
 	// resolve, an exhausted retry cap, a budget breach). It is empty for every issue that is

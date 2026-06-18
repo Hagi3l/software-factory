@@ -66,6 +66,7 @@ const (
 	traceHash       = "sha256:tracedddddddddd" // harness-2's threaded map — deliberately NOT in the store (degrades to unavailable)
 	mergedTraceHash = "sha256:tracemerged1111" // harness-1's map — present in the store (a resolvable link)
 	verdictHash     = "sha256:verdicteeeeeeee"
+	transformHash   = "sha256:transformfffff" // harness-1's transformation log (T6.3) — present in the store
 )
 
 func detailServer(t *testing.T) *httptest.Server {
@@ -79,7 +80,7 @@ func detailServer(t *testing.T) *httptest.Server {
 			Spec: "specs/x.md", SpecHash: "sha256:speccccccccc", Base: "harness-0-candidate",
 			Attempt: 2, SpentTokens: 1234, SpentUSD: 0.0456, Body: "Implement the widget.",
 			TestsSoul: "go-test-author", ImplementSoul: "go-implementor",
-			TraceMap: mergedTraceHash, GateVerdict: verdictHash,
+			TraceMap: mergedTraceHash, GateVerdict: verdictHash, TransformLog: transformHash,
 		},
 		// harness-2 is in flight: no provenance, evidence falls back to the threaded map.
 		"harness-2": {
@@ -100,6 +101,12 @@ func detailServer(t *testing.T) *httptest.Server {
 			`{"name":"mutation","kind":"metric","passed":true,"metric":{"score":0.86,"parsed":true,"op":">=","threshold":0.8}},` +
 			`{"name":"govulncheck","kind":"command","passed":true,"exit_code":0}` +
 			`]}`,
+		// The transformation log (T6.3): one precise semantic rename and one text-fallback rename
+		// (with a precision note) — the verification view weighs the latter more suspiciously.
+		transformHash: `[` +
+			`{"tool":"rename","target":"greet → hello at a.go:3:6","mechanism":"semantic","files":2,"edits":4},` +
+			`{"tool":"rename","target":"old → new at b.go:1:1","mechanism":"text","files":1,"edits":3,"note":"3 match(es); 1 inside comments or string literals — review them"}` +
+			`]`,
 	}}
 	prov := detailProv{
 		byIssue: map[string]core.Provenance{

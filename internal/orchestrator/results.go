@@ -182,6 +182,18 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 		}
 	}
 
+	// Record this invocation's transformation-log hash on the issue (T6.3) so the verification
+	// view can weigh which of its writes were precise (semantic) and which fell back to the text
+	// floor — for a dead-lettered candidate as much as a merged one. Stamped for EVERY
+	// disposition, idempotent (a set), non-fatal observability like the transcript stamp; an
+	// empty hash (the invocation ran no semantic write tools) is a no-op (see
+	// core.Issue.TransformLog).
+	if hash := transformLogHash(res); hash != "" {
+		if err := o.bd.StampTransformLog(ctx, issue.ID, hash); err != nil {
+			o.log.Warn("orchestrator: stamp transform log failed (non-fatal)", "issue", issue.ID, "err", err)
+		}
+	}
+
 	stage, ok := o.stageForRole(issue.Role)
 	if !ok {
 		// An in_progress issue whose role has no agent stage should never have been

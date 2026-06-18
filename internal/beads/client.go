@@ -206,6 +206,7 @@ func (r issueJSON) toCore() core.Issue {
 		TestsSoul:     metaString(r.Metadata, MetadataKeyTestsSoul),
 		ImplementSoul: metaString(r.Metadata, MetadataKeyImplementSoul),
 		GateVerdict:   metaString(r.Metadata, MetadataKeyGateVerdict),
+		TransformLog:  metaString(r.Metadata, MetadataKeyTransformLog),
 		// When the issue last entered its current status, stamped atomically by every
 		// status-changing write (setStatus/Claim); the board's time-in-state anchor. Zero
 		// (absent/unparsable) on an issue that has not transitioned since the field landed.

@@ -245,6 +245,15 @@ the whole argument for one issue, forensically, from the persisted
 - **The [test↔spec traceability map](verification.md)** — each test against the spec
   heading and sentence it claims to encode: the only window into how the author read the
   prose.
+- **The transformation log** — when the issue ran semantic write tools
+  ([components/agent.md](components/agent.md) "Mechanism is recorded"), each `rename` /
+  `code_action` with the mechanism it ran through: **semantic** (the language server's own
+  WorkspaceEdit) or **text fallback** (the degraded word-boundary floor, which can rewrite
+  comments and string literals). The count of text fallbacks and each fallback's precision
+  note are surfaced so the imprecise edits — the ones that warrant a closer look — read at a
+  glance. It is the verification-side payoff of recording the mechanism: the gate weighs a
+  text-fallback rename more suspiciously, and so can a human. Omitted when the issue ran no
+  semantic write tools.
 
 It is a **forensic snapshot**, not a feed (a settled proof, like Replay), and it is
 rendered for *rejected* candidates too — a failed verdict is exactly what a human triaging

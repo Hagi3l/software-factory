@@ -82,6 +82,10 @@ type Beads interface {
 	// issue's gate run, for every disposition, so a rejected candidate's verdict is reachable
 	// for the verification view (see core.Issue.GateVerdict, the plan's T4.22).
 	StampGateVerdict(ctx context.Context, id, hash string) error
+	// StampTransformLog records the artifact hash of an issue's transformation log (the semantic-
+	// vs-text-fallback record of its writes), for every disposition, so the verification view can
+	// weigh a candidate's text-fallback transformations (see core.Issue.TransformLog, T6.3).
+	StampTransformLog(ctx context.Context, id, hash string) error
 }
 
 // Gate verifies a candidate in a fresh, orchestrator-controlled sandbox and returns a
