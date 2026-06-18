@@ -185,6 +185,12 @@ merge, which brings the spec and all child code together. The merge queue itself
 also creates the branch off `main` on the first child integration if it does not yet
 exist (idempotent — the only place integration branches are written), so child
 integration is robust whether the wizard pre-created the branch with the spec or not.
+A mid-epic [Resolve](control-room.md) refinement (unsticking a dead-lettered child by
+editing the spec) commits onto the **same** epic branch — identified from the
+dead-lettered issue's `epic_id` — parented on the branch's current tip so it preserves
+the children's already-integrated work; it too holds `main` quiescent until the terminal
+merge. Committing a refinement to `main` mid-epic would advance `main` (and fire a deploy)
+before the feature was finished, the same atomicity break the first-commit rule avoids.
 
 **Completion.** The epic is done when its subtree has **drained**: every issue
 sharing the `epic_id` is closed (integrated onto the epic branch) **and zero

@@ -448,23 +448,42 @@ func (s *wizardSeeder) epicFeatureName(epic string, members []core.Issue) string
 	return epic
 }
 
-// commitOntoEpic commits the approved spec + sidecar onto a fresh epic/<epic_id> branch cut from
-// main, leaving main and the working tree's HEAD untouched (T7.5, specs/integration.md "The epic
-// branch"). It is done entirely with git plumbing: stage the spec files, snapshot the resulting
-// tree (main's tree + the spec), write a commit with main as its sole parent, and point the epic
-// branch at it — so neither main moves nor does the checkout switch branches. The working-tree
-// spec files are then unstaged but left on disk: the orchestrator resolves an issue's spec slice
-// by reading the repo's working tree, so the feature's spec must be readable there for the whole
-// epic even though it is committed only on the epic branch (the children's sandboxes still base
-// off main — code, not the spec, which reaches the agent via its Brief — and integrate their
-// candidates onto this branch). main exists in any real integration repo; absent it the epic
-// branch cannot be cut, which is surfaced as an error rather than guessed.
+// commitOntoEpic commits the approved/refined spec + sidecar onto the epic/<epic_id> branch,
+// leaving main and the working tree's HEAD untouched (T7.5, specs/integration.md "The epic
+// branch"). It serves both wizard write paths: Create opens the branch (cutting it from main with
+// the spec as its first commit), and Resolve refines the spec mid-epic (committing onto the branch
+// the feature's siblings are already integrating onto). The parent is chosen accordingly: the
+// epic branch's current tip when it already exists, else main — so a Resolve refinement builds on
+// the children's already-integrated work rather than orphaning it, while Create's first commit
+// still descends from main. Either way main never moves.
+//
+// It is done entirely with git plumbing, using the index as scratch so the working tree's HEAD
+// (main) is never switched: load the base tree into the index (`read-tree base` — critically, this
+// carries forward every blob the base already holds, so when the base is the epic tip the
+// children's integrated code is preserved in the snapshot, not dropped), stage the spec files on
+// top of it from the working tree, snapshot that tree, write a commit parented on the base, point
+// the epic branch at it, then restore the index to HEAD. The working-tree spec files are left on
+// disk (unstaged): the orchestrator resolves an issue's spec slice by reading the repo's working
+// tree, so the feature's spec must be readable there for the whole epic even though it is committed
+// only on the epic branch (children's sandboxes still base off main — code, not the spec, which
+// reaches the agent via its Brief). main exists in any real integration repo; absent it (and no
+// epic branch yet) the commit has no base, which is surfaced as an error rather than guessed.
 func (s *wizardSeeder) commitOntoEpic(ctx context.Context, epicID string, files []string, message string) (string, error) {
 	branch := core.EpicBranch(epicID)
 	ref := "refs/heads/" + branch
-	mainTip, err := s.git(ctx, "rev-parse", "--verify", "refs/heads/main")
+	base, err := s.git(ctx, "rev-parse", "--verify", ref)
 	if err != nil {
-		return "", fmt.Errorf("epic mode requires an initialized main branch to cut %s from: %w", branch, err)
+		// No epic branch yet (the Create case): cut the first commit from main.
+		base, err = s.git(ctx, "rev-parse", "--verify", "refs/heads/main")
+		if err != nil {
+			return "", fmt.Errorf("epic mode requires an initialized main branch to open %s from: %w", branch, err)
+		}
+	}
+	// Load the base tree into the index, then overlay the (refined) spec files from the working
+	// tree, so the snapshot is base-tree + spec — preserving the base's existing content (the
+	// children's integrated code, when the base is the epic tip).
+	if _, err := s.git(ctx, "read-tree", base); err != nil {
+		return "", err
 	}
 	if _, err := s.git(ctx, append([]string{"add", "--"}, files...)...); err != nil {
 		return "", err
@@ -473,16 +492,16 @@ func (s *wizardSeeder) commitOntoEpic(ctx context.Context, epicID string, files 
 	if err != nil {
 		return "", err
 	}
-	commit, err := s.git(ctx, "commit-tree", tree, "-p", mainTip, "-m", message)
+	commit, err := s.git(ctx, "commit-tree", tree, "-p", base, "-m", message)
 	if err != nil {
 		return "", err
 	}
 	if _, err := s.git(ctx, "update-ref", ref, commit); err != nil {
 		return "", err
 	}
-	// Unstage just the spec files (mixed reset of those paths); the working-tree copies remain on
-	// disk for spec resolution, and main's index/tree is left as it was.
-	if _, err := s.git(ctx, append([]string{"reset", "-q", "--"}, files...)...); err != nil {
+	// Restore the index to HEAD (main): the working-tree spec files remain on disk (unstaged) for
+	// spec resolution, and main's index/tree is left exactly as it was.
+	if _, err := s.git(ctx, "reset", "-q"); err != nil {
 		return "", err
 	}
 	return commit, nil

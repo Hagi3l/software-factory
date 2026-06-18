@@ -162,6 +162,14 @@ refined spec, commits it, and **reopens** the dead-lettered issue so the next di
 re-resolves the edited slice. Resolve creates no new seed issues — new scope goes
 through Create.
 
+Under [`integration.mode: epic`](configuration.md) the refinement commits onto the
+**active epic branch** (`epic/<epic_id>`, identified from the dead-lettered issue's epic
+id), not `main` — committing to `main` mid-epic would advance it before the feature's
+single terminal merge and break the one-feature-one-landing guarantee. The commit parents
+on the epic branch's current tip, so it builds on (and preserves) the children's
+already-integrated work and rides to `main` only when the epic lands. In the default
+`per-item` mode the refinement commits to `main` as before.
+
 ## A note on liveness
 
 Live views refresh over SSE, each with a slow periodic backstop so a settled board

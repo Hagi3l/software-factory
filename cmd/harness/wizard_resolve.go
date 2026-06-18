@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -71,8 +72,28 @@ func (s *wizardSeeder) Resolve(ctx context.Context, req wizard.ResolveRequest) (
 	}
 	written = append(written, sidecar)
 
-	// 4. commit the refined spec + sidecar.
-	commit, err := s.commit(ctx, written, resolveCommitMessage(req, transcriptRef, sidecar))
+	// 4. commit the refined spec + sidecar. Under integration.mode: epic the refinement must land
+	// on the active epic branch, not main — committing to main mid-epic would advance main before
+	// the feature's single terminal merge, breaking the one-feature-one-landing guarantee (and the
+	// next main push would deploy a half-built feature). The dead-lettered issue being unstuck
+	// carries its epic id (core.EpicOf), which names the branch its siblings integrate onto; the
+	// refinement parents on that branch's tip (commitOntoEpic), so it rides to main only at the
+	// terminal merge and preserves the children's already-integrated work. In per-item mode the
+	// commit goes to main as before.
+	message := resolveCommitMessage(req, transcriptRef, sidecar)
+	var (
+		commit string
+		err    error
+	)
+	if s.epicMode() {
+		epicID, eerr := s.resolveEpicID(ctx, req.IssueID)
+		if eerr != nil {
+			return wizard.ResolveResult{}, eerr
+		}
+		commit, err = s.commitOntoEpic(ctx, epicID, written, message)
+	} else {
+		commit, err = s.commit(ctx, written, message)
+	}
 	if err != nil {
 		return wizard.ResolveResult{}, err
 	}
@@ -91,6 +112,23 @@ func (s *wizardSeeder) Resolve(ctx context.Context, req wizard.ResolveRequest) (
 		res.ReopenedIssue = req.IssueID
 	}
 	return res, nil
+}
+
+// resolveEpicID maps the dead-lettered issue being unstuck to the epic whose branch the spec
+// refinement must land on under epic mode (core.EpicOf: the issue's threaded epic id, or its own
+// id if it is the root). It loads the issue from beads — the issue carries the epic identity, the
+// single source the merge queue and the board also group by. Resolve is always entered from a
+// specific dead-lettered issue, so the id is present; an empty id in epic mode is refused rather
+// than silently committing to main (which would break the feature's atomic landing).
+func (s *wizardSeeder) resolveEpicID(ctx context.Context, issueID string) (string, error) {
+	if issueID == "" {
+		return "", errors.New("epic mode: Resolve needs the dead-lettered issue id to target its epic branch")
+	}
+	issue, err := s.bd.Get(ctx, issueID)
+	if err != nil {
+		return "", fmt.Errorf("load dead-lettered issue %s to find its epic: %w", issueID, err)
+	}
+	return core.EpicOf(issue), nil
 }
 
 // resolveCommitMessage builds the Resolve commit's message: a `specs:` subject from the summary,

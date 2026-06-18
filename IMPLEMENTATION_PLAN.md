@@ -469,7 +469,6 @@ per epic, not new machinery. Spec contract:
 - Thread `BudgetCaps` to the board cards so a `budget.wall` tint can render there (currently caps reach only the Budgets view) *(from T4.18)*.
 - Decomposition-preview dry-run before APPROVE (control-room.md OPEN, "leaning defer"; seed issues stay coarse and the autonomous planner decomposes) *(from T4.14)*.
 - Control-room surface for the transform log (e.g. a verification-view row weighing text-fallback renames) — the record is harvested onto Evidence; only the read/render is a follow-up *(from T6.3)*.
-- Resolve mode (`wizard_resolve.go`) still commits its spec refinement to `main` via `s.commit` even under epic mode, which would move `main` mid-epic; in epic mode a Resolve edit should commit onto the active epic branch instead (the dead-lettered issue carries its epic id). Out of T7.5's scope (Create wizard) *(from T7.5)*.
 
 ## Open decisions affecting the plan
 
