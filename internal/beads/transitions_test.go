@@ -914,6 +914,54 @@ func TestEpicAndWallRoundTripIntegration(t *testing.T) {
 	}
 }
 
+// TestStampIntegratedRoundTripIntegration proves the durable integration marker survives
+// StampIntegrated into beads metadata and decodes back as core.Issue.Integrated on Get — the
+// signal the epic roll-up counts (instead of `closed`) and the cold-start projection rebuild
+// re-derives, with no git read (T8.3, specs/integration.md "Integrated vs. closed"). It is
+// absent (false) until stamped, the stamp is idempotent (a set, not an increment), and it must
+// not disturb the issue's other fields.
+func TestStampIntegratedRoundTripIntegration(t *testing.T) {
+	bdAvailable(t)
+	dir := bdInit(t)
+	c := New(WithDir(dir))
+	ctx := context.Background()
+
+	created, err := c.Apply(ctx, []core.Proposal{
+		{Issue: core.Issue{Title: "ship", Role: "implement", EpicID: "harness-1"}},
+	})
+	if err != nil {
+		t.Fatalf("Apply: %v", err)
+	}
+	id := created[0].ID
+
+	got, err := c.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.Integrated {
+		t.Error("Integrated = true before StampIntegrated, want false")
+	}
+
+	if err := c.StampIntegrated(ctx, id); err != nil {
+		t.Fatalf("StampIntegrated: %v", err)
+	}
+	// Idempotent: re-stamping the same landing (an at-least-once redelivery) is a no-op set.
+	if err := c.StampIntegrated(ctx, id); err != nil {
+		t.Fatalf("StampIntegrated (re-stamp): %v", err)
+	}
+	got, err = c.Get(ctx, id)
+	if err != nil {
+		t.Fatalf("Get after stamp: %v", err)
+	}
+	if !got.Integrated {
+		t.Error("Integrated = false after StampIntegrated, want true (metadata round-trip)")
+	}
+	// The stamp must not disturb the values written at creation.
+	if got.EpicID != "harness-1" || got.Role != "implement" {
+		t.Errorf("EpicID/Role = %q/%q, want harness-1/implement (stamp must not disturb them)", got.EpicID, got.Role)
+	}
+}
+
 // TestStampTranscriptRoundTripIntegration proves the most-recent invocation transcript hash
 // survives StampTranscript into beads metadata and decodes back on Get — so the decision trail is
 // reachable from the issue itself (for the Resolve wizard / replay of non-merged work, T4.15),

@@ -634,7 +634,20 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 		return true, fmt.Errorf("merge candidate %s for issue %s: %w", candidateRef, issue.ID, err)
 	}
 	o.announceMergeState(issue, core.MergeStateLanded, commit)
-	o.log.Info("orchestrator: merged to main", "issue", issue.ID, "ref", candidateRef, "commit", commit,
+	// Stamp the durable integration marker before the bead is closed (accept closes it once this
+	// returns). `closed` alone cannot distinguish an integration from a superseded retry or the
+	// closed epic root, so the epic roll-up counts THIS marker — written the instant the candidate
+	// lands, for both per-item and epic mode (specs/integration.md "Integrated vs. closed", T8.3).
+	// Best-effort: a stamp failure must not undo a landed merge (the commit is already on the
+	// integration branch), so it is logged, not fatal — a cold-start rebuild re-reads the marker
+	// and the roll-up is a progress hint, not a correctness gate.
+	if err := o.bd.StampIntegrated(ctx, issue.ID); err != nil {
+		o.log.Warn("orchestrator: stamp integrated marker failed (merge already landed)", "issue", issue.ID, "err", err)
+	}
+	// Name the real integration target: in epic mode a child lands on epic/<epic_id>, not main —
+	// main advances only at the epic's terminal merge (T8.6, specs/integration.md).
+	o.log.Info("orchestrator: merged candidate", "issue", issue.ID, "target", o.integrationBranchName(issue),
+		"ref", candidateRef, "commit", commit,
 		"soul", prov.Soul, "model", prov.Model, "prompt_sha", prov.PromptSHA, "verified", prov.Verified)
 	return false, nil
 }

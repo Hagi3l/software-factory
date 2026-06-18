@@ -139,14 +139,15 @@ const (
 // EpicSummary is the whole-feature roll-up the board's hero (epic root) card renders under
 // integration.mode: epic (T7.6, control-room.md "Epics on the board"). It needs no new data —
 // it is an aggregate over the issues sharing an epic_id (core.EpicOf), the same grouping the
-// epic budget enforces and the Budgets view shows: Integrated/Total is the closed-vs-all count
-// (a closed issue is one integrated onto the epic branch), Tokens/USD is the summed marginal
+// epic budget enforces and the Budgets view shows: Integrated/Total is the integrated-vs-active
+// child count (counting the durable `integrated` marker, NOT any closed status — a bead closes
+// for several reasons, only one of which is integration), Tokens/USD is the summed marginal
 // spend against the epic_budget cap, and State is the integrating→done lifecycle. So the hero
 // shows "bounded autonomy" — progress and spend vs cap — as the feature builds.
 type EpicSummary struct {
 	EpicID     string
-	Integrated int     // issues of this epic that are closed (integrated onto the epic branch)
-	Total      int     // all issues of this epic
+	Integrated int     // children marked integrated (the durable marker, not any closed status)
+	Total      int     // integrated children + still-active children, excluding root + superseded beads
 	State      string  // EpicStateIntegrating | EpicStateDone
 	Tokens     int     // summed marginal token spend across the epic (matches authorizeEpic)
 	TokenCap   int     // configured epic token cap, 0 when uncapped
@@ -172,12 +173,30 @@ func (r *Reader) epicSummaries(ctx context.Context, issues []core.Issue, caps Bu
 			s = &EpicSummary{EpicID: ep, State: EpicStateIntegrating}
 			sums[ep] = s
 		}
-		s.Total++
-		if i.Status == statusClosed {
-			s.Integrated++
-		}
+		// Spend aggregates over EVERY issue of the epic — the root, superseded retries, and every
+		// intermediate stage all burned tokens — so the hero's burn matches the Budgets view /
+		// authorizeEpic exactly (the same marginal Closing* sum). The progress *counts* below
+		// filter; the spend does not.
 		s.Tokens += i.ClosingTokens
 		s.USD += i.ClosingUSD
+		// Progress counts only the feature's "real" children: a bead reaches closed for several
+		// reasons, so `closed` cannot mean "contributed to the feature" (specs/integration.md
+		// "Integrated vs. closed"). Exclude the epic root (it closes at decomposition; its id is
+		// the epic id) and any closed-but-not-integrated bead — a superseded on_failure retry or an
+		// advanced intermediate stage. What remains is one frontier bead per lineage: its terminal
+		// integrated bead, or its current active (open/in_progress/blocked) stage. Integrated counts
+		// the durable marker (T8.3), never `closed`. So a feature split into two children that has
+		// landed neither reads 0/2, never 1/4 from counting the closed root and a failed attempt.
+		if i.ID == ep {
+			continue
+		}
+		if i.Status == statusClosed && !i.Integrated {
+			continue
+		}
+		s.Total++
+		if i.Integrated {
+			s.Integrated++
+		}
 	}
 	for ep, s := range sums {
 		s.TokenCap = caps.EpicTokens

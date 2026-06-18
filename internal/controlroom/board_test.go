@@ -423,8 +423,11 @@ func colOrder(body string) []string {
 func epicBoardServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	issues := []core.Issue{
+		// The epic root closed at decomposition (never integrated → excluded from progress); one
+		// child integrated onto the epic branch (the durable marker, T8.3); one child is still in
+		// flight. So the hero reads 1/2 — counting the marker, not the closed root.
 		{ID: "feat-1", Title: "Add the vault", Role: "plan", Status: "closed"},
-		{ID: "feat-1.1", Title: "API", Role: "implementor", Status: "closed", EpicID: "feat-1"},
+		{ID: "feat-1.1", Title: "API", Role: "implementor", Status: "closed", EpicID: "feat-1", Integrated: true},
 		{ID: "feat-1.2", Title: "UI", Role: "test-author", Status: "in_progress", EpicID: "feat-1"},
 	}
 	s := New(Options{
@@ -440,8 +443,8 @@ func epicBoardServer(t *testing.T) *httptest.Server {
 
 // TestBoardEpicChromeRenders is T7.6's rendered-HTML contract under epic mode: every card shows the
 // shared epic badge, and the epic root renders the hero block — the integrating state and the
-// children-integrated/total progress (2 of 3 closed). The hue-hashed left-border tint rides the
-// card's inline style.
+// children-integrated/total progress (1 integrated of 2 real children — the closed-at-decomposition
+// root is excluded, T8.3). The hue-hashed left-border tint rides the card's inline style.
 func TestBoardEpicChromeRenders(t *testing.T) {
 	ts := epicBoardServer(t)
 	r := get(t, ts, "/board")
@@ -453,7 +456,7 @@ func TestBoardEpicChromeRenders(t *testing.T) {
 		"border-left-color",    // the hue-hashed tint on the card's inline style
 		"integrating",          // the hero's feature state (nothing landed on main in the fake prov)
 		"integrated",           // the hero's progress label
-		"2/3",                  // children integrated / total (feat-1 + feat-1.1 closed, feat-1.2 in flight)
+		"1/2",                  // children integrated / total (feat-1.1 integrated; feat-1.2 in flight; root excluded)
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("epic board missing %q", want)

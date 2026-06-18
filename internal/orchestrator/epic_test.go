@@ -101,3 +101,34 @@ func TestMergeCandidateUsesEpicTarget(t *testing.T) {
 		t.Errorf("merge target = %v, want [refs/heads/epic/feat-1] (epic-mode retargeting)", got)
 	}
 }
+
+// TestMergeCandidateStampsIntegratedMarker is T8.3's write-side contract: when a verified
+// candidate lands on its integration branch, the orchestrator stamps the durable `integrated`
+// marker on the child's bead — the signal the epic roll-up counts instead of `closed` and the
+// cold-start projection rebuild re-derives. The marker is set the instant the merge lands (before
+// the bead is closed) and survives the close, so a later read distinguishes this integration from
+// any other close (specs/integration.md "Integrated vs. closed", demo-run-issues.md #7).
+func TestMergeCandidateStampsIntegratedMarker(t *testing.T) {
+	bd := newFakeBeads()
+	bd.put(core.Issue{ID: "iss-1", Role: "implement", Status: "open", EpicID: "feat-1"})
+	g := &fakeGate{report: gate.Report{Passed: true}}
+	m := &fakeMerger{}
+	o, _ := newOrch(t, epicCfg(2), bd, g, m)
+	o.inflight.add(core.Issue{ID: "iss-1", Role: "implement", EpicID: "feat-1"}, testLease())
+
+	res := core.Result{IssueID: "iss-1", Status: core.StatusDone, Branch: core.Branch{Ref: core.CandidateBranch("iss-1")}}
+	if transient, err := o.handleResult(context.Background(), res); err != nil || transient {
+		t.Fatalf("handleResult = (%v,%v), want (false,nil)", transient, err)
+	}
+	got, err := bd.Get(context.Background(), "iss-1")
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if !got.Integrated {
+		t.Error("Integrated = false after merge, want true (the durable integration marker)")
+	}
+	// The marker must coexist with the close — closed AND integrated is what the roll-up counts.
+	if got.Status != "closed" {
+		t.Errorf("Status = %q, want closed (the bead is closed after integration)", got.Status)
+	}
+}

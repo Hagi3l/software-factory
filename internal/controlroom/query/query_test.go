@@ -650,12 +650,14 @@ func findCard(b Board, id string) *IssueCard {
 }
 
 // epicBoardIssues is a single feature: a root seed (feat-1, no EpicID so it is its own epic) and
-// two children that thread the root's id — one integrated (closed), one still in flight. Marginal
-// Closing* spend is stamped so the hero's aggregate matches what the Budgets view sums.
+// two children that thread the root's id — one integrated (the durable marker, T8.3), one still in
+// flight. The root closed at decomposition (closed but NOT integrated → excluded from progress).
+// Marginal Closing* spend is stamped on every issue (root included) so the hero's aggregate matches
+// what the Budgets view sums — spend aggregates over all, progress counts only the integrated marker.
 func epicBoardIssues() []core.Issue {
 	return []core.Issue{
 		{ID: "feat-1", Title: "Add the vault", Role: "plan", Status: "closed", ClosingTokens: 100, ClosingUSD: 1.0},
-		{ID: "feat-1.1", Title: "API", Role: "implement", Status: "closed", EpicID: "feat-1", ClosingTokens: 50, ClosingUSD: 0.5},
+		{ID: "feat-1.1", Title: "API", Role: "implement", Status: "closed", EpicID: "feat-1", Integrated: true, ClosingTokens: 50, ClosingUSD: 0.5},
 		{ID: "feat-1.2", Title: "UI", Role: "qa", Status: "in_progress", EpicID: "feat-1", ClosingTokens: 0, ClosingUSD: 0},
 	}
 }
@@ -694,8 +696,11 @@ func TestBoardEpicModeBadgeAndHero(t *testing.T) {
 		t.Error("child card must not carry a hero summary")
 	}
 	e := root.Epic
-	if e.Integrated != 2 || e.Total != 3 {
-		t.Errorf("progress = %d/%d, want 2/3", e.Integrated, e.Total)
+	// One child carries the integrated marker, one is in flight; the closed root is excluded (it
+	// closed at decomposition, never integrated). So progress is 1/2, never 2/3 from counting the
+	// closed root (T8.3, specs/integration.md "Integrated vs. closed").
+	if e.Integrated != 1 || e.Total != 2 {
+		t.Errorf("progress = %d/%d, want 1/2", e.Integrated, e.Total)
 	}
 	if e.Tokens != 150 || e.USD != 1.5 {
 		t.Errorf("spend = %d tok / $%.2f, want 150 / $1.50", e.Tokens, e.USD)
@@ -705,6 +710,45 @@ func TestBoardEpicModeBadgeAndHero(t *testing.T) {
 	}
 	if e.State != EpicStateIntegrating {
 		t.Errorf("state = %q, want integrating (nothing landed on main yet)", e.State)
+	}
+}
+
+// TestBoardEpicProgressExcludesRootAndSupersededBeads is T8.3's progress-accounting contract: the
+// roll-up counts the durable `integrated` marker, never `closed`, and excludes the epic root and
+// any closed-but-not-integrated bead (a superseded on_failure retry or an advanced intermediate
+// stage). The fixture is one feature whose two children each spawned a superseded attempt before
+// one integrated and one stayed in flight — so a naive closed-count would read 4/6, but the honest
+// progress is 1/2 (specs/integration.md "Integrated vs. closed", demo-run-issues.md #7). Spend
+// still aggregates over EVERY bead (root and corpses burned tokens) so it matches the Budgets view.
+func TestBoardEpicProgressExcludesRootAndSupersededBeads(t *testing.T) {
+	issues := []core.Issue{
+		// Root: closed at decomposition, never integrated → excluded from progress, counted in spend.
+		{ID: "feat-1", Role: "plan", Status: "closed", ClosingTokens: 100},
+		// Child A: a failed first attempt (closed, not integrated → superseded, excluded) and the
+		// retry that integrated (closed + marker → counts as 1/1).
+		{ID: "feat-1.a0", Role: "implement", Status: "closed", EpicID: "feat-1", ClosingTokens: 40},
+		{ID: "feat-1.a1", Role: "qa", Status: "closed", EpicID: "feat-1", Integrated: true, ClosingTokens: 60},
+		// Child B: an advanced intermediate stage (closed, not integrated → excluded) and its current
+		// in-flight stage (counts toward total, not yet integrated).
+		{ID: "feat-1.b0", Role: "test-author", Status: "closed", EpicID: "feat-1", ClosingTokens: 30},
+		{ID: "feat-1.b1", Role: "implement", Status: "in_progress", EpicID: "feat-1", ClosingTokens: 0},
+	}
+	r := NewReader(&fakeIssues{all: issues}, &fakeArts{}, &fakeProv{})
+	caps := BudgetCaps{EpicTokens: 1000, EpicUSD: 10}
+	board, err := r.Board(context.Background(), []string{"plan", "test-author", "implement", "qa"}, true, caps)
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	e := findCard(board, "feat-1").Epic
+	if e == nil {
+		t.Fatal("root card carries no Epic hero summary")
+	}
+	if e.Integrated != 1 || e.Total != 2 {
+		t.Errorf("progress = %d/%d, want 1/2 (one integrated child, one in flight; root + superseded excluded)", e.Integrated, e.Total)
+	}
+	// Spend is the sum over every bead of the epic (100+40+60+30+0), unaffected by the count filter.
+	if e.Tokens != 230 {
+		t.Errorf("Tokens = %d, want 230 (spend aggregates over ALL beads, not the filtered set)", e.Tokens)
 	}
 }
 

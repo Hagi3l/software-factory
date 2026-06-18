@@ -145,6 +145,18 @@ const MetadataKeyGateVerdict = "gate_verdict"
 // text-fallback transformations, for a rejected candidate as much as a merged one (T6.3).
 const MetadataKeyTransformLog = "transform_log"
 
+// MetadataKeyIntegrated marks a child whose verified candidate landed on its integration branch
+// (core.Issue.Integrated) — the durable distinction `closed` cannot make, since a bead closes
+// for several reasons (integrated, superseded by an on_failure retry, or — the epic root —
+// closed at decomposition). The orchestrator stamps it (StampIntegrated) in the merge path the
+// instant a candidate lands, for both per-item and epic mode, so the board hero's epic roll-up
+// counts integration rather than any close (integrated vs. total). It is stamped post-hoc and
+// NOT threaded forward — each bead records its own landing — and is the durable signal the
+// cold-start projection rebuild re-derives from (no git read). Absent (false) on every issue
+// whose candidate has not integrated (see specs/integration.md "Integrated vs. closed", the
+// plan's T8.3).
+const MetadataKeyIntegrated = "integrated"
+
 // MetadataKeyDLQReason holds the orchestrator's one-line classification of why an issue
 // dead-lettered (core.Issue.DeadLetterReason) — the same reason published on the DLQ alert.
 // It is written in the same transition that blocks the issue (Block) so the dead-letter queue
@@ -353,6 +365,25 @@ func (c *Client) StampTransformLog(ctx context.Context, id, hash string) error {
 	args := []string{"update", id, "--set-metadata", MetadataKeyTransformLog + "=" + hash}
 	if _, err := c.run(ctx, args); err != nil {
 		return fmt.Errorf("beads: stamp transform log on %s: %w", id, err)
+	}
+	return nil
+}
+
+// StampIntegrated marks a child's bead as integrated — its verified candidate landed on the
+// integration branch — merged into its metadata without touching status or other keys (like
+// StampGateVerdict). The orchestrator calls it in the merge path the instant the candidate
+// lands, BEFORE it closes the bead, so the durable marker that distinguishes an integration
+// from any other close is written exactly once per landing. It is a set (the value is always
+// true), so re-stamping on an at-least-once redelivery of the same Result is idempotent. The
+// value is stored as the JSON bool true, which metaBool reads back directly (see
+// core.Issue.Integrated, specs/integration.md "Integrated vs. closed").
+func (c *Client) StampIntegrated(ctx context.Context, id string) error {
+	if id == "" {
+		return fmt.Errorf("beads: empty issue id")
+	}
+	args := []string{"update", id, "--set-metadata", MetadataKeyIntegrated + "=true"}
+	if _, err := c.run(ctx, args); err != nil {
+		return fmt.Errorf("beads: stamp integrated on %s: %w", id, err)
 	}
 	return nil
 }

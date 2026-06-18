@@ -207,6 +207,11 @@ func (r issueJSON) toCore() core.Issue {
 		ImplementSoul: metaString(r.Metadata, MetadataKeyImplementSoul),
 		GateVerdict:   metaString(r.Metadata, MetadataKeyGateVerdict),
 		TransformLog:  metaString(r.Metadata, MetadataKeyTransformLog),
+		// The durable integration marker (stamped post-hoc by StampIntegrated when a candidate
+		// lands on its integration branch), distinguishing an integrated child from a bead that
+		// closed for any other reason. Absent decodes to false; re-derived from this on cold-start
+		// rebuild (no git read), and what the epic roll-up counts instead of `closed` (T8.3).
+		Integrated: metaBool(r.Metadata, MetadataKeyIntegrated),
 		// When the issue last entered its current status, stamped atomically by every
 		// status-changing write (setStatus/Claim); the board's time-in-state anchor. Zero
 		// (absent/unparsable) on an issue that has not transitioned since the field landed.
@@ -300,6 +305,26 @@ func metaInt(m map[string]json.RawMessage, key string) int {
 		return 0
 	}
 	return n
+}
+
+// metaBool returns the boolean value of a metadata key, or false if absent. It backs the
+// durable `integrated` marker (StampIntegrated writes the JSON bool true). Lenient like the
+// other decoders — foreign metadata must never fail a read: it accepts the value stored either
+// as a JSON bool (true) or as the string "true", and reads anything else as false.
+func metaBool(m map[string]json.RawMessage, key string) bool {
+	raw, ok := m[key]
+	if !ok {
+		return false
+	}
+	var b bool
+	if err := json.Unmarshal(raw, &b); err == nil {
+		return b
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s == "true"
+	}
+	return false
 }
 
 // metaFloat returns the float value of a metadata key, or 0 if absent or not a

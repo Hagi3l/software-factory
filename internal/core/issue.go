@@ -216,6 +216,20 @@ type Issue struct {
 	// core.TransformRecord, specs/components/agent.md "Mechanism is recorded").
 	TransformLog string
 
+	// Integrated marks a child whose verified candidate landed on its integration branch —
+	// the durable distinction `closed` alone cannot make. A bead reaches `closed` for several
+	// reasons (its candidate integrated, it was superseded by an on_failure retry, or — the
+	// epic root — it closed at decomposition), so `closed` does not mean "contributed to the
+	// feature." The orchestrator stamps this marker (StampIntegrated) in the merge path the
+	// instant a candidate lands, so the board hero's epic roll-up counts *integration*, not any
+	// close: integrated = children marked integrated; total = those plus the still-active
+	// children, excluding the epic root and any closed-but-not-integrated bead. It rides in
+	// beads metadata (durable across a cold-start rebuild — re-derived from the marker, not a
+	// git read), is NOT threaded forward (each bead records its own landing), and is false on
+	// every issue whose candidate has not integrated (see specs/integration.md "Integrated vs.
+	// closed", specs/glossary.md#integrated, the plan's T8.3).
+	Integrated bool
+
 	// DeadLetterReason is the orchestrator's one-line classification of *why* an issue
 	// dead-lettered — the same reason published on the DLQ alert (an escalation it cannot
 	// resolve, an exhausted retry cap, a budget breach). It is empty for every issue that is

@@ -84,6 +84,12 @@ type Beads interface {
 	// vs-text-fallback record of its writes), for every disposition, so the verification view can
 	// weigh a candidate's text-fallback transformations (see core.Issue.TransformLog, T6.3).
 	StampTransformLog(ctx context.Context, id, hash string) error
+	// StampIntegrated marks a child whose verified candidate landed on its integration branch,
+	// the durable distinction `closed` cannot make (integrated vs. superseded vs. closed root).
+	// The orchestrator stamps it in the merge path the instant a candidate lands, so the board
+	// hero's epic roll-up counts integration rather than any close (see core.Issue.Integrated,
+	// the plan's T8.3).
+	StampIntegrated(ctx context.Context, id string) error
 }
 
 // Gate verifies a candidate in a fresh, orchestrator-controlled sandbox and returns a

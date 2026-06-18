@@ -35,6 +35,7 @@ type fakeBeads struct {
 	closed      []string
 	blocked     []string
 	parked      []string
+	integrated  []string
 	approvedRef []string
 	approvedBy  map[string]string
 	applied     []core.Proposal
@@ -276,6 +277,19 @@ func (f *fakeBeads) StampTransformLog(_ context.Context, id, hash string) error 
 		is.TransformLog = hash
 		f.issues[id] = is
 	}
+	return nil
+}
+
+func (f *fakeBeads) StampIntegrated(_ context.Context, id string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	// Mirror the real client: durable on the issue so a later Get/ListAll sees the marker (the
+	// epic roll-up's read and the cold-start rebuild's re-derivation). Always sets true.
+	if is, ok := f.issues[id]; ok {
+		is.Integrated = true
+		f.issues[id] = is
+	}
+	f.integrated = append(f.integrated, id)
 	return nil
 }
 

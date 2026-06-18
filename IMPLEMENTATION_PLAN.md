@@ -351,13 +351,27 @@ switchable to de-risk rollout.
   skip. Tests: `TestScheduleReadySkipsSettledCandidate` (closed + blocked sub-tests),
   `TestScheduleReadyDispatchesKnownOpenCandidate` (inverse guard — open known candidate still dispatches).
   ([components/orchestrator.md](specs/components/orchestrator.md))
-- [ ] **T8.3 `integrated` as a durable state + correct epic rollup** *(fixes #7)* — stamp an
-  `integrated` tag/label on a child's bead when the integrate stage merges it onto the epic
-  branch (`results.go` integrate path / `epic*.go`); `epicSummaries`
-  (`internal/controlroom/query/query.go:166`) counts **integrated**, not any `closed`, and
-  excludes the epic root (id == epic id) and failure-routed beads. Cold-start re-derives the flag
-  from the tag (durable, no git read). Removes the misleading `1/N`.
-  ([integration.md](specs/integration.md), [glossary.md](specs/glossary.md))
+- [x] **T8.3 `integrated` as a durable state + correct epic rollup** *(fixes #7)* — *done.* The
+  marker is durable **issue metadata** (`MetadataKeyIntegrated = "integrated"`, value JSON `true`),
+  consistent with the existing `Stamp*` family — not a selector *label* (Tags are the soul-selector
+  namespace; bd only sets labels at create, so a post-hoc label write was the wrong seam). New
+  `beads.Client.StampIntegrated(id)` (idempotent set), decoded by `metaBool` into the new
+  `core.Issue.Integrated` field; added to the orchestrator `Beads` seam + its fake. The merge path
+  (`results.go` `mergeCandidate`) stamps it the instant a candidate lands (before the bead is
+  closed; best-effort — a stamp failure logs, never undoes a landed merge), in **both** per-item and
+  epic mode (an integration is an integration). `epicSummaries`
+  (`internal/controlroom/query/query.go`) now counts the **marker**, not `closed`, and excludes the
+  epic root (`i.ID == ep`) and any closed-but-not-integrated bead (a superseded retry or an advanced
+  intermediate stage); **spend still aggregates over every bead** so the hero matches the Budgets
+  view. The spec's rule collapses each lineage to one frontier bead (its integrated bead or its
+  current active stage), so a two-child feature reads `0/2 → 1/2 → 2/2`, never `1/4`. **Cold-start
+  re-derivation is automatic** — the projection's `reset()` carries the full `core.Issue` (incl.
+  `Integrated`) hydrated from `bd.ListAll`, no git read. Specs were written ahead (integration.md
+  "Integrated vs. closed", glossary "Integrated") — no spec change. Tests:
+  `TestStampIntegratedRoundTripIntegration` (bd round-trip + idempotent),
+  `TestMergeCandidateStampsIntegratedMarker` (write-side: stamped on land, survives close),
+  `TestBoardEpicProgressExcludesRootAndSupersededBeads` (1/2 not 4/6; spend unaffected); existing
+  epic-hero fixtures updated to the marker. ([integration.md](specs/integration.md), [glossary.md](specs/glossary.md))
 - [ ] **T8.4 Control-room projection-backed read model** *(fixes #4, #6, #8)* — back the
   `IssueReader` seam (`internal/controlroom/query`, `NewReader`) with a projection-backed reader
   when co-located, fed by **snapshot-then-stream** over the existing `internal/controlroom/live`
@@ -374,10 +388,10 @@ switchable to de-risk rollout.
   coherent, independently-verifiable unit). Optional turn-budget backstop for test-author left to
   decide after a re-run. Tradeoff to note: smaller children = more fixed per-stage overhead (net
   cheaper than a runaway). ([workflow.md](specs/workflow.md))
-- [ ] **T8.6 Name the real merge target in the log** *(fixes #9)* — `results.go:637`
-  `orchestrator: merged to main` is wrong in epic mode (a child merges onto `epic/<id>`, not
-  main). Name the actual target. Trivial; fold into T8.3's `results.go` pass. (No spec change —
-  log wording reflects [integration.md](specs/integration.md) epic semantics.)
+- [x] **T8.6 Name the real merge target in the log** *(fixes #9)* — *done* (folded into T8.3's
+  `results.go` pass). The `mergeCandidate` success log is now `orchestrator: merged candidate` with a
+  `target=<integrationBranchName(issue)>` field — `epic/<id>` in epic mode, `main` in per-item — so
+  the log never claims a child advanced `main` when it landed on the epic branch. (No spec change.)
 - [ ] **T8.7 Wizard one-root-in-epic hardening** *(fixes #1)* — harden the requirements-planner
   persona (`config/souls/prompts/requirements-planner.md`) to always seed exactly one root issue
   in epic mode, and clarify the wizard error (`cmd/harness/wizard_seed.go:197`). Spec touch only
