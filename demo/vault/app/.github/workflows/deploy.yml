@@ -27,6 +27,18 @@ name: deploy
 on:
   push:
     branches: [main]
+    # Only deploy when something that actually affects the binary changes. The harness lands
+    # each feature as the candidate's own content commit PLUS a machine-authored integrate
+    # commit that carries the provenance trailer but an empty diff (the content already landed
+    # on the candidate). A push of only that empty commit — or a specs-/docs-only change —
+    # touches none of these paths, so it no longer triggers a no-op build+deploy. The binary is
+    # built from cmd/ + internal/ (Go sources, compiled *_templ.go, and the //go:embed'd
+    # static assets all live here) and the module files; nothing else feeds it.
+    paths:
+      - 'cmd/**'
+      - 'internal/**'
+      - 'go.mod'
+      - 'go.sum'
 
 # Serialize deploys; a newer push supersedes one already running.
 concurrency:

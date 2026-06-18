@@ -137,7 +137,16 @@ git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
 # --non-interactive: bd init drops into a wizard when stdin is a tty (the normal case when
 # you run this script by hand). Its stdout is hidden below, so the prompt would be invisible
 # and bd would hang forever waiting on stdin. Force the non-interactive path.
-( cd "$SITE" && "$BD" init --prefix vault --server --non-interactive >/dev/null )
+# --skip-hooks: do NOT install beads' git hooks. By default bd init points the repo's
+# core.hooksPath at .beads/hooks, so every git operation fires a beads post-checkout/post-merge
+# that re-syncs the work store from .beads/issues.jsonl. The harness drives heavy git activity
+# on THIS repo during a run (the merger adds a detached worktree per rebase and fast-forwards
+# main), so those hooks fire mid-run and re-import a stale jsonl snapshot over the orchestrator's
+# authoritative Dolt writes — silently reverting just-closed stage issues back to in_progress
+# (observed: every intermediate author-tests/implement/qa issue stuck open after a clean merge).
+# The orchestrator is the single beads writer via the warm Dolt server; it never wants a git
+# hook reconciling beads behind its back, so the hooks are pure foot-gun here. Disable them.
+( cd "$SITE" && "$BD" init --prefix vault --server --non-interactive --skip-hooks >/dev/null )
 "$BD" -C "$SITE" dolt status >/dev/null 2>&1 || { echo "error: beads dolt sql-server did not come up (see $SITE/.beads/dolt-server.log)"; exit 1; }
 
 # ---- reset the public repo to the green seed -------------------------------------------
