@@ -45,12 +45,8 @@ autonomous implementation) — a later validation concern, never an engineering 
   `(spec)` as it landed).
 - **Open tasks (`- [ ]`) keep their full detail.** Only **Phase 5** (production
   isolation) has open lines — the Firecracker backend T5.2 is hardware-blocked and deliberately
-  last; the optional items are T5.5 gVisor and T5.11 warm pools + HA. **Phase 7** (atomic feature
-  integration / epic mode) is **complete** — T7.1 (the live multi-child-rebase bug),
-  T7.2 (`integration.mode` config), T7.3 (merge-queue retargeting), T7.4 (epic-completion
-  detection + terminal merge), T7.5 (one-active-epic consent gate + wizard creates the epic
-  branch with the spec), T7.6 (board epic hero card), T7.7 (vault demo exercises epic mode),
-  and T7.8 (board epic-lineage thread + decoupled grouping chrome) are all done.
+  last; the optional items are T5.5 gVisor and T5.11 warm pools + HA. Everything else (Phases
+  0–4, 6, 7) is complete and collapsed.
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -292,181 +288,21 @@ per epic, not new machinery. Spec contract:
 **vault demo exercises it** (T7.7).
 
 - [x] **T7.1 Fix the re-gate ref form (unblocks any multi-child rebase)** — *done.*
-  `rebaseOntoMain` now returns the **short** branch name `integration/<id>` (new
-  `integrationBranch` helper) as the re-gate's ref, while keeping the fully-qualified
-  `refs/heads/integration/<id>` (`integrationRef`, refactored to build on the short form) for
-  the `update-ref` publish + `update-ref -d` cleanup, which do not DWIM. The re-gate's sandbox
-  seeds by `git clone` + `git checkout <ref>`, and a clone has no local `refs/heads/*` (only
-  `origin/*`), so only the short name DWIM-resolves there — exactly as the candidate gate uses
-  `candidate/<id>`. Fixes the `pathspec … did not match` loop that hung any multi-child rebase,
-  and is the foundation epic mode's per-child re-gate leans on. Regression: `TestGitMergerReGatesRebasedResult`
-  now asserts the re-gate is called with `integration/iss-1`; the real-git `merge_integration_test.go`
-  rebase path exercises it end-to-end. No spec/doc change (bug fix to already-documented intent).
-- [x] **T7.2 `integration.mode` config + validation** — *done.* Added the optional top-level
-  `integration: { mode: per-item | epic }` block (`config.Integration`, `Harness.Mode()`
-  accessor defaulting to `per-item` so an absent block and explicit `per-item` are identical).
-  `validateIntegration` rejects any mode outside `{per-item, epic}` (same enum pattern as the
-  policy profile). The full `Config` is already threaded to the orchestrator (`Options.Config`),
-  so `cfg.Harness.Mode()` is reachable for T7.3. Docs: `docs/configuration.md` gained an
-  `integration` section. Tests: valid/empty/epic accepted, unknown rejected, `Mode()` default.
-- [x] **T7.3 Retarget the merge queue per epic** *(needs T7.1, T7.2)* — *done (merge-queue
-  retargeting; the wizard spec-commit-onto-branch rides with T7.5).* The `Merger.Merge`
-  signature gained a fully-qualified `target` ref; everywhere the queue read `refs/heads/main`
-  it now reads `target` — rebase target, fast-forward/ancestor check, idempotency log grep,
-  conflict detection, and the advance `update-ref` (all inside `Merge`, so one parameter covers
-  the spec's first four retarget points). The orchestrator computes the per-issue target via
-  `integrationTargetRef`/`integrationBranchName` (new `internal/orchestrator/epic.go`):
-  `refs/heads/main` in per-item, `refs/heads/epic/<core.EpicOf(issue)>` in epic mode. `Merge`
-  **creates the epic branch off `main` on first use** (idempotent — the only writer of
-  integration branches), so child integration works without a pre-existing branch. The
-  **resolve-stage rebase** is retargeted in both phases: the trusted re-rebase rides the `target`
-  param, and the merge-resolver **agent** now reads its rebase target from a new
-  `core.Brief.IntegrationBase` (short branch name, surfaced in the agent prompt's
-  `# Integration branch` section) — so a conflicting candidate rebases onto the epic branch
-  (where its colliding sibling lives), not `main`. The merge-resolver persona (config + demo)
-  was generalized from literal `main` to "the integration branch named in your Brief". Tests:
-  `epic.go` helpers (both modes incl. root-folds-into-own-epic), `buildBrief` IntegrationBase,
-  agent `buildContext` surfacing, an orchestrator merge-flow test asserting the epic target, and
-  a real-git `TestGitMergerEpicTargetIntegration` (two siblings land on an auto-created epic
-  branch; **`main` never moves**). Spec note added (merge queue idempotently creates the branch).
-  **Deferred to T7.5:** committing the wizard's approved spec *onto* the epic branch as its first
-  commit (needs the epic-root id at seed time + the one-active-epic consent gate that defines
-  "an epic"); until then epic mode commits the spec to `main` and the epic branch inherits it, so
-  the merge mechanics are correct but full spec-off-main atomicity awaits T7.5. *(spec)*
-  [integration.md](specs/integration.md)
-- [x] **T7.4 Epic-completion detection + terminal merge** *(needs T7.3)* — *done.* New
-  `sweepEpicCompletion` (`internal/orchestrator/epic_completion.go`) runs **only under
-  `integration.mode: epic`**, on the **slow sweep cadence** alongside `recompileMergedDelta`
-  (wired into `tickLoop`'s startup pass + slow-tick branch). It does an `epic_id` **aggregate**
-  read (`ListAll` grouped by `core.EpicOf`) and lands a feature when its subtree has **drained**:
-  every issue `closed` **and** no member in the in-flight projection. The in-flight clause uses
-  `o.inflight.issues()` (the single writer's read-your-writes record) to close the window where a
-  just-spawned child is not yet visible in the eventually-consistent `ListAll` but its in-flight
-  parent is. **All-or-nothing falls out of the drain test**: a blocked (dead-lettered) or still-open
-  child means `drained=false`, so the terminal merge never fires and the epic branch is abandoned
-  (`main` untouched). On drain, `terminalMerge` calls the new `Merger.MergeEpic` — a **two-parent
-  merge commit** on `main` (first parent `main`, second the epic tip via `git commit-tree -p main
-  -p epic`, tree = epic tip's tree), subject = the epic **root's** title, trailer cites the **epic
-  id** (whole-feature layer; per-child provenance stays reachable under the second parent —
-  two-tier). v1 skips re-gating at the terminal step (`main` quiescent — the last child's rebased
-  re-gate already verified the whole feature). **Idempotent**: `MergeEpic` greps `main` for a commit
-  citing the epic id and returns `merged=false` if already landed, so the steady-state slow sweep is
-  a cheap silent re-check (the root stays closed, so drain is re-detected forever); a `merged=true`
-  landing announces `MergeStateLanded` keyed by the epic root (merge-queue view) and logs. Defensive
-  `epicTip == mainTip` no-op guards an empty merge. Tests: real-git
-  `TestGitMergerEpicTerminalMergeIntegration` (two children land on `epic/feat-1`, `main` quiescent,
-  terminal merge has the right two parents/tree/subject/trailer, per-child history reachable,
-  repeated call no-ops) + orchestrator sweep tests (`epic_completion_test.go`: drain lands with
-  whole-feature provenance, per-item no-op, all-or-nothing for blocked/open/in-progress children,
-  in-flight member waits, missing root waits, idempotent `merged=false` absorbed). Docs:
-  `docs/pipeline.md` gained a "Where `integrate` lands" epic-mode paragraph. Spec
-  ([components/orchestrator.md](specs/components/orchestrator.md) §7,
-  [integration.md](specs/integration.md) "Atomic feature integration") already documented this — no
-  spec change. **Deferred to T7.5:** the wizard creating `epic/<id>` with the spec as its first
-  commit + the one-active-epic consent gate; until then the merge mechanics are complete but the
-  spec rides in via `main` inheritance (T7.3's note).
-- [x] **T7.5 One-active-epic consent gate + wizard creates the epic branch with the spec**
-  *(needs T7.4)* — *done.* Two halves landed in the Create-Task wizard's seeder
-  (`cmd/harness/wizard_seed.go`). **One-active-epic consent gate** (`ensureNoActiveEpic`): under
-  `integration.mode: epic`, `Seed` refuses a second approval while an epic is in flight, before any
-  write. It reads `beads.ListAll`, groups by `core.EpicOf`, and an epic is "active" if any member is
-  not `closed` (work in flight) **OR** its subtree has drained but its terminal merge has not yet
-  landed it on `main`. The drained-but-unlanded clause (checked via `epicLandedOnMain`, which greps
-  `main` for a provenance trailer citing the epic id — the same idempotency check `MergeEpic` uses)
-  is load-bearing: seeding a second epic in that window would cut it from a `main` lacking the first
-  feature, and the first's terminal merge (whose tree is the epic branch's) would later revert it.
-  The refusal names the in-flight feature (root issue title + id). **Single root for v1:** `validate`
-  requires exactly one seed issue in epic mode (the epic id is that root's id; more roots would mint
-  multiple epic branches + terminal merges); per-item mode is unchanged. **Spec onto the epic branch**
-  (`seedEpic` + `commitOntoEpic`): epic mode swaps the last two Seed steps — create the seed issue
-  first to learn the epic-root id (= epic id), then commit the spec+sidecar onto a fresh
-  `epic/<epic_id>` branch cut from `main`, **not** onto `main`. Done with git plumbing (`add` →
-  `write-tree` → `commit-tree -p main` → `update-ref` → `reset -- <files>`) so `main` and the
-  working-tree HEAD never move; the working-tree spec files are left on disk (unstaged). **Key
-  discovery driving the design:** the orchestrator resolves an issue's spec slice by reading the
-  repo's *working tree* (`spec.Resolve(o.opts.Repo, ...)` → `os.ReadFile`), and child sandboxes base
-  off `main` (code). So the spec must stay readable from the working tree even though it is committed
-  only on the epic branch — hence `commitOntoEpic` leaves the spec files in the working tree
-  (uncommitted relative to main) rather than checking out the epic branch. Children get the spec via
-  their Brief (read from the working tree); their candidates integrate onto the epic branch; the
-  terminal merge brings spec+code to `main` once. No orchestrator changes were needed. **Single
-  source of truth:** added `core.EpicBranch(epicID)` (the `epic/<id>` name), now used by both the
-  orchestrator (`orchestrator.epicBranch` delegates to it) and the wizard. The merge queue's
-  idempotent branch-create (T7.3) is now a no-op for an epic the wizard already opened. Docs:
-  `docs/control-room.md` APPROVE step gained an epic-mode paragraph; spec (integration.md "The epic
-  branch", control-room.md) already documented this — no spec change. Tests
-  (`cmd/harness/wizard_seed_test.go`): `TestSeedEpicCommitsSpecOntoEpicBranch` (spec on epic branch
-  cut from main, main quiescent, spec **not** on main, spec readable in working tree, root has empty
-  EpicID), `TestValidateEpicRequiresSingleRoot`, `TestSeedEpicRefusesSecondInFlight`,
-  `TestSeedEpicGateTracksLanding` (drained-but-unlanded refused; admitted once a terminal-merge
-  trailer is on main). *(spec)* [integration.md](specs/integration.md),
-  [control-room.md](specs/control-room.md)
-- [x] **T7.6 Board epic hero card** *(needs T7.4)* — under `integration.mode: epic` the board
-  makes the feature legible with no new data (rides existing `epic_id` via `core.EpicOf`).
-  `query.Board` gained an `epicMode bool` + `query.BudgetCaps` param (server passes a new
-  `s.epicMode()` reading `cfg.Harness.Mode() == config.IntegrationEpic`, plus `s.budgetCaps`);
-  in epic mode every `IssueCard` carries its shared `EpicID` and the epic **root** card a new
-  `*query.EpicSummary` hero roll-up (Integrated/Total closed-vs-all, Tokens/USD summed marginal
-  Closing* spend matching Budgets + authorizeEpic, caps vs `epic_budget`, State). State is
-  `integrating`, flipping to `done` only when the terminal merge has landed on `main` — read
-  via the new `Reader.landedOnMain` (`prov.ByIssue(epicID)` greps `main`), best-effort. The
-  view (`board.templ`/`board.go`) renders an **epic badge** on every card, a hue-hashed
-  left-border tint (`cardStyle`/`epicHue`: FNV-1a → injection-free `hsl()` SafeCSS, colour
-  never the sole channel), and an `epicHero` block (state badge, integrated X/Y + progress bar
-  via `epicProgressWidth`, spend vs cap when capped); per-item mode renders none of it. `Board`
-  echoes an `EpicMode` field. Templ + Tailwind regenerated. Tests: `query_test.go` (badge+hero
-  2/3 progress + summed spend, done-on-terminal-merge via fake prov, per-item no-chrome) and
-  `board_test.go` (rendered badge/tint/hero/`2/3`/`integrating`, per-item no chrome). Docs:
-  `docs/control-room.md` Board row gained an epic-mode paragraph. *(spec)*
-  [control-room.md](specs/control-room.md)
-- [x] **T7.7 Vault demo exercises epic mode** *(needs T7.4)* — *done.* Added the
-  `integration:\n  mode: epic` block to `demo/vault/config/harness.yaml` (with a load-bearing
-  comment: the operator drafts a *feature*, so the feature is the unit of integration **and** of
-  deploy — children integrate onto `epic/<id>`, `main` advances once at the terminal merge when
-  the subtree drains, so `run.sh`'s push watcher fires **one** deploy per feature). The deploy
-  path needed **zero** code changes — `run.sh`'s `push_main_watcher` and `deploy.yml`'s
-  `on: push: branches: [main]` already key on a `main` advance, which epic mode makes happen
-  once per feature. Verified with `harness validate --config demo/vault/config` → `OK` (the lone
-  warning is the pre-existing T2.13 producer/verifier family-overlap advisory, unrelated). Docs:
-  `demo/vault/README.md` updated — the DAG diagram now shows children landing on the epic branch
-  + a terminal `land` step, the post-diagram paragraph explains epic mode + one-deploy-per-feature,
-  the draft-feature step notes the board epic hero card and the single epic-id provenance trailer,
-  the deploy bullet notes the once-per-feature push, and the "How it maps to the real config" table
-  gained a third row (per-item → `integration.mode: epic`). No spec change (integration.md already
-  specifies the demo exercises epic mode). **Phase 7 core complete** (T7.1–T7.7); the board
-  epic-lineage enhancement is tracked as **T7.8** below. *(spec)*
-  [integration.md](specs/integration.md)
-- [x] **T7.8 Board epic-lineage thread + decoupled grouping chrome** *(needs T7.6)* — *done.*
-  Grouping chrome is now driven by data, not `integration.mode`: `query.Board` populates
-  `IssueCard.EpicID` (badge + tint) and a new `IssueCard.ParentID` (lineage edge) whenever an issue
-  belongs to a *multi-issue* epic (gate `epicCounts[ep] > 1`), in per-item and epic modes alike,
-  while a lone single-issue epic stays bare and the hero roll-up (`IssueCard.Epic`) stays
-  epic-mode-only. One colour source: `cardStyle` (board.go) publishes the FNV-hashed hue once as the
-  `--epic` CSS custom property, and the left-border tint, the new badge dot (`epicDotStyle`), and the
-  JS thread strokes all read `var(--epic)` (the JS never re-hashes). `ParentID` is derived with no new
-  beads data via `parentOf` (Base `candidate/<id>` → that producer; else non-root child → epic root;
-  root → none); cards emit `data-epic` + `data-parent` and a new embedded
-  `internal/controlroom/assets/static/lineage.js` draws a bespoke SVG bézier overlay inside the
-  `[data-board-scroll]` content-space container — faint by default, highlighting the whole path through
-  a card (ancestors + descendants) on hover/focus, redrawing on `htmx:afterSwap` + resize, honoring
-  `prefers-reduced-motion`, terminating at the qa card (blocked-by edges not drawn). Tests:
-  `query_test.go` (`TestBoardPerItemModeGroupingButNoHero`, `TestBoardSingleIssueEpicStaysBare`,
-  `TestBoardLineageParentID`) and `board_test.go` (`TestBoardLineageChromeRenders` + tightened
-  `TestBoardNoEpicChromeInPerItem`); `lineage.js` has no Go-side unit test (no JS harness in-repo) —
-  verified by manual/visual check. Docs: `docs/control-room.md` Board row updated; no spec change
-  (control-room.md already specified it). **Phase 7 fully complete** (T7.1–T7.8). *(spec)*
-  [control-room.md](specs/control-room.md)
+- [x] **T7.2 `integration.mode` config + validation** — *done.*
+- [x] **T7.3 Retarget the merge queue per epic** — *done.*
+- [x] **T7.4 Epic-completion detection + terminal merge** — *done.*
+- [x] **T7.5 One-active-epic consent gate + wizard creates the epic branch with the spec** — *done.*
+- [x] **T7.6 Board epic hero card** — *done.*
+- [x] **T7.7 Vault demo exercises epic mode** — *done.*
+- [x] **T7.8 Board epic-lineage thread + decoupled grouping chrome** — *done.*
 
 ---
 
 ## Deferred & follow-ups (filed, not blocking)
 
-- ~~Control-room tooltip on producer/verifier model-family overlap — the diversity-warning was never surfaced in the config view~~ — **done.** The config view (T4.26) now renders an **advisories** section carrying `config.Warnings()` (T2.13) — the same non-fatal advisories `harness validate` prints at startup (chiefly producer/verifier model-family overlap, plus package-proxy/git-remote-not-allowlisted). `configview.Build` projects `cfg.Warnings()` onto a new `ConfigView.Warnings []string` (Warnings() is fully nil-safe); `config.templ`'s `configWarnings` renders it in the warn color tokens, shown only when non-empty (clean config → no section). Tests: `configview_test.go` (`TestBuildSurfacesWarnings`, `TestBuildNoWarningsWhenClean`) + `config_test.go` (`TestConfigSurfacesAdvisories`, render + clean-negative). Spec: `specs/control-room.md` "The config view" gained an Advisories bullet; docs: `docs/control-room.md` Config row. CSS regenerated (`bin/tailwindcss -i assets/app.tw.css -o assets/static/app.css --minify`) for the new warn utility classes *(from T2.13)*.
 - Live-streaming replay (reconstruct the decision trail as the invocation runs) — needs the broker to emit structured per-turn events; overlaps the activity feed *(from T4.11)*.
-- ~~Wire `Reader.Replay` to read `issue.Transcript` so non-merged (dead-lettered/in-flight) invocations replay too~~ — **done.** `Reader.Replay` now resolves the transcript hash by preferring the merge trailer (merged replay byte-for-byte unchanged) then falling back to `core.Issue.Transcript` (the orchestrator stamps it for every disposition, T4.15), so dead-lettered/in-flight invocations replay — the case the forensic trail matters most for. `Reader.Invocation.ReplayAvailable` mirrors the same resolution so the live-invocation view's handoff link surfaces for a terminal *blocked* run too, not just merged work. The replay-view notice and `docs/control-room.md` were corrected (the old "retained only for work merged to main" text was stale). Tests: `replay_test.go` (`TestReplayNonMergedFromIssueStamp`, `TestReplayPrefersMergeTrailer`; fixed the stale `TestReplayNotMerged` rationale) and `query_test.go` (`TestInvocationBlockedWithStampOffersReplay`). No spec change — `specs/observability.md` already specifies replay "live or after the fact … when an autonomous change looks wrong"; only the read lagged the design *(from T4.11, T4.15)*.
 - Consolidate the status bar's 2–3 per-page SSE connections (page content + status bar + alerts.js) onto one connection or h2c *(from T4.19)*.
 - Client-side live wall/token ticker on the invocation budget meter (mid-invocation spend isn't persisted to beads) *(from T4.21)*.
-- ~~Thread `BudgetCaps` to the board cards so a `budget.wall` tint can render there~~ — **done.** `query.Board` already received `BudgetCaps`; it now stamps each `IssueCard` with `WallCapped`/`WallPct`/`WallOver` (cumulative `core.Issue.SpentWall` vs `caps.IssueWall`, via the same `meterPct`/`meterOver` the Budgets view uses, so the two surfaces never disagree on a breach). A live (non-closed) card's timer tints toward its `budget.wall` ceiling — amber at ≥80%, rose once over (`timerRowClass`/`wallTint` in `board.go`, reusing the Budgets color tokens), with the exact percent in a hover tooltip (`wallTitle`) so the cue isn't color-alone. Uncapped wall renders no tint (a percent of no cap is meaningless), mirroring the Budgets view. Realizes control-room.md "The board, in motion" ("the in-progress timer tints toward its budget.wall ceiling") — no spec change (it was spec'd optional). Tests: `query_test.go` (`TestBoardCardWallBudget`, `TestBoardCardWallUncapped`) + `board_test.go` (`TestBoardWallTimerTint`, `TestBoardWallNoTintWhenUncapped`). Docs: `docs/control-room.md` Board row *(from T4.18)*.
 - Decomposition-preview dry-run before APPROVE (control-room.md OPEN, "leaning defer"; seed issues stay coarse and the autonomous planner decomposes) *(from T4.14)*.
 - Control-room surface for the transform log (e.g. a verification-view row weighing text-fallback renames) — the record is harvested onto Evidence; only the read/render is a follow-up *(from T6.3)*.
 
