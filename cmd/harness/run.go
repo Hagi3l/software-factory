@@ -252,14 +252,20 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		return nil, err
 	}
 
-	// Production uses the Docker backend; a test may inject the local host-exec backend
-	// (never config-selectable — see runOptions.backend). The same backend serves the runner
-	// (building candidates), the gate (verifying them), and — when configured — the
-	// requirements-planner wizard's read-only codebase exploration (T4.28). Built before the
-	// control room so the planner wiring below can hand it to WithSandbox.
+	// The isolation backend is config, not code (sandbox.backend: docker | gvisor |
+	// firecracker — see specs/components/sandbox.md): NewBackend honors that selection so
+	// asking for gVisor does not silently hand back Docker. A test may inject its own
+	// backend through opts.backend (the local host-exec backend; never config-selectable),
+	// which takes precedence. The same backend serves the runner (building candidates), the
+	// gate (verifying them), and — when configured — the requirements-planner wizard's
+	// read-only codebase exploration (T4.28). Built before the control room so the planner
+	// wiring below can hand it to WithSandbox.
 	backend := opts.backend
 	if backend == nil {
-		backend = sandbox.NewDockerBackend()
+		backend, err = sandbox.NewBackend(cfg.Infra.Sandbox)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// One temp dir holds every per-sandbox broker socket (runner, gate, and the planner's

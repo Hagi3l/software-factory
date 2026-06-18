@@ -21,8 +21,11 @@ Phase 3 (full DAG, decomposition, merge queue) is complete (T3.13 landed). Phase
 is complete (T6.1–T6.3). Phase 7 (atomic feature integration / epic mode) is complete
 (T7.1–T7.8; the vault demo now runs `integration.mode: epic`). The only remaining
 *engineering* of new substrate is Phase 5 (production isolation & distribution), and within
-it every still-open item is either **optional** (T5.5 gVisor backend, T5.11 warm pools + HA
-orchestrator) or **hardware-blocked** (T5.2 Firecracker, needs KVM the dev box lacks).
+it every still-open item is either **optional** (T5.11 warm pools + HA orchestrator) or
+**hardware-blocked** (T5.2 Firecracker, needs KVM the dev box lacks). T5.5 (gVisor backend)
+is now **done** — and landing it wired up the previously-missing config→backend selection,
+so `sandbox.backend` is finally honored at startup (firecracker fails closed rather than
+silently degrading to Docker).
 
 **Phase 8 (demo-hardening) is complete** (T8.1–T8.7 all landed). The 2026-06-18 live vault-demo run surfaced read-model
 consistency bugs (scheduler + control room read beads directly) and a planner over-bundling cost
@@ -56,8 +59,8 @@ autonomous implementation) — a later validation concern, never an engineering 
   `(spec)` as it landed).
 - **Open tasks (`- [ ]`) keep their full detail.** Only **Phase 5** (production
   isolation) has open lines — the Firecracker backend T5.2 is hardware-blocked and deliberately
-  last; the optional items are T5.5 gVisor and T5.11 warm pools + HA. Everything else (Phases
-  0–4, 6, 7) is complete and collapsed.
+  last; the one remaining optional item is T5.11 warm pools + HA (T5.5 gVisor is now done).
+  Everything else (Phases 0–4, 6, 7) is complete and collapsed.
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -250,7 +253,24 @@ them); only the *order of attention* changes.
 - [x] **T5.3 Rootfs / base-image composition** — *done.*
 - [x] **T5.3a Harness kernel passes its own `gosec` gate (self-host readiness)** — *done.*
 - [x] **T5.4 Sandbox seeded-worktree ownership** *(carried from Phase 1)* — *done.*
-- [ ] **T5.5** *(optional)* gVisor backend (medium-trust). ([components/sandbox.md](specs/components/sandbox.md))
+- [x] **T5.5** *(optional)* gVisor backend (medium-trust) — *done.* Implemented as the
+  Docker provisioning path pinned to the `runsc` OCI runtime (`docker run --runtime=runsc`),
+  not a second backend — gVisor boots an ordinary container image with a user-space kernel,
+  so reusing `DockerBackend` keeps a single provisioning implementation (zero-network,
+  explicit worktree seeding, chown, wall-clock watchdog all unchanged). New `WithRuntime`
+  DockerOption + `NewGVisorBackend` (`internal/sandbox/docker.go`, `gvisor.go`→`backend.go`),
+  and **the load-bearing fix this exposed**: `cmd/harness/run.go` hardcoded
+  `NewDockerBackend()`, so `sandbox.backend: gvisor|firecracker` validated fine but was
+  silently ignored — "backend is config, not code" was not actually wired. New
+  `sandbox.NewBackend(cfg.Infra.Sandbox)` factory honors the selection: docker/""→Docker,
+  gvisor→gVisor, **firecracker→fail-closed error** (hardware-blocked T5.2, must not degrade
+  to a weaker backend than asked), unknown→error. The test-injected backend seam
+  (`opts.backend`) still takes precedence. runsc isn't installed in this dev box (no network
+  to fetch it), so the live boot is unexercised here, but the runtime-arg shaping and factory
+  selection are fully unit-tested via the existing `run` seam (no daemon needed). Tests:
+  `TestGVisorProvisionPinsRunscRuntime`, `TestDockerProvisionHasNoRuntimeFlag`,
+  `TestNewBackendSelectsByConfig`, `TestNewBackendThreadsOptions`. docs/configuration.md
+  updated (sandbox.backend now honored, firecracker fails closed). ([components/sandbox.md](specs/components/sandbox.md))
 - [x] **T5.6 Package proxy on the broker allowlist** — *done.*
 - [x] **T5.6a Gate-verifier package egress** — *done.*
 - [x] **T5.7 Scoped short-lived secret minting** — *done.*

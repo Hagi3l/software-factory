@@ -260,9 +260,14 @@ models:
   block — the per-million-token price table the orchestrator uses to convert recorded
   token usage into USD for budget enforcement. Prices are not secrets; API keys come
   from the environment.
-- **`sandbox.backend`** is `docker` in the bootstrap (a stand-in for Firecracker) and
-  the sandbox is `broker-only`: zero direct network, every call mediated by the broker
-  against the `allowlist`.
+- **`sandbox.backend`** selects the isolation backend and is honored at startup (not
+  decorative): `docker` (the bootstrap default — weak shared-kernel isolation, dev only)
+  and `gvisor` (medium-trust: the same container boot pinned to the `runsc` runtime, so
+  the host needs gVisor registered as a Docker runtime) both work today; `firecracker`
+  (the production microVM target) is **not yet available** and selecting it fails closed
+  with a clear error rather than silently degrading to Docker. Whichever backend, the
+  sandbox is `broker-only`: zero direct network, every call mediated by the broker against
+  the `allowlist`.
 - **`broker.allowlist`** is the deny-by-default egress set (a destination not listed is
   refused at the broker). `package-proxy` permits Go module fetches: the zero-network
   sandbox can't reach a proxy directly, so the image runs an in-sandbox GOPROXY shim

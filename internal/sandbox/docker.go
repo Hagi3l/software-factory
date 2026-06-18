@@ -77,7 +77,14 @@ type dockerSessionFunc func(ctx context.Context, args ...string) (SessionStream,
 // handle.
 type DockerBackend struct {
 	bin string
-	run dockerRunFunc
+	// runtime is the OCI runtime the `docker run` is pinned to (`docker run
+	// --runtime=<runtime>`). Empty means Docker's default (runc), the weak shared-kernel
+	// dev backend. Set to "runsc" by NewGVisorBackend so the same provisioning machinery
+	// boots the container under gVisor's user-space kernel (medium isolation) — the gVisor
+	// backend is Docker-with-a-runtime, not a separate provisioning path (single source of
+	// truth; see specs/components/sandbox.md "Pluggable backends").
+	runtime string
+	run     dockerRunFunc
 	// session opens a long-lived `docker exec` with attached stdin/stdout streams (the
 	// in-sandbox transport for an LSP language server). A seam over the real
 	// docker-exec-with-pipes, defaulted in NewDockerBackend; tests inject a fake.
@@ -96,6 +103,15 @@ type DockerOption func(*DockerBackend)
 // on PATH).
 func WithDockerBinary(path string) DockerOption {
 	return func(b *DockerBackend) { b.bin = path }
+}
+
+// WithRuntime pins the OCI runtime the container boots under (`docker run
+// --runtime=<runtime>`). Empty (the default) uses Docker's configured default, runc.
+// NewGVisorBackend passes "runsc" to boot under gVisor's user-space kernel; the rest
+// of the provisioning path is identical, so the gVisor backend reuses every Docker
+// invariant (zero-network, explicit worktree seeding, wall-clock watchdog) unchanged.
+func WithRuntime(runtime string) DockerOption {
+	return func(b *DockerBackend) { b.runtime = runtime }
 }
 
 // NewDockerBackend builds a DockerBackend. With no options it invokes "docker" from
@@ -166,17 +182,23 @@ func (b *DockerBackend) Provision(ctx context.Context, spec Spec) (Sandbox, erro
 	// out. Disk is not enforced here — Docker disk quotas need a specific storage
 	// driver (storage-opt); it is optional in the contract and left to the production
 	// (Firecracker) backend.
-	runArgs := []string{
-		"run", "-d", "--init",
+	runArgs := []string{"run", "-d", "--init"}
+	// --runtime pins the OCI runtime: empty keeps Docker's default (runc, dev), "runsc"
+	// boots under gVisor's user-space kernel (the gVisor backend). It must precede the
+	// image, like every other `docker run` flag.
+	if b.runtime != "" {
+		runArgs = append(runArgs, "--runtime", b.runtime)
+	}
+	runArgs = append(runArgs,
 		"--network", "none",
 		"--name", name,
 		"--cpus", strconv.Itoa(spec.Limits.CPU),
 		"--memory", strconv.FormatInt(memBytes, 10),
 		"-w", containerWorkdir,
-		"-v", spec.Broker.Address + ":" + containerBrokerSock,
+		"-v", spec.Broker.Address+":"+containerBrokerSock,
 		image,
 		"sleep", keepAliveSeconds,
-	}
+	)
 	out, err := b.dockerOK(ctx, nil, runArgs...)
 	if err != nil {
 		return nil, err
