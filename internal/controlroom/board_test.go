@@ -376,17 +376,43 @@ func TestBoardEpicChromeRenders(t *testing.T) {
 }
 
 // TestBoardNoEpicChromeInPerItem proves the default per-item server renders no epic chrome — the
-// shared fixture threads no epic_id and the mode is per-item, so neither a badge nor a hero block
-// appears. This guards against the epic chrome leaking into the kernel default.
+// shared fixture is three single-issue epics (no shared epic_id) and the mode is per-item, so
+// neither a grouping badge nor a hero block appears. This guards against the epic chrome leaking
+// onto a board of unrelated lone issues (the grouping gate is a real multi-issue fan-out).
 func TestBoardNoEpicChromeInPerItem(t *testing.T) {
-	ts := boardServer(t) // no Config → per-item
+	ts := boardServer(t) // no Config → per-item; fixture is lone issues, no shared epic
 	r := get(t, ts, "/board")
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
-	for _, unwanted := range []string{"epic ", "border-left-color", "integrating"} {
+	for _, unwanted := range []string{"epic ", "border-left-color", "integrating", "data-epic", "data-parent"} {
 		if strings.Contains(r.body, unwanted) {
-			t.Errorf("per-item board unexpectedly contains epic chrome %q", unwanted)
+			t.Errorf("per-item board of lone issues unexpectedly contains epic chrome %q", unwanted)
+		}
+	}
+}
+
+// TestBoardLineageChromeRenders is T7.8's rendered-HTML contract: a multi-issue epic's cards carry
+// the lineage data-attributes (data-epic for grouping, data-parent for the thread edge) and the
+// single color source — the --epic custom property, read by the tint, the badge dot, and the
+// client thread alike (board.go cardStyle). It also wires the lineage.js overlay. The fixture's
+// children carry no candidate base, so each threads to the epic root (data-parent="feat-1").
+func TestBoardLineageChromeRenders(t *testing.T) {
+	ts := epicBoardServer(t)
+	r := get(t, ts, "/board")
+	if r.status != http.StatusOK {
+		t.Fatalf("status = %d, want 200", r.status)
+	}
+	for _, want := range []string{
+		`data-epic="feat-1"`,        // the grouping key the overlay reads
+		`data-parent="feat-1"`,      // the lineage edge: a child threads to the epic root
+		"--epic:",                   // the one color source published on the card
+		"var(--epic)",               // the tint reads the custom property, not a re-hash
+		"data-board-scroll",         // the overlay's content-space anchor
+		"/static/lineage.js",        // the thread overlay is loaded
+	} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("lineage board missing %q", want)
 		}
 	}
 }

@@ -663,10 +663,11 @@ func TestBoardEpicHeroDoneOnTerminalMerge(t *testing.T) {
 	}
 }
 
-// TestBoardPerItemModeNoEpicChrome proves per-item mode omits the epic chrome entirely: every
-// issue is its own epic there, so a badge on every card would be noise. No card carries an EpicID
-// or a hero summary even though the issues thread an epic_id.
-func TestBoardPerItemModeNoEpicChrome(t *testing.T) {
+// TestBoardPerItemModeGroupingButNoHero proves T7.8's decouple: in per-item mode a *multi-issue*
+// epic still carries the grouping chrome (the shared EpicID badge/tint key on every card) because
+// that is pure observability, but no card carries the hero summary — the hero's integrating→done
+// lifecycle is epic-mode-only. epicBoardIssues is a real 3-issue fan-out, so all three group.
+func TestBoardPerItemModeGroupingButNoHero(t *testing.T) {
 	r := NewReader(&fakeIssues{all: epicBoardIssues()}, &fakeArts{}, &fakeProv{})
 	board, err := r.Board(context.Background(), []string{"plan", "implement", "qa"}, false, BudgetCaps{})
 	if err != nil {
@@ -677,8 +678,62 @@ func TestBoardPerItemModeNoEpicChrome(t *testing.T) {
 	}
 	for _, id := range []string{"feat-1", "feat-1.1", "feat-1.2"} {
 		c := findCard(board, id)
-		if c.EpicID != "" || c.Epic != nil {
-			t.Errorf("card %s has epic chrome in per-item mode (EpicID=%q, Epic=%v)", id, c.EpicID, c.Epic)
+		if c.EpicID != "feat-1" {
+			t.Errorf("card %s EpicID = %q, want feat-1 (grouping is decoupled from mode)", id, c.EpicID)
+		}
+		if c.Epic != nil {
+			t.Errorf("card %s carries a hero summary in per-item mode (hero is epic-mode-only)", id)
+		}
+	}
+}
+
+// TestBoardSingleIssueEpicStaysBare proves the grouping chrome gates on a genuine multi-issue
+// fan-out: a lone, directly-seeded issue (its own single-issue epic) gets neither badge nor
+// thread, in either mode — there the chrome would only be noise (T7.8).
+func TestBoardSingleIssueEpicStaysBare(t *testing.T) {
+	issues := []core.Issue{
+		{ID: "solo-1", Title: "A lone task", Role: "implement", Status: "in_progress"},
+		{ID: "solo-2", Title: "Another lone task", Role: "plan", Status: "closed"},
+	}
+	for _, epicMode := range []bool{false, true} {
+		r := NewReader(&fakeIssues{all: issues}, &fakeArts{}, &fakeProv{})
+		board, err := r.Board(context.Background(), []string{"plan", "implement"}, epicMode, BudgetCaps{})
+		if err != nil {
+			t.Fatalf("Board(epicMode=%v): %v", epicMode, err)
+		}
+		for _, id := range []string{"solo-1", "solo-2"} {
+			c := findCard(board, id)
+			if c.EpicID != "" || c.ParentID != "" {
+				t.Errorf("epicMode=%v: lone issue %s has grouping chrome (EpicID=%q, ParentID=%q)", epicMode, id, c.EpicID, c.ParentID)
+			}
+		}
+	}
+}
+
+// TestBoardLineageParentID proves the lineage thread's edge target (ParentID) is derived with no
+// new beads data (T7.8): a card whose Base is a candidate branch threads to that producer's id; a
+// top-level decomposition child (no candidate base) threads to the epic root; the root has none.
+func TestBoardLineageParentID(t *testing.T) {
+	issues := []core.Issue{
+		{ID: "feat-1", Title: "root", Role: "plan", Status: "closed"},
+		// A top-level decomposition child: no candidate base → threads to the epic root.
+		{ID: "feat-1.1", Title: "child", Role: "implement", Status: "closed", EpicID: "feat-1"},
+		// A produced next-stage issue: its Base names its predecessor's verified candidate.
+		{ID: "feat-1.2", Title: "produced", Role: "qa", Status: "in_progress", EpicID: "feat-1", Base: core.CandidateBranch("feat-1.1")},
+	}
+	r := NewReader(&fakeIssues{all: issues}, &fakeArts{}, &fakeProv{})
+	board, err := r.Board(context.Background(), []string{"plan", "implement", "qa"}, false, BudgetCaps{})
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	want := map[string]string{"feat-1": "", "feat-1.1": "feat-1", "feat-1.2": "feat-1.1"}
+	for id, parent := range want {
+		c := findCard(board, id)
+		if c == nil {
+			t.Fatalf("card %s missing", id)
+		}
+		if c.ParentID != parent {
+			t.Errorf("card %s ParentID = %q, want %q", id, c.ParentID, parent)
 		}
 	}
 }

@@ -26,20 +26,29 @@ func cardVTName(id string) templ.SafeCSS {
 }
 
 // cardStyle is the card's inline style: always the view-transition-name (cardVTName) so a moved
-// card animates, plus — under epic mode (card.EpicID set) — a left-border tint whose hue is a
-// deterministic hash of the epic id (T7.6, control-room.md "Epics on the board"). The tint groups
-// a feature's work visually and disambiguates simultaneous epics with no central color registry,
-// stable across restarts. Color is never the *sole* channel (the epic badge text is the robust
-// identifier) — this is a redundant cue per the spec's accessibility note. It returns templ.SafeCSS
-// (bypassing templ's style sanitizer, which would strip view-transition-name): both interpolated
-// values are injection-free — the id is reduced to the CSS ident charset and the hue is an integer.
+// card animates, plus — when the card belongs to a multi-issue epic (card.EpicID set) — the
+// epic's color published as the `--epic` CSS custom property and a left-border tint reading it.
+// Publishing the hue once as a custom property is the *one color source* (T7.8): the tint here,
+// the badge dot, and the client-drawn lineage thread all read var(--epic), so the JS overlay
+// never re-implements the Go FNV hash. The hue is a deterministic hash of the epic id (T7.6,
+// control-room.md "Epics on the board") — registry-free, stable across restarts, grouping a
+// feature's work visually and disambiguating simultaneous epics. Color is never the *sole*
+// channel (the epic badge text is the robust identifier) — a redundant cue per the spec's
+// accessibility note. It returns templ.SafeCSS (bypassing templ's style sanitizer, which would
+// strip view-transition-name): every interpolated value is injection-free — the id is reduced to
+// the CSS ident charset and the hue is an integer.
 func cardStyle(card query.IssueCard) templ.SafeCSS {
 	css := string(cardVTName(card.ID))
 	if card.EpicID != "" {
-		css += "; border-left-width: 3px; border-left-color: " + epicHue(card.EpicID)
+		css += "; --epic: " + epicHue(card.EpicID) + "; border-left-width: 3px; border-left-color: var(--epic)"
 	}
 	return templ.SafeCSS(css)
 }
+
+// epicDotStyle fills the epic badge's dot from the card's --epic custom property (cardStyle) — so
+// the badge dot and the left-border tint read the one color source (T7.8). It is a constant,
+// injection-free declaration, returned as SafeCSS so templ's sanitizer does not strip the var().
+func epicDotStyle() templ.SafeCSS { return templ.SafeCSS("background-color: var(--epic)") }
 
 // epicHue maps an epic id to a stable, well-distributed CSS hsl() color string. The hue is an
 // FNV-1a hash of the id modulo 360 (so it is deterministic and registry-free — the same epic is

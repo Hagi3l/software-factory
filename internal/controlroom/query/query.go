@@ -74,17 +74,28 @@ type IssueCard struct {
 	StateEnteredAt time.Time
 	CreatedAt      time.Time
 	// EpicID is the card's epic identity (core.EpicOf: the root seed's id, shared by every
-	// issue of one feature) — set only under integration.mode: epic, "" otherwise. The board
-	// renders it as a shared epic badge + a hue-hashed left-border tint so simultaneous epics
-	// read apart and a feature's work groups visually (T7.6, control-room.md "Epics on the
-	// board"). It is empty in per-item mode, where every issue is its own epic and the chrome
-	// would be noise.
+	// issue of one feature). It is set whenever the issue belongs to a *multi-issue* epic — a
+	// real decomposition fan-out (the epic's issue count > 1) — in per-item and epic modes
+	// alike, because the grouping chrome it drives (a shared epic badge, a hue-hashed
+	// left-border tint, and the lineage thread) is pure observability and is meaningful as soon
+	// as a feature has more than one work item (T7.8, control-room.md "Epics on the board"). A
+	// lone, directly-seeded issue (its own single-issue epic) leaves it empty — there the chrome
+	// would only be noise.
 	EpicID string
+	// ParentID is the id of the card that *produced* this one — the lineage thread's edge
+	// target (T7.8, control-room.md "Lineage thread"). It is derived with no new beads data:
+	// a produced issue branches from its predecessor's verified candidate, so a Base of
+	// candidate/<id> names the stage producer; a top-level decomposition child (no such base)
+	// descends directly from the epic root. The root itself has none. Set only for cards in a
+	// multi-issue epic (the same gate as EpicID), since a lone issue has no lineage to thread.
+	ParentID string
 	// Epic is the whole-feature summary, set only on an epic's *root* card (the hero) under
 	// epic mode — nil on a child card and in per-item mode. It carries the progress indicator
 	// (children integrated / total), the aggregate spend vs the epic_budget cap, and the
 	// feature's integrating→done state, so the operator watches the feature land without
-	// reading commits (T7.6, control-room.md "The root card is the hero").
+	// reading commits (T7.6, control-room.md "The root card is the hero"). It stays epic-mode-
+	// only by design: its integrating→done lifecycle is git-derived and meaningless in per-item,
+	// where the root closes at decomposition — so the grouping chrome above is decoupled from it.
 	Epic *EpicSummary
 }
 
@@ -217,16 +228,26 @@ const unassignedStage = "(unassigned)"
 // ad-hoc role the config never declared — is appended in stable alphabetical order, with
 // unassigned work last; those materialize only when they actually hold cards. Cards within
 // a column are ordered by id for a stable render.
-// Under integration.mode: epic (epicMode), every card is enriched with its epic identity (the
-// hue-hashed badge/tint) and each epic's root card carries the whole-feature EpicSummary hero
-// roll-up, measured against the supplied epic budget caps (T7.6, control-room.md "Epics on the
-// board"). In per-item mode (epicMode false) the epic chrome is omitted entirely — every issue
-// is its own epic there, so a badge on every card would be noise — and caps is ignored. caps is
-// the same query.BudgetCaps the Budgets view uses, so the hero's spend agrees with that view.
+// The grouping chrome — each card's epic identity (the hue-hashed badge/tint) and its lineage
+// parent (the thread edge) — is driven by the *data*, not the mode: a card gets it whenever its
+// issue belongs to a multi-issue epic (a real decomposition fan-out), in per-item and epic modes
+// alike (T7.8, control-room.md "Epics on the board"). A lone, directly-seeded issue (its own
+// single-issue epic) stays bare — the chrome would only be noise. The whole-feature EpicSummary
+// hero roll-up, by contrast, is set only under integration.mode: epic (epicMode) on each epic's
+// root card and measured against the supplied epic budget caps (T7.6) — its integrating→done
+// lifecycle is git-derived and meaningless in per-item, where the root closes at decomposition.
+// caps is the same query.BudgetCaps the Budgets view uses, so the hero's spend agrees with that
+// view; it is ignored in per-item mode.
 func (r *Reader) Board(ctx context.Context, stageOrder []string, epicMode bool, caps BudgetCaps) (Board, error) {
 	issues, err := r.issues.ListAll(ctx)
 	if err != nil {
 		return Board{}, fmt.Errorf("query: board: %w", err)
+	}
+	// Count issues per epic so the grouping chrome gates on a genuine multi-issue fan-out
+	// (epic count > 1), independent of integration.mode.
+	epicCounts := make(map[string]int)
+	for _, i := range issues {
+		epicCounts[core.EpicOf(i)]++
 	}
 	var summaries map[string]*EpicSummary
 	if epicMode {
@@ -239,14 +260,17 @@ func (r *Reader) Board(ctx context.Context, stageOrder []string, epicMode bool, 
 			stage = unassignedStage
 		}
 		c := cardOf(i)
-		if epicMode {
-			ep := core.EpicOf(i)
+		ep := core.EpicOf(i)
+		// Grouping chrome rides a real multi-issue epic, in either mode: the shared badge/tint
+		// (EpicID) and the lineage thread's edge target (ParentID).
+		if epicCounts[ep] > 1 {
 			c.EpicID = ep
-			// A card is its epic's root (the hero) exactly when its own id is the epic id; only
-			// the hero carries the whole-feature summary, children carry just the shared badge.
-			if i.ID == ep {
-				c.Epic = summaries[ep]
-			}
+			c.ParentID = parentOf(i, ep)
+		}
+		// The hero is epic-mode-only and rides the epic root card (its own id == the epic id);
+		// children carry just the shared grouping chrome above.
+		if epicMode && i.ID == ep {
+			c.Epic = summaries[ep]
 		}
 		byStage[stage] = append(byStage[stage], c)
 	}
@@ -261,6 +285,23 @@ func (r *Reader) Board(ctx context.Context, stageOrder []string, epicMode bool, 
 		board.Columns[idx].Focus = true
 	}
 	return board, nil
+}
+
+// parentOf derives a card's lineage parent — the card that produced it — with no new beads
+// data (T7.8, control-room.md "Lineage thread"). A produced issue branches from its
+// predecessor's verified candidate, so a Base of candidate/<id> names the stage producer
+// directly; a child without such a base (a top-level decomposition issue, or a freshly seeded
+// one) descends from the epic root, so it threads back to ep. The root itself (its own id == the
+// epic id) has no parent. The thread it backs is a clean producer tree — sibling-ordering
+// blocked-by edges are deliberately not drawn (control-room.md).
+func parentOf(i core.Issue, ep string) string {
+	if pid, ok := core.IssueIDFromCandidateBranch(i.Base); ok {
+		return pid
+	}
+	if i.ID != ep {
+		return ep
+	}
+	return ""
 }
 
 // frontierColumn returns the index of the board's work frontier — the column the view

@@ -19,7 +19,7 @@ the optional T2.11 decision-note remains (resolved as configuration, not a build
 Phase 3 (full DAG, decomposition, merge queue) is complete (T3.13 landed). Phase 4
 (control room + Create/Resolve wizard) is complete. Phase 6 (agent semantic LSP tooling)
 is complete (T6.1–T6.3). Phase 7 (atomic feature integration / epic mode) is complete
-(T7.1–T7.7; the vault demo now runs `integration.mode: epic`). The only remaining
+(T7.1–T7.8; the vault demo now runs `integration.mode: epic`). The only remaining
 *engineering* of new substrate is Phase 5 (production isolation & distribution), and within
 it every still-open item is either **optional** (T5.5 gVisor backend, T5.11 warm pools + HA
 orchestrator) or **hardware-blocked** (T5.2 Firecracker, needs KVM the dev box lacks).
@@ -40,17 +40,17 @@ autonomous implementation) — a later validation concern, never an engineering 
 ## How to read this
 
 - **Completed tasks are collapsed to a one-line `— *done.*` checklist entry.** Phases
-  0–1, 2, 3, 4, and 6 are done; the verbose per-task findings were pruned once complete —
+  0–1, 2, 3, 4, 6, and 7 are done; the verbose per-task findings were pruned once complete —
   that history lives in git, the code, and the specs they informed (each task updated its
   `(spec)` as it landed).
-- **Open tasks (`- [ ]`) keep their full detail.** One open line remains: **Phase 5** (production
-  isolation — the Firecracker backend T5.2 is hardware-blocked and deliberately last; the
-  optional items are T5.5 gVisor and T5.11 warm pools + HA). **Phase 7** (atomic feature
+- **Open tasks (`- [ ]`) keep their full detail.** Only **Phase 5** (production
+  isolation) has open lines — the Firecracker backend T5.2 is hardware-blocked and deliberately
+  last; the optional items are T5.5 gVisor and T5.11 warm pools + HA. **Phase 7** (atomic feature
   integration / epic mode) is **complete** — T7.1 (the live multi-child-rebase bug),
   T7.2 (`integration.mode` config), T7.3 (merge-queue retargeting), T7.4 (epic-completion
   detection + terminal merge), T7.5 (one-active-epic consent gate + wizard creates the epic
-  branch with the spec), T7.6 (board epic hero card), and T7.7 (vault demo exercises epic mode)
-  are all done.
+  branch with the spec), T7.6 (board epic hero card), T7.7 (vault demo exercises epic mode),
+  and T7.8 (board epic-lineage thread + decoupled grouping chrome) are all done.
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -436,38 +436,25 @@ per epic, not new machinery. Spec contract:
   specifies the demo exercises epic mode). **Phase 7 core complete** (T7.1–T7.7); the board
   epic-lineage enhancement is tracked as **T7.8** below. *(spec)*
   [integration.md](specs/integration.md)
-- [ ] **T7.8 Board epic-lineage thread + decoupled grouping chrome** *(needs T7.6)* — make the
-  board show *which work items belong to one feature and how they descend*, building on T7.6's
-  hero/chrome. Three moves (control-room.md "Epics on the board", updated):
-  1. **Decouple grouping from `integration.mode`.** Today `query.Board` only sets `IssueCard.EpicID`
-     (and so the badge + tint) under epic mode. Drive the **badge + tint + lineage thread** off the
-     data instead: populate `EpicID = core.EpicOf(i)` whenever the issue belongs to a **multi-issue
-     epic** (a real decomposition fan-out — gate on the epic's issue count > 1, which `epicSummaries`
-     already knows), in `per-item` and `epic` modes alike. A lone, directly-seeded issue (its own
-     single-issue epic) stays bare. The **hero** roll-up (`IssueCard.Epic`/`EpicSummary`) stays
-     **epic-mode-only** — its `integrating → done` state is git-derived and meaningless in per-item,
-     where the root closes at decomposition.
-  2. **One colour source.** Refactor `cardStyle`/`epicHue` (board.go) to emit the hashed hue as a
-     CSS custom property `--epic` on the card; the left-border tint, the badge dot, and the new
-     thread strokes all read `var(--epic)` — so the JS overlay never re-implements the Go FNV hash.
-  3. **Lineage thread (bespoke client overlay).** Add `ParentID` to `IssueCard`, derived with **no
-     new beads data**: `base == candidate/<id>` → parent `<id>` (the stage producer); else a
-     top-level decomposition child → parent = the epic root (`core.EpicOf`); the root → none.
-     Emit `data-parent` + `data-epic` on each card. A new embedded `lineage.js` (loaded like
-     `ticker.js`/`board-autoscroll.js`) draws an SVG layer **inside the horizontal scroll
-     container** (content-space coords, so it scrolls with the cards): a curved bézier from each
-     card's parent (right edge) to the card (left edge), stroked `var(--epic)`, **faint by default**;
-     hover/focus a card **highlights the whole path through it** (ancestors + descendants) and
-     **dims** the rest. Redraw on `htmx:afterSwap` and after the View-Transition settles (not
-     mid-tween) and on resize; draw statically under `prefers-reduced-motion`. The thread terminates
-     at the **qa** card (`integrate` has no card). Sibling-ordering `blocked-by` edges are **not**
-     drawn (clean producer tree). This is the one client-side-graph exception (control-room.md
-     *Graph viz*) — a bespoke overlay, no graph library; the DAG view stays server-side SVG.
-  Tests: `query_test.go` for `ParentID` derivation + the >1-issue decouple gate (per-item decomposed
-  epic now carries `EpicID`; single-issue issue stays bare; hero still per-item-suppressed);
-  `board_test.go` for the `--epic` var + `data-parent`/`data-epic` attributes. The `lineage.js`
-  overlay has no Go-side unit test (no JS harness in-repo) — verified by visual/manual check; note
-  this rather than imply coverage. Docs: `docs/control-room.md` Board row. *(spec)*
+- [x] **T7.8 Board epic-lineage thread + decoupled grouping chrome** *(needs T7.6)* — *done.*
+  Grouping chrome is now driven by data, not `integration.mode`: `query.Board` populates
+  `IssueCard.EpicID` (badge + tint) and a new `IssueCard.ParentID` (lineage edge) whenever an issue
+  belongs to a *multi-issue* epic (gate `epicCounts[ep] > 1`), in per-item and epic modes alike,
+  while a lone single-issue epic stays bare and the hero roll-up (`IssueCard.Epic`) stays
+  epic-mode-only. One colour source: `cardStyle` (board.go) publishes the FNV-hashed hue once as the
+  `--epic` CSS custom property, and the left-border tint, the new badge dot (`epicDotStyle`), and the
+  JS thread strokes all read `var(--epic)` (the JS never re-hashes). `ParentID` is derived with no new
+  beads data via `parentOf` (Base `candidate/<id>` → that producer; else non-root child → epic root;
+  root → none); cards emit `data-epic` + `data-parent` and a new embedded
+  `internal/controlroom/assets/static/lineage.js` draws a bespoke SVG bézier overlay inside the
+  `[data-board-scroll]` content-space container — faint by default, highlighting the whole path through
+  a card (ancestors + descendants) on hover/focus, redrawing on `htmx:afterSwap` + resize, honoring
+  `prefers-reduced-motion`, terminating at the qa card (blocked-by edges not drawn). Tests:
+  `query_test.go` (`TestBoardPerItemModeGroupingButNoHero`, `TestBoardSingleIssueEpicStaysBare`,
+  `TestBoardLineageParentID`) and `board_test.go` (`TestBoardLineageChromeRenders` + tightened
+  `TestBoardNoEpicChromeInPerItem`); `lineage.js` has no Go-side unit test (no JS harness in-repo) —
+  verified by manual/visual check. Docs: `docs/control-room.md` Board row updated; no spec change
+  (control-room.md already specified it). **Phase 7 fully complete** (T7.1–T7.8). *(spec)*
   [control-room.md](specs/control-room.md)
 
 ---
