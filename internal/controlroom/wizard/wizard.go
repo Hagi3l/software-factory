@@ -106,6 +106,7 @@ type Planner struct {
 	log          *slog.Logger
 	sandboxCfg   *sandboxConfig // read-only exploration template (T4.28); nil = tools disabled
 	projectIndex string         // specs/README.md content for Create grounding (T4.28); "" = none
+	epicMode     bool           // integration.mode: epic — Create drafts must seed exactly one root (T8.7)
 
 	mu          sync.Mutex
 	sessions    map[string]*Session
@@ -204,6 +205,20 @@ func WithProjectIndex(readme string) Option {
 	return func(p *Planner) { p.projectIndex = logSnippet(readme, maxProjectIndexRunes) }
 }
 
+// WithEpicMode tells the planner the run lands features atomically (integration.mode: epic), so a
+// Create draft must seed **exactly one** root issue — the epic is keyed on that single root's id
+// and the decomposition planner fans it into children (specs/integration.md "exactly one root",
+// specs/control-room.md). T8.7: the persona alone cannot know the run's integration mode (it is a
+// static prompt shared across deployments), so without this the planner had no way to honor the
+// one-root rule and the demo run drafted two roots — the consent gate then refused the approve.
+// Folding the mode into the system prompt at session start (epicGrounding) makes the rule live.
+// The composition root sets it only when cfg.Harness.Mode() == config.IntegrationEpic; the default
+// per-item mode leaves it false and the wizard's behavior byte-for-byte unchanged. Resolve sessions
+// seed no new work, so the rule is irrelevant there and only New (Create) folds it in.
+func WithEpicMode() Option {
+	return func(p *Planner) { p.epicMode = true }
+}
+
 // NewPlanner builds a requirements planner over a resolved model adapter and persona text.
 // The composition root resolves the configured model to an adapter (via the infra registry),
 // reads the persona file, and (for T4.28) reads specs/README.md, passing each in as text — so
@@ -238,6 +253,13 @@ func (p *Planner) New() *Session {
 		persona += projectGrounding(p.projectIndex)
 		opening = []model.Message{{Role: model.RoleAssistant, Text: createGreeting(p.sandboxCfg != nil)}}
 	}
+	// In epic mode fold the one-root rule into the system prompt so the planner honors it when it
+	// drafts (T8.7). It rides the system channel like projectGrounding — it shapes the planner's
+	// reasoning without appearing in the human↔planner transcript. Gated on epicMode, so a per-item
+	// session is unchanged.
+	if p.epicMode {
+		persona += epicGrounding()
+	}
 	return p.register(&Session{
 		ID:          newID(),
 		hub:         live.NewHub(),
@@ -269,6 +291,27 @@ func projectGrounding(index string) string {
 		b.WriteByte('\n')
 	}
 	b.WriteString("----- end specs/README.md -----\n")
+	return b.String()
+}
+
+// epicGrounding folds the run's epic integration mode into the system prompt (T8.7) so the planner
+// drafts exactly one root seed issue. The rule is a hard correctness property of the consent gate
+// (specs/integration.md "exactly one root"): the epic is keyed on the single root's id, so a draft
+// with two roots mints two epics and the gate refuses the approve. Stating it here turns that
+// post-hoc refusal into up-front guidance — the planner captures the whole feature as one coarse
+// seed and lets decomposition split it. It rides the system channel (background context), so the
+// human↔planner transcript stays clean.
+func epicGrounding() string {
+	var b strings.Builder
+	b.WriteString("\n\n## Integration mode: epic (read at session start)\n\n")
+	b.WriteString("This run lands each feature **atomically**: the whole feature merges to `main` in ")
+	b.WriteString("one commit, or none of it does. The epic is keyed on a **single root issue id**, so ")
+	b.WriteString("your draft must seed **exactly one** root seed issue — capture the whole feature as ")
+	b.WriteString("one coarse seed and let the autonomous decomposition planner fan it into the child ")
+	b.WriteString("work items. Do **not** split the feature into multiple seed issues yourself: two or ")
+	b.WriteString("more roots would mint multiple epics (each its own branch and landing), defeating ")
+	b.WriteString("one-feature-one-landing, and the consent gate will refuse the draft. One feature, ")
+	b.WriteString("one root seed — every inter-task split comes from decomposition, not from you.\n")
 	return b.String()
 }
 

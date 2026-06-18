@@ -369,6 +369,12 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			if readme, rerr := os.ReadFile(filepath.Join(repo, "specs", "README.md")); rerr == nil {
 				plannerOpts = append(plannerOpts, wizard.WithProjectIndex(string(readme)))
 			}
+			// Under integration.mode: epic tell the planner to seed exactly one root issue (T8.7), so
+			// it honors the epic's one-root contract up front rather than having the consent gate
+			// refuse a two-root draft after the fact. No-op in the default per-item mode.
+			if cfg.Harness.Mode() == config.IntegrationEpic {
+				plannerOpts = append(plannerOpts, wizard.WithEpicMode())
+			}
 			// Read-only codebase exploration (T4.28): when a sandbox profile is configured, give the
 			// planner the agent's read tools over a fresh read-only sandbox seeded from the repo, so
 			// it grounds specs + seed issues in the real code. baseRef defaults to the repo's current

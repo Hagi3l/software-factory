@@ -24,14 +24,15 @@ is complete (T6.1–T6.3). Phase 7 (atomic feature integration / epic mode) is c
 it every still-open item is either **optional** (T5.5 gVisor backend, T5.11 warm pools + HA
 orchestrator) or **hardware-blocked** (T5.2 Firecracker, needs KVM the dev box lacks).
 
-**Phase 8 (demo-hardening) has live work.** The 2026-06-18 live vault-demo run surfaced read-model
+**Phase 8 (demo-hardening) is complete** (T8.1–T8.7 all landed). The 2026-06-18 live vault-demo run surfaced read-model
 consistency bugs (scheduler + control room read beads directly) and a planner over-bundling cost
 issue. The **read-model spine is complete** (T8.1–T8.4, T8.6): the orchestrator's work-graph
 projection is now the authoritative live read model — the scheduler dispatches off it (T8.2), it is
 durable-stamped + correctly rolled up (T8.3), and the control room's live work-state views read it
 instead of polling beads (T8.4). The cost-driver fix has also landed: **T8.5** hardened both
 decomposition-planner personas to require single-concern children (closing the spec↔persona gap —
-the spec already mandated it). Remaining: **T8.7** (wizard one-root-in-epic hardening). See Phase 8 below,
+the spec already mandated it). **T8.7** (wizard one-root-in-epic hardening) has landed — Phase 8
+is now complete. See Phase 8 below,
 [`demo-run-issues.md`](demo-run-issues.md), and [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md).
 
 **Development mode for Phases 2–6: built by hand with Claude Code, human-reviewed —
@@ -430,11 +431,22 @@ switchable to de-risk rollout.
   `results.go` pass). The `mergeCandidate` success log is now `orchestrator: merged candidate` with a
   `target=<integrationBranchName(issue)>` field — `epic/<id>` in epic mode, `main` in per-item — so
   the log never claims a child advanced `main` when it landed on the epic branch. (No spec change.)
-- [ ] **T8.7 Wizard one-root-in-epic hardening** *(fixes #1)* — harden the requirements-planner
-  persona (`config/souls/prompts/requirements-planner.md`) to always seed exactly one root issue
-  in epic mode, and clarify the wizard error (`cmd/harness/wizard_seed.go:197`). Spec touch only
-  if the one-root-in-epic rule isn't already stated.
-  ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md))
+- [x] **T8.7 Wizard one-root-in-epic hardening** *(fixes #1)* — *done.* The root cause was that
+  the requirements-planner persona is a **static prompt shared across deployments** — it had no way
+  to know the run's `integration.mode`, so it split the feature at the *seed* level (two roots) and
+  the consent gate refused the APPROVE after the fact. Fix is **systemic, not just persona text**:
+  a new `wizard.WithEpicMode()` option (`internal/controlroom/wizard/wizard.go`) folds a one-root
+  directive into the Create session's **system prompt** at `New()` (via `epicGrounding()`, mirroring
+  `projectGrounding`/T4.28) — it rides the system channel, never the human↔planner transcript;
+  `cmd/harness/run.go` sets it only when `cfg.Harness.Mode() == config.IntegrationEpic`, so per-item
+  sessions are byte-for-byte unchanged. Both personas (`config/` + `demo/vault/config/`, kept
+  in-sync) also gained an explicit one-root-in-epic bullet in "The draft" rules. The consent-gate
+  error (`wizard_seed.go`) was clarified to name *why* (epic keyed on a single root id) and the
+  action (ask the planner to consolidate; decomposition splits it back). **No spec change** —
+  integration.md ("exactly one root") and control-room.md already mandate it; docs already document
+  it. Tests: `TestEpicModeFoldsOneRootRuleIntoPrompt` + `TestPerItemModeLeavesPromptUnchanged`
+  (grounding is opt-in, never leaks into the transcript); existing `TestValidateEpicRequiresSingleRoot`
+  still green. ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md), [integration.md](specs/integration.md))
 
 ---
 

@@ -202,7 +202,7 @@ func (s *wizardSeeder) validate(req wizard.SeedRequest) error {
 	// than one root would mint multiple epics (each its own branch + terminal merge), defeating
 	// the one-feature-one-landing contract.
 	if s.epicMode() && len(req.Issues) != 1 {
-		return fmt.Errorf("epic mode lands one feature atomically, so a draft must seed exactly one root issue (the planner decomposes it into children); got %d — consolidate them into a single seed issue", len(req.Issues))
+		return fmt.Errorf("epic mode lands one feature atomically and keys the epic on a single root issue id, so a draft must seed exactly one root issue — got %d. Ask the planner to consolidate them into a single coarse root seed; the autonomous decomposition planner splits it back into the child work items (multiple roots would mint multiple epics, each its own branch and landing)", len(req.Issues))
 	}
 	batch, err := s.validateSpecFiles(req.Specs)
 	if err != nil {

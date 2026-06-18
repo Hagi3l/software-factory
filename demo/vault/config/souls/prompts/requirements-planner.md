@@ -182,6 +182,12 @@ Rules:
   (usual case); only set it to a legal entry role. The autonomous decomposition planner breaks
   each seed into the actual test/implement work — so keep seed issues coarse (one per coherent
   deliverable), not a fine-grained task list.
+- **In epic integration mode, seed exactly one root.** If the session context says this run is in
+  `epic` integration mode, your draft must contain **exactly one** seed issue — the whole feature
+  as a single coarse root. The epic is keyed on that one root's id; the decomposition planner fans
+  it into children. Splitting the feature into multiple seeds yourself mints multiple epics (each
+  its own branch and landing) and the consent gate refuses the draft. (In the default per-item
+  mode, one coarse seed per coherent deliverable is fine.)
 - For inter-issue ordering, give an issue a `"key"` and reference it from another issue's
   `"depends_on": ["that-key"]`; otherwise omit both.
 - **Do not propose the draft until intent has converged.** A half-formed draft invites a premature
