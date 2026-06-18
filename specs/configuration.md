@@ -171,7 +171,10 @@ policy:
   `internal/runner/**`, `internal/broker/**`); a candidate hitting any requires approval
   regardless of profile, which is how *TCB-touching changes stay human-reviewed permanently*
   ([bootstrap.md](bootstrap.md)). This same list is the operational definition of the TCB
-  boundary.
+  boundary. The concrete glob set is **not** a hardcoded kernel default: it is a
+  per-deployment operational-review decision that must be reviewed and pinned for the
+  target repository before autonomy is switched on for harness work, so the boundary
+  reflects what actually constitutes the TCB *there* ([bootstrap.md](bootstrap.md)).
 
 ---
 
@@ -322,6 +325,38 @@ validate` step must run before anything executes and check:
 - `integration.mode`, if present, is one of `per-item` / `epic`.
 
 > Treat config validation as a gate on startup, not a nicety.
+
+---
+
+## Advisories — non-fatal warnings
+
+Validation above gates startup on **faults**: a config that would break at run time
+(a role no soul fulfils, a `produces:` target that doesn't exist, a postcondition with
+no resolvable command) fails fast, before anything executes. Alongside it sits a second,
+softer channel — `config.Warnings()` — for **advisories**: configurations that are
+legal and runnable but worth a second look. These do **not** fail startup; `harness
+validate` prints them to stderr and exits `0`. The split is deliberate, and it follows
+the *config is the pipeline, so the harness recommends but does not force* principle —
+the same rationale as [verification.md](verification.md)'s "Model diversity is
+configured, not mandated": faults the harness must reject because they cannot run;
+advisories it surfaces and leaves to the operator's judgement.
+
+The known advisories are:
+
+- **Producer/verifier model-family overlap** — the verifier role shares a model family
+  with the producer, weakening the N-version independence
+  [verification.md](verification.md) recommends (correlated blind spots). The model
+  assignment is the operator's call, so this is advised, never forced.
+- **A package proxy named but not on the broker allowlist** — dead config: the named
+  proxy is unreachable, and package fetches are denied deny-by-default
+  ([security.md](security.md) Control 2).
+- **A git remote named but not allowlisted** — the candidate-branch push to that remote
+  would be denied ([security.md](security.md) Control 3).
+
+Both surfaces read the same channel: `harness validate` prints these to stderr (exit
+`0`), and the control-room [config view](control-room.md) renders them as an
+**Advisories** section, putting the same signal where the operator inspects the running
+factory. A clean config produces no advisories.
 
 ---
 
