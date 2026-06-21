@@ -238,6 +238,10 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	tel, err := telemetry.Setup(context.Background(), telemetry.Config{
 		Endpoint:    cfg.Infra.OTel.Endpoint,
 		ServiceName: "harness",
+		// Resolve ${ENV} references in the export headers here, at the last responsible
+		// moment, so a backend credential lives in config only as an env reference.
+		Headers: cfg.Infra.OTel.ResolveHeaders(),
+		TLS:     cfg.Infra.OTel.TLS,
 	})
 	if err != nil {
 		return nil, err

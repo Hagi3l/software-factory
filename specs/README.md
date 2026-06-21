@@ -93,7 +93,7 @@ oddly (Soul, Role, Runner, Brief), it's defined there.
 | [configuration.md](configuration.md) | `harness.yaml`, `souls/*.yaml`, infra overlays, and config validation. |
 | [models.md](models.md) | Model-agnostic agent loop, the provider abstraction in the runner, canonical types, the adapters. |
 | [specs-process.md](specs-process.md) | How specs are written, the human re-entry invariant, spec-drift handling, spec-version pinning. |
-| [observability.md](observability.md) | Broker-as-collector, the three stores, the OTel trace model, live vs. history, replayability. |
+| [observability.md](observability.md) | Broker-as-collector, the three stores, the OTel signal model (traces/metrics/logs, trusted-side-only), live vs. history, replayability. |
 | [control-room.md](control-room.md) | The web UI: stack, the views, live/historical rendering, and the Create-Task/Resolve wizard. |
 | [bootstrap.md](bootstrap.md) | How the harness comes to build itself: the minimal kernel, the TCB caveat, the trusted→autonomous progression. |
 | [components/orchestrator.md](components/orchestrator.md) | The scheduler + gatekeeper + sole beads writer and its reconciliation loop. |

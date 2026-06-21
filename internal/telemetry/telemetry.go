@@ -7,14 +7,19 @@ import (
 	"time"
 
 	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/exporters/otlp/otlplog/otlploggrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlpmetric/otlpmetricgrpc"
 	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/exporters/stdout/stdoutlog"
 	"go.opentelemetry.io/otel/exporters/stdout/stdoutmetric"
 	"go.opentelemetry.io/otel/exporters/stdout/stdouttrace"
+	otellog "go.opentelemetry.io/otel/log"
+	lognoop "go.opentelemetry.io/otel/log/noop"
 	"go.opentelemetry.io/otel/metric"
 	mnoop "go.opentelemetry.io/otel/metric/noop"
-	"go.opentelemetry.io/otel/sdk/resource"
+	sdklog "go.opentelemetry.io/otel/sdk/log"
 	sdkmetric "go.opentelemetry.io/otel/sdk/metric"
+	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 	tnoop "go.opentelemetry.io/otel/trace/noop"
@@ -38,6 +43,17 @@ type Config struct {
 	// ServiceName is the resource service.name reported to the backend. Defaults to
 	// "harness" when empty.
 	ServiceName string
+	// Headers are sent with every OTLP export — the auth + routing metadata an
+	// authenticated backend (e.g. OpenObserve, Grafana Cloud, Honeycomb) requires. Values
+	// are already resolved: the caller (config.OTelConfig.ResolveHeaders) expands any
+	// ${ENV} reference from the environment, so a credential never lives literal in
+	// config. Ignored by the stdout exporter (nothing to authenticate to).
+	Headers map[string]string
+	// TLS selects transport security for the OTLP/gRPC dial. False (the default) dials
+	// insecurely — the local-collector posture the dev endpoint localhost:4317 expects.
+	// True dials with the host's root CAs, the posture an authenticated public backend
+	// reached over the internet requires. Ignored by the stdout exporter.
+	TLS bool
 }
 
 // Provider is the harness's live telemetry: a tracer for spans and a set of metric
@@ -48,12 +64,22 @@ type Config struct {
 // to Noop so telemetry is never a required collaborator.
 type Provider struct {
 	tracer   trace.Tracer
+	logs     otellog.LoggerProvider
 	inst     *Instruments
 	shutdown func(context.Context) error
 }
 
 // Tracer returns the span tracer. It is never nil (Noop supplies an inert one).
 func (p *Provider) Tracer() trace.Tracer { return p.tracer }
+
+// LoggerProvider returns the OTel logs provider the trusted-side slog→OTel bridge
+// (T5.13) builds its handler over. It is never nil (Noop supplies an inert one), so the
+// bridge wiring is unconditional — whether a record is actually exported is the
+// Provider's concern, mirroring Tracer()/the metric instruments. The harness only ever
+// feeds it from trusted host-side code; untrusted model text and sandbox output are span
+// attributes / artifact-store evidence, never log records (specs/observability.md "Logs
+// are trusted-side only").
+func (p *Provider) LoggerProvider() otellog.LoggerProvider { return p.logs }
 
 // Shutdown flushes and stops the exporters, draining any batched spans/metrics. It is a
 // no-op for a Noop provider. The composition root defers it so a clean process exit
@@ -71,7 +97,11 @@ func (p *Provider) Shutdown(ctx context.Context) error {
 // unconditionally with zero overhead when telemetry is off.
 func Noop() *Provider {
 	inst, _ := newInstruments(mnoop.NewMeterProvider().Meter(ScopeName))
-	return &Provider{tracer: tnoop.NewTracerProvider().Tracer(ScopeName), inst: inst}
+	return &Provider{
+		tracer: tnoop.NewTracerProvider().Tracer(ScopeName),
+		logs:   lognoop.NewLoggerProvider(),
+		inst:   inst,
+	}
 }
 
 // NewWith builds a Provider over caller-supplied OTel providers instead of the
@@ -86,7 +116,7 @@ func NewWith(tp trace.TracerProvider, mp metric.MeterProvider) (*Provider, error
 	if err != nil {
 		return nil, fmt.Errorf("telemetry: build instruments: %w", err)
 	}
-	return &Provider{tracer: tp.Tracer(ScopeName), inst: inst}, nil
+	return &Provider{tracer: tp.Tracer(ScopeName), logs: lognoop.NewLoggerProvider(), inst: inst}, nil
 }
 
 // Setup builds a Provider for the configured endpoint. An empty endpoint returns Noop
@@ -103,7 +133,7 @@ func Setup(ctx context.Context, cfg Config) (*Provider, error) {
 	}
 	res := resource.NewSchemaless(attribute.String("service.name", name))
 
-	spanExp, metExp, err := exporters(ctx, cfg.Endpoint)
+	spanExp, metExp, logExp, err := exporters(ctx, cfg)
 	if err != nil {
 		return nil, err
 	}
@@ -116,50 +146,78 @@ func Setup(ctx context.Context, cfg Config) (*Provider, error) {
 		sdkmetric.WithReader(sdkmetric.NewPeriodicReader(metExp)),
 		sdkmetric.WithResource(res),
 	)
+	// Logs ride a batch processor (one export RPC per batch, not per record, so a busy
+	// run doesn't firehose the wire) wrapped in a min-severity filter that drops anything
+	// below Info — the third signal, off the same endpoint as traces/metrics.
+	lp := sdklog.NewLoggerProvider(
+		sdklog.WithResource(res),
+		sdklog.WithProcessor(newMinSeverityProcessor(otellog.SeverityInfo, sdklog.NewBatchProcessor(logExp))),
+	)
 	inst, err := newInstruments(mp.Meter(ScopeName))
 	if err != nil {
 		// Tear down the providers we just built so a failed Setup leaks no exporter.
 		_ = tp.Shutdown(ctx)
 		_ = mp.Shutdown(ctx)
+		_ = lp.Shutdown(ctx)
 		return nil, fmt.Errorf("telemetry: build instruments: %w", err)
 	}
 
 	shutdown := func(ctx context.Context) error {
-		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx))
+		return errors.Join(tp.Shutdown(ctx), mp.Shutdown(ctx), lp.Shutdown(ctx))
 	}
-	return &Provider{tracer: tp.Tracer(ScopeName), inst: inst, shutdown: shutdown}, nil
+	return &Provider{tracer: tp.Tracer(ScopeName), logs: lp, inst: inst, shutdown: shutdown}, nil
 }
 
-// exporters builds the span + metric exporters for an endpoint. "stdout" prints to the
-// process stdout (offline); any other value is an OTLP/gRPC collector address, dialed
-// insecurely (no TLS — a local collector) and lazily.
-func exporters(ctx context.Context, endpoint string) (sdktrace.SpanExporter, sdkmetric.Exporter, error) {
-	if endpoint == EndpointStdout {
+// exporters builds the trace + metric + log exporters for the configured endpoint, all
+// three off the one endpoint so a single backend ingests the whole record. "stdout"
+// prints to the process stdout (offline, no auth). Any other value is an OTLP/gRPC
+// collector address, dialed lazily with the configured auth/routing Headers and either
+// insecurely (cfg.TLS=false, the local-collector default) or over TLS with the host's
+// root CAs (cfg.TLS=true, an authenticated public backend).
+func exporters(ctx context.Context, cfg Config) (sdktrace.SpanExporter, sdkmetric.Exporter, sdklog.Exporter, error) {
+	if cfg.Endpoint == EndpointStdout {
 		spanExp, err := stdouttrace.New()
 		if err != nil {
-			return nil, nil, fmt.Errorf("telemetry: stdout trace exporter: %w", err)
+			return nil, nil, nil, fmt.Errorf("telemetry: stdout trace exporter: %w", err)
 		}
 		metExp, err := stdoutmetric.New()
 		if err != nil {
-			return nil, nil, fmt.Errorf("telemetry: stdout metric exporter: %w", err)
+			return nil, nil, nil, fmt.Errorf("telemetry: stdout metric exporter: %w", err)
 		}
-		return spanExp, metExp, nil
+		logExp, err := stdoutlog.New()
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("telemetry: stdout log exporter: %w", err)
+		}
+		return spanExp, metExp, logExp, nil
 	}
-	spanExp, err := otlptracegrpc.New(ctx,
-		otlptracegrpc.WithEndpoint(endpoint),
-		otlptracegrpc.WithInsecure(),
-	)
+
+	traceOpts := []otlptracegrpc.Option{otlptracegrpc.WithEndpoint(cfg.Endpoint)}
+	metricOpts := []otlpmetricgrpc.Option{otlpmetricgrpc.WithEndpoint(cfg.Endpoint)}
+	logOpts := []otlploggrpc.Option{otlploggrpc.WithEndpoint(cfg.Endpoint)}
+	if !cfg.TLS {
+		traceOpts = append(traceOpts, otlptracegrpc.WithInsecure())
+		metricOpts = append(metricOpts, otlpmetricgrpc.WithInsecure())
+		logOpts = append(logOpts, otlploggrpc.WithInsecure())
+	}
+	if len(cfg.Headers) > 0 {
+		traceOpts = append(traceOpts, otlptracegrpc.WithHeaders(cfg.Headers))
+		metricOpts = append(metricOpts, otlpmetricgrpc.WithHeaders(cfg.Headers))
+		logOpts = append(logOpts, otlploggrpc.WithHeaders(cfg.Headers))
+	}
+
+	spanExp, err := otlptracegrpc.New(ctx, traceOpts...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("telemetry: otlp trace exporter: %w", err)
+		return nil, nil, nil, fmt.Errorf("telemetry: otlp trace exporter: %w", err)
 	}
-	metExp, err := otlpmetricgrpc.New(ctx,
-		otlpmetricgrpc.WithEndpoint(endpoint),
-		otlpmetricgrpc.WithInsecure(),
-	)
+	metExp, err := otlpmetricgrpc.New(ctx, metricOpts...)
 	if err != nil {
-		return nil, nil, fmt.Errorf("telemetry: otlp metric exporter: %w", err)
+		return nil, nil, nil, fmt.Errorf("telemetry: otlp metric exporter: %w", err)
 	}
-	return spanExp, metExp, nil
+	logExp, err := otlploggrpc.New(ctx, logOpts...)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("telemetry: otlp log exporter: %w", err)
+	}
+	return spanExp, metExp, logExp, nil
 }
 
 // Instruments are the metric instruments for the schema's three families. They are

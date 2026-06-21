@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -713,6 +714,66 @@ func (c *Config) validateOTel(add func(string, ...any)) {
 				ep, otelEndpointStdout)
 		}
 	}
+	c.validateOTelHeaders(add)
+}
+
+// otelEnvRefRE matches a value that is wholly one environment reference — "${ENV_VAR}"
+// with a valid shell-style variable name — the form a credential header must take so its
+// secret lives in the environment, never literal in config (specs/observability.md, "the
+// same key-handling discipline as the model registry"). otelEnvRefAnyRE finds any
+// well-formed ${VAR} occurrence, used to detect a malformed reference (a stray "${" or
+// "${BAD-NAME}") anywhere in a value.
+var (
+	otelEnvRefRE    = regexp.MustCompile(`^\$\{[A-Za-z_][A-Za-z0-9_]*\}$`)
+	otelEnvRefAnyRE = regexp.MustCompile(`\$\{[A-Za-z_][A-Za-z0-9_]*\}`)
+)
+
+// otelCredentialHeaderHints are substrings that, when present in a header NAME
+// (case-insensitive), mark it as carrying a credential — its value must then be a pure
+// ${ENV_VAR} reference, not a literal secret. Routing metadata (organization, stream) has
+// none of these substrings and may be a plain literal.
+var otelCredentialHeaderHints = []string{"authorization", "auth", "token", "key", "secret", "password", "credential", "cookie"}
+
+// validateOTelHeaders enforces the credential-handling discipline on otel.headers: a
+// header whose name looks like a credential must carry a ${ENV_VAR} reference (resolved
+// from the environment at startup by OTelConfig.ResolveHeaders), never a literal secret;
+// any value that embeds a ${...} reference must spell it correctly. This turns a leaked
+// credential or a typo'd env reference into a loud startup error instead of a secret
+// committed to a config file or a silently-empty auth header. See specs/observability.md.
+func (c *Config) validateOTelHeaders(add func(string, ...any)) {
+	for name, value := range c.Infra.OTel.Headers {
+		if name == "" {
+			add("otel.headers has an empty header name")
+			continue
+		}
+		// A malformed reference (e.g. "${" with no close, or "${BAD-NAME}") would resolve
+		// to a useless literal — catch it rather than ship a broken auth header.
+		if strings.Contains(value, "${") && !refsWellFormed(value) {
+			add("otel.headers[%q] value %q contains a malformed ${ENV_VAR} reference", name, value)
+			continue
+		}
+		if isCredentialHeaderName(name) && !otelEnvRefRE.MatchString(value) {
+			add("otel.headers[%q] looks like a credential, so its value must be an ${ENV_VAR} reference (got a literal); keep secrets in the environment, not config", name)
+		}
+	}
+}
+
+// refsWellFormed reports whether every "${" in s opens a well-formed ${ENV_VAR}
+// reference. It strips the valid references and fails if a bare "${" remains.
+func refsWellFormed(s string) bool {
+	return !strings.Contains(otelEnvRefAnyRE.ReplaceAllString(s, ""), "${")
+}
+
+// isCredentialHeaderName reports whether a header name (case-insensitive) carries one of
+// the credential hint substrings.
+func isCredentialHeaderName(name string) bool {
+	lower := strings.ToLower(name)
+	for _, hint := range otelCredentialHeaderHints {
+		if strings.Contains(lower, hint) {
+			return true
+		}
+	}
+	return false
 }
 
 // Artifact store backend identifiers. These mirror artifact.BackendFiles/BackendS3,

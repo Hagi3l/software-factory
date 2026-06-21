@@ -34,6 +34,22 @@ const (
 // collide with OTel's own semantic conventions. These keys are the join columns the
 // control-room views key off — e.g. provenance traces a commit → issue → soul → model
 // via AttrIssueID/AttrSoul/AttrModel, and the budget view groups cost by AttrModel.
+//
+// Cardinality rule (binding on every emitter — spans, metric dimensions, and log
+// records alike). All three OTel signals share this schema so they join in a backend
+// ("show the spans AND logs AND metrics for this issue/soul/stage"), but a metric
+// labeled by an unbounded id spawns one time series per value and melts the backend.
+// So:
+//
+//   - The high-cardinality identifiers — AttrIssueID, AttrEpicID, AttrInvocationID —
+//     are TRACE and LOG attributes only. NEVER use them as a metric dimension; on a
+//     trace/log they are exactly the drill-down key you want.
+//   - Metric dimensions stay BOUNDED: AttrIssueRole (a fixed role set), AttrModel,
+//     AttrSoul, AttrTokenKind, AttrGatePassed, AttrComponent, and AttrAttempt (a
+//     small-integer retry count capped by the budget). These have few distinct values,
+//     so their cartesian product of time series stays small.
+//
+// See specs/observability.md "Correlation: one schema across all three signals".
 const (
 	AttrComponent      = "harness.component" // emitting component: orchestrator|runner|broker|gate
 	AttrIssueID        = "harness.issue.id"
@@ -65,6 +81,11 @@ const (
 	AttrGatePassed     = "harness.gate.passed"
 	AttrGateChecksRun  = "harness.gate.checks_run"
 	AttrHTTPStatus     = "harness.http.status" // upstream status of a brokered package fetch
+	// AttrAttempt is the per-issue retry count (0 on the first try, incremented on each
+	// re-dispatch up to the budget cap). It is a bounded small integer, so unlike the
+	// unbounded ids above it is safe as a metric dimension — a retries-by-stage panel —
+	// as well as a trace/log attribute. See the cardinality rule above.
+	AttrAttempt = "harness.attempt"
 )
 
 // Token-kind attribute values for AttrTokenKind on the token-throughput counter. The

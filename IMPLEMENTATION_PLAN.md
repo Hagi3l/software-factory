@@ -283,6 +283,80 @@ them); only the *order of attention* changes.
 - [ ] **T5.11** *(optional)* Warm sandbox pools + HA orchestrator via NATS-KV leader election. *(OPEN.)* ([components/runner.md](specs/components/runner.md), [components/orchestrator.md](specs/components/orchestrator.md))
 - [ ] **T5.2 Firecracker sandbox backend** ***(lowest priority — see the Phase 5 prioritization note above; deliberately last)*** — a KVM-microVM backend implementing the `Backend`/`Sandbox` interface: rootfs seeding, vsock I/O (T5.1, done), resource limits incl. disk, deterministic teardown. The production isolation target. **Blocked on hardware, not on code:** needs KVM (bare-metal or nested virt) that the dev environment lacks, so it cannot be built-and-verified here — do it only once such hardware is available, after the rest of Phase 5 + Phase 6 (all of which the Docker backend supports for dev/human-reviewed runs). Kept as ID T5.2 (referenced elsewhere) despite its end-of-list position. (needs T5.1) ([components/sandbox.md](specs/components/sandbox.md))
 
+### Multi-signal OTLP observability (T5.12–T5.15)
+
+Production-grade telemetry export, demo-driven (the vault demo for a security audience wants
+to *show the whole record shipped* — traces, metrics, and logs — in one backend). Today the
+harness exports OTel **traces + metrics** to a single OTLP/gRPC endpoint dialed insecure with
+no headers, so only an anonymous local viewer (Jaeger, which also refuses the metrics) can
+receive it. This block adds the **logs** signal, **trace-correlated** from the trusted side's
+`slog`, and **authenticated** export so any real OTLP backend (OpenObserve first; equally
+Grafana Cloud / Honeycomb) can ingest all three. The unit of work is the signal pipeline, not
+OpenObserve — OO is the first consumer and the demo's ephemeral sink. Specs already updated
+([observability.md](specs/observability.md) "three signals, one endpoint" + "logs are
+trusted-side only", [configuration.md](specs/configuration.md) `otel.headers`). Listed in
+dependency order; each carries its own doc update (docs/configuration.md, docs/control-room.md
+where relevant, and the vault README's telemetry section) per the doc-tracking rule.
+
+- [x] **T5.12 OTLP logs signal + authenticated multi-signal export** — *done.* Added the third
+  OTel pipeline to `internal/telemetry`: `exporters` now returns a `sdklog.Exporter` too
+  (`otlploggrpc` for an OTLP endpoint, `stdoutlog` for `endpoint: stdout`), `Setup` builds a
+  `sdklog.LoggerProvider` alongside the tracer/meter providers, and the composite `Shutdown`
+  joins all three flushes. **Logs batch at Info+** via a new `minSeverityProcessor`
+  (`logs.go`) wrapping `sdklog.NewBatchProcessor` — it implements both `sdklog.Processor`
+  (drops sub-Info records in `OnEmit`) and the `log.FilterProcessor` `Enabled` hint (so the
+  SDK skips *constructing* a dropped record at the logger boundary); undefined-severity
+  records are kept (indeterminate → forward). `Provider.LoggerProvider()` exposes the
+  `otellog.LoggerProvider` the **T5.13** slog bridge will build over — never nil (Noop/NewWith
+  return `lognoop.NewLoggerProvider()`), so bridge wiring stays unconditional like
+  Tracer()/the instruments. **Auth + multi-signal export:** `telemetry.Config` gained
+  `Headers map[string]string` + `TLS bool`, threaded into all three exporters via
+  `WithHeaders` and `WithInsecure`-when-`!TLS` (omitting it → TLS with host roots).
+  **Credential discipline:** `OTelConfig` gained `headers`/`tls`; `OTelConfig.ResolveHeaders()`
+  expands `${ENV}` refs at the run.go call site (last responsible moment, unset→""), and
+  `validateOTel` now rejects a credential-named header (`authorization`/`*-key`/`*-token`/…)
+  whose value is a literal rather than an `${ENV_VAR}` ref, plus any malformed `${…}` —
+  routing metadata (`organization`) stays literal-OK. **Schema:** `conventions.go` gained
+  `AttrAttempt` (`harness.attempt`, bounded retry count — safe as a metric dimension) and a
+  **binding cardinality-rule doc** on the attribute block (unbounded ids = trace/log only;
+  metric dimensions stay bounded). New deps: `otel/log`, `otel/sdk/log`, `otlploggrpc`,
+  `stdoutlog` @ v0.14.0 (resolve cleanly against otel v1.44.0). Tests:
+  `TestMinSeverityProcessorDropsBelowInfo`/`…DelegatesLifecycle`,
+  `TestSetupOTLPWithHeadersAndTLSBuildsLazily`, `TestLoggerProviderNeverNil`,
+  `TestValidateOTelHeadersValid`/`…RejectsLiteralCredential`/`…RejectsMalformedRef`,
+  `TestResolveHeadersExpandsEnv`. docs/configuration.md updated (otel.headers/tls + three
+  signals). Specs were written ahead (observability.md "three signals, one endpoint" +
+  cardinality rule, configuration.md `otel.headers`) — no spec change. ([observability.md](specs/observability.md),
+  [configuration.md](specs/configuration.md))
+- [ ] **T5.13 Trusted-side slog → OTel log bridge** — compose the harness's injected logger at
+  the `cmd/harness` run wiring as `TextHandler(stderr) → control-room LogBridge → otelslog`
+  (reusing the `internal/controlroom/live/logbridge.go` tee pattern), so every trusted-side
+  record fans out to console, the live activity feed, and the OTLP logs backend from one
+  source. Only trusted host-side code (broker/orchestrator/runner/agent-loop) feeds it; the
+  untrusted model text + sandbox output stay span attributes / artifact-store evidence — the
+  trusted-side-only invariant now in the spec. Enrich **one per-invocation logger at the
+  invocation boundary** (`runner.Invoke`, where the Brief is in hand) via `slog.With` using the
+  `telemetry.Attr*` constants (issue/epic/soul/role/model/invocation/attempt) — never inline
+  strings — so every log record carries the same join columns as the span on its trace and the
+  metric it fed, and correlates in the backend. (needs T5.12)
+  ([observability.md](specs/observability.md), [components/agent.md](specs/components/agent.md))
+- [ ] **T5.14 Context-variant log sweep + lint enforcement** — convert every `slog` call to its
+  `…Context(ctx, …)` form threading the **span-carrying** ctx, so log records land correlated
+  with the trace/span that emitted them (call sites with no ctx in scope pass
+  `context.Background()` and simply don't correlate). Make it permanent with **`sloglint`
+  (`context: all`)** in `.golangci.yml` so a non-context log call fails `make check`. Mechanical
+  but codebase-wide; US spellings stay (the gate's `misspell` is `locale: US`). (needs T5.13)
+  ([observability.md](specs/observability.md))
+- [ ] **T5.15 OpenObserve demo bootstrap** — `demo/vault/run.sh` gains `OPENOBSERVE=1` (mirrors
+  the `JAEGER=1` path): boot OO as an **ephemeral `docker run --rm` with no volume** (data dies
+  with the container — no persistence wanted), `--memory`-capped to protect the 8Gi sandbox
+  budget; wait healthy; generate a token, export it as the env var T5.12 reads; provision a
+  single **completeness overview dashboard** (traces + logs + metrics panels) via OO's API; and
+  rewrite a temp infra overlay pointing `otel.endpoint` at OO's OTLP gRPC (`:5081`) with the
+  org/stream/auth metadata headers. Dashboard JSON lives in a new `demo/vault/observe/`. Pins
+  the exact OO OTLP metadata names + confirms logs ride the same gRPC port at impl time. (needs
+  T5.12, T5.13) ([observability.md](specs/observability.md))
+
 ## Phase 6 — Agent semantic tooling (LSP)
 
 Replaces the agent's text-only `search`/`edit_file` floor with **intent-first, LSP-backed**

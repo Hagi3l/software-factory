@@ -90,6 +90,46 @@ func TestSetupOTLPEndpointBuildsLazily(t *testing.T) {
 	_ = p.Shutdown(ctx) // best-effort drain; a flush to the unreachable collector errors
 }
 
+func TestSetupOTLPWithHeadersAndTLSBuildsLazily(t *testing.T) {
+	// Auth headers + TLS must thread into all three exporters without dialing — the same
+	// lazy-build property as the plain OTLP case, now with the authenticated-backend
+	// posture (resolved headers, transport security). Nothing listens here, so a non-lazy
+	// build would fail; that it builds is the property under test.
+	p, err := Setup(context.Background(), Config{
+		Endpoint: "127.0.0.1:65534",
+		Headers:  map[string]string{"organization": "default", "authorization": "Basic deadbeef"},
+		TLS:      true,
+	})
+	if err != nil {
+		t.Fatalf("Setup otlp+headers+tls: %v", err)
+	}
+	if p.shutdown == nil {
+		t.Fatal("otlp endpoint must build real exporters with a shutdown")
+	}
+	if p.LoggerProvider() == nil {
+		t.Error("a real provider must expose a non-nil LoggerProvider for the slog bridge")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+	_ = p.Shutdown(ctx) // best-effort drain
+}
+
+// TestLoggerProviderNeverNil pins the invariant the T5.13 slog bridge relies on: every
+// construction path yields a usable LoggerProvider, so bridge wiring is unconditional.
+func TestLoggerProviderNeverNil(t *testing.T) {
+	if Noop().LoggerProvider() == nil {
+		t.Error("Noop LoggerProvider is nil")
+	}
+	stdout, err := Setup(context.Background(), Config{Endpoint: EndpointStdout})
+	if err != nil {
+		t.Fatalf("Setup stdout: %v", err)
+	}
+	if stdout.LoggerProvider() == nil {
+		t.Error("stdout LoggerProvider is nil")
+	}
+	_ = stdout.Shutdown(context.Background())
+}
+
 func TestTracerStartsNamedSpanWithAttributes(t *testing.T) {
 	p, sr, _ := newRecording(t)
 	_, span := p.Tracer().Start(context.Background(), SpanLLMTurn)

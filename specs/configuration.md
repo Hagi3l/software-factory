@@ -254,7 +254,10 @@ artifacts:
   backend: files           # files (dev) | s3 (distributed) — see artifact-store
   path: ./.harness/artifacts
 otel:
-  endpoint: ...            # trace/metric export; see observability.md
+  endpoint: ...            # OTLP export of traces + metrics + logs; "" off, "stdout" dev; see observability.md
+  headers:                 # sent with every export (auth for backends like OpenObserve)
+    organization: default  # credential VALUES come from env, never literal in config
+    authorization: ${OTEL_OTLP_AUTH}
 models:                    # registry: model name (used by soul.model) → provider adapter
   claude-opus-4-7:
     provider: anthropic

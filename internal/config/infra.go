@@ -226,9 +226,44 @@ type ArtifactsConfig struct {
 	Region   string `yaml:"region,omitempty"`   // s3 region (required when endpoint is empty)
 }
 
-// OTelConfig configures trace/metric export. An empty Endpoint disables export.
+// OTelConfig configures OTLP export of all three OTel signals — traces, metrics, and
+// logs — off one endpoint (specs/observability.md "three signals, one endpoint"). An
+// empty Endpoint disables export; "stdout" prints offline; any other value is an
+// OTLP/gRPC collector host:port.
+//
+// Headers are sent with every export — the auth + routing metadata an authenticated
+// backend (OpenObserve, Grafana Cloud, Honeycomb) requires. Following the same discipline
+// as the model registry's API keys, a CREDENTIAL value is never literal here: a header
+// whose name looks like a credential must be an environment reference of the form
+// ${ENV_VAR}, resolved at startup by ResolveHeaders. Non-credential routing metadata
+// (e.g. organization, stream-name) may be a plain literal. Validation (validateOTel)
+// enforces this; a ${ENV_VAR} that is unset at runtime resolves to empty (the export then
+// fails auth loudly at the backend, the same fail-closed posture as a missing API key).
+//
+// TLS selects transport security for the dial: false (default) is insecure, the
+// local-collector posture localhost:4317 expects; true uses the host's root CAs for an
+// authenticated public backend reached over the internet.
 type OTelConfig struct {
-	Endpoint string `yaml:"endpoint,omitempty"`
+	Endpoint string            `yaml:"endpoint,omitempty"`
+	Headers  map[string]string `yaml:"headers,omitempty"`
+	TLS      bool              `yaml:"tls,omitempty"`
+}
+
+// ResolveHeaders returns the export headers with every ${ENV_VAR} reference expanded from
+// the process environment (an unset var expands to ""). Plain-literal values pass through
+// unchanged. Resolution happens here, at the last responsible moment before the exporter
+// is built, so a credential lives in config only as an env reference, never as a secret —
+// the same posture the model registry takes with API keys. Returns nil for no headers so
+// the exporter adds no WithHeaders option.
+func (o OTelConfig) ResolveHeaders() map[string]string {
+	if len(o.Headers) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(o.Headers))
+	for k, v := range o.Headers {
+		out[k] = os.Expand(v, os.Getenv)
+	}
+	return out
 }
 
 // SigningConfig configures provenance-commit signing and verification (T5.10,

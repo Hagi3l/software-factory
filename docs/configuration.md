@@ -241,7 +241,11 @@ artifacts:
   # endpoint: minio.internal:9000   # MinIO/non-AWS host[:port]; prefix http:// for plaintext dev
   # region: us-east-1               # required when endpoint is empty (derives the AWS endpoint)
 otel:
-  endpoint: localhost:4317   # "" = off, "stdout" = offline dev, host:port = OTLP/gRPC
+  endpoint: localhost:4317   # "" = off, "stdout" = offline dev, host:port = OTLP/gRPC (traces + metrics + logs)
+  # tls: true                # dial with the host's root CAs (an authenticated public backend); default off = insecure (local collector)
+  # headers:                 # sent with every export — auth + routing for backends like OpenObserve
+  #   organization: default          # routing metadata — a literal is fine
+  #   authorization: ${OTEL_OTLP_AUTH}   # credential — MUST be an ${ENV_VAR} ref, never a literal secret
 signing:                     # provenance-commit signing (T5.10); omit/disable to leave commits unsigned
   # enabled: true
   # key: /run/secrets/harness_ed25519        # SSH private signing key (the harness identity); a runtime secret
@@ -324,7 +328,21 @@ models:
   `AWS_SESSION_TOKEN`). The bucket must already exist; the backend never creates it.
   `harness validate` fails an `s3` config that names no bucket or no endpoint/region.
 - **`otel.endpoint`** defaults to off; `stdout` is for offline dev, a `host:port` is
-  OTLP/gRPC to an external collector (a Phase 5 deployment step).
+  OTLP/gRPC to an external collector (a Phase 5 deployment step). All **three** OTel
+  signals — traces, metrics, and logs — export off this one endpoint, so a single
+  multi-signal backend (e.g. OpenObserve) ingests the whole record; a trace-only viewer
+  (Jaeger) takes the spans and ignores the rest. Logs are batched at Info+ and carry only
+  the trusted side's `slog` (see [observability.md](../specs/observability.md)).
+- **`otel.tls`** selects transport security for the dial: off (default) is insecure — the
+  local-collector posture `localhost:4317` expects; `true` uses the host's root CAs for an
+  authenticated public backend reached over the internet.
+- **`otel.headers`** are sent with every export — the auth + routing metadata a backend
+  like OpenObserve requires. A header whose **name** looks like a credential
+  (`authorization`, `*-key`, `*-token`, …) must carry an `${ENV_VAR}` reference, resolved
+  from the environment at startup, **never a literal secret** — the same key-handling
+  discipline as model API keys. Routing metadata (`organization`, `stream-name`) may be a
+  plain literal. `harness validate` rejects a literal credential or a malformed
+  `${ENV_VAR}` reference.
 - **`signing`** turns on cryptographic signing of the harness-authored provenance commit
   (SSH signing, `gpg.format=ssh`; see [security.md](../specs/security.md)). With
   `enabled: true` and a `key` (path to the harness's SSH **private** signing key) the

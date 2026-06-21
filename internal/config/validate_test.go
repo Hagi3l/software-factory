@@ -488,6 +488,75 @@ func TestValidateOTelEndpointRejectsMalformed(t *testing.T) {
 	}
 }
 
+// Export headers carry a backend's auth + routing metadata. A credential value must be an
+// ${ENV_VAR} reference (so the secret lives in the environment, never in config), while
+// non-credential routing metadata may be a literal — the discipline validateOTelHeaders
+// enforces. See specs/observability.md.
+func TestValidateOTelHeadersValid(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.OTel = OTelConfig{
+		Endpoint: "localhost:5081",
+		Headers: map[string]string{
+			"organization":  "default",            // routing metadata — literal OK
+			"stream-name":   "default",            // routing metadata — literal OK
+			"authorization": "${OTEL_OTLP_AUTH}",  // credential — must be an env ref
+		},
+	}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidateOTelHeadersRejectsLiteralCredential(t *testing.T) {
+	// A credential-named header (authorization) with a literal value is a secret committed
+	// to config — the exact thing the env-ref discipline forbids.
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.OTel = OTelConfig{
+		Endpoint: "localhost:5081",
+		Headers:  map[string]string{"authorization": "Basic c2VjcmV0"},
+	}
+	mustContain(t, problems(t, c), "must be an ${ENV_VAR} reference")
+}
+
+func TestValidateOTelHeadersRejectsMalformedRef(t *testing.T) {
+	// A typo'd reference ("${OTEL_OTLP_AUTH" with no close) would resolve to a useless
+	// literal and ship a broken auth header — caught at the gate instead.
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.OTel = OTelConfig{
+		Endpoint: "localhost:5081",
+		Headers:  map[string]string{"x-api-key": "${OTEL_KEY"},
+	}
+	mustContain(t, problems(t, c), "malformed ${ENV_VAR} reference")
+}
+
+// ResolveHeaders expands ${ENV} references from the environment at the last responsible
+// moment; literals pass through and an unset var resolves to empty (fail-closed at the
+// backend, not at config load).
+func TestResolveHeadersExpandsEnv(t *testing.T) {
+	t.Setenv("OTEL_OTLP_AUTH", "Basic resolved-secret")
+	o := OTelConfig{Headers: map[string]string{
+		"organization":  "default",
+		"authorization": "${OTEL_OTLP_AUTH}",
+		"x-unset":       "${OTEL_NOT_SET}",
+	}}
+	got := o.ResolveHeaders()
+	if got["organization"] != "default" {
+		t.Errorf("literal header changed: %q", got["organization"])
+	}
+	if got["authorization"] != "Basic resolved-secret" {
+		t.Errorf("env ref not expanded: %q", got["authorization"])
+	}
+	if got["x-unset"] != "" {
+		t.Errorf("unset env ref should resolve to empty, got %q", got["x-unset"])
+	}
+	if (OTelConfig{}).ResolveHeaders() != nil {
+		t.Error("no headers should resolve to nil (no WithHeaders option)")
+	}
+}
+
 // The requirements-planner block is optional, but when present its tuning knobs must be
 // non-negative. max_tool_turns (read-only exploration round-trips per human turn) and
 // turn_timeout (per-turn wall-clock) join max_tokens as bounds the wizard reads; a negative
