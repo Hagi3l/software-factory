@@ -87,8 +87,10 @@ func readFileTool(sb sandbox.Sandbox) Tool {
 func writeFileTool(sb sandbox.Sandbox, notifier editNotifier) Tool {
 	return funcTool{
 		def: model.ToolDef{
-			Name:        "write_file",
-			Description: "Create or overwrite a file in the worktree with the given contents (parent directories are created).",
+			Name: "write_file",
+			Description: "Create or overwrite a file in the worktree with the given contents (parent directories " +
+				"are created). Prefer edit_file to modify an existing file; use write_file only to create a new " +
+				"file or fully rewrite one.",
 			Params: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -125,7 +127,9 @@ func editFileTool(sb sandbox.Sandbox, notifier editNotifier) Tool {
 		def: model.ToolDef{
 			Name: "edit_file",
 			Description: "Replace an exact substring in a file. old_string must match exactly once " +
-				"unless replace_all is true. Returns an error if old_string is missing or not unique.",
+				"unless replace_all is true. Returns an error if old_string is missing or not unique. " +
+				"Keep old_string minimal — just enough to match uniquely (usually 1-3 lines); excess " +
+				"context wastes tokens and risks a mismatch.",
 			Params: json.RawMessage(`{
 				"type": "object",
 				"properties": {
@@ -267,7 +271,11 @@ func runTool(sb sandbox.Sandbox) Tool {
 		def: model.ToolDef{
 			Name: "run",
 			Description: "Run a shell command in the worktree (e.g. build, test, or lint). Returns stdout, " +
-				"stderr, and the exit code. A non-zero exit is reported but is not a tool failure — read the output.",
+				"stderr, and the exit code. A non-zero exit is reported but is not a tool failure — read the output. " +
+				"Use it for build/test/lint and similar actions: to read, list, or search files prefer " +
+				"read_file / list_dir / search, and to change files use write_file / edit_file — those are cheaper " +
+				"and keep the agent's file view and code index current. Avoid cat/ls/grep/find and shell " +
+				"redirection to write files.",
 			Params: json.RawMessage(`{
 				"type": "object",
 				"properties": {
