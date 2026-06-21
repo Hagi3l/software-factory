@@ -30,3 +30,15 @@ RUN curl -sSfL https://github.com/tailwindlabs/tailwindcss/releases/download/v4.
 WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN GOPROXY=https://proxy.golang.org go mod download
+
+# Warm the BUILD cache (GOCACHE), not just the module cache above. Every gate runs in a
+# FRESH sandbox by design, so without this each `make test-unit`/`gosec`/`govulncheck` run
+# cold-compiles the whole dependency graph + stdlib from scratch — and modernc.org/sqlite
+# (pure-Go SQLite) is enormous. Compiling once here at image-build time bakes those compiled
+# artifacts into the image so every in-sandbox gate reuses them. The agent's diff only
+# recompiles the vault's own changed packages (cheap); stdlib + deps stay cached. Offline-safe:
+# the deps are already in the module cache, so no proxy is needed (GOPROXY stays off). `go test
+# -run='^$'` compiles the test binaries (what test-unit needs) without running any test. A
+# feature that adds a new dependency needs this image rebuilt — same as the module cache above.
+COPY . .
+RUN go build ./... && go test -run='^$' ./...

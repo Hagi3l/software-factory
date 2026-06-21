@@ -12,7 +12,19 @@ sandbox:
   egress:  broker-only
   # `wall` bounds the WHOLE invocation including time the runner waits on inference. A full
   # Go build + the gate scanners take real time, so keep it generous on demo hardware.
-  limits:  { cpu: 4, mem: 4Gi, wall: 30m }
+  #
+  # These are PER-SANDBOX caps. The orchestrator has no global concurrency throttle
+  # (scheduleReady dispatches every ready issue), so on a fan-out the runner can hold several
+  # sandboxes at once — peak concurrency = the widest set of unblocked sibling children.
+  #   - cpu: overcommit is safe (the kernel time-slices), so 6 gives a single gate more parallel
+  #     compile/test throughput while a 2-wide burst just shares cores. Go build/test and the
+  #     scanners parallelize well.
+  #   - mem: a HARD wall — if (peak concurrent sandboxes x mem) exceeds the Docker VM's RAM, the
+  #     VM OOM-kills gates. On an 8Gi VM, 4Gi holds ~1 heavy gate with headroom or 2 at the edge;
+  #     if epics fan out wider, either lower this, give the VM more RAM, or let the planner's
+  #     dependency edges serialize the siblings. The warmed GOCACHE (see Dockerfile) cuts peak
+  #     gate memory too, since fewer packages compile from cold.
+  limits:  { cpu: 6, mem: 4Gi, wall: 30m }
   # Resolves the logical profile each soul names (soul.sandbox: vault-toolchain) to the
   # concrete image the docker backend boots. run.sh builds it locally tagged
   # `vault-toolchain` (from demo/vault/Dockerfile), so the profile maps to that bare tag.
