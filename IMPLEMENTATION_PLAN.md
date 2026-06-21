@@ -328,18 +328,33 @@ where relevant, and the vault README's telemetry section) per the doc-tracking r
   signals). Specs were written ahead (observability.md "three signals, one endpoint" +
   cardinality rule, configuration.md `otel.headers`) — no spec change. ([observability.md](specs/observability.md),
   [configuration.md](specs/configuration.md))
-- [ ] **T5.13 Trusted-side slog → OTel log bridge** — compose the harness's injected logger at
-  the `cmd/harness` run wiring as `TextHandler(stderr) → control-room LogBridge → otelslog`
-  (reusing the `internal/controlroom/live/logbridge.go` tee pattern), so every trusted-side
-  record fans out to console, the live activity feed, and the OTLP logs backend from one
-  source. Only trusted host-side code (broker/orchestrator/runner/agent-loop) feeds it; the
-  untrusted model text + sandbox output stay span attributes / artifact-store evidence — the
-  trusted-side-only invariant now in the spec. Enrich **one per-invocation logger at the
-  invocation boundary** (`runner.Invoke`, where the Brief is in hand) via `slog.With` using the
-  `telemetry.Attr*` constants (issue/epic/soul/role/model/invocation/attempt) — never inline
-  strings — so every log record carries the same join columns as the span on its trace and the
-  metric it fed, and correlates in the backend. (needs T5.12)
-  ([observability.md](specs/observability.md), [components/agent.md](specs/components/agent.md))
+- [x] **T5.13 Trusted-side slog → OTel log bridge** — *done.* The trusted side's `slog` now
+  fans out to **three sinks from one source**: console (`TextHandler→stderr`), the live activity
+  feed (the existing control-room `LogBridge` tee), and the **OTLP logs backend** (new). New
+  `Provider.WrapLogHandler(base, name)` (`internal/telemetry/logs.go`) wraps a base handler in a
+  `multiHandler` fan-out that adds an `otelslog`-bridged sink over the LoggerProvider T5.12 built
+  — a **no-op passthrough when export is off** (Noop/test provider has `shutdown==nil`), so the
+  run wiring calls it unconditionally. `multiHandler` is the host-side analog of the LogBridge
+  tee generalized to N terminal handlers (Enabled = OR across sinks, Handle clones the record to
+  each, WithAttrs/WithGroup propagate). **Wiring** (`cmd/harness/run.go`): right after
+  `telemetry.Setup`, `log = slog.New(tel.WrapLogHandler(log.Handler(), "harness"))` adds the OTel
+  sink **regardless of serve mode** (OTLP export is independent of the co-located control room);
+  the existing serve-mode `LogBridge` then wraps *that*, so a record flows
+  `LogBridge(tee→feed) → multiHandler → {console, otelslog→OTLP}` — one source, three sinks. Only
+  trusted host-side code logs through it; untrusted model text + sandbox output stay
+  span/artifact evidence (the trusted-side-only invariant). **Per-invocation enrichment**
+  (`runner.invoke`): one `ilog := r.log.With(...)` built at the invocation boundary using the
+  `telemetry.Attr*` constants (invocation/issue/epic/soul/role/model/attempt) — never inline
+  strings — replaces the ad-hoc `r.log.With("invocation",…,"issue",…)` and is threaded through
+  the relay, the provisioned-sandbox/usage/teardown/broker logs, and `harvest` (signature now
+  takes the enriched `*slog.Logger`, dropping the redundant `issueID` param). The invocation span
+  also gained `AttrEpicID`+`AttrAttempt` so the span, its logs, and its metrics share the same
+  join columns and correlate in the backend. New dep `contrib/bridges/otelslog v0.10.0` (resolves
+  against otel v1.44.0 / log v0.14.0). Tests: `TestMultiHandlerFansOutToEverySink`,
+  `TestWrapLogHandlerOffIsPassthrough`, `TestWrapLogHandlerOnFansOutKeepingBase`; existing runner
+  + cmd/harness spine suites still green. Specs written ahead (observability.md "Logs are
+  trusted-side only", "Correlation: one schema") — no spec change; no CLI/config/control-room
+  surface change, so no docs/ update. ([observability.md](specs/observability.md), [components/agent.md](specs/components/agent.md))
 - [ ] **T5.14 Context-variant log sweep + lint enforcement** — convert every `slog` call to its
   `…Context(ctx, …)` form threading the **span-carrying** ctx, so log records land correlated
   with the trace/span that emitted them (call sites with no ctx in scope pass

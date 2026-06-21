@@ -301,12 +301,31 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		attribute.String(telemetry.AttrComponent, telemetry.ComponentRunner),
 		attribute.String(telemetry.AttrInvocationID, invID),
 		attribute.String(telemetry.AttrIssueID, brief.Issue.ID),
+		attribute.String(telemetry.AttrEpicID, brief.Issue.EpicID),
 		attribute.String(telemetry.AttrIssueRole, brief.Issue.Role),
 		attribute.String(telemetry.AttrSoul, brief.Soul.Name),
 		attribute.String(telemetry.AttrModel, brief.Soul.Model),
+		attribute.Int(telemetry.AttrAttempt, brief.Issue.Attempt),
 		attribute.String(telemetry.AttrBase, brief.Base),
 	))
 	defer span.End()
+
+	// One per-invocation logger, enriched with the invocation's identity using the
+	// telemetry schema's join-column keys (never inline strings). Every record it writes
+	// lands in the OTLP logs backend (T5.13) carrying the same issue/epic/soul/role/model/
+	// invocation/attempt columns as the span on its trace and the metrics it feeds, so all
+	// three signals correlate in the backend (specs/observability.md "Correlation: one
+	// schema across all three signals"). It is the trusted-side runner's voice for this
+	// invocation — the sandboxed agent's own output is span/artifact evidence, not a log.
+	ilog := r.log.With(
+		slog.String(telemetry.AttrInvocationID, invID),
+		slog.String(telemetry.AttrIssueID, brief.Issue.ID),
+		slog.String(telemetry.AttrEpicID, brief.Issue.EpicID),
+		slog.String(telemetry.AttrSoul, brief.Soul.Name),
+		slog.String(telemetry.AttrIssueRole, brief.Issue.Role),
+		slog.String(telemetry.AttrModel, brief.Soul.Model),
+		slog.Int(telemetry.AttrAttempt, brief.Issue.Attempt),
+	)
 
 	// Resolve the provider adapter for this invocation's soul up front: the runner
 	// holds the key and the adapter, so the agent's brokered model calls are
@@ -351,7 +370,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownTimeout)
 		defer cancel()
 		if err := sb.Teardown(tctx); err != nil {
-			r.log.Error("runner: teardown sandbox", "id", sb.ID(), "err", err)
+			ilog.Error("runner: teardown sandbox", "id", sb.ID(), "err", err)
 		}
 	}()
 
@@ -368,7 +387,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		remote:        r.opts.GitRemote,
 		minter:        r.opts.Minter,
 		packageProxy:  r.opts.PackageProxy,
-		log:           r.log.With("invocation", invID, "issue", brief.Issue.ID),
+		log:           ilog,
 		tel:           r.tel,
 		model:         brief.Soul.Model,
 		// parentCtx carries the invocation span so the relay's per-turn llm-turn / tool-call
@@ -381,11 +400,11 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	defer stopBroker() // closes ln via Serve's ctx-cancel path
 	go func() {
 		if err := srv.Serve(brokerCtx, ln); err != nil {
-			r.log.Error("runner: broker serve", "err", err)
+			ilog.Error("runner: broker serve", "err", err)
 		}
 	}()
 
-	r.log.Info("runner: provisioned sandbox", "id", sb.ID(), "issue", brief.Issue.ID, "profile", spec.Profile, "base", brief.Base)
+	ilog.Info("runner: provisioned sandbox", "id", sb.ID(), "profile", spec.Profile, "base", brief.Base)
 	invStart := time.Now()
 	res, invErr := r.invoker.Invoke(ctx, sb, brief, spec.Broker)
 	elapsed := time.Since(invStart)
@@ -402,7 +421,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	span.SetAttributes(attribute.String(telemetry.AttrResultStatus, status))
 
 	u := rel.Usage()
-	r.log.Info("runner: invocation usage", "issue", brief.Issue.ID,
+	ilog.Info("runner: invocation usage",
 		"input_tokens", u.InputTokens, "output_tokens", u.OutputTokens,
 		"cache_read_tokens", u.CacheReadTokens, "cache_creation_tokens", u.CacheCreationTokens)
 
@@ -425,7 +444,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		// threads it onto the issue's cumulative SpentWall and enforces the cumulative wall
 		// budget across the on_failure loop (see specs/workflow.md).
 		res.Elapsed = elapsed
-		r.harvest(ctx, brief.Issue.ID, rel, &res)
+		r.harvest(ctx, ilog, rel, &res)
 	}
 	return res, invErr
 }
@@ -440,11 +459,11 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 // A harvest failure degrades provenance but does not fail the invocation: a good
 // candidate must not be thrown away (and re-run at cost) because a store write hiccuped.
 // It is logged loudly, and the orchestrator merges with whatever evidence is present.
-func (r *Runner) harvest(ctx context.Context, issueID string, rel *relay, res *core.Result) {
+func (r *Runner) harvest(ctx context.Context, log *slog.Logger, rel *relay, res *core.Result) {
 	if prompt, ok := rel.Prompt(); ok {
 		ref, err := r.store.Put(ctx, core.ArtifactKindPrompt, bytes.NewReader(prompt))
 		if err != nil {
-			r.log.Error("runner: harvest prompt", "issue", issueID, "err", err)
+			log.Error("runner: harvest prompt", "err", err)
 		} else {
 			res.Evidence.PromptSHA = ref.Hash
 			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
@@ -453,7 +472,7 @@ func (r *Runner) harvest(ctx context.Context, issueID string, rel *relay, res *c
 	if transcript, ok := rel.Transcript(); ok {
 		ref, err := r.store.Put(ctx, core.ArtifactKindTranscript, bytes.NewReader(transcript))
 		if err != nil {
-			r.log.Error("runner: harvest transcript", "issue", issueID, "err", err)
+			log.Error("runner: harvest transcript", "err", err)
 		} else {
 			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
 		}
@@ -468,7 +487,7 @@ func (r *Runner) harvest(ctx context.Context, issueID string, rel *relay, res *c
 	if len(res.Trace) > 0 {
 		ref, err := r.store.Put(ctx, core.ArtifactKindTraceabilityMap, bytes.NewReader(formatTraceabilityMap(res.Trace)))
 		if err != nil {
-			r.log.Error("runner: harvest traceability map", "issue", issueID, "err", err)
+			log.Error("runner: harvest traceability map", "err", err)
 		} else {
 			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
 			res.Trace = nil
@@ -483,9 +502,9 @@ func (r *Runner) harvest(ctx context.Context, issueID string, rel *relay, res *c
 	// so the orchestrator still sees it.
 	if len(res.Transforms) > 0 {
 		if data, err := json.Marshal(res.Transforms); err != nil {
-			r.log.Error("runner: marshal transform log", "issue", issueID, "err", err)
+			log.Error("runner: marshal transform log", "err", err)
 		} else if ref, perr := r.store.Put(ctx, core.ArtifactKindTransformLog, bytes.NewReader(data)); perr != nil {
-			r.log.Error("runner: harvest transform log", "issue", issueID, "err", perr)
+			log.Error("runner: harvest transform log", "err", perr)
 		} else {
 			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
 			res.Transforms = nil

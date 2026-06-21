@@ -248,6 +248,16 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	}
 	releases = append(releases, func() { _ = tel.Shutdown(context.Background()) })
 
+	// Fan the trusted side's slog out to the OTLP logs backend in addition to the console
+	// (TextHandler → otelslog), so a configured otel.endpoint receives all three OTel
+	// signals from one source — traces, metrics, and logs (specs/observability.md "three
+	// signals, one endpoint"; T5.13). WrapLogHandler is a passthrough when export is off, so
+	// this is unconditional; only trusted host-side code (orchestrator/runner/broker/agent
+	// loop) logs through it, never the sandboxed agent (logs are trusted-side only). The
+	// control-room LogBridge below then wraps this so the same record also reaches the live
+	// feed — one slog source, three sinks.
+	log = slog.New(tel.WrapLogHandler(log.Handler(), "harness"))
+
 	// Model registry: soul.model -> provider adapter. Keys come from the environment
 	// inside the registry, never from config. Built before the control room so the
 	// requirements-planner wizard (T4.12) can resolve its configured model to an adapter.

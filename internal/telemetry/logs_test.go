@@ -2,11 +2,63 @@ package telemetry
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 
 	otellog "go.opentelemetry.io/otel/log"
 	sdklog "go.opentelemetry.io/otel/sdk/log"
 )
+
+// capturingHandler is a minimal slog.Handler that records the messages it is handed and
+// the attrs bound via WithAttrs, so a test can assert the fan-out delivered a record to it.
+type capturingHandler struct {
+	level    slog.Level
+	messages *[]string
+	attrs    []slog.Attr
+}
+
+func (h *capturingHandler) Enabled(_ context.Context, l slog.Level) bool { return l >= h.level }
+func (h *capturingHandler) Handle(_ context.Context, r slog.Record) error {
+	*h.messages = append(*h.messages, r.Message)
+	return nil
+}
+func (h *capturingHandler) WithAttrs(as []slog.Attr) slog.Handler {
+	return &capturingHandler{level: h.level, messages: h.messages, attrs: append(append([]slog.Attr(nil), h.attrs...), as...)}
+}
+func (h *capturingHandler) WithGroup(string) slog.Handler { return h }
+
+func TestMultiHandlerFansOutToEverySink(t *testing.T) {
+	var aMsgs, bMsgs []string
+	a := &capturingHandler{messages: &aMsgs}
+	b := &capturingHandler{messages: &bMsgs}
+	m := newMultiHandler(a, b)
+	ctx := context.Background()
+
+	if err := m.Handle(ctx, slog.Record{Message: "hello"}); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if len(aMsgs) != 1 || len(bMsgs) != 1 || aMsgs[0] != "hello" || bMsgs[0] != "hello" {
+		t.Fatalf("record not fanned to both sinks: a=%v b=%v", aMsgs, bMsgs)
+	}
+
+	// Enabled is OR across sinks: a record one sink would take is processed even if another
+	// sink drops it.
+	hi := &capturingHandler{level: slog.LevelError, messages: &aMsgs}
+	lo := &capturingHandler{level: slog.LevelDebug, messages: &bMsgs}
+	if !newMultiHandler(hi, lo).Enabled(ctx, slog.LevelInfo) {
+		t.Error("Enabled should be true when any sink accepts the level")
+	}
+	if newMultiHandler(hi).Enabled(ctx, slog.LevelInfo) {
+		t.Error("Enabled should be false when the only sink rejects the level")
+	}
+
+	// WithAttrs propagates to every sink (so the per-invocation join columns reach both the
+	// console/feed and the OTLP backend).
+	wa := m.WithAttrs([]slog.Attr{slog.String("k", "v")})
+	if _, ok := wa.(*multiHandler); !ok {
+		t.Fatal("WithAttrs must return a multiHandler")
+	}
+}
 
 // capturingProcessor records the severities of every record it is forwarded, so a test
 // can assert exactly which records the min-severity filter let through.
@@ -68,6 +120,42 @@ func TestMinSeverityProcessorDropsBelowInfo(t *testing.T) {
 		if next.emitted[i] != sev {
 			t.Errorf("forwarded[%d] = %v, want %v", i, next.emitted[i], sev)
 		}
+	}
+}
+
+func TestWrapLogHandlerOffIsPassthrough(t *testing.T) {
+	// An off (Noop) provider has no real log pipeline, so wrapping must return the base
+	// handler unchanged — no otelslog sink, no allocation. This is what lets the run wiring
+	// call WrapLogHandler unconditionally.
+	base := &capturingHandler{messages: &[]string{}}
+	if got := Noop().WrapLogHandler(base, "harness"); got != slog.Handler(base) {
+		t.Errorf("off provider must return base unchanged, got %T", got)
+	}
+	var nilProvider *Provider
+	if got := nilProvider.WrapLogHandler(base, "harness"); got != slog.Handler(base) {
+		t.Errorf("nil provider must return base unchanged, got %T", got)
+	}
+}
+
+func TestWrapLogHandlerOnFansOutKeepingBase(t *testing.T) {
+	// A real (exporting) provider must fan out to BOTH the base sink and the OTel bridge:
+	// the returned handler differs from base, and a record logged through it still reaches
+	// base (so console/feed never lose a record when OTLP export is on).
+	p, err := Setup(context.Background(), Config{Endpoint: EndpointStdout})
+	if err != nil {
+		t.Fatalf("Setup: %v", err)
+	}
+	defer func() { _ = p.Shutdown(context.Background()) }()
+
+	var msgs []string
+	base := &capturingHandler{messages: &msgs}
+	wrapped := p.WrapLogHandler(base, "harness")
+	if wrapped == slog.Handler(base) {
+		t.Fatal("an exporting provider must wrap base, not return it unchanged")
+	}
+	slog.New(wrapped).Info("orchestrator: dispatched")
+	if len(msgs) != 1 || msgs[0] != "orchestrator: dispatched" {
+		t.Fatalf("base sink lost the record when OTLP export is on: %v", msgs)
 	}
 }
 
