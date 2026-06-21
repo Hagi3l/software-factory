@@ -173,6 +173,36 @@ Two things to expect:
   Mode" flag, or a Dark-Reader-style extension). Disable auto-dark for `127.0.0.1:16686` to
   get the intended UI — there is no demo-side or server-side lever for this.
 
+### See the WHOLE record — all three signals (optional)
+
+Jaeger shows traces. But the harness ships **three** OTel signals off one endpoint — traces,
+**logs** (the trusted side's `slog`, trace-correlated), and **metrics** (token spend, gate
+pass/fail, invocations) — and for a security audience the point is that the *complete,
+tamper-evident record* lands in a real backend, authenticated. Jaeger is trace-only and refuses
+the rest; **OpenObserve** is a single binary that ingests all three. Run with `OPENOBSERVE=1`:
+
+```bash
+OPENOBSERVE=1 ./demo/vault/run.sh
+```
+
+This spins one **OpenObserve** container (authenticated OTLP/gRPC on `5081` — all three signals
+ride that one port — and the UI/REST API on `5080`), points the demo's `otel.endpoint` at it
+with the org/stream/auth headers an authenticated backend needs, and auto-provisions a
+three-panel **completeness overview** dashboard (one panel per signal). Open
+<http://127.0.0.1:5080>, log in as `root@harness.demo` / `Harness#Demo1`, and watch traces,
+logs, and metrics arrive together as the pipeline runs. The container is **ephemeral** (`--rm`,
+no volume, `--memory`-capped so it doesn't crowd the gate sandboxes) — all data dies with it on
+exit, by design. `JAEGER=1` and `OPENOBSERVE=1` are mutually exclusive (one `otel.endpoint`).
+
+How the auth stays clean: OpenObserve's ingestion token is just `base64(email:password)`;
+`run.sh` derives it locally and exports it as `OTEL_OTLP_AUTH`, which the materialized overlay
+references as `authorization: ${OTEL_OTLP_AUTH}` — the harness expands it host-side at export
+time, so the credential lives in the environment, never in config (the same discipline as the
+model API key, and what `harness validate`'s credential-header rule enforces). The dashboard
+JSON and provisioning details live in [`observe/`](observe/); it is pinned to OpenObserve's
+dashboard v5 schema and POSTed **best-effort** — if a bumped `OPENOBSERVE_IMAGE` drifts the
+schema, the demo still runs and you import the JSON from the UI.
+
 ### A good feature to draft on stage
 
 A **one-time, single-use secret share link**: generate an expiring link that reveals one

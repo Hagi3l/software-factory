@@ -1,0 +1,172 @@
+{
+  "version": 5,
+  "dashboardId": "harness-completeness-overview",
+  "title": "Harness — completeness overview",
+  "description": "The whole telemetry record in one place: all three OTel signals the harness ships (traces + logs + metrics) arriving from service 'harness'. Traces and logs land in the 'default' stream; metrics arrive as Prometheus-named streams (dots become underscores, e.g. harness.invocations -> harness_invocations). Provisioned by demo/vault/run.sh under OPENOBSERVE=1; pinned to the OpenObserve dashboard v5 schema — bump it with the image (OPENOBSERVE_IMAGE).",
+  "role": "",
+  "owner": "harness-demo",
+  "created": "2026-01-01T00:00:00.000Z",
+  "tabs": [
+    {
+      "tabId": "default",
+      "name": "Default",
+      "panels": [
+        {
+          "id": "panel-traces",
+          "type": "bar",
+          "title": "Traces — spans / interval",
+          "description": "Span volume over time from the traces stream. Every invocation is one trace (invocation -> boot -> llm-turn xN -> tool-call xM -> gate-run).",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "unit_custom": null,
+            "decimals": 0
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) AS \"x_axis_1\", count(*) AS \"y_axis_1\" FROM \"default\" GROUP BY x_axis_1 ORDER BY x_axis_1 ASC",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "traces",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null,
+                    "aggregationFunction": "histogram",
+                    "sortBy": "ASC"
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Spans",
+                    "alias": "y_axis_1",
+                    "column": "_timestamp",
+                    "color": "#5960b2",
+                    "aggregationFunction": "count"
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1
+              }
+            }
+          ],
+          "layout": { "x": 0, "y": 0, "w": 24, "h": 9, "i": 1 }
+        },
+        {
+          "id": "panel-logs",
+          "type": "bar",
+          "title": "Logs — records / interval",
+          "description": "Trusted-side slog exported as OTel log records, trace-correlated (each carries the trace/span id of the work that emitted it). One source, two sinks: the live activity feed and this backend.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "unit_custom": null,
+            "decimals": 0
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT histogram(_timestamp) AS \"x_axis_1\", count(*) AS \"y_axis_1\" FROM \"default\" GROUP BY x_axis_1 ORDER BY x_axis_1 ASC",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  {
+                    "label": "Timestamp",
+                    "alias": "x_axis_1",
+                    "column": "_timestamp",
+                    "color": null,
+                    "aggregationFunction": "histogram",
+                    "sortBy": "ASC"
+                  }
+                ],
+                "y": [
+                  {
+                    "label": "Records",
+                    "alias": "y_axis_1",
+                    "column": "_timestamp",
+                    "color": "#7a9e3f",
+                    "aggregationFunction": "count"
+                  }
+                ],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1
+              }
+            }
+          ],
+          "layout": { "x": 0, "y": 9, "w": 24, "h": 9, "i": 2 }
+        },
+        {
+          "id": "panel-metrics",
+          "type": "line",
+          "title": "Metrics — invocations (harness_invocations)",
+          "description": "OTLP metrics queried by PromQL. harness.invocations is exported as the metric stream harness_invocations (OTel dotted names map to Prometheus underscores). Other streams: harness_cost_usd, harness_tokens, harness_gate_runs, harness_llm_turns.",
+          "config": {
+            "show_legends": true,
+            "legends_position": null,
+            "unit": null,
+            "unit_custom": null,
+            "decimals": 0
+          },
+          "queryType": "promql",
+          "queries": [
+            {
+              "query": "harness_invocations",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "harness_invocations",
+                "stream_type": "metrics",
+                "x": [],
+                "y": [],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "{{harness_issue_role}}",
+                "layer_type": "scatter",
+                "weight_fixed": 1
+              }
+            }
+          ],
+          "layout": { "x": 0, "y": 18, "w": 24, "h": 9, "i": 3 }
+        }
+      ]
+    }
+  ],
+  "variables": {
+    "list": [],
+    "showDynamicFilters": false
+  }
+}

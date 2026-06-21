@@ -27,6 +27,7 @@
 #   VAULT_REMOTE='' ./demo/vault/run.sh                     # purely local; no GitHub push (default: push to the public repo)
 #   KEEP_SITE=1 ./demo/vault/run.sh                         # don't delete the scratch repo on exit
 #   JAEGER=1 ./demo/vault/run.sh                            # spin a Jaeger container; export OTel traces to it
+#   OPENOBSERVE=1 ./demo/vault/run.sh                       # spin an OpenObserve container; export ALL THREE signals (traces+logs+metrics) to it
 set -euo pipefail
 
 # ---- knobs (override via env) ----------------------------------------------------------
@@ -44,6 +45,20 @@ IMAGE='vault-toolchain'       # sandbox profile named by the vault souls
 BASE_IMAGE='go-toolchain'     # the vault image bases on this kernel image
 JAEGER_NAME='harness-vault-jaeger'              # container name (JAEGER=1 only)
 JAEGER_IMAGE='jaegertracing/all-in-one:1.76.0'  # single-binary OTLP collector + trace UI (pinned: v2 is a collector-based rewrite)
+# OpenObserve (OPENOBSERVE=1 only): a single-binary, multi-signal OTLP backend — unlike Jaeger
+# (traces only) it ingests traces + logs + metrics on one authenticated endpoint, so the demo
+# can show the WHOLE record (the T5.12/T5.13 logs+metrics work) land in one place. The image
+# tag is overridable so a schema bump (dashboard v5 is pinned in observe/) can be tracked.
+OPENOBSERVE_NAME='harness-vault-openobserve'
+OPENOBSERVE_IMAGE="${OPENOBSERVE_IMAGE:-public.ecr.aws/zinclabs/openobserve:v0.14.7}"
+OO_EMAIL='root@harness.demo'        # OO root user (ingestion token = base64(email:password))
+OO_PASSWORD='Harness#Demo1'         # ephemeral container, dies on exit — not a real secret
+OO_ORG='default'                    # OO default organization (REST path + OTLP `organization` header)
+
+# JAEGER and OPENOBSERVE both retarget the single otel.endpoint, so they are mutually exclusive.
+if [ -n "${JAEGER:-}" ] && [ -n "${OPENOBSERVE:-}" ]; then
+  echo "error: set JAEGER=1 OR OPENOBSERVE=1, not both — otel.endpoint is one export target"; exit 1
+fi
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
@@ -77,15 +92,16 @@ docker build -f "$REPO_ROOT/deploy/go-toolchain.Dockerfile" -t "$BASE_IMAGE" "$R
 say "Building the '$IMAGE' image (adds templ + Tailwind + the vault module cache)"
 docker build -f "$DEMO_DIR/Dockerfile" -t "$IMAGE" "$APP_DIR"
 
-# ---- materialize config (model/endpoint subs, and the Jaeger OTLP endpoint) ------------
+# ---- materialize config (model/endpoint subs, and the Jaeger/OpenObserve OTLP endpoint) ----
 # Copy the tracked config to a temp dir whenever we need to rewrite it — for a MODEL/ENDPOINT
-# override and/or to point OTel at the Jaeger container — so demo/vault/config stays pristine.
+# override and/or to point OTel at the Jaeger or OpenObserve container — so demo/vault/config
+# stays pristine.
 CONFIG_DIR="$DEMO_DIR/config"
 MODEL_OVERRIDDEN=
 if [ "$MODEL" != "$DEFAULT_MODEL" ] || [ "$MODEL_ENDPOINT" != "$DEFAULT_ENDPOINT" ]; then
   MODEL_OVERRIDDEN=1
 fi
-if [ -n "$MODEL_OVERRIDDEN" ] || [ -n "${JAEGER:-}" ]; then
+if [ -n "$MODEL_OVERRIDDEN" ] || [ -n "${JAEGER:-}" ] || [ -n "${OPENOBSERVE:-}" ]; then
   CONFIG_DIR="$(mktemp -d -t harness-vault-cfg-XXXXXX)/config"
   cp -r "$DEMO_DIR/config" "$CONFIG_DIR"
 fi
@@ -108,6 +124,29 @@ if [ -n "${JAEGER:-}" ]; then
   # Matches only the empty-string value, so the model `endpoint:` URL above is untouched.
   sed -i.bak 's|^  endpoint: "".*|  endpoint: "127.0.0.1:4317"|' "$CONFIG_DIR/infra.dev.yaml"
   rm -f "$CONFIG_DIR/infra.dev.yaml.bak"
+fi
+if [ -n "${OPENOBSERVE:-}" ]; then
+  # Repoint otel at the OpenObserve container: its OTLP/gRPC port (5081, plaintext h2c -> tls
+  # stays false) plus the org/stream routing + auth headers an authenticated multi-signal
+  # backend needs (T5.12). The `authorization` value stays an ${ENV_VAR} ref — never a literal
+  # secret — so it passes `harness validate`'s credential-header rule; run.sh exports
+  # OTEL_OTLP_AUTH below once OO is up. `organization`/`stream-name` are routing metadata, so a
+  # literal is fine. awk (not sed) because we replace one line with a multi-line block; matches
+  # only the 2-space `endpoint: ""` (the model endpoints are deeper-indented + non-empty).
+  awk '
+    /^  endpoint: ""/ && !oo_done {
+      print "  endpoint: \"127.0.0.1:5081\""
+      print "  tls: false"
+      print "  headers:"
+      print "    organization: default"
+      print "    stream-name: default"
+      print "    authorization: ${OTEL_OTLP_AUTH}"
+      oo_done = 1
+      next
+    }
+    { print }
+  ' "$CONFIG_DIR/infra.dev.yaml" > "$CONFIG_DIR/infra.dev.yaml.oo" \
+    && mv "$CONFIG_DIR/infra.dev.yaml.oo" "$CONFIG_DIR/infra.dev.yaml"
 fi
 
 # ---- scaffold a throwaway target repo from the established app -------------------------
@@ -187,6 +226,8 @@ cleanup() {
   "$BD" -C "$SITE" dolt stop >/dev/null 2>&1 || true
   [ -n "${KEEP_SITE:-}" ] || rm -rf "$SITE"
   [ -z "${JAEGER:-}" ] || docker rm -f "$JAEGER_NAME" >/dev/null 2>&1 || true
+  # OO runs with --rm so it self-removes on stop; force-remove anyway in case it's still up.
+  [ -z "${OPENOBSERVE:-}" ] || docker rm -f "$OPENOBSERVE_NAME" >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -201,6 +242,51 @@ if [ -n "${JAEGER:-}" ]; then
     -e COLLECTOR_OTLP_ENABLED=true \
     -p 16686:16686 -p 4317:4317 \
     "$JAEGER_IMAGE" >/dev/null
+fi
+
+# ---- start OpenObserve (multi-signal OTLP backend), if requested -----------------------
+# Single self-contained binary: authenticated OTLP/gRPC on 5081 (traces + logs + metrics all
+# ride the one port) and the UI/REST API on 5080. Ephemeral by design — `--rm`, no volume, so
+# every ingested signal dies with the container — and `--memory`-capped so it can't eat into
+# the gate sandboxes' share of the ~8Gi VM (a single gate already wants up to 4Gi).
+if [ -n "${OPENOBSERVE:-}" ]; then
+  command -v curl >/dev/null || { echo "error: curl not found (OPENOBSERVE=1 needs it to health-check + provision the dashboard)"; exit 1; }
+  say "Starting OpenObserve (OTLP traces+logs+metrics + UI) — http://127.0.0.1:5080"
+  docker rm -f "$OPENOBSERVE_NAME" >/dev/null 2>&1 || true   # clear any stale container from a prior run
+  docker run -d --rm --name "$OPENOBSERVE_NAME" \
+    --memory=1g \
+    -e ZO_ROOT_USER_EMAIL="$OO_EMAIL" \
+    -e ZO_ROOT_USER_PASSWORD="$OO_PASSWORD" \
+    -p 5080:5080 -p 5081:5081 \
+    "$OPENOBSERVE_IMAGE" >/dev/null
+
+  # OO's ingestion credential IS base64(email:password) — exactly the string its own Ingestion
+  # page shows. Derive it locally (offline, no API round-trip) and export it as the env var the
+  # materialized overlay's `authorization: ${OTEL_OTLP_AUTH}` header references; the harness
+  # expands it host-side (config.OTelConfig.ResolveHeaders) when it builds the exporter, so the
+  # secret lives in the environment, never in config — the same key discipline as the model key.
+  OO_TOKEN="$(printf '%s:%s' "$OO_EMAIL" "$OO_PASSWORD" | base64 | tr -d '\n')"
+  export OTEL_OTLP_AUTH="Basic $OO_TOKEN"
+
+  say "Waiting for OpenObserve to be healthy"
+  oo_ready=
+  for _ in $(seq 1 60); do
+    if curl -fsS "http://127.0.0.1:5080/healthz" >/dev/null 2>&1; then oo_ready=1; break; fi
+    sleep 1
+  done
+  [ -n "$oo_ready" ] || { echo "error: OpenObserve did not become healthy on :5080"; docker logs "$OPENOBSERVE_NAME" 2>&1 | tail -n 30; exit 1; }
+
+  # Provision the completeness overview dashboard (traces + logs + metrics panels) via OO's REST
+  # API. BEST-EFFORT: the JSON is pinned to OO's dashboard v5 schema, which evolves with the
+  # product, so a mismatch (e.g. a bumped OPENOBSERVE_IMAGE) must NOT abort the demo — telemetry
+  # still lands, and the file can be imported by hand from the UI. JSON: demo/vault/observe/.
+  if curl -fsS -X POST "http://127.0.0.1:5080/api/$OO_ORG/dashboards?folder=default" \
+       -H "Authorization: Basic $OO_TOKEN" -H 'Content-Type: application/json' \
+       --data-binary @"$DEMO_DIR/observe/completeness-dashboard.json" >/dev/null 2>&1; then
+    say "Provisioned the 'completeness overview' dashboard"
+  else
+    say "Dashboard auto-provision skipped (OO API/schema may differ for $OPENOBSERVE_IMAGE) — telemetry still lands; import demo/vault/observe/completeness-dashboard.json from the UI"
+  fi
 fi
 
 # ---- validate, run ---------------------------------------------------------------------
@@ -227,5 +313,6 @@ else
   echo "    when it lands: 'git -C $SITE log' shows the provenance trailer; the diff is the feature."
 fi
 [ -z "${JAEGER:-}" ] || echo "    telemetry    : open http://127.0.0.1:16686 (service 'harness') to watch each invocation as a trace"
+[ -z "${OPENOBSERVE:-}" ] || echo "    telemetry    : open http://127.0.0.1:5080 (login $OO_EMAIL / $OO_PASSWORD) — traces, logs & metrics in the 'completeness overview' dashboard"
 echo
 "$HARNESS" run --config "$CONFIG_DIR" --repo "$SITE" --bd "$BD" --serve-addr "$SERVE_ADDR"

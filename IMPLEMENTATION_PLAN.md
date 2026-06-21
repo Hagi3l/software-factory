@@ -371,15 +371,34 @@ where relevant, and the vault README's telemetry section) per the doc-tracking r
   test site fixed inline. Repo-wide: `golangci-lint run` = 0 issues, full `go test ./...` green.
   No spec/doc change (lint-config + mechanical call-site sweep; observability.md already
   mandates trace-correlated logs). ([observability.md](specs/observability.md))
-- [ ] **T5.15 OpenObserve demo bootstrap** — `demo/vault/run.sh` gains `OPENOBSERVE=1` (mirrors
-  the `JAEGER=1` path): boot OO as an **ephemeral `docker run --rm` with no volume** (data dies
-  with the container — no persistence wanted), `--memory`-capped to protect the 8Gi sandbox
-  budget; wait healthy; generate a token, export it as the env var T5.12 reads; provision a
-  single **completeness overview dashboard** (traces + logs + metrics panels) via OO's API; and
-  rewrite a temp infra overlay pointing `otel.endpoint` at OO's OTLP gRPC (`:5081`) with the
-  org/stream/auth metadata headers. Dashboard JSON lives in a new `demo/vault/observe/`. Pins
-  the exact OO OTLP metadata names + confirms logs ride the same gRPC port at impl time. (needs
-  T5.12, T5.13) ([observability.md](specs/observability.md))
+- [x] **T5.15 OpenObserve demo bootstrap** — *done.* `demo/vault/run.sh` gained an
+  `OPENOBSERVE=1` path mirroring `JAEGER=1`: boots OO as an **ephemeral `docker run -d --rm`
+  with no volume** (`public.ecr.aws/zinclabs/openobserve`, tag overridable via
+  `OPENOBSERVE_IMAGE`), `--memory=1g`-capped so it can't crowd the gate sandboxes' share of the
+  ~8Gi VM; exposes the authenticated OTLP/gRPC port `5081` (**all three signals ride that one
+  port** — confirmed against OO's OTLP design) + UI/REST on `5080`; **health-waits** on
+  `GET /healthz`; derives the ingestion **token locally as `base64(email:password)`** (offline,
+  no API round-trip — exactly what OO's Ingestion page shows) and exports it as **`OTEL_OTLP_AUTH`**
+  (the env var the overlay's `authorization: ${OTEL_OTLP_AUTH}` header references); **best-effort
+  POSTs** a three-panel **completeness overview dashboard** (one panel per signal) to
+  `POST /api/{org}/dashboards`; and rewrites the temp infra overlay (via `awk`, since one line
+  becomes a multi-line block) to point `otel.endpoint` at `127.0.0.1:5081` with `tls: false`
+  (plaintext h2c, localhost) + `organization`/`stream-name` (literal routing) + the env-ref
+  `authorization` header. **Credential discipline verified:** `harness validate` accepts the
+  `${OTEL_OTLP_AUTH}` ref and rejects a literal (T5.12's `validateOTelHeaders` rule). Dashboard
+  JSON + provisioning notes live in the **new `demo/vault/observe/`**; the dashboard is pinned to
+  OO's **v5** schema and POSTed best-effort (schema drift on an image bump degrades gracefully —
+  telemetry still lands, import by hand). The metrics panel queries via **PromQL**
+  (`harness_invocations`) since OO stores OTLP metrics as Prometheus-named streams (dotted
+  instrument names → underscores; sourced from `internal/telemetry/conventions.go`); traces+logs
+  panels count over the `default` stream. `JAEGER`/`OPENOBSERVE` are mutually exclusive (one
+  `otel.endpoint`). No Go code changed — the unit is the shell bootstrap + committed assets;
+  verified by `bash -n`, a simulated overlay rewrite, and a real `harness validate` (both the
+  accept and reject cases). docs: `demo/vault/README.md` telemetry section gained the
+  `OPENOBSERVE=1` subsection; `demo/vault/observe/README.md` documents the dashboard + auth. No
+  spec change — observability.md ("three signals, one endpoint"; "a single-binary multi-signal
+  sink e.g. OpenObserve") was written ahead. **The whole T5.12–T5.15 block is now complete.**
+  ([observability.md](specs/observability.md))
 
 ## Phase 6 — Agent semantic tooling (LSP)
 
