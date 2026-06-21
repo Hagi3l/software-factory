@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"strings"
 	"sync"
@@ -240,7 +239,7 @@ func New(opts Options, bd Beads, g Gate, merger Merger, nc *nats.Conn, js jetstr
 
 	log := opts.Logger
 	if log == nil {
-		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+		log = slog.New(slog.DiscardHandler)
 	}
 	tel := opts.Telemetry
 	if tel == nil {
@@ -323,7 +322,7 @@ func (o *Orchestrator) Run(ctx context.Context) error {
 	// results for pre-restart in-flight work are briefly ignored until the lease sweep restrands
 	// and redispatches them — so a transient beads hiccup at boot must not crash the orchestrator.
 	if err := o.rebuildInflight(ctx); err != nil {
-		o.log.Error("orchestrator: rebuild in-flight projection at startup; continuing with empty projection", "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: rebuild in-flight projection at startup; continuing with empty projection", "err", err)
 	}
 
 	var wg sync.WaitGroup
@@ -381,7 +380,7 @@ func (o *Orchestrator) rebuildInflight(ctx context.Context) error {
 		return fmt.Errorf("orchestrator: rebuild work-graph projection: %w", err)
 	}
 	o.inflight.reset(all)
-	o.log.Info("orchestrator: rebuilt work-graph projection from beads", "issues", len(all), "in_flight", o.inflight.size())
+	o.log.InfoContext(ctx, "orchestrator: rebuilt work-graph projection from beads", "issues", len(all), "in_flight", o.inflight.size())
 	return nil
 }
 

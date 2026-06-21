@@ -355,13 +355,22 @@ where relevant, and the vault README's telemetry section) per the doc-tracking r
   + cmd/harness spine suites still green. Specs written ahead (observability.md "Logs are
   trusted-side only", "Correlation: one schema") — no spec change; no CLI/config/control-room
   surface change, so no docs/ update. ([observability.md](specs/observability.md), [components/agent.md](specs/components/agent.md))
-- [ ] **T5.14 Context-variant log sweep + lint enforcement** — convert every `slog` call to its
-  `…Context(ctx, …)` form threading the **span-carrying** ctx, so log records land correlated
-  with the trace/span that emitted them (call sites with no ctx in scope pass
-  `context.Background()` and simply don't correlate). Make it permanent with **`sloglint`
-  (`context: all`)** in `.golangci.yml` so a non-context log call fails `make check`. Mechanical
-  but codebase-wide; US spellings stay (the gate's `misspell` is `locale: US`). (needs T5.13)
-  ([observability.md](specs/observability.md))
+- [x] **T5.14 Context-variant log sweep + lint enforcement** — *done.* Enabled **`sloglint`
+  with `context: all`** in `.golangci.yml` (new `settings.sloglint.context: all`), so a
+  non-context `slog` call now fails `make check`. The linter surfaced ~190 sites across ~20
+  files (the initial grep was inflated by non-slog `.Error(`/`.Info(`); sloglint is the
+  authoritative oracle). Swept every one in two transforms: **(A)** `Info/Warn/Error/Debug` →
+  `…Context(ctx, …)` threading the most-derived span-carrying ctx in scope — the function's
+  `ctx` param, the tracer-`Start`-reassigned `ctx`, an HTTP handler's `r.Context()`, or (in
+  tests) `t.Context()`; call sites with genuinely no reachable ctx pass `context.Background()`
+  (uncorrelated by design, never a signature change). **(B)** `slog.New(slog.NewTextHandler(
+  io.Discard, nil))` → `slog.New(slog.DiscardHandler)` at the ~10 discard-logger sites (Go 1.26
+  has `slog.DiscardHandler`), dropping the now-unused `io` import. Executed as 6 parallel
+  subagents over disjoint packages (agent/gate/orchestrator/runner/controlroom/goproxy+lsp+cmd),
+  each driven to **0 sloglint** and a clean package build; the lone `internal/telemetry`
+  test site fixed inline. Repo-wide: `golangci-lint run` = 0 issues, full `go test ./...` green.
+  No spec/doc change (lint-config + mechanical call-site sweep; observability.md already
+  mandates trace-correlated logs). ([observability.md](specs/observability.md))
 - [ ] **T5.15 OpenObserve demo bootstrap** — `demo/vault/run.sh` gains `OPENOBSERVE=1` (mirrors
   the `JAEGER=1` path): boot OO as an **ephemeral `docker run --rm` with no volume** (data dies
   with the container — no persistence wanted), `--memory`-capped to protect the 8Gi sandbox

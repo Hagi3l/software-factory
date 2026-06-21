@@ -2,6 +2,7 @@ package live_test
 
 import (
 	"bytes"
+	"context"
 	"log/slog"
 	"strings"
 	"testing"
@@ -25,7 +26,7 @@ func TestLogBridge_TeesRecordAsSystemEvent(t *testing.T) {
 	defer cancel()
 	log, buf := bridgeLogger(t, act, hub)
 
-	log.Info("orchestrator: dispatched", "issue", "harness-1", "role", "test-author")
+	log.InfoContext(t.Context(), "orchestrator: dispatched", "issue", "harness-1", "role", "test-author")
 
 	// The base handler still wrote the record — the bridge tees, it does not replace.
 	if !strings.Contains(buf.String(), "dispatched") {
@@ -67,8 +68,8 @@ func TestLogBridge_LevelMapsToKind(t *testing.T) {
 		log  func(*slog.Logger)
 		kind string
 	}{
-		{func(l *slog.Logger) { l.Warn("runner: slow") }, "warn"},
-		{func(l *slog.Logger) { l.Error("gate: failed") }, "error"},
+		{func(l *slog.Logger) { l.WarnContext(context.Background(), "runner: slow") }, "warn"},
+		{func(l *slog.Logger) { l.ErrorContext(context.Background(), "gate: failed") }, "error"},
 	}
 	for _, c := range cases {
 		act := live.NewActivity(4)
@@ -85,7 +86,7 @@ func TestLogBridge_NoComponentPrefixAttributedToHarness(t *testing.T) {
 	act := live.NewActivity(4)
 	log, _ := bridgeLogger(t, act, live.NewHub())
 
-	log.Info("starting up")
+	log.InfoContext(t.Context(), "starting up")
 
 	got := act.Recent()
 	if len(got) != 1 || got[0].AgentID != "harness" || got[0].Detail != "starting up" {
@@ -97,7 +98,7 @@ func TestLogBridge_WithAttrsAreIncluded(t *testing.T) {
 	act := live.NewActivity(4)
 	log, _ := bridgeLogger(t, act, live.NewHub())
 
-	log.With("run", "abc").Info("runner: provisioned", "id", "sb-1")
+	log.With("run", "abc").InfoContext(t.Context(), "runner: provisioned", "id", "sb-1")
 
 	got := act.Recent()
 	if len(got) != 1 {
@@ -114,7 +115,7 @@ func TestLogBridge_RespectsBaseLevel(t *testing.T) {
 	// Enabled and never reaches the feed.
 	log, _ := bridgeLogger(t, act, live.NewHub())
 
-	log.Debug("orchestrator: noisy detail")
+	log.DebugContext(t.Context(), "orchestrator: noisy detail")
 
 	if got := act.Recent(); len(got) != 0 {
 		t.Fatalf("feed entries = %d, want 0 (debug below base level)", len(got))

@@ -8,6 +8,7 @@ linters:
     - misspell
     - nilerr
     - reassign
+    - sloglint
     - unconvert
     - unparam
   settings:
@@ -21,6 +22,11 @@ linters:
         - performance
     misspell:
       locale: US
+    sloglint:
+      # Every slog call must use the ...Context variant threading the span-carrying ctx,
+      # so log records land correlated with the trace/span that emitted them (T5.14,
+      # specs/observability.md). A non-context log call fails the gate.
+      context: all
     unparam:
       check-exported: false
   exclusions:

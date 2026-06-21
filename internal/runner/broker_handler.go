@@ -216,7 +216,7 @@ func (r *relay) Complete(ctx context.Context, req model.Request) (model.Response
 	d := time.Since(start)
 	if err != nil {
 		span.RecordError(err)
-		r.log.Error("broker: model completion failed", "err", err)
+		r.log.ErrorContext(ctx, "broker: model completion failed", "err", err)
 		return model.Response{}, err
 	}
 
@@ -241,7 +241,7 @@ func (r *relay) Complete(ctx context.Context, req model.Request) (model.Response
 	for _, tc := range resp.ToolCalls {
 		r.publishEvent(tokenEvent{Type: "tool", Delta: toolCallSummary(tc)})
 	}
-	r.log.Info("broker: model completion",
+	r.log.InfoContext(ctx, "broker: model completion",
 		"stop", resp.Stop,
 		"input_tokens", resp.Usage.InputTokens,
 		"output_tokens", resp.Usage.OutputTokens,
@@ -278,7 +278,7 @@ func (r *relay) GitPush(ctx context.Context, req broker.GitPushRequest) (broker.
 	defer span.End()
 
 	if req.Branch != r.allowedBranch {
-		r.log.Warn("broker: git push refused, not the task branch", "requested", req.Branch, "allowed", r.allowedBranch)
+		r.log.WarnContext(ctx, "broker: git push refused, not the task branch", "requested", req.Branch, "allowed", r.allowedBranch)
 		err := fmt.Errorf("git push denied: branch %q is not this task's branch %q", req.Branch, r.allowedBranch)
 		span.RecordError(err)
 		return broker.GitPushResult{}, err
@@ -287,19 +287,19 @@ func (r *relay) GitPush(ctx context.Context, req broker.GitPushRequest) (broker.
 	bundle, err := r.extractBundle(ctx, req.Branch)
 	if err != nil {
 		span.RecordError(err)
-		r.log.Error("broker: git push failed extracting branch", "branch", req.Branch, "err", err)
+		r.log.ErrorContext(ctx, "broker: git push failed extracting branch", "branch", req.Branch, "err", err)
 		return broker.GitPushResult{}, err
 	}
 
 	commit, err := r.landBundle(ctx, req.Branch, bundle)
 	if err != nil {
 		span.RecordError(err)
-		r.log.Error("broker: git push failed applying branch", "branch", req.Branch, "err", err)
+		r.log.ErrorContext(ctx, "broker: git push failed applying branch", "branch", req.Branch, "err", err)
 		return broker.GitPushResult{}, err
 	}
 
 	span.SetAttributes(attribute.String(telemetry.AttrGitCommit, commit))
-	r.log.Info("broker: git push", "branch", req.Branch, "commit", commit)
+	r.log.InfoContext(ctx, "broker: git push", "branch", req.Branch, "commit", commit)
 	return broker.GitPushResult{Commit: commit}, nil
 }
 
@@ -324,7 +324,7 @@ func (r *relay) landBundle(ctx context.Context, branch string, bundle []byte) (s
 			rctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), revokeTimeout)
 			defer cancel()
 			if err := r.minter.Revoke(rctx, cred); err != nil {
-				r.log.Warn("broker: revoke scoped push token failed (token self-expires by its TTL)", "err", err)
+				r.log.WarnContext(rctx, "broker: revoke scoped push token failed (token self-expires by its TTL)", "err", err)
 			}
 		}()
 	}
@@ -349,23 +349,23 @@ func (r *relay) FetchPackage(ctx context.Context, req broker.FetchPackageRequest
 	res, err := r.fetcher.Fetch(ctx, req)
 	if err != nil {
 		span.RecordError(err)
-		r.log.Error("broker: package fetch failed", "path", req.Path, "err", err)
+		r.log.ErrorContext(ctx, "broker: package fetch failed", "path", req.Path, "err", err)
 		return broker.FetchPackageResult{}, err
 	}
 	span.SetAttributes(attribute.Int(telemetry.AttrHTTPStatus, res.Status))
-	r.log.Info("broker: package fetch", "path", req.Path, "status", res.Status, "bytes", len(res.Body))
+	r.log.InfoContext(ctx, "broker: package fetch", "path", req.Path, "status", res.Status, "bytes", len(res.Body))
 	return res, nil
 }
 
 // PublishEvent forwards a best-effort agent progress/log event to NATS on this
 // invocation's event subject. The agent holds no NATS credentials and does not know
 // its own subject — the broker supplies it. Delivery is fire-and-forget.
-func (r *relay) PublishEvent(_ context.Context, ev broker.PublishRequest) error {
+func (r *relay) PublishEvent(ctx context.Context, ev broker.PublishRequest) error {
 	data, err := json.Marshal(ev)
 	if err != nil {
 		return fmt.Errorf("broker: marshal event: %w", err)
 	}
-	r.log.Info("broker: publish event", "type", ev.Type)
+	r.log.InfoContext(ctx, "broker: publish event", "type", ev.Type)
 	if err := r.publishEnveloped(data); err != nil {
 		return fmt.Errorf("broker: publish event: %w", err)
 	}
@@ -465,7 +465,7 @@ func (r *relay) publishEvent(ev tokenEvent) {
 		return
 	}
 	if err := r.publishEnveloped(data); err != nil {
-		r.log.Debug("broker: drop live event", "err", err)
+		r.log.DebugContext(context.Background(), "broker: drop live event", "err", err)
 	}
 }
 

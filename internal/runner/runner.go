@@ -8,7 +8,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"strings"
@@ -185,7 +184,7 @@ func New(opts Options, backend sandbox.Backend, resolver AdapterResolver, pub Pu
 
 	log := opts.Logger
 	if log == nil {
-		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+		log = slog.New(slog.DiscardHandler)
 	}
 	tel := opts.Telemetry
 	if tel == nil {
@@ -254,14 +253,14 @@ func (r *Runner) serveRole(ctx context.Context, role string, cons jetstream.Cons
 func (r *Runner) handle(ctx context.Context, role string, msg jetstream.Msg) {
 	var brief core.Brief
 	if err := json.Unmarshal(msg.Data(), &brief); err != nil {
-		r.log.Error("runner: undecodable work message, terminating", "role", role, "err", err)
+		r.log.ErrorContext(ctx, "runner: undecodable work message, terminating", "role", role, "err", err)
 		_ = msg.TermWithReason("undecodable brief")
 		return
 	}
 
 	res, err := r.invoke(ctx, brief)
 	if err != nil {
-		r.log.Error("runner: invocation failed, redelivering", "role", role, "issue", brief.Issue.ID, "err", err)
+		r.log.ErrorContext(ctx, "runner: invocation failed, redelivering", "role", role, "issue", brief.Issue.ID, "err", err)
 		_ = msg.Nak()
 		return
 	}
@@ -272,16 +271,16 @@ func (r *Runner) handle(ctx context.Context, role string, msg jetstream.Msg) {
 	res.IssueID = brief.Issue.ID
 
 	if err := r.publishResult(ctx, role, res); err != nil {
-		r.log.Error("runner: publish result failed, redelivering", "role", role, "issue", brief.Issue.ID, "err", err)
+		r.log.ErrorContext(ctx, "runner: publish result failed, redelivering", "role", role, "issue", brief.Issue.ID, "err", err)
 		_ = msg.Nak()
 		return
 	}
 
 	if err := msg.Ack(); err != nil {
-		r.log.Error("runner: ack failed", "role", role, "issue", brief.Issue.ID, "err", err)
+		r.log.ErrorContext(ctx, "runner: ack failed", "role", role, "issue", brief.Issue.ID, "err", err)
 		return
 	}
-	r.log.Info("runner: invocation harvested", "role", role, "issue", brief.Issue.ID, "status", res.Status)
+	r.log.InfoContext(ctx, "runner: invocation harvested", "role", role, "issue", brief.Issue.ID, "status", res.Status)
 }
 
 // invoke runs one agent end to end: stand up the broker socket the sandbox will talk
@@ -370,7 +369,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownTimeout)
 		defer cancel()
 		if err := sb.Teardown(tctx); err != nil {
-			ilog.Error("runner: teardown sandbox", "id", sb.ID(), "err", err)
+			ilog.ErrorContext(ctx, "runner: teardown sandbox", "id", sb.ID(), "err", err)
 		}
 	}()
 
@@ -400,11 +399,11 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	defer stopBroker() // closes ln via Serve's ctx-cancel path
 	go func() {
 		if err := srv.Serve(brokerCtx, ln); err != nil {
-			ilog.Error("runner: broker serve", "err", err)
+			ilog.ErrorContext(ctx, "runner: broker serve", "err", err)
 		}
 	}()
 
-	ilog.Info("runner: provisioned sandbox", "id", sb.ID(), "profile", spec.Profile, "base", brief.Base)
+	ilog.InfoContext(ctx, "runner: provisioned sandbox", "id", sb.ID(), "profile", spec.Profile, "base", brief.Base)
 	invStart := time.Now()
 	res, invErr := r.invoker.Invoke(ctx, sb, brief, spec.Broker)
 	elapsed := time.Since(invStart)
@@ -421,7 +420,7 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	span.SetAttributes(attribute.String(telemetry.AttrResultStatus, status))
 
 	u := rel.Usage()
-	ilog.Info("runner: invocation usage",
+	ilog.InfoContext(ctx, "runner: invocation usage",
 		"input_tokens", u.InputTokens, "output_tokens", u.OutputTokens,
 		"cache_read_tokens", u.CacheReadTokens, "cache_creation_tokens", u.CacheCreationTokens)
 
@@ -463,7 +462,7 @@ func (r *Runner) harvest(ctx context.Context, log *slog.Logger, rel *relay, res 
 	if prompt, ok := rel.Prompt(); ok {
 		ref, err := r.store.Put(ctx, core.ArtifactKindPrompt, bytes.NewReader(prompt))
 		if err != nil {
-			log.Error("runner: harvest prompt", "err", err)
+			log.ErrorContext(ctx, "runner: harvest prompt", "err", err)
 		} else {
 			res.Evidence.PromptSHA = ref.Hash
 			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
@@ -472,7 +471,7 @@ func (r *Runner) harvest(ctx context.Context, log *slog.Logger, rel *relay, res 
 	if transcript, ok := rel.Transcript(); ok {
 		ref, err := r.store.Put(ctx, core.ArtifactKindTranscript, bytes.NewReader(transcript))
 		if err != nil {
-			log.Error("runner: harvest transcript", "err", err)
+			log.ErrorContext(ctx, "runner: harvest transcript", "err", err)
 		} else {
 			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
 		}
@@ -487,7 +486,7 @@ func (r *Runner) harvest(ctx context.Context, log *slog.Logger, rel *relay, res 
 	if len(res.Trace) > 0 {
 		ref, err := r.store.Put(ctx, core.ArtifactKindTraceabilityMap, bytes.NewReader(formatTraceabilityMap(res.Trace)))
 		if err != nil {
-			log.Error("runner: harvest traceability map", "err", err)
+			log.ErrorContext(ctx, "runner: harvest traceability map", "err", err)
 		} else {
 			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
 			res.Trace = nil
@@ -502,9 +501,9 @@ func (r *Runner) harvest(ctx context.Context, log *slog.Logger, rel *relay, res 
 	// so the orchestrator still sees it.
 	if len(res.Transforms) > 0 {
 		if data, err := json.Marshal(res.Transforms); err != nil {
-			log.Error("runner: marshal transform log", "err", err)
+			log.ErrorContext(ctx, "runner: marshal transform log", "err", err)
 		} else if ref, perr := r.store.Put(ctx, core.ArtifactKindTransformLog, bytes.NewReader(data)); perr != nil {
-			log.Error("runner: harvest transform log", "err", perr)
+			log.ErrorContext(ctx, "runner: harvest transform log", "err", perr)
 		} else {
 			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
 			res.Transforms = nil

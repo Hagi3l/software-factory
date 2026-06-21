@@ -245,7 +245,7 @@ func (s *Server) routes() {
 func (s *Server) render(w http.ResponseWriter, r *http.Request, c templ.Component) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := c.Render(r.Context(), w); err != nil {
-		s.log.Error("controlroom: render failed", "path", r.URL.Path, "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: render failed", "path", r.URL.Path, "err", err)
 	}
 }
 
@@ -271,7 +271,7 @@ func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := live.Stream(r.Context(), w, sub, sseHeartbeat); err != nil {
-		s.log.Debug("controlroom: sse stream closed", "path", r.URL.Path, "err", err)
+		s.log.DebugContext(r.Context(), "controlroom: sse stream closed", "path", r.URL.Path, "err", err)
 	}
 }
 
@@ -296,7 +296,7 @@ func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 	}
 	board, err := s.reader.Board(r.Context(), s.stageOrder, s.epicMode(), s.budgetCaps)
 	if err != nil {
-		s.log.Error("controlroom: board read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: board read failed", "err", err)
 		s.render(w, r, views.BoardMessage("Could not load the board: "+err.Error()))
 		return
 	}
@@ -315,7 +315,7 @@ func (s *Server) handleBoardCards(w http.ResponseWriter, r *http.Request) {
 	}
 	board, err := s.reader.Board(r.Context(), s.stageOrder, s.epicMode(), s.budgetCaps)
 	if err != nil {
-		s.log.Error("controlroom: board fragment read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: board fragment read failed", "err", err)
 		http.Error(w, "could not refresh the board\n", http.StatusInternalServerError)
 		return
 	}
@@ -333,7 +333,7 @@ func (s *Server) handleDAG(w http.ResponseWriter, r *http.Request) {
 	}
 	g, err := s.reader.DAG(r.Context())
 	if err != nil {
-		s.log.Error("controlroom: dag read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: dag read failed", "err", err)
 		s.render(w, r, views.DAGMessage("Could not load the DAG: "+err.Error()))
 		return
 	}
@@ -352,7 +352,7 @@ func (s *Server) handleDAGSVG(w http.ResponseWriter, r *http.Request) {
 	}
 	g, err := s.reader.DAG(r.Context())
 	if err != nil {
-		s.log.Error("controlroom: dag fragment read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: dag fragment read failed", "err", err)
 		http.Error(w, "could not refresh the dag\n", http.StatusInternalServerError)
 		return
 	}
@@ -394,7 +394,7 @@ func (s *Server) handleInvocation(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	inv, err := s.invocation(r.Context(), id)
 	if err != nil {
-		s.log.Error("controlroom: invocation read failed", "id", id, "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: invocation read failed", "id", id, "err", err)
 		s.render(w, r, views.InvocationMessage("Could not load invocation "+id+": "+err.Error()))
 		return
 	}
@@ -412,7 +412,7 @@ func (s *Server) handleInvocationItems(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	inv, err := s.invocation(r.Context(), id)
 	if err != nil {
-		s.log.Error("controlroom: invocation read failed", "id", id, "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: invocation read failed", "id", id, "err", err)
 		http.Error(w, "invocation read failed\n", http.StatusInternalServerError)
 		return
 	}
@@ -443,7 +443,7 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	detail, err := s.reader.IssueDetail(r.Context(), id)
 	if err != nil {
-		s.log.Error("controlroom: issue detail read failed", "id", id, "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: issue detail read failed", "id", id, "err", err)
 		s.render(w, r, views.IssueDetailMessage("Could not load issue "+id+": "+err.Error()))
 		return
 	}
@@ -465,7 +465,7 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	rep, err := s.reader.Replay(r.Context(), id)
 	if err != nil {
-		s.log.Error("controlroom: replay read failed", "id", id, "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: replay read failed", "id", id, "err", err)
 		s.render(w, r, views.ReplayNotAttached("Could not load replay for "+id+": "+err.Error()))
 		return
 	}
@@ -488,7 +488,7 @@ func (s *Server) handleVerification(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	v, err := s.reader.GateVerdict(r.Context(), id)
 	if err != nil {
-		s.log.Error("controlroom: verification read failed", "id", id, "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: verification read failed", "id", id, "err", err)
 		s.render(w, r, views.VerificationNotAttached("Could not load verification for "+id+": "+err.Error()))
 		return
 	}
@@ -509,7 +509,7 @@ func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
 	hash := r.PathValue("hash")
 	rc, err := s.reader.Artifact(r.Context(), hash)
 	if err != nil {
-		s.log.Debug("controlroom: artifact fetch failed", "hash", hash, "err", err)
+		s.log.DebugContext(r.Context(), "controlroom: artifact fetch failed", "hash", hash, "err", err)
 		http.Error(w, "artifact not found\n", http.StatusNotFound)
 		return
 	}
@@ -517,7 +517,7 @@ func (s *Server) handleArtifact(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	if _, err := io.Copy(w, rc); err != nil {
-		s.log.Debug("controlroom: artifact stream interrupted", "hash", hash, "err", err)
+		s.log.DebugContext(r.Context(), "controlroom: artifact stream interrupted", "hash", hash, "err", err)
 	}
 }
 
@@ -540,7 +540,7 @@ func (s *Server) handleStatusBar(w http.ResponseWriter, r *http.Request) {
 	}
 	st, err := s.reader.Status(r.Context(), s.budgetCaps)
 	if err != nil {
-		s.log.Error("controlroom: status read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: status read failed", "err", err)
 		http.Error(w, "could not refresh the status bar\n", http.StatusInternalServerError)
 		return
 	}
@@ -583,7 +583,7 @@ func (s *Server) handlePersona(w http.ResponseWriter, r *http.Request) {
 	}
 	data, err := os.ReadFile(path) // #nosec G304 -- path is resolved from the in-config soul roster (see personaPathFor), never a raw request value.
 	if err != nil {
-		s.log.Error("controlroom: persona read failed", "path", path, "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: persona read failed", "path", path, "err", err)
 		s.render(w, r, views.PersonaError("Could not read persona file: "+err.Error()))
 		return
 	}
@@ -620,7 +620,7 @@ func (s *Server) handleDLQ(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := s.reader.DeadLetters(r.Context())
 	if err != nil {
-		s.log.Error("controlroom: dlq read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: dlq read failed", "err", err)
 		s.render(w, r, views.DeadLetterMessage("Could not load the dead-letter queue: "+err.Error()))
 		return
 	}
@@ -639,7 +639,7 @@ func (s *Server) handleDLQItems(w http.ResponseWriter, r *http.Request) {
 	}
 	items, err := s.reader.DeadLetters(r.Context())
 	if err != nil {
-		s.log.Error("controlroom: dlq fragment read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: dlq fragment read failed", "err", err)
 		http.Error(w, "could not refresh the dead-letter queue\n", http.StatusInternalServerError)
 		return
 	}
@@ -660,7 +660,7 @@ func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.reader.MergeQueue(r.Context(), s.mergeQueue.Snapshot())
 	if err != nil {
-		s.log.Error("controlroom: merge-queue read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: merge-queue read failed", "err", err)
 		s.render(w, r, views.MergeQueueMessage("Could not load the merge queue: "+err.Error()))
 		return
 	}
@@ -678,7 +678,7 @@ func (s *Server) handleMergeItems(w http.ResponseWriter, r *http.Request) {
 	}
 	rows, err := s.reader.MergeQueue(r.Context(), s.mergeQueue.Snapshot())
 	if err != nil {
-		s.log.Error("controlroom: merge-queue fragment read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: merge-queue fragment read failed", "err", err)
 		http.Error(w, "could not refresh the merge queue\n", http.StatusInternalServerError)
 		return
 	}
@@ -700,7 +700,7 @@ func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
 	}
 	b, err := s.reader.Budgets(r.Context(), s.budgetCaps)
 	if err != nil {
-		s.log.Error("controlroom: budgets read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: budgets read failed", "err", err)
 		s.render(w, r, views.BudgetsMessage("Could not load budgets: "+err.Error()))
 		return
 	}
@@ -718,7 +718,7 @@ func (s *Server) handleBudgetsItems(w http.ResponseWriter, r *http.Request) {
 	}
 	b, err := s.reader.Budgets(r.Context(), s.budgetCaps)
 	if err != nil {
-		s.log.Error("controlroom: budgets fragment read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: budgets fragment read failed", "err", err)
 		http.Error(w, "could not refresh budgets\n", http.StatusInternalServerError)
 		return
 	}
@@ -735,7 +735,7 @@ func (s *Server) handleProvenance(w http.ResponseWriter, r *http.Request) {
 	}
 	commits, err := s.reader.RecentProvenance(r.Context(), provenanceLimit)
 	if err != nil {
-		s.log.Error("controlroom: provenance read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: provenance read failed", "err", err)
 		s.render(w, r, views.ProvenanceMessage("Could not load provenance: "+err.Error()))
 		return
 	}
@@ -751,7 +751,7 @@ func (s *Server) handleProvenanceItems(w http.ResponseWriter, r *http.Request) {
 	}
 	commits, err := s.reader.RecentProvenance(r.Context(), provenanceLimit)
 	if err != nil {
-		s.log.Error("controlroom: provenance fragment read failed", "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: provenance fragment read failed", "err", err)
 		http.Error(w, "could not refresh provenance\n", http.StatusInternalServerError)
 		return
 	}
@@ -798,7 +798,7 @@ func (s *Server) handleCreateStream(w http.ResponseWriter, r *http.Request) {
 	defer cancel()
 
 	if err := live.Stream(r.Context(), w, sub, sseHeartbeat); err != nil {
-		s.log.Debug("controlroom: wizard sse stream closed", "session", sess.ID, "err", err)
+		s.log.DebugContext(r.Context(), "controlroom: wizard sse stream closed", "session", sess.ID, "err", err)
 	}
 }
 
@@ -1047,11 +1047,11 @@ func (s *Server) handleCreateApprove(w http.ResponseWriter, r *http.Request) {
 	})
 	sess.FinishCommit(res, err)
 	if err != nil {
-		s.log.Warn("controlroom: wizard approval failed", "session", sess.ID, "err", err)
+		s.log.WarnContext(r.Context(), "controlroom: wizard approval failed", "session", sess.ID, "err", err)
 		s.render(w, r, views.CreateApproveResult(wizard.SeedResult{}, "Could not commit the draft: "+err.Error()))
 		return
 	}
-	s.log.Info("controlroom: wizard draft approved", "session", sess.ID, "commit", res.Commit, "issues", len(res.Issues))
+	s.log.InfoContext(r.Context(), "controlroom: wizard draft approved", "session", sess.ID, "commit", res.Commit, "issues", len(res.Issues))
 	s.render(w, r, views.CreateApproveResult(res, ""))
 }
 
@@ -1074,7 +1074,7 @@ func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	rc, err := s.reader.ResolveContext(r.Context(), s.repo, s.specDepth, id)
 	if err != nil {
-		s.log.Error("controlroom: resolve context read failed", "id", id, "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: resolve context read failed", "id", id, "err", err)
 		s.render(w, r, views.ResolveMessage("Could not load issue "+id+" to resolve: "+err.Error()))
 		return
 	}
@@ -1112,7 +1112,7 @@ func (s *Server) handleResolveBlast(w http.ResponseWriter, r *http.Request) {
 	}
 	br, err := s.reader.BlastRadius(r.Context(), s.repo, s.specDepth, paths)
 	if err != nil {
-		s.log.Error("controlroom: blast radius read failed", "session", sess.ID, "err", err)
+		s.log.ErrorContext(r.Context(), "controlroom: blast radius read failed", "session", sess.ID, "err", err)
 		http.Error(w, "could not compute the blast radius\n", http.StatusInternalServerError)
 		return
 	}
@@ -1176,11 +1176,11 @@ func (s *Server) handleResolveApprove(w http.ResponseWriter, r *http.Request) {
 	})
 	sess.FinishCommit(res, err)
 	if err != nil {
-		s.log.Warn("controlroom: resolve approval failed", "session", sess.ID, "issue", sess.ResolveIssue(), "err", err)
+		s.log.WarnContext(r.Context(), "controlroom: resolve approval failed", "session", sess.ID, "issue", sess.ResolveIssue(), "err", err)
 		s.render(w, r, views.ResolveApproveResult(wizard.ResolveResult{}, "Could not commit the resolution: "+err.Error()))
 		return
 	}
-	s.log.Info("controlroom: resolve draft approved", "session", sess.ID, "commit", res.Commit, "reopened", res.ReopenedIssue)
+	s.log.InfoContext(r.Context(), "controlroom: resolve draft approved", "session", sess.ID, "commit", res.Commit, "reopened", res.ReopenedIssue)
 	s.render(w, r, views.ResolveApproveResult(res, ""))
 }
 
@@ -1204,7 +1204,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 	if err != nil {
 		return err
 	}
-	s.log.Info("controlroom: serving", "addr", ln.Addr().String())
+	s.log.InfoContext(ctx, "controlroom: serving", "addr", ln.Addr().String())
 
 	errCh := make(chan error, 1)
 	go func() { errCh <- srv.Serve(ln) }()
@@ -1214,7 +1214,7 @@ func (s *Server) ListenAndServe(ctx context.Context, addr string) error {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
-		s.log.Info("controlroom: stopped")
+		s.log.InfoContext(ctx, "controlroom: stopped")
 		return nil
 	case err := <-errCh:
 		if errors.Is(err, http.ErrServerClosed) {

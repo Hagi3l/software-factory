@@ -60,7 +60,7 @@ func cmdSandboxGoproxy(args []string) error {
 		_ = srv.Shutdown(sctx)
 	}()
 
-	log.Info("sandbox-goproxy: serving", "addr", *addr, "broker", *brokerEndpoint)
+	log.InfoContext(ctx, "sandbox-goproxy: serving", "addr", *addr, "broker", *brokerEndpoint)
 	if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("sandbox-goproxy: serve: %w", err)
 	}

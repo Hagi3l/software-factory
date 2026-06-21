@@ -62,7 +62,7 @@ func (o *Orchestrator) parkAwaitingApproval(ctx context.Context, issue core.Issu
 		// park: store an empty provenance and proceed (the merge re-gate still rebuilds it on
 		// a rebase; a fast-forward then carries a minimal trailer, self-describing like a
 		// missing prompt sha).
-		o.log.Error("orchestrator: marshal parked provenance", "issue", issue.ID, "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: marshal parked provenance", "issue", issue.ID, "err", err)
 		provJSON = nil
 	}
 	// Publish the escalation before blocking so a publish failure (transient) leaves the
@@ -81,7 +81,7 @@ func (o *Orchestrator) parkAwaitingApproval(ctx context.Context, issue core.Issu
 	}); err != nil {
 		return true, fmt.Errorf("park issue %s awaiting approval: %w", issue.ID, err)
 	}
-	o.log.Warn("orchestrator: parked integrate candidate awaiting human approval",
+	o.log.WarnContext(ctx, "orchestrator: parked integrate candidate awaiting human approval",
 		"issue", issue.ID, "candidate", res.Branch.Ref, "profile", o.opts.Config.Harness.Policy.Profile)
 	return false, errAwaitingApproval
 }
@@ -116,22 +116,22 @@ func (o *Orchestrator) consumeApprovals(ctx context.Context, cons jetstream.Cons
 func (o *Orchestrator) handleApprovalMessage(ctx context.Context, msg jetstream.Msg) {
 	var req core.ApprovalRequest
 	if err := json.Unmarshal(msg.Data(), &req); err != nil {
-		o.log.Error("orchestrator: undecodable approval, terminating", "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: undecodable approval, terminating", "err", err)
 		_ = msg.TermWithReason("undecodable approval")
 		return
 	}
 	if req.IssueID == "" {
-		o.log.Error("orchestrator: approval has no issue id, terminating")
+		o.log.ErrorContext(ctx, "orchestrator: approval has no issue id, terminating")
 		_ = msg.TermWithReason("approval without issue id")
 		return
 	}
 	transient, err := o.handleApproval(ctx, req)
 	switch {
 	case err != nil && transient:
-		o.log.Error("orchestrator: transient failure handling approval, redelivering", "issue", req.IssueID, "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: transient failure handling approval, redelivering", "issue", req.IssueID, "err", err)
 		_ = msg.Nak()
 	case err != nil:
-		o.log.Error("orchestrator: permanent failure handling approval, terminating", "issue", req.IssueID, "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: permanent failure handling approval, terminating", "issue", req.IssueID, "err", err)
 		_ = msg.TermWithReason("unprocessable approval")
 	default:
 		_ = msg.Ack()
@@ -149,12 +149,12 @@ func (o *Orchestrator) handleApproval(ctx context.Context, req core.ApprovalRequ
 		return true, fmt.Errorf("get issue %s: %w", req.IssueID, err)
 	}
 	if issue.Status != statusBlocked || issue.CandidateRef == "" {
-		o.log.Info("orchestrator: approval for issue not awaiting approval, ignoring",
+		o.log.InfoContext(ctx, "orchestrator: approval for issue not awaiting approval, ignoring",
 			"issue", issue.ID, "status", issue.Status, "approved", req.Approved)
 		return false, nil
 	}
 	if req.CandidateSHA != "" && req.CandidateSHA != issue.CandidateRef {
-		o.log.Warn("orchestrator: approval candidate mismatch (stale), ignoring",
+		o.log.WarnContext(ctx, "orchestrator: approval candidate mismatch (stale), ignoring",
 			"issue", issue.ID, "approved_sha", req.CandidateSHA, "parked_sha", issue.CandidateRef)
 		return false, nil
 	}
@@ -182,7 +182,7 @@ func (o *Orchestrator) resumeApproved(ctx context.Context, issue core.Issue, sta
 	var prov core.Provenance
 	if issue.ParkedProvenance != "" {
 		if err := json.Unmarshal([]byte(issue.ParkedProvenance), &prov); err != nil {
-			o.log.Error("orchestrator: decode parked provenance, merging with a degraded record", "issue", issue.ID, "err", err)
+			o.log.ErrorContext(ctx, "orchestrator: decode parked provenance, merging with a degraded record", "issue", issue.ID, "err", err)
 		}
 	}
 	prov.Issue = issue.ID
@@ -205,7 +205,7 @@ func (o *Orchestrator) resumeApproved(ctx context.Context, issue core.Issue, sta
 	}); err != nil {
 		return true, fmt.Errorf("close integrated issue %s: %w", issue.ID, err)
 	}
-	o.log.Info("orchestrator: integrated approved candidate", "issue", issue.ID, "approver", req.Approver, "ref", issue.CandidateRef)
+	o.log.InfoContext(ctx, "orchestrator: integrated approved candidate", "issue", issue.ID, "approver", req.Approver, "ref", issue.CandidateRef)
 	return false, nil
 }
 
@@ -216,7 +216,7 @@ func (o *Orchestrator) resumeApproved(ctx context.Context, issue core.Issue, sta
 // usage — a reject adds no spend but does spend a retry, exactly like a gate rejection.
 func (o *Orchestrator) rejectParked(ctx context.Context, issue core.Issue, stage config.Stage, req core.ApprovalRequest) (bool, error) {
 	res := core.Result{IssueID: issue.ID, Branch: core.Branch{Ref: issue.CandidateRef}}
-	o.log.Warn("orchestrator: human rejected integrate candidate", "issue", issue.ID, "approver", req.Approver, "ref", issue.CandidateRef)
+	o.log.WarnContext(ctx, "orchestrator: human rejected integrate candidate", "issue", issue.ID, "approver", req.Approver, "ref", issue.CandidateRef)
 	return o.route(ctx, issue, stage, res, "human rejected integrate candidate")
 }
 

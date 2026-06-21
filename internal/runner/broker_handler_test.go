@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -89,7 +88,7 @@ func (s *bundleSandbox) Exec(_ context.Context, cmd sandbox.Command) (sandbox.Ex
 }
 func (s *bundleSandbox) Teardown(context.Context) error { return nil }
 
-func discardLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
+func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
 func testRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox) *relay {
 	return newRelay(adapter, pub, sb, relayConfig{

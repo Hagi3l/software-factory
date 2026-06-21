@@ -65,7 +65,7 @@ func (e *rpcError) Error() string { return fmt.Sprintf("lsp: rpc error %d: %s", 
 // the whole transport. It starts the reader goroutine immediately. A nil logger discards.
 func New(stdout io.Reader, stdin io.Writer, closer io.Closer, log *slog.Logger) *Client {
 	if log == nil {
-		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+		log = slog.New(slog.DiscardHandler)
 	}
 	c := &Client{
 		w:       stdin,
@@ -184,7 +184,7 @@ type inbound struct {
 func (c *Client) dispatch(payload []byte) {
 	var in inbound
 	if err := json.Unmarshal(payload, &in); err != nil {
-		c.log.Debug("lsp: undecodable message", "err", err)
+		c.log.DebugContext(context.Background(), "lsp: undecodable message", "err", err)
 		return
 	}
 	switch {
@@ -196,14 +196,14 @@ func (c *Client) dispatch(payload []byte) {
 	case in.ID != nil:
 		c.deliverResponse(*in.ID, rpcResult{result: in.Result, err: in.Error})
 	default:
-		c.log.Debug("lsp: ignoring message with neither method nor id")
+		c.log.DebugContext(context.Background(), "lsp: ignoring message with neither method nor id")
 	}
 }
 
 func (c *Client) deliverResponse(idRaw json.RawMessage, res rpcResult) {
 	id, err := strconv.Atoi(strings.TrimSpace(string(idRaw)))
 	if err != nil {
-		c.log.Debug("lsp: response with non-integer id", "id", string(idRaw))
+		c.log.DebugContext(context.Background(), "lsp: response with non-integer id", "id", string(idRaw))
 		return
 	}
 	c.mu.Lock()

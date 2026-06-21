@@ -153,7 +153,7 @@ func TestWrapLogHandlerOnFansOutKeepingBase(t *testing.T) {
 	if wrapped == slog.Handler(base) {
 		t.Fatal("an exporting provider must wrap base, not return it unchanged")
 	}
-	slog.New(wrapped).Info("orchestrator: dispatched")
+	slog.New(wrapped).InfoContext(context.Background(), "orchestrator: dispatched")
 	if len(msgs) != 1 || msgs[0] != "orchestrator: dispatched" {
 		t.Fatalf("base sink lost the record when OTLP export is on: %v", msgs)
 	}

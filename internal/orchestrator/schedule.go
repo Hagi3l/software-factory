@@ -20,7 +20,7 @@ import (
 func (o *Orchestrator) scheduleReady(ctx context.Context) {
 	ready, err := o.bd.Ready(ctx)
 	if err != nil {
-		o.log.Error("orchestrator: query ready work", "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: query ready work", "err", err)
 		return
 	}
 	for _, issue := range ready {
@@ -48,7 +48,7 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 			// Not an agent stage (or an unknown role): nothing to dispatch. Non-agent
 			// stages (e.g. integrate) are executed by the orchestrator on acceptance, never
 			// dispatched to a runner, so a ready issue for one would be a config/seed error.
-			o.log.Warn("orchestrator: ready issue has no agent stage for its role; skipping",
+			o.log.WarnContext(ctx, "orchestrator: ready issue has no agent stage for its role; skipping",
 				"issue", issue.ID, "role", issue.Role)
 			continue
 		}
@@ -58,7 +58,7 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 			// either that (defense-in-depth) or a role with several souls none of whose
 			// selector the issue's tags satisfy. Skip and log; the issue stays ready and is
 			// retried — a persistently unmatched issue is a planner/config fault for a human.
-			o.log.Error("orchestrator: no soul matches issue; cannot dispatch", "issue", issue.ID, "role", issue.Role, "tags", issue.Tags)
+			o.log.ErrorContext(ctx, "orchestrator: no soul matches issue; cannot dispatch", "issue", issue.ID, "role", issue.Role, "tags", issue.Tags)
 			continue
 		}
 
@@ -68,7 +68,7 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 			_, e := o.bd.Claim(ctx, issue.ID, o.leaseTTL)
 			return e
 		}); err != nil {
-			o.log.Error("orchestrator: claim issue", "issue", issue.ID, "err", err)
+			o.log.ErrorContext(ctx, "orchestrator: claim issue", "issue", issue.ID, "err", err)
 			continue
 		}
 		brief := o.buildBrief(issue, stage, soul)
@@ -78,7 +78,7 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 		// stalled issue (the same discipline buildBrief uses for an unresolvable slice).
 		if brief.SpecHash != "" {
 			if err := o.bd.PinSpecHash(ctx, issue.ID, brief.SpecHash); err != nil {
-				o.log.Error("orchestrator: pin spec hash; dispatching anyway", "issue", issue.ID, "err", err)
+				o.log.ErrorContext(ctx, "orchestrator: pin spec hash; dispatching anyway", "issue", issue.ID, "err", err)
 			}
 		}
 		// Record the just-pinned spec hash into the in-flight projection's snapshot. The claim
@@ -90,18 +90,18 @@ func (o *Orchestrator) scheduleReady(ctx context.Context) {
 		issue.SpecHash = brief.SpecHash
 		o.inflight.updateIssue(issue)
 		if err := o.publishWork(ctx, issue.Role, brief); err != nil {
-			o.log.Error("orchestrator: publish work, releasing claim", "issue", issue.ID, "err", err)
+			o.log.ErrorContext(ctx, "orchestrator: publish work, releasing claim", "issue", issue.ID, "err", err)
 			// Undo the claim so the issue returns to ready and is redispatched promptly
 			// rather than waiting for the lease to expire. Through the choke point so the
 			// in_progress→open reversal is announced too (the card returns to the queue).
 			if rerr := o.transition(ctx, issue, statusOpen, func(ctx context.Context) error {
 				return o.bd.Release(ctx, issue.ID)
 			}); rerr != nil {
-				o.log.Error("orchestrator: release after failed publish", "issue", issue.ID, "err", rerr)
+				o.log.ErrorContext(ctx, "orchestrator: release after failed publish", "issue", issue.ID, "err", rerr)
 			}
 			continue
 		}
-		o.log.Info("orchestrator: dispatched", "issue", issue.ID, "role", issue.Role, "soul", soul.Name, "attempt", issue.Attempt)
+		o.log.InfoContext(ctx, "orchestrator: dispatched", "issue", issue.ID, "role", issue.Role, "soul", soul.Name, "attempt", issue.Attempt)
 	}
 }
 
@@ -128,7 +128,7 @@ func (o *Orchestrator) buildBrief(issue core.Issue, stage config.Stage, soul cor
 	if issue.Spec != "" {
 		s, err := spec.Resolve(o.opts.Repo, issue.Spec, o.opts.Config.Harness.SpecDepth)
 		if err != nil {
-			o.log.Error("orchestrator: resolve spec slice; dispatching with empty slice",
+			o.log.ErrorContext(context.Background(), "orchestrator: resolve spec slice; dispatching with empty slice",
 				"issue", issue.ID, "spec", issue.Spec, "err", err)
 		} else {
 			specSlice = s

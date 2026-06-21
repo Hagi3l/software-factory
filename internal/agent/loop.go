@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
@@ -73,7 +72,7 @@ type Loop struct {
 // always terminates.
 func New(tools ToolSource, budget Budget, log *slog.Logger) *Loop {
 	if log == nil {
-		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+		log = slog.New(slog.DiscardHandler)
 	}
 	if budget.MaxTurns <= 0 {
 		budget.MaxTurns = DefaultMaxTurns
@@ -143,7 +142,7 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 		})
 
 		if l.budget.MaxTokens > 0 && total.InputTokens+total.OutputTokens >= l.budget.MaxTokens {
-			l.log.Warn("agent: token budget exhausted, stopping",
+			l.log.WarnContext(ctx, "agent: token budget exhausted, stopping",
 				"issue", brief.Issue.ID, "turn", turn,
 				"input_tokens", total.InputTokens, "output_tokens", total.OutputTokens, "cap", l.budget.MaxTokens)
 			return core.Result{Status: core.StatusFailed}, nil
@@ -153,7 +152,7 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 		// cannot self-submit (there is no candidate), so nudge it back to a lifecycle
 		// tool; the turn cap bounds a model that keeps refusing.
 		if len(resp.ToolCalls) == 0 {
-			l.log.Debug("agent: model returned no tool calls, nudging", "issue", brief.Issue.ID, "turn", turn, "stop", resp.Stop)
+			l.log.DebugContext(ctx, "agent: model returned no tool calls, nudging", "issue", brief.Issue.ID, "turn", turn, "stop", resp.Stop)
 			messages = append(messages, model.Message{Role: model.RoleUser, Text: nudge})
 			continue
 		}
@@ -162,7 +161,7 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 		for _, tc := range resp.ToolCalls {
 			tool, ok := byName[tc.Name]
 			if !ok {
-				l.log.Warn("agent: model called unknown tool", "issue", brief.Issue.ID, "tool", tc.Name)
+				l.log.WarnContext(ctx, "agent: model called unknown tool", "issue", brief.Issue.ID, "tool", tc.Name)
 				results = append(results, model.ToolResult{
 					ToolCallID: tc.ID,
 					Content:    fmt.Sprintf("unknown tool %q; available tools: %s", tc.Name, strings.Join(toolNames(defs), ", ")),
@@ -175,7 +174,7 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 				return core.Result{}, fmt.Errorf("agent: tool %q (turn %d): %w", tc.Name, turn, err)
 			}
 			if out.Result != nil {
-				l.log.Info("agent: invocation terminated by tool", "issue", brief.Issue.ID, "tool", tc.Name, "status", out.Result.Status, "turns", turn)
+				l.log.InfoContext(ctx, "agent: invocation terminated by tool", "issue", brief.Issue.ID, "tool", tc.Name, "status", out.Result.Status, "turns", turn)
 				return *out.Result, nil
 			}
 			results = append(results, model.ToolResult{ToolCallID: tc.ID, Content: out.Content, IsError: out.IsError})
@@ -183,7 +182,7 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 		messages = append(messages, model.Message{Role: model.RoleTool, ToolResults: results})
 	}
 
-	l.log.Warn("agent: turn budget exhausted, stopping", "issue", brief.Issue.ID, "max_turns", l.budget.MaxTurns)
+	l.log.WarnContext(ctx, "agent: turn budget exhausted, stopping", "issue", brief.Issue.ID, "max_turns", l.budget.MaxTurns)
 	return core.Result{Status: core.StatusFailed}, nil
 }
 

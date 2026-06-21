@@ -140,7 +140,7 @@ func buildExplorer(ctx context.Context, cfg sandboxConfig) (*explorer, error) {
 	brokerCtx, stopBroker := context.WithCancel(context.WithoutCancel(ctx))
 	go func() {
 		if err := srv.Serve(brokerCtx, ln); err != nil {
-			cfg.log.Error("wizard: exploration broker serve", "err", err)
+			cfg.log.ErrorContext(brokerCtx, "wizard: exploration broker serve", "err", err)
 		}
 	}()
 
@@ -160,7 +160,7 @@ func buildExplorer(ctx context.Context, cfg sandboxConfig) (*explorer, error) {
 		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownTimeout)
 		defer cancel()
 		if err := sb.Teardown(tctx); err != nil {
-			cfg.log.Error("wizard: teardown exploration sandbox", "id", sb.ID(), "err", err)
+			cfg.log.ErrorContext(tctx, "wizard: teardown exploration sandbox", "id", sb.ID(), "err", err)
 		}
 	}
 	return &explorer{sb: sb, byName: byName, defs: defs, cleanup: cleanup}, nil

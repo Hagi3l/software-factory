@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"path/filepath"
 	"strconv"
@@ -304,7 +303,7 @@ func WithIndependentChecks(names []string) Option {
 // gate-run span and metric are emitted unconditionally with no overhead when export is off.
 func New(backend sandbox.Backend, registry Registry, store artifact.Store, socketDir string, log *slog.Logger, tel *telemetry.Provider, opts ...Option) *Runner {
 	if log == nil {
-		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+		log = slog.New(slog.DiscardHandler)
 	}
 	if tel == nil {
 		tel = telemetry.Noop()
@@ -364,7 +363,7 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 		return Report{}, err
 	}
 	defer candDone()
-	r.log.Info("gate: provisioned verification sandbox", "id", cand.ID(), "ref", c.Ref, "profile", c.Profile, "checks", len(checks))
+	r.log.InfoContext(ctx, "gate: provisioned verification sandbox", "id", cand.ID(), "ref", c.Ref, "profile", c.Profile, "checks", len(checks))
 
 	// A red→green proof additionally needs a second verifier seeded at the
 	// pre-implementation base, to confirm the acceptance tests fail without the change.
@@ -379,7 +378,7 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 		}
 		defer baseDone()
 		base = b
-		r.log.Info("gate: provisioned base verification sandbox", "id", b.ID(), "ref", c.BaseRef)
+		r.log.InfoContext(ctx, "gate: provisioned base verification sandbox", "id", b.ID(), "ref", c.BaseRef)
 	}
 
 	report := Report{Passed: true}
@@ -403,7 +402,7 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 			// aggregates every independent finding (T2.12), not just the first.
 			continue
 		}
-		r.log.Debug("gate: check passed", "ref", c.Ref, "check", check.Name)
+		r.log.DebugContext(ctx, "gate: check passed", "ref", c.Ref, "check", check.Name)
 	}
 
 	// Persist each check's evidence to the artifact store and stamp the ref onto the
@@ -429,7 +428,7 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 	)
 	r.tel.RecordGateRun(ctx, report.Passed, time.Since(start))
 
-	r.log.Info("gate: verdict", "ref", c.Ref, "passed", report.Passed, "checks_run", len(report.Checks))
+	r.log.InfoContext(ctx, "gate: verdict", "ref", c.Ref, "passed", report.Passed, "checks_run", len(report.Checks))
 	return report, nil
 }
 
@@ -560,7 +559,7 @@ func execCheck(ctx context.Context, sb sandbox.Sandbox, cmd string) (sandbox.Exe
 // logs both halves, since which half failed is the first thing a human needs to know.
 func (r *Runner) logFailure(ref string, check Check, cr CheckResult) {
 	if cr.Base != nil {
-		r.log.Info("gate: red→green proof failed", "ref", ref, "check", check.Name,
+		r.log.InfoContext(context.Background(), "gate: red→green proof failed", "ref", ref, "check", check.Name,
 			"base_exit", cr.Base.ExitCode, "candidate_exit", cr.ExitCode,
 			"base_stdout_tail", tailString(cr.Base.Stdout, 1000),
 			"candidate_stdout_tail", tailString(cr.Stdout, 1000))
@@ -569,13 +568,13 @@ func (r *Runner) logFailure(ref string, check Check, cr CheckResult) {
 	if cr.Metric != nil {
 		// A metric check can fail with exit 0 (a measured score below threshold), so log the
 		// score and comparison rather than just the exit code, which would read as a pass.
-		r.log.Info("gate: metric check failed", "ref", ref, "check", check.Name,
+		r.log.InfoContext(context.Background(), "gate: metric check failed", "ref", ref, "check", check.Name,
 			"score", cr.Metric.Score, "parsed", cr.Metric.Parsed,
 			"op", cr.Metric.Op, "threshold", cr.Metric.Threshold, "exit_code", cr.ExitCode,
 			"stdout_tail", tailString(cr.Stdout, 1000), "stderr_tail", tailString(cr.Stderr, 1000))
 		return
 	}
-	r.log.Info("gate: check failed", "ref", ref, "check", check.Name, "exit_code", cr.ExitCode,
+	r.log.InfoContext(context.Background(), "gate: check failed", "ref", ref, "check", check.Name, "exit_code", cr.ExitCode,
 		"stdout_tail", tailString(cr.Stdout, 2000), "stderr_tail", tailString(cr.Stderr, 2000))
 }
 
@@ -615,7 +614,7 @@ func (r *Runner) provisionVerifier(ctx context.Context, c Candidate, ref string)
 	brokerCtx, stopBroker := context.WithCancel(ctx)
 	go func() {
 		if err := srv.Serve(brokerCtx, ln); err != nil {
-			r.log.Error("gate: broker serve", "err", err)
+			r.log.ErrorContext(brokerCtx, "gate: broker serve", "err", err)
 		}
 	}()
 	cleanup := func() {
@@ -623,7 +622,7 @@ func (r *Runner) provisionVerifier(ctx context.Context, c Candidate, ref string)
 		tctx, cancel := context.WithTimeout(context.WithoutCancel(ctx), teardownTimeout)
 		defer cancel()
 		if err := sb.Teardown(tctx); err != nil {
-			r.log.Error("gate: teardown verification sandbox", "id", sb.ID(), "err", err)
+			r.log.ErrorContext(tctx, "gate: teardown verification sandbox", "id", sb.ID(), "err", err)
 		}
 	}
 	return sb, cleanup, nil
@@ -643,7 +642,7 @@ func (r *Runner) persistEvidence(ctx context.Context, ref string, report *Report
 		cr := &report.Checks[i]
 		a, err := r.store.Put(ctx, core.ArtifactKindGateEvidence, bytes.NewReader(formatEvidence(*cr)))
 		if err != nil {
-			r.log.Error("gate: persist check evidence", "ref", ref, "check", cr.Name, "err", err)
+			r.log.ErrorContext(ctx, "gate: persist check evidence", "ref", ref, "check", cr.Name, "err", err)
 			continue
 		}
 		cr.Evidence = a
@@ -663,12 +662,12 @@ func (r *Runner) persistVerdict(ctx context.Context, ref string, report *Report)
 	}
 	data, err := json.Marshal(verdictRecord(*report))
 	if err != nil {
-		r.log.Error("gate: marshal verdict record", "ref", ref, "err", err)
+		r.log.ErrorContext(ctx, "gate: marshal verdict record", "ref", ref, "err", err)
 		return
 	}
 	a, err := r.store.Put(ctx, core.ArtifactKindGateVerdict, bytes.NewReader(data))
 	if err != nil {
-		r.log.Error("gate: persist verdict record", "ref", ref, "err", err)
+		r.log.ErrorContext(ctx, "gate: persist verdict record", "ref", ref, "err", err)
 		return
 	}
 	report.Verdict = a
@@ -895,10 +894,10 @@ func (h fetchOnlyHandler) FetchPackage(ctx context.Context, req broker.FetchPack
 	res, err := h.fetcher.Fetch(ctx, req)
 	if err != nil {
 		span.RecordError(err)
-		h.log.Error("gate: package fetch failed", "path", req.Path, "err", err)
+		h.log.ErrorContext(ctx, "gate: package fetch failed", "path", req.Path, "err", err)
 		return broker.FetchPackageResult{}, err
 	}
 	span.SetAttributes(attribute.Int(telemetry.AttrHTTPStatus, res.Status))
-	h.log.Info("gate: package fetch", "path", req.Path, "status", res.Status, "bytes", len(res.Body))
+	h.log.InfoContext(ctx, "gate: package fetch", "path", req.Path, "status", res.Status, "bytes", len(res.Body))
 	return res, nil
 }

@@ -89,12 +89,12 @@ func (o *Orchestrator) consumeResults(ctx context.Context, cons jetstream.Consum
 func (o *Orchestrator) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	var res core.Result
 	if err := json.Unmarshal(msg.Data(), &res); err != nil {
-		o.log.Error("orchestrator: undecodable result, terminating", "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: undecodable result, terminating", "err", err)
 		_ = msg.TermWithReason("undecodable result")
 		return
 	}
 	if res.IssueID == "" {
-		o.log.Error("orchestrator: result has no issue id, terminating")
+		o.log.ErrorContext(ctx, "orchestrator: result has no issue id, terminating")
 		_ = msg.TermWithReason("result without issue id")
 		return
 	}
@@ -102,13 +102,13 @@ func (o *Orchestrator) handleMessage(ctx context.Context, msg jetstream.Msg) {
 	transient, err := o.handleResult(ctx, res)
 	switch {
 	case err != nil && transient:
-		o.log.Error("orchestrator: transient failure handling result, redelivering", "issue", res.IssueID, "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: transient failure handling result, redelivering", "issue", res.IssueID, "err", err)
 		_ = msg.Nak()
 	case err != nil:
 		// A non-transient processing error: terminating the message is the safe choice,
 		// since redelivery would just repeat it. The issue stays in_progress and the
 		// reconcile sweep will eventually release it for a fresh attempt.
-		o.log.Error("orchestrator: permanent failure handling result, terminating", "issue", res.IssueID, "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: permanent failure handling result, terminating", "issue", res.IssueID, "err", err)
 		_ = msg.TermWithReason("unprocessable result")
 	default:
 		_ = msg.Ack()
@@ -133,7 +133,7 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 	// handling is serial so that removal lands before the next is processed — so a duplicate can
 	// never re-Apply (specs/components/orchestrator.md "Live state vs. durable state").
 	if !o.inflight.has(res.IssueID) {
-		o.log.Info("orchestrator: result for issue not in flight, ignoring as stale/duplicate",
+		o.log.InfoContext(ctx, "orchestrator: result for issue not in flight, ignoring as stale/duplicate",
 			"issue", res.IssueID, "result_status", res.Status)
 		return false, nil
 	}
@@ -187,7 +187,7 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 	// is a no-op (see core.Issue.Transcript, specs/observability.md).
 	if hash := transcriptHash(res); hash != "" {
 		if err := o.bd.StampTranscript(ctx, issue.ID, hash); err != nil {
-			o.log.Warn("orchestrator: stamp transcript failed (non-fatal)", "issue", issue.ID, "err", err)
+			o.log.WarnContext(ctx, "orchestrator: stamp transcript failed (non-fatal)", "issue", issue.ID, "err", err)
 		}
 	}
 
@@ -199,7 +199,7 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 	// core.Issue.TransformLog).
 	if hash := transformLogHash(res); hash != "" {
 		if err := o.bd.StampTransformLog(ctx, issue.ID, hash); err != nil {
-			o.log.Warn("orchestrator: stamp transform log failed (non-fatal)", "issue", issue.ID, "err", err)
+			o.log.WarnContext(ctx, "orchestrator: stamp transform log failed (non-fatal)", "issue", issue.ID, "err", err)
 		}
 	}
 
@@ -264,13 +264,13 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 		// harvest) is a no-op, and a failed write is logged rather than looping the Result.
 		if hash := report.Verdict.Hash; hash != "" {
 			if err := o.bd.StampGateVerdict(ctx, issue.ID, hash); err != nil {
-				o.log.Warn("orchestrator: stamp gate verdict failed (non-fatal)", "issue", issue.ID, "err", err)
+				o.log.WarnContext(ctx, "orchestrator: stamp gate verdict failed (non-fatal)", "issue", issue.ID, "err", err)
 			}
 		}
 		if report.Passed {
 			return o.accept(ctx, issue, stage, res, report)
 		}
-		o.log.Info("orchestrator: gate rejected candidate", "issue", issue.ID, "checks_run", len(report.Checks))
+		o.log.InfoContext(ctx, "orchestrator: gate rejected candidate", "issue", issue.ID, "checks_run", len(report.Checks))
 		return o.route(ctx, issue, stage, res, "gate rejected candidate")
 
 	default:
@@ -346,7 +346,7 @@ func (o *Orchestrator) reGate(issue core.Issue, srcStage config.Stage, res core.
 			return core.Provenance{}, false, err
 		}
 		if !report.Passed {
-			o.log.Info("orchestrator: re-gate rejected rebased result", "issue", issue.ID,
+			o.log.InfoContext(ctx, "orchestrator: re-gate rejected rebased result", "issue", issue.ID,
 				"ref", landedRef, "checks_run", len(report.Checks))
 			return core.Provenance{}, false, nil
 		}
@@ -366,7 +366,7 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 		if _, err := o.applyTracked(ctx, res.Proposes); err != nil {
 			return true, fmt.Errorf("apply proposals for issue %s: %w", issue.ID, err)
 		}
-		o.log.Info("orchestrator: applied agent proposals", "issue", issue.ID, "count", len(res.Proposes))
+		o.log.InfoContext(ctx, "orchestrator: applied agent proposals", "issue", issue.ID, "count", len(res.Proposes))
 	}
 
 	for _, target := range stage.Produces {
@@ -395,7 +395,7 @@ func (o *Orchestrator) accept(ctx context.Context, issue core.Issue, stage confi
 	}); err != nil {
 		return true, fmt.Errorf("close accepted issue %s: %w", issue.ID, err)
 	}
-	o.log.Info("orchestrator: accepted", "issue", issue.ID, "produces", stage.Produces)
+	o.log.InfoContext(ctx, "orchestrator: accepted", "issue", issue.ID, "produces", stage.Produces)
 	return false, nil
 }
 
@@ -425,7 +425,7 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage c
 		return true, fmt.Errorf("check plan %s children: %w", issue.ID, err)
 	}
 	if hasChildren {
-		o.log.Info("orchestrator: plan already decomposed (children exist); closing without re-applying", "issue", issue.ID)
+		o.log.InfoContext(ctx, "orchestrator: plan already decomposed (children exist); closing without re-applying", "issue", issue.ID)
 		if err := o.transition(ctx, issue, statusClosed, func(ctx context.Context) error {
 			return o.bd.Close(ctx, issue.ID)
 		}); err != nil {
@@ -485,7 +485,7 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage c
 	}); err != nil {
 		return true, fmt.Errorf("close plan issue %s: %w", issue.ID, err)
 	}
-	o.log.Info("orchestrator: accepted decomposition", "issue", issue.ID, "children", len(res.Proposes))
+	o.log.InfoContext(ctx, "orchestrator: accepted decomposition", "issue", issue.ID, "children", len(res.Proposes))
 	return false, nil
 }
 
@@ -583,7 +583,7 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage c
 		return true, fmt.Errorf("create produced %q issue from %s: %w", target, issue.ID, err)
 	}
 	for _, c := range created {
-		o.log.Info("orchestrator: produced next-stage issue", "from", issue.ID, "stage", target, "new", c.ID, "base", res.Branch.Ref)
+		o.log.InfoContext(ctx, "orchestrator: produced next-stage issue", "from", issue.ID, "stage", target, "new", c.ID, "base", res.Branch.Ref)
 	}
 	return false, nil
 }
@@ -651,7 +651,7 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 	// integration branch), so it is logged, not fatal — a cold-start rebuild re-reads the marker
 	// and the roll-up is a progress hint, not a correctness gate.
 	if err := o.bd.StampIntegrated(ctx, issue.ID); err != nil {
-		o.log.Warn("orchestrator: stamp integrated marker failed (merge already landed)", "issue", issue.ID, "err", err)
+		o.log.WarnContext(ctx, "orchestrator: stamp integrated marker failed (merge already landed)", "issue", issue.ID, "err", err)
 	} else {
 		// Mirror the durable marker into the work-graph projection so the control room's
 		// projection-backed epic hero counts this integration without re-reading beads (T8.4).
@@ -662,7 +662,7 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 	}
 	// Name the real integration target: in epic mode a child lands on epic/<epic_id>, not main —
 	// main advances only at the epic's terminal merge (T8.6, specs/integration.md).
-	o.log.Info("orchestrator: merged candidate", "issue", issue.ID, "target", o.integrationBranchName(issue),
+	o.log.InfoContext(ctx, "orchestrator: merged candidate", "issue", issue.ID, "target", o.integrationBranchName(issue),
 		"ref", candidateRef, "commit", commit,
 		"soul", prov.Soul, "model", prov.Model, "prompt_sha", prov.PromptSHA, "verified", prov.Verified)
 	return false, nil
@@ -716,7 +716,7 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 		return true, fmt.Errorf("close routed issue %s: %w", issue.ID, err)
 	}
 	for _, c := range created {
-		o.log.Info("orchestrator: routed failure to fix issue", "from", issue.ID, "to_stage", stage.OnFailure,
+		o.log.InfoContext(ctx, "orchestrator: routed failure to fix issue", "from", issue.ID, "to_stage", stage.OnFailure,
 			"new", c.ID, "attempt", issue.Attempt+1, "spent_tokens", spentTokens, "spent_usd", spentUSD, "spent_wall", spentWall, "reason", reason)
 	}
 	return false, nil
@@ -828,7 +828,7 @@ func (o *Orchestrator) resolveConflict(ctx context.Context, issue core.Issue, re
 		return true, fmt.Errorf("close conflicted issue %s: %w", issue.ID, err)
 	}
 	for _, c := range created {
-		o.log.Info("orchestrator: spawned conflict-resolution issue", "from", issue.ID, "new", c.ID,
+		o.log.InfoContext(ctx, "orchestrator: spawned conflict-resolution issue", "from", issue.ID, "new", c.ID,
 			"role", rstage.Role, "base", res.Branch.Ref, "attempt", issue.Attempt+1, "reason", reason)
 	}
 	return false, nil
@@ -873,7 +873,7 @@ func (o *Orchestrator) stampProducingSoul(ctx context.Context, issue *core.Issue
 			return
 		}
 		if err := o.bd.StampSouls(ctx, issue.ID, soul.Name, ""); err != nil {
-			o.log.Warn("orchestrator: stamp tests-soul failed (non-fatal)", "issue", issue.ID, "err", err)
+			o.log.WarnContext(ctx, "orchestrator: stamp tests-soul failed (non-fatal)", "issue", issue.ID, "err", err)
 			return
 		}
 		issue.TestsSoul = soul.Name
@@ -882,7 +882,7 @@ func (o *Orchestrator) stampProducingSoul(ctx context.Context, issue *core.Issue
 			return
 		}
 		if err := o.bd.StampSouls(ctx, issue.ID, "", soul.Name); err != nil {
-			o.log.Warn("orchestrator: stamp implement-soul failed (non-fatal)", "issue", issue.ID, "err", err)
+			o.log.WarnContext(ctx, "orchestrator: stamp implement-soul failed (non-fatal)", "issue", issue.ID, "err", err)
 			return
 		}
 		issue.ImplementSoul = soul.Name
@@ -984,7 +984,7 @@ func (o *Orchestrator) deadLetter(ctx context.Context, issue core.Issue, reason 
 	}); err != nil {
 		return true, fmt.Errorf("block dead-lettered issue %s: %w", issue.ID, err)
 	}
-	o.log.Warn("orchestrator: dead-lettered", "issue", issue.ID, "role", issue.Role, "attempt", issue.Attempt, "reason", reason)
+	o.log.WarnContext(ctx, "orchestrator: dead-lettered", "issue", issue.ID, "role", issue.Role, "attempt", issue.Attempt, "reason", reason)
 	return false, nil
 }
 

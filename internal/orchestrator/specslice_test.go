@@ -3,7 +3,6 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -23,7 +22,7 @@ import (
 func orchWithRepo(repo string, depth int) *Orchestrator {
 	return &Orchestrator{
 		opts:     Options{Repo: repo, Config: &config.Config{Harness: &config.Harness{SpecDepth: depth}}},
-		log:      slog.New(slog.NewTextHandler(io.Discard, nil)),
+		log:      slog.New(slog.DiscardHandler),
 		inflight: newInflightProjection(),
 	}
 }

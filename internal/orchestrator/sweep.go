@@ -27,9 +27,9 @@ func (o *Orchestrator) sweepLeases(ctx context.Context) {
 		if err := o.transition(ctx, issue, statusOpen, func(ctx context.Context) error {
 			return o.bd.Release(ctx, issue.ID)
 		}); err != nil {
-			o.log.Error("orchestrator: release stranded issue", "issue", issue.ID, "err", err)
+			o.log.ErrorContext(ctx, "orchestrator: release stranded issue", "issue", issue.ID, "err", err)
 			continue
 		}
-		o.log.Info("orchestrator: released stranded issue back to ready", "issue", issue.ID)
+		o.log.InfoContext(ctx, "orchestrator: released stranded issue back to ready", "issue", issue.ID)
 	}
 }

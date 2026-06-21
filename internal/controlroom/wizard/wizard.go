@@ -485,14 +485,14 @@ func (s *Session) ensureExplorer(ctx context.Context) (*explorer, error) {
 	// happens before any tool can run — so surface it on both channels: a UI status line (the
 	// dots would otherwise sit frozen) and an info log (the terminal would otherwise be silent).
 	s.hub.Broadcast(live.Event{Name: eventTool, Data: html.EscapeString("preparing the codebase sandbox…")})
-	s.log.Info("wizard: provisioning exploration sandbox", "session", s.ID, "profile", cfg.profile, "base_ref", cfg.baseRef)
+	s.log.InfoContext(ctx, "wizard: provisioning exploration sandbox", "session", s.ID, "profile", cfg.profile, "base_ref", cfg.baseRef)
 	start := time.Now()
 	built, err := buildExplorer(ctx, *cfg)
 	if err != nil {
-		s.log.Error("wizard: exploration sandbox provisioning failed", "session", s.ID, "elapsed", time.Since(start).String(), "err", err)
+		s.log.ErrorContext(ctx, "wizard: exploration sandbox provisioning failed", "session", s.ID, "elapsed", time.Since(start).String(), "err", err)
 		return nil, err
 	}
-	s.log.Info("wizard: exploration sandbox ready", "session", s.ID, "elapsed", time.Since(start).String())
+	s.log.InfoContext(ctx, "wizard: exploration sandbox ready", "session", s.ID, "elapsed", time.Since(start).String())
 	s.mu.Lock()
 	s.explorer = built
 	s.mu.Unlock()
@@ -766,7 +766,7 @@ func (s *Session) run() {
 	turn, err := s.converse(ctx, msgs, defs)
 	prose := turn.prose
 	if err != nil {
-		s.log.Error("wizard: model turn failed", "session", s.ID, "err", err)
+		s.log.ErrorContext(ctx, "wizard: model turn failed", "session", s.ID, "err", err)
 		prose = fmt.Sprintf("The requirements planner hit an error and could not reply: %v\n\nPlease try again.", err)
 	}
 
@@ -888,7 +888,7 @@ func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []mod
 		// Log each model round-trip so a multi-step (and, with this model, multi-second) turn is
 		// never a silent terminal: you can see the call go out and how long it took to come back.
 		callStart := time.Now()
-		s.log.Info("wizard: model call", "session", s.ID, "round", turn, "messages", len(msgs), "tools", len(defs))
+		s.log.InfoContext(ctx, "wizard: model call", "session", s.ID, "round", turn, "messages", len(msgs), "tools", len(defs))
 		resp, err := s.adapter.Complete(ctx, model.Request{
 			System:    s.persona,
 			Messages:  msgs,
@@ -898,7 +898,7 @@ func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []mod
 		if err != nil {
 			return out, err
 		}
-		s.log.Info("wizard: model replied", "session", s.ID, "round", turn,
+		s.log.InfoContext(ctx, "wizard: model replied", "session", s.ID, "round", turn,
 			"elapsed", time.Since(callStart).String(), "tool_calls", len(resp.ToolCalls), "reply_chars", len(resp.Text))
 
 		// Partition this round's calls: harvest the output calls (latest-wins) and ack them; queue
@@ -961,14 +961,14 @@ func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []mod
 func (s *Session) harvestLedger(out *plannerTurn, tc model.ToolCall) model.ToolResult {
 	items, err := parseLedgerArgs(tc.Args)
 	if err != nil {
-		s.log.Warn("wizard: update_ledger args did not decode", "session", s.ID, "err", err)
+		s.log.WarnContext(context.Background(), "wizard: update_ledger args did not decode", "session", s.ID, "err", err)
 		return model.ToolResult{ToolCallID: tc.ID, Content: "update_ledger arguments did not decode as JSON: " + err.Error(), IsError: true}
 	}
 	if len(items) == 0 {
 		return model.ToolResult{ToolCallID: tc.ID, Content: "update_ledger recorded no items (each fork needs a non-empty question)", IsError: true}
 	}
 	out.ledger, out.ledgerSet = items, true
-	s.log.Debug("wizard: ledger harvested", "session", s.ID, "items", len(items))
+	s.log.DebugContext(context.Background(), "wizard: ledger harvested", "session", s.ID, "items", len(items))
 	return model.ToolResult{ToolCallID: tc.ID, Content: fmt.Sprintf("ledger recorded (%d item(s))", len(items))}
 }
 
@@ -978,11 +978,11 @@ func (s *Session) harvestLedger(out *plannerTurn, tc model.ToolCall) model.ToolR
 func (s *Session) harvestDraft(out *plannerTurn, tc model.ToolCall) model.ToolResult {
 	d, err := parseDraftArgs(tc.Args)
 	if err != nil {
-		s.log.Warn("wizard: propose_draft args rejected", "session", s.ID, "err", err)
+		s.log.WarnContext(context.Background(), "wizard: propose_draft args rejected", "session", s.ID, "err", err)
 		return model.ToolResult{ToolCallID: tc.ID, Content: "propose_draft arguments rejected: " + err.Error(), IsError: true}
 	}
 	out.draft, out.draftSet = d, true
-	s.log.Debug("wizard: draft harvested", "session", s.ID, "specs", len(d.Specs), "issues", len(d.Issues))
+	s.log.DebugContext(context.Background(), "wizard: draft harvested", "session", s.ID, "specs", len(d.Specs), "issues", len(d.Issues))
 	return model.ToolResult{ToolCallID: tc.ID, Content: fmt.Sprintf("draft recorded (%d spec(s), %d issue(s))", len(d.Specs), len(d.Issues))}
 }
 

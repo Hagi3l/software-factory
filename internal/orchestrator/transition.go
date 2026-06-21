@@ -80,11 +80,11 @@ func (o *Orchestrator) announceState(issue core.Issue, status string) {
 	}
 	data, err := json.Marshal(ev)
 	if err != nil {
-		o.log.Warn("orchestrator: marshal issue-state event", "issue", issue.ID, "err", err)
+		o.log.WarnContext(context.Background(), "orchestrator: marshal issue-state event", "issue", issue.ID, "err", err)
 		return
 	}
 	if err := o.nc.Publish(messaging.IssueStateSubject(issue.ID), data); err != nil {
-		o.log.Warn("orchestrator: publish issue-state event", "issue", issue.ID, "status", status, "err", err)
+		o.log.WarnContext(context.Background(), "orchestrator: publish issue-state event", "issue", issue.ID, "status", status, "err", err)
 	}
 }
 
@@ -108,10 +108,10 @@ func (o *Orchestrator) announceMergeState(issue core.Issue, state, commit string
 	}
 	data, err := json.Marshal(ev)
 	if err != nil {
-		o.log.Warn("orchestrator: marshal merge-state event", "issue", issue.ID, "err", err)
+		o.log.WarnContext(context.Background(), "orchestrator: marshal merge-state event", "issue", issue.ID, "err", err)
 		return
 	}
 	if err := o.nc.Publish(messaging.MergeStateSubject(issue.ID), data); err != nil {
-		o.log.Warn("orchestrator: publish merge-state event", "issue", issue.ID, "state", state, "err", err)
+		o.log.WarnContext(context.Background(), "orchestrator: publish merge-state event", "issue", issue.ID, "state", state, "err", err)
 	}
 }

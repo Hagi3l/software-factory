@@ -37,7 +37,7 @@ func (o *Orchestrator) sweepEpicCompletion(ctx context.Context) {
 	}
 	all, err := o.bd.ListAll(ctx)
 	if err != nil {
-		o.log.Error("orchestrator: list all for epic-completion sweep", "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: list all for epic-completion sweep", "err", err)
 		return
 	}
 
@@ -110,7 +110,7 @@ func (o *Orchestrator) terminalMerge(ctx context.Context, root core.Issue) {
 	prov := core.Provenance{Issue: epic, Subject: root.Title}
 	commit, merged, err := o.merger.MergeEpic(ctx, o.opts.Repo, epicRef, target, prov)
 	if err != nil {
-		o.log.Error("orchestrator: epic terminal merge", "epic", epic, "epic_ref", epicRef, "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: epic terminal merge", "epic", epic, "epic_ref", epicRef, "err", err)
 		return
 	}
 	if !merged {
@@ -119,6 +119,6 @@ func (o *Orchestrator) terminalMerge(ctx context.Context, root core.Issue) {
 	// Surface the atomic landing on the merge-queue view, keyed by the epic root, exactly as a
 	// per-item candidate's landed step is (T4.24). commit is the new main tip the merge produced.
 	o.announceMergeState(root, core.MergeStateLanded, commit)
-	o.log.Info("orchestrator: epic landed atomically (terminal merge)",
+	o.log.InfoContext(ctx, "orchestrator: epic landed atomically (terminal merge)",
 		"epic", epic, "commit", commit, "subject", root.Title)
 }

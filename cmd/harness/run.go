@@ -84,7 +84,7 @@ func cmdRun(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.Info("harness run: starting", "repo", absRepo, "roles", agentRoles(cfg), "serve", *serveAddr)
+	log.InfoContext(ctx, "harness run: starting", "repo", absRepo, "roles", agentRoles(cfg), "serve", *serveAddr)
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return comp.orch.Run(ctx) })
 	g.Go(func() error { return comp.rnr.Run(ctx) })
@@ -96,7 +96,7 @@ func cmdRun(args []string) error {
 		g.Go(func() error { return comp.server.ListenAndServe(ctx, addr) })
 	}
 	err = g.Wait()
-	log.Info("harness run: stopped", "err", err)
+	log.InfoContext(ctx, "harness run: stopped", "err", err)
 	return err
 }
 
@@ -196,7 +196,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		}
 	} else {
 		if opts.natsAddr != "" {
-			log.Warn("harness run: --nats-addr ignored because nats.url points at an external cluster", "nats_url", url)
+			log.WarnContext(context.Background(), "harness run: --nats-addr ignored because nats.url points at an external cluster", "nats_url", url)
 		}
 		nc, err = messaging.Connect(url, nats.Name("harness"))
 		if err != nil {

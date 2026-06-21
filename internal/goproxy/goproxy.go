@@ -18,7 +18,6 @@ package goproxy
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"net/http"
 
@@ -42,7 +41,7 @@ type Fetcher interface {
 // the runner surfaces here as a failed fetch, which is exactly right.
 func Handler(f Fetcher, log *slog.Logger) http.Handler {
 	if log == nil {
-		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+		log = slog.New(slog.DiscardHandler)
 	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -61,7 +60,7 @@ func Handler(f Fetcher, log *slog.Logger) http.Handler {
 
 		res, err := f.FetchPackage(r.Context(), broker.FetchPackageRequest{Path: reqPath})
 		if err != nil {
-			log.Warn("goproxy: broker fetch failed", "path", reqPath, "err", err)
+			log.WarnContext(r.Context(), "goproxy: broker fetch failed", "path", reqPath, "err", err)
 			http.Error(w, "goproxy: "+err.Error(), http.StatusBadGateway)
 			return
 		}
@@ -75,7 +74,7 @@ func Handler(f Fetcher, log *slog.Logger) http.Handler {
 		}
 		w.WriteHeader(status)
 		if _, err := w.Write(res.Body); err != nil {
-			log.Debug("goproxy: write response", "path", reqPath, "err", err)
+			log.DebugContext(r.Context(), "goproxy: write response", "path", reqPath, "err", err)
 		}
 	})
 	return mux

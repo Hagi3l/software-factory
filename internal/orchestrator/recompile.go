@@ -51,7 +51,7 @@ func (o *Orchestrator) recompileSpecDelta(ctx context.Context) {
 		}
 		slice, err := spec.Resolve(o.opts.Repo, issue.Spec, o.opts.Config.Harness.SpecDepth)
 		if err != nil {
-			o.log.Error("orchestrator: resolve spec slice for drift check; leaving in-flight work untouched",
+			o.log.ErrorContext(ctx, "orchestrator: resolve spec slice for drift check; leaving in-flight work untouched",
 				"issue", issue.ID, "spec", issue.Spec, "err", err)
 			continue
 		}
@@ -64,10 +64,10 @@ func (o *Orchestrator) recompileSpecDelta(ctx context.Context) {
 		if err := o.transition(ctx, issue, statusOpen, func(ctx context.Context) error {
 			return o.bd.Reissue(ctx, issue.ID)
 		}); err != nil {
-			o.log.Error("orchestrator: reissue spec-drifted issue", "issue", issue.ID, "err", err)
+			o.log.ErrorContext(ctx, "orchestrator: reissue spec-drifted issue", "issue", issue.ID, "err", err)
 			continue
 		}
-		o.log.Info("orchestrator: spec drift detected; reissued stale in-flight work",
+		o.log.InfoContext(ctx, "orchestrator: spec drift detected; reissued stale in-flight work",
 			"issue", issue.ID, "spec", issue.Spec, "pinned", issue.SpecHash, "current", current)
 	}
 }
@@ -109,7 +109,7 @@ func (o *Orchestrator) recompileMergedDelta(ctx context.Context) {
 
 	all, err := o.bd.ListAll(ctx)
 	if err != nil {
-		o.log.Error("orchestrator: list all for merged spec-drift sweep", "err", err)
+		o.log.ErrorContext(ctx, "orchestrator: list all for merged spec-drift sweep", "err", err)
 		return
 	}
 
@@ -150,7 +150,7 @@ func (o *Orchestrator) recompileMergedDelta(ctx context.Context) {
 		members := closed[k]
 		slice, err := spec.Resolve(o.opts.Repo, k.spec, o.opts.Config.Harness.SpecDepth)
 		if err != nil {
-			o.log.Error("orchestrator: resolve spec slice for merged drift check; leaving merged work untouched",
+			o.log.ErrorContext(ctx, "orchestrator: resolve spec slice for merged drift check; leaving merged work untouched",
 				"epic", k.epic, "spec", k.spec, "err", err)
 			continue
 		}
@@ -190,7 +190,7 @@ func (o *Orchestrator) recompileMergedDelta(ctx context.Context) {
 			Issue: core.Issue{Title: title, Body: body, Role: plan.spawn, Spec: k.spec, Tags: tags, EpicID: k.epic},
 		}})
 		if err != nil {
-			o.log.Error("orchestrator: spawn re-derivation plan issue", "epic", k.epic, "spec", k.spec, "err", err)
+			o.log.ErrorContext(ctx, "orchestrator: spawn re-derivation plan issue", "epic", k.epic, "spec", k.spec, "err", err)
 			continue
 		}
 		// Idempotency (2): re-pin every closed member to the new slice (the latch). Once the
@@ -199,11 +199,11 @@ func (o *Orchestrator) recompileMergedDelta(ctx context.Context) {
 		// (the open-plan marker keeps the next sweep from double-spawning meanwhile).
 		for _, m := range members {
 			if err := o.bd.PinSpecHash(ctx, m.ID, current); err != nil {
-				o.log.Error("orchestrator: re-pin merged issue spec hash", "issue", m.ID, "err", err)
+				o.log.ErrorContext(ctx, "orchestrator: re-pin merged issue spec hash", "issue", m.ID, "err", err)
 			}
 		}
 		for _, c := range created {
-			o.log.Info("orchestrator: spec drift on merged work; spawned re-derivation plan",
+			o.log.InfoContext(ctx, "orchestrator: spec drift on merged work; spawned re-derivation plan",
 				"epic", k.epic, "spec", k.spec, "plan", c.ID, "current", current)
 		}
 	}

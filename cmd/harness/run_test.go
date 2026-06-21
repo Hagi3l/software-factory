@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"net"
 	"testing"
@@ -31,7 +30,7 @@ func TestBuildRunComponents(t *testing.T) {
 	resolvePersonas(cfg)
 
 	repo := t.TempDir()
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 
 	comp, err := buildRunComponents(cfg, repo, runOptions{
 		// A bd binary that does not exist: the orchestrator's Ready query will error
@@ -70,7 +69,7 @@ func TestBuildRunComponentsServe(t *testing.T) {
 		t.Fatalf("load config: %v", err)
 	}
 	resolvePersonas(cfg)
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 
 	off, err := buildRunComponents(cfg, t.TempDir(), runOptions{bdBin: "bd"}, log)
 	if err != nil {
@@ -101,7 +100,7 @@ func TestBuildRunComponentsCleanupReleases(t *testing.T) {
 	}
 	resolvePersonas(cfg)
 	repo := t.TempDir()
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 
 	for i := 0; i < 2; i++ {
 		comp, err := buildRunComponents(cfg, repo, runOptions{bdBin: "bd"}, log)
@@ -140,7 +139,7 @@ func TestBuildRunComponentsExternalNATS(t *testing.T) {
 	resolvePersonas(cfg)
 	cfg.Infra.NATS.URL = "nats://" + addr // point the run at the external cluster
 
-	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+	log := slog.New(slog.DiscardHandler)
 	comp, err := buildRunComponents(cfg, t.TempDir(), runOptions{bdBin: "bd"}, log)
 	if err != nil {
 		t.Fatalf("buildRunComponents (external nats): %v", err)

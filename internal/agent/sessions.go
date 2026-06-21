@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"path"
 	"sync"
@@ -67,7 +66,7 @@ type serverSession struct {
 // ErrNoSemanticSession and edits are no-ops. A nil logger discards.
 func NewSessions(sb sandbox.Sandbox, log *slog.Logger) *Sessions {
 	if log == nil {
-		log = slog.New(slog.NewTextHandler(io.Discard, nil))
+		log = slog.New(slog.DiscardHandler)
 	}
 	s := &Sessions{exec: sb, log: log, servers: make(map[string]*serverSession)}
 	if op, ok := sb.(sandbox.SessionOpener); ok {
@@ -104,7 +103,7 @@ func (s *Sessions) NotifyEdit(ctx context.Context, relPath, content string) {
 		return
 	}
 	if err := ss.sync(s.uriFor(relPath), content); err != nil {
-		s.log.Debug("agent: lsp didChange failed", "path", relPath, "err", err)
+		s.log.DebugContext(ctx, "agent: lsp didChange failed", "path", relPath, "err", err)
 	}
 }
 
@@ -287,18 +286,18 @@ func (s *Sessions) manifestLocked(ctx context.Context) *lsmanifest.Manifest {
 	res, err := s.exec.Exec(ctx, sandbox.Command{Path: "cat", Args: []string{"--", lsmanifest.ManifestPath}})
 	if err != nil {
 		s.mfErr = err
-		s.log.Debug("agent: read language-server manifest", "err", err)
+		s.log.DebugContext(ctx, "agent: read language-server manifest", "err", err)
 		return nil
 	}
 	if res.ExitCode != 0 {
 		s.mfErr = fmt.Errorf("manifest %s not present (exit %d)", lsmanifest.ManifestPath, res.ExitCode)
-		s.log.Debug("agent: no language-server manifest in image", "path", lsmanifest.ManifestPath)
+		s.log.DebugContext(ctx, "agent: no language-server manifest in image", "path", lsmanifest.ManifestPath)
 		return nil
 	}
 	m, err := lsmanifest.Parse(res.Stdout)
 	if err != nil {
 		s.mfErr = err
-		s.log.Warn("agent: invalid language-server manifest", "err", err)
+		s.log.WarnContext(ctx, "agent: invalid language-server manifest", "err", err)
 		return nil
 	}
 	s.manifest = m
@@ -329,7 +328,7 @@ func (s *Sessions) session(ctx context.Context, srv *lsmanifest.Server) (*server
 	}
 	ss := &serverSession{client: client, stream: stream, langID: srv.LanguageID, open: make(map[string]int)}
 	s.servers[srv.LanguageID] = ss
-	s.log.Debug("agent: launched language server", "language", srv.LanguageID)
+	s.log.DebugContext(ctx, "agent: launched language server", "language", srv.LanguageID)
 	return ss, nil
 }
 
