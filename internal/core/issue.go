@@ -119,6 +119,18 @@ type Issue struct {
 	ClosingTokens int
 	ClosingUSD    float64
 
+	// SpentUsage and ClosingUsage carry the in/out/cache-read/cache-creation BREAKDOWN behind
+	// the SpentTokens and ClosingTokens scalars above — the same two halves (threaded chain
+	// cumulative vs this issue's own marginal), split by token kind. They are display-only: the
+	// budget half of the termination guarantee is enforced against the scalar totals
+	// (SpentTokens/ClosingTokens), never these, so carrying them adds observability without
+	// touching the halting logic. By construction SpentUsage.TotalTokens() == SpentTokens and
+	// ClosingUsage.TotalTokens() == ClosingTokens (threaded/stamped in lockstep), so the
+	// control room's per-kind breakdown always reconciles to the single meter figure. Ride in
+	// beads metadata as a compact encoding; absent decodes to a zero Usage.
+	SpentUsage   Usage
+	ClosingUsage Usage
+
 	// EpicID is the id of the root seed issue of this issue's epic — the work item a human
 	// seeded, from which the whole fan-out of plan/author-tests/implement/qa issues descends.
 	// It is threaded forward onto every produced child and every on_failure fix exactly like

@@ -37,11 +37,11 @@ of the build (`go generate`), not the runtime.
 | **DAG** | the [issue dependency graph](glossary.md#issue-dependency-graph); blockers, merge order | beads → server-side SVG |
 | **Activity feed** | what the agents *and the factory* are doing right now — agent `token`/`reasoning`/`tool` events plus system lifecycle events, filterable by source | NATS events (SSE) + factory log bridge |
 | **Issue / invocation detail** | Brief, transcript, candidate diff, gate evidence, budget, retries | beads + [artifact store](components/artifact-store.md) + [trace](observability.md) |
-| **Live invocation** | watch *one* running agent: its `reasoning`/`tool`/`token` stream scoped to a single invocation, with its live budget — until it terminates, then hands off to Replay | NATS events (SSE), scoped by issue/agent |
+| **Live invocation** | watch *one* running agent: its `reasoning`/`tool`/`token` stream scoped to a single invocation, with its live budget (token burn broken down by kind) — until it terminates, then hands off to Replay | NATS events (SSE), scoped by issue/agent |
 | **Verification** | the trust argument for one issue, forensically: producer≠verifier soul split, red→green proof, mutation score, scanners, the test↔spec map | [artifact store](components/artifact-store.md) (`gate-verdict`) + git |
 | **Merge queue** | the [serialized merge train](integration.md) in flight: each `integrate` candidate's step (`queued`/`rebasing`/`re-gating`/`conflicted`) | NATS [`merge-state`](messaging.md) (SSE) + beads |
 | **Dead-letter queue** | escalations needing a human — *the action surface* | beads + artifact store |
-| **Budgets** | token/$/wall-clock burn vs. caps, per epic/issue | beads + OTel metrics |
+| **Budgets** | token/$/wall-clock burn vs. caps, per epic/issue — each token total broken down by kind (input/output/cached) | beads + OTel metrics |
 | **Provenance** | trace any merged commit back to issue→soul→model→prompt→evidence, with each commit's [signature verdict](security.md) (signed / unsigned / unverified) when signing is configured | git + artifact store |
 | **Config** | the declared factory at rest: role-flow pipeline, gate checks, the resolved soul roster, policy, and redacted infra — read-only | validated config (in-process) |
 
@@ -67,7 +67,9 @@ of the build (`go generate`), not the runtime.
   thing it *is* showing); the periodic backstop stays on all of them.
 - **Historical/forensic:** plain server-rendered pages from the stores, with the
   structured timeline from the OTel trace backend. Supports **replay** of an
-  invocation's decision trail (see [observability.md](observability.md)). A detail
+  invocation's decision trail (see [observability.md](observability.md)), including
+  each turn's token usage broken down by kind (input/output/cache read/cache write).
+  A detail
   page is a forensic snapshot, not a feed — it is deliberately *not* live. The one
   deliberate exception is the [live invocation view](#the-live-invocation-view),
   which *is* a feed — but only while its agent runs; the moment the invocation

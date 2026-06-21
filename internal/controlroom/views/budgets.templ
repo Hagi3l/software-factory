@@ -88,6 +88,9 @@ templ epicBudgetRow(e query.EpicBudgetRow) {
 			<span class="text-fg">{ formatTokens(e.Tokens) }</span>
 			<span class="text-faint">/ { capTokens(e.TokenCap) }</span>
 			@budgetPct(e.TokenPct, e.TokenOver, e.TokenCap > 0)
+			if bd := tokenBreakdown(e.TokensIn, e.TokensOut, e.TokensCacheRead, e.TokensCacheCreate); bd != "" {
+				<div class="text-xs text-faint tabular-nums">{ bd }</div>
+			}
 		</td>
 		<td class="px-3 py-2 whitespace-nowrap">
 			<span class="text-fg">{ formatUSD(e.USD) }</span>
@@ -141,6 +144,9 @@ templ issueBudgetRow(i query.IssueBudgetRow) {
 			<span class="text-fg">{ formatTokens(i.Tokens) }</span>
 			<span class="text-faint">/ { capTokens(i.TokenCap) }</span>
 			@budgetPct(i.TokenPct, i.TokenOver, i.TokenCap > 0)
+			if bd := tokenBreakdown(i.TokensIn, i.TokensOut, i.TokensCacheRead, i.TokensCacheCreate); bd != "" {
+				<div class="text-xs text-faint tabular-nums">{ bd }</div>
+			}
 		</td>
 		<td class="px-3 py-2 whitespace-nowrap">
 			<span class="text-fg">{ formatUSD(i.USD) }</span>

@@ -79,7 +79,8 @@ func detailServer(t *testing.T) *httptest.Server {
 			ID: "harness-1", Title: "Merged work", Status: "closed", Role: "implementor",
 			Spec: "specs/x.md", SpecHash: "sha256:speccccccccc", Base: "harness-0-candidate",
 			Attempt: 2, SpentTokens: 1234, SpentUSD: 0.0456, Body: "Implement the widget.",
-			TestsSoul: "go-test-author", ImplementSoul: "go-implementor",
+			SpentUsage: core.Usage{InputTokens: 1000, OutputTokens: 200, CacheReadTokens: 34},
+			TestsSoul:  "go-test-author", ImplementSoul: "go-implementor",
 			TraceMap: mergedTraceHash, GateVerdict: verdictHash, TransformLog: transformHash,
 		},
 		// harness-2 is in flight: no provenance, evidence falls back to the threaded map.
@@ -145,8 +146,9 @@ func TestIssueDetailMergedRendersEvidence(t *testing.T) {
 		"implementor",                 // role
 		"specs/x.md",                  // spec path (the brief)
 		"Implement the widget.",       // the body brief
-		"1234 tokens",                 // budget spend
+		"1,234 tokens",                // budget spend (comma-grouped, matching the Budgets view)
 		"$0.0456",                     // budget spend in dollars
+		"1,000 in · 200 out · 34 cached", // the in/out/cache token breakdown
 		"go-implementor",              // provenance soul
 		"claude-test",                 // provenance model
 		"tests-pass",                  // a verified gate check label

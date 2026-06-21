@@ -63,7 +63,10 @@ templ IssueDetailPage(d query.IssueDetail) {
 						@field("Base", d.Issue.Base, true)
 					}
 					@field("Attempt", strconv.Itoa(d.Issue.Attempt), false)
-					@field("Spend", strconv.Itoa(d.Issue.SpentTokens)+" tokens · "+formatUSD(d.Issue.SpentUSD), false)
+					@field("Spend", issueSpend(d.Issue), false)
+					if bd := issueTokenBreakdown(d.Issue); bd != "" {
+						@field("Tokens", bd, false)
+					}
 				</dl>
 				if d.Issue.Body != "" {
 					<pre class="whitespace-pre-wrap break-words rounded-lg border border-border bg-surface p-4 text-sm text-fg">{ d.Issue.Body }</pre>

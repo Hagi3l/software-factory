@@ -207,14 +207,15 @@ func (f *fakeBeads) ListAll(context.Context) ([]core.Issue, error) {
 	return out, nil
 }
 
-func (f *fakeBeads) StampClosingSpend(_ context.Context, id string, tokens int, usd float64) error {
+func (f *fakeBeads) StampClosingSpend(_ context.Context, id string, usage core.Usage, usd float64) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	// Mirror the real client: the marginal is durable on the issue, so a later ListAll (the
 	// epic-budget aggregate read) sees it.
 	if is, ok := f.issues[id]; ok {
-		is.ClosingTokens = tokens
+		is.ClosingTokens = usage.TotalTokens()
 		is.ClosingUSD = usd
+		is.ClosingUsage = usage
 		f.issues[id] = is
 	}
 	return nil

@@ -189,6 +189,10 @@ func (r issueJSON) toCore() core.Issue {
 		// across an epic for the aggregate epic-budget read. Absent decodes to 0.
 		ClosingTokens: metaInt(r.Metadata, MetadataKeyClosingTokens),
 		ClosingUSD:    metaFloat(r.Metadata, MetadataKeyClosingUSD),
+		// Display-only in/out/cache breakdown behind the threaded and marginal token scalars;
+		// absent/malformed decodes to a zero Usage (see metaUsage).
+		SpentUsage:   metaUsage(r.Metadata, MetadataKeySpentUsage),
+		ClosingUsage: metaUsage(r.Metadata, MetadataKeyClosingUsage),
 		// Approval-gate state (T2.10), written by AwaitApproval when an integrate is parked
 		// for human approval; absent (empty) on every issue that is not parked.
 		CandidateRef:     metaString(r.Metadata, MetadataKeyCandidateRef),
@@ -360,6 +364,27 @@ func metaDuration(m map[string]json.RawMessage, key string) time.Duration {
 		return 0
 	}
 	return d
+}
+
+// metaUsage returns the core.Usage decoded from a metadata key's compact
+// "in/out/cacheRead/cacheCreate" string value (the inverse of encodeUsage), or a zero Usage if
+// absent, not a string, or malformed. It backs the display-only spend breakdown (spent_usage /
+// closing_usage); lenient like the other meta helpers — foreign or partial metadata must never
+// fail a read, and a zero Usage simply renders no breakdown.
+func metaUsage(m map[string]json.RawMessage, key string) core.Usage {
+	raw, ok := m[key]
+	if !ok {
+		return core.Usage{}
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err != nil {
+		return core.Usage{}
+	}
+	var in, out, cr, cc int
+	if _, err := fmt.Sscanf(s, "%d/%d/%d/%d", &in, &out, &cr, &cc); err != nil {
+		return core.Usage{}
+	}
+	return core.Usage{InputTokens: in, OutputTokens: out, CacheReadTokens: cr, CacheCreationTokens: cc}
 }
 
 // metaTime returns the time.Time parsed from a metadata key's RFC3339 string value, or the

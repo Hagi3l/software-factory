@@ -116,6 +116,27 @@ func capsSummary(c query.BudgetCaps) string {
 	return join2(parts, "  ·  ")
 }
 
+// tokenBreakdown renders the in/out/cache split behind a token total as a compact secondary
+// line (e.g. "120,000 in · 1,500 out · 1,400 cached"). It is the detail behind the Tokens
+// meter — what lets an operator see *why* a burn is high: input dominating with no cached
+// tokens is the signature of uncached context re-transmission. Cache read and creation are
+// folded into one "cached" figure (both are prompt-cache traffic billed at reduced rates);
+// a kind with zero tokens is dropped so a no-cache row stays "N in · N out". Returns "" when
+// there is no breakdown to show (a fresh issue), so the caller renders nothing.
+func tokenBreakdown(in, out, cacheRead, cacheCreate int) string {
+	var parts []string
+	if in > 0 {
+		parts = append(parts, formatTokens(in)+" in")
+	}
+	if out > 0 {
+		parts = append(parts, formatTokens(out)+" out")
+	}
+	if c := cacheRead + cacheCreate; c > 0 {
+		parts = append(parts, formatTokens(c)+" cached")
+	}
+	return join(parts)
+}
+
 func join(parts []string) string  { return join2(parts, " · ") }
 func join2(parts []string, sep string) string {
 	out := ""

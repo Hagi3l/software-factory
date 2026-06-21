@@ -86,6 +86,9 @@ templ invocationBudget(b query.IssueBudgetRow) {
 			@invocationMeter("Wall", formatDuration(b.Wall), capDur(b.WallCap), b.WallPct, b.WallOver, b.WallCap > 0)
 			@invocationMeter("Retries", strconv.Itoa(b.Attempt), capRetries(b.MaxRetries), b.RetryPct, b.RetryOver, b.MaxRetries > 0)
 		</dl>
+		if bd := tokenBreakdown(b.TokensIn, b.TokensOut, b.TokensCacheRead, b.TokensCacheCreate); bd != "" {
+			<p class="mt-2 text-xs text-faint tabular-nums">{ bd }</p>
+		}
 	</section>
 }
 

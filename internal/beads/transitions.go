@@ -98,6 +98,25 @@ const (
 	MetadataKeyClosingUSD    = "closing_usd"
 )
 
+// MetadataKeySpentUsage and MetadataKeyClosingUsage hold the in/out/cache-read/cache-creation
+// BREAKDOWN behind the *Tokens scalars above (core.Issue.SpentUsage / ClosingUsage) — the same
+// threaded-cumulative vs own-marginal split, by token kind. They are display-only (the control
+// room's per-kind meter); budget enforcement reads only the scalar totals. Stored as a compact
+// "in/out/cacheRead/cacheCreate" string (encodeUsage) so the four counts ride in one metadata
+// value and round-trip legibly like MetadataKeySpentWall. SpentUsage is threaded forward at
+// create() like SpentTokens; ClosingUsage is stamped post-hoc by StampClosingSpend like
+// ClosingTokens. Absent (or malformed) decodes to a zero Usage.
+const (
+	MetadataKeySpentUsage   = "spent_usage"
+	MetadataKeyClosingUsage = "closing_usage"
+)
+
+// encodeUsage renders a core.Usage as the compact "in/out/cacheRead/cacheCreate" metadata
+// value; parseUsage (in client.go) is its inverse. The order is fixed and positional.
+func encodeUsage(u core.Usage) string {
+	return fmt.Sprintf("%d/%d/%d/%d", u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens)
+}
+
 // MetadataKeyEpicID holds the id of the root seed issue of an issue's epic (core.Issue.EpicID):
 // the work item a human seeded, from which the whole fan-out descends. It is threaded forward
 // onto every produced child and on_failure fix like MetadataKeyBase — a root seed carries none
@@ -262,13 +281,16 @@ func (c *Client) PinSpecHash(ctx context.Context, id, hash string) error {
 // specs/workflow.md "epic_budget"). It is a set, not an increment, so re-stamping the same
 // Result on an at-least-once redelivery is idempotent. bd stores a numeric --set-metadata value
 // as a JSON number, so metaInt/metaFloat read these back directly.
-func (c *Client) StampClosingSpend(ctx context.Context, id string, tokens int, usd float64) error {
+func (c *Client) StampClosingSpend(ctx context.Context, id string, usage core.Usage, usd float64) error {
 	if id == "" {
 		return fmt.Errorf("beads: empty issue id")
 	}
 	args := []string{"update", id,
-		"--set-metadata", fmt.Sprintf("%s=%d", MetadataKeyClosingTokens, tokens),
-		"--set-metadata", fmt.Sprintf("%s=%s", MetadataKeyClosingUSD, strconv.FormatFloat(usd, 'f', -1, 64))}
+		"--set-metadata", fmt.Sprintf("%s=%d", MetadataKeyClosingTokens, usage.TotalTokens()),
+		"--set-metadata", fmt.Sprintf("%s=%s", MetadataKeyClosingUSD, strconv.FormatFloat(usd, 'f', -1, 64)),
+		// The per-kind breakdown behind the scalar total, set in lockstep so ClosingUsage
+		// always reconciles to ClosingTokens. Display-only — never read by budget enforcement.
+		"--set-metadata", fmt.Sprintf("%s=%s", MetadataKeyClosingUsage, encodeUsage(usage))}
 	if _, err := c.run(ctx, args); err != nil {
 		return fmt.Errorf("beads: stamp closing spend on %s: %w", id, err)
 	}
@@ -634,6 +656,11 @@ func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {
 		}
 		if issue.SpentUSD > 0 {
 			meta[MetadataKeySpentUSD] = issue.SpentUSD
+		}
+		// The per-kind breakdown behind SpentTokens, threaded in lockstep so it reconciles to
+		// the scalar; stamped only when there is spend to record (a zero Usage stays absent).
+		if issue.SpentUsage.TotalTokens() > 0 {
+			meta[MetadataKeySpentUsage] = encodeUsage(issue.SpentUsage)
 		}
 		// Cumulative wall is threaded like the token/dollar spend; stored as a Go-duration
 		// string so it round-trips through metadata legibly (metaDuration parses it back).

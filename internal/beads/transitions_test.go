@@ -871,9 +871,11 @@ func TestEpicAndWallRoundTripIntegration(t *testing.T) {
 	c := New(WithDir(dir))
 	ctx := context.Background()
 
+	spent := core.Usage{InputTokens: 5_000, OutputTokens: 800, CacheReadTokens: 600, CacheCreationTokens: 0}
 	created, err := c.Apply(ctx, []core.Proposal{
 		{Issue: core.Issue{Title: "fix", Role: "implement", Attempt: 1,
-			EpicID: "harness-1", SpentWall: 90 * time.Second}},
+			EpicID: "harness-1", SpentWall: 90 * time.Second,
+			SpentTokens: spent.TotalTokens(), SpentUsage: spent}},
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -890,12 +892,17 @@ func TestEpicAndWallRoundTripIntegration(t *testing.T) {
 	if got.SpentWall != 90*time.Second {
 		t.Errorf("SpentWall = %s, want 1m30s (round-tripped as a duration string)", got.SpentWall)
 	}
+	// The threaded cumulative breakdown round-trips at creation, reconciled to SpentTokens.
+	if got.SpentUsage != spent {
+		t.Errorf("SpentUsage = %+v, want %+v (compact in/out/cache round-trip at create)", got.SpentUsage, spent)
+	}
 	// Closing spend is absent until stamped — the aggregate read treats it as 0.
-	if got.ClosingTokens != 0 || got.ClosingUSD != 0 {
-		t.Errorf("ClosingTokens/USD = %d/%v, want 0/0 before StampClosingSpend", got.ClosingTokens, got.ClosingUSD)
+	if got.ClosingTokens != 0 || got.ClosingUSD != 0 || got.ClosingUsage != (core.Usage{}) {
+		t.Errorf("Closing = %d/%v/%+v, want 0/0/zero before StampClosingSpend", got.ClosingTokens, got.ClosingUSD, got.ClosingUsage)
 	}
 
-	if err := c.StampClosingSpend(ctx, id, 12_000, 0.35); err != nil {
+	closing := core.Usage{InputTokens: 9_000, OutputTokens: 1_500, CacheReadTokens: 1_400, CacheCreationTokens: 100}
+	if err := c.StampClosingSpend(ctx, id, closing, 0.35); err != nil {
 		t.Fatalf("StampClosingSpend: %v", err)
 	}
 	got, err = c.Get(ctx, id)
@@ -907,6 +914,13 @@ func TestEpicAndWallRoundTripIntegration(t *testing.T) {
 	}
 	if got.ClosingUSD != 0.35 {
 		t.Errorf("ClosingUSD = %v, want 0.35 (fractional --set-metadata round-trip)", got.ClosingUSD)
+	}
+	// The per-kind breakdown round-trips alongside the scalar and reconciles to it.
+	if got.ClosingUsage != closing {
+		t.Errorf("ClosingUsage = %+v, want %+v (compact in/out/cache round-trip)", got.ClosingUsage, closing)
+	}
+	if got.ClosingUsage.TotalTokens() != got.ClosingTokens {
+		t.Errorf("ClosingUsage total %d != ClosingTokens %d (breakdown must reconcile to scalar)", got.ClosingUsage.TotalTokens(), got.ClosingTokens)
 	}
 	// The stamp must not disturb the values written at creation.
 	if got.EpicID != "harness-1" || got.SpentWall != 90*time.Second || got.Attempt != 1 {

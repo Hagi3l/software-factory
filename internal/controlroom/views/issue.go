@@ -3,7 +3,23 @@ package views
 import (
 	"fmt"
 	"strings"
+
+	"github.com/Loxstomper/harness/internal/core"
 )
+
+// issueSpend renders an issue's cumulative spend ("N tokens · $X") — the chain-cumulative
+// Spent* plus this issue's own marginal Closing*, the same total the Budgets table shows, so
+// the detail page and the budget meter never disagree on what an issue cost.
+func issueSpend(i core.Issue) string {
+	return formatTokens(i.SpentTokens+i.ClosingTokens) + " tokens · " + formatUSD(i.SpentUSD+i.ClosingUSD)
+}
+
+// issueTokenBreakdown renders the in/out/cache split behind issueSpend's token total (the
+// cumulative SpentUsage + ClosingUsage), or "" when there is nothing to show.
+func issueTokenBreakdown(i core.Issue) string {
+	u := i.SpentUsage.Add(i.ClosingUsage)
+	return tokenBreakdown(u.InputTokens, u.OutputTokens, u.CacheReadTokens, u.CacheCreationTokens)
+}
 
 // shortHash renders a content address compactly for display: the digest without its
 // algorithm prefix, truncated, so a long sha256 reads as a glanceable token. The full

@@ -724,6 +724,9 @@ type EpicBudgetRow struct {
 	USDCap    float64
 	USDPct    int
 	USDOver   bool
+	// The in/out/cache-read/cache-creation split behind Tokens (summed marginal ClosingUsage
+	// over the epic's issues, in lockstep with Tokens). Display-only; reconciles to Tokens.
+	TokensIn, TokensOut, TokensCacheRead, TokensCacheCreate int
 }
 
 // IssueBudgetRow is one issue's cumulative burn against the per-issue caps. Token/USD burn is
@@ -753,6 +756,11 @@ type IssueBudgetRow struct {
 	WallCap    time.Duration
 	WallPct    int
 	WallOver   bool
+	// The in/out/cache-read/cache-creation split behind Tokens (the chain-cumulative SpentUsage
+	// plus this issue's marginal ClosingUsage, in lockstep with Tokens). Display-only; their sum
+	// reconciles to Tokens. Lets the control room show *why* an issue's token burn is high —
+	// e.g. input dominating with zero cache reads points at uncached context re-transmission.
+	TokensIn, TokensOut, TokensCacheRead, TokensCacheCreate int
 }
 
 // Budgets is the budget view's projection: epic aggregates and per-issue burn, each measured
@@ -791,6 +799,7 @@ func aggregateBudgets(issues []core.Issue, caps BudgetCaps) Budgets {
 		tokens int
 		usd    float64
 		issues int
+		usage  core.Usage // per-kind split summed in lockstep with tokens (marginal ClosingUsage)
 	}
 	byEpic := make(map[string]*epicAgg)
 	for _, i := range issues {
@@ -802,6 +811,7 @@ func aggregateBudgets(issues []core.Issue, caps BudgetCaps) Budgets {
 		}
 		a.tokens += i.ClosingTokens
 		a.usd += i.ClosingUSD
+		a.usage = a.usage.Add(i.ClosingUsage)
 		a.issues++
 	}
 
@@ -818,6 +828,11 @@ func aggregateBudgets(issues []core.Issue, caps BudgetCaps) Budgets {
 			USDCap:    caps.EpicUSD,
 			USDPct:    meterPct(a.usd, caps.EpicUSD),
 			USDOver:   meterOver(a.usd, caps.EpicUSD),
+
+			TokensIn:          a.usage.InputTokens,
+			TokensOut:         a.usage.OutputTokens,
+			TokensCacheRead:   a.usage.CacheReadTokens,
+			TokensCacheCreate: a.usage.CacheCreationTokens,
 		})
 	}
 	sort.Slice(out.Epics, func(x, y int) bool { return epicLess(out.Epics[x], out.Epics[y]) })
@@ -837,6 +852,9 @@ func aggregateBudgets(issues []core.Issue, caps BudgetCaps) Budgets {
 func buildIssueBudgetRow(i core.Issue, caps BudgetCaps) IssueBudgetRow {
 	tokens := i.SpentTokens + i.ClosingTokens
 	usd := i.SpentUSD + i.ClosingUSD
+	// Cumulative breakdown = threaded chain (SpentUsage) + this issue's marginal (ClosingUsage),
+	// the per-kind split behind the `tokens` total above.
+	usage := i.SpentUsage.Add(i.ClosingUsage)
 	return IssueBudgetRow{
 		ID:         i.ID,
 		Role:       i.Role,
@@ -858,6 +876,11 @@ func buildIssueBudgetRow(i core.Issue, caps BudgetCaps) IssueBudgetRow {
 		WallCap:    caps.IssueWall,
 		WallPct:    meterPct(float64(i.SpentWall), float64(caps.IssueWall)),
 		WallOver:   meterOver(float64(i.SpentWall), float64(caps.IssueWall)),
+
+		TokensIn:          usage.InputTokens,
+		TokensOut:         usage.OutputTokens,
+		TokensCacheRead:   usage.CacheReadTokens,
+		TokensCacheCreate: usage.CacheCreationTokens,
 	}
 }
 
@@ -1257,6 +1280,7 @@ type ReplayTurn struct {
 	InputTokens  int
 	OutputTokens int
 	CacheRead    int
+	CacheCreate  int
 }
 
 // Replay is the reconstructed decision trail for one invocation (specs/observability.md,
@@ -1280,6 +1304,7 @@ type Replay struct {
 	Turns       []ReplayTurn
 	TotalInput  int
 	TotalOutput int
+	TotalCache  int // cache-read + cache-creation tokens summed across turns
 }
 
 // Replay reconstructs an invocation's decision trail from its broker-captured transcript.
@@ -1335,7 +1360,7 @@ func (r *Reader) Replay(ctx context.Context, id string) (Replay, error) {
 	}
 
 	rep.Available = true
-	rep.System, rep.Turns, rep.TotalInput, rep.TotalOutput = buildReplay(turns)
+	rep.System, rep.Turns, rep.TotalInput, rep.TotalOutput, rep.TotalCache = buildReplay(turns)
 	return rep, nil
 }
 
@@ -1349,9 +1374,9 @@ func (r *Reader) Replay(ctx context.Context, id string) (Replay, error) {
 // assistant's output is already rendered as the previous turn's response. A non-monotonic
 // history (which the append-only loop never produces) falls back to showing the whole slice
 // so the trail is never silently truncated.
-func buildReplay(turns []model.TranscriptTurn) (system string, out []ReplayTurn, totalIn, totalOut int) {
+func buildReplay(turns []model.TranscriptTurn) (system string, out []ReplayTurn, totalIn, totalOut, totalCache int) {
 	if len(turns) == 0 {
-		return "", nil, 0, 0
+		return "", nil, 0, 0, 0
 	}
 	system = turns[0].Request.System
 	prevLen := 0
@@ -1368,6 +1393,7 @@ func buildReplay(turns []model.TranscriptTurn) (system string, out []ReplayTurn,
 			InputTokens:  t.Response.Usage.InputTokens,
 			OutputTokens: t.Response.Usage.OutputTokens,
 			CacheRead:    t.Response.Usage.CacheReadTokens,
+			CacheCreate:  t.Response.Usage.CacheCreationTokens,
 		}
 		for _, m := range msgs[start:] {
 			if m.Role == model.RoleAssistant {
@@ -1381,9 +1407,10 @@ func buildReplay(turns []model.TranscriptTurn) (system string, out []ReplayTurn,
 		prevLen = len(msgs)
 		totalIn += rt.InputTokens
 		totalOut += rt.OutputTokens
+		totalCache += rt.CacheRead + rt.CacheCreate
 		out = append(out, rt)
 	}
-	return system, out, totalIn, totalOut
+	return system, out, totalIn, totalOut, totalCache
 }
 
 // replayMessage projects a canonical message into the view's flattened form, keeping the

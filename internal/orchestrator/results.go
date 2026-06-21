@@ -164,14 +164,16 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 	if o.epicBudgetConfigured() {
 		closingTokens := res.Usage.TotalTokens()
 		closingUSD := o.priceUsage(issue, res.Usage)
-		if err := o.bd.StampClosingSpend(ctx, issue.ID, closingTokens, closingUSD); err != nil {
+		if err := o.bd.StampClosingSpend(ctx, issue.ID, res.Usage, closingUSD); err != nil {
 			return true, fmt.Errorf("stamp closing spend on %s: %w", issue.ID, err)
 		}
 		// Mirror onto the in-memory issue so the settle transition below caches the marginal spend
 		// into the work-graph projection — the board's epic hero rolls it up from there (T8.4), and
-		// the cached snapshot must not read 0 for a closed issue that just burned tokens.
+		// the cached snapshot must not read 0 for a closed issue that just burned tokens. The
+		// per-kind breakdown (ClosingUsage) mirrors alongside the scalar for the control room.
 		issue.ClosingTokens = closingTokens
 		issue.ClosingUSD = closingUSD
+		issue.ClosingUsage = res.Usage
 	}
 
 	// Record the most-recent invocation's transcript hash on the issue so the decision trail is
@@ -681,7 +683,7 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 // attempt's spend (Result.Usage, priced through the selected soul's per-model cost table)
 // to the predecessor's running total and stamps the sum on the fix issue.
 func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result, reason string) (bool, error) {
-	spentTokens, spentUSD, spentWall, ok, transient, err := o.chargeAndAuthorize(ctx, issue, res, reason)
+	spentTokens, spentUSD, spentWall, spentUsage, ok, transient, err := o.chargeAndAuthorize(ctx, issue, res, reason)
 	if !ok {
 		return transient, err
 	}
@@ -703,7 +705,7 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	}
 
 	created, err := o.applyTracked(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, SpentUsage: spentUsage, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create on_failure fix issue from %s: %w", issue.ID, err)
@@ -730,14 +732,17 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 // (merge-conflict resolution), so the budget half of termination is enforced identically
 // wherever the orchestrator spawns a follow-up attempt — a conflict loop is bounded the same
 // way a fix loop is (see specs/workflow.md, specs/integration.md).
-func (o *Orchestrator) chargeAndAuthorize(ctx context.Context, issue core.Issue, res core.Result, reason string) (spentTokens int, spentUSD float64, spentWall time.Duration, ok bool, transient bool, err error) {
+func (o *Orchestrator) chargeAndAuthorize(ctx context.Context, issue core.Issue, res core.Result, reason string) (spentTokens int, spentUSD float64, spentWall time.Duration, spentUsage core.Usage, ok bool, transient bool, err error) {
 	spentTokens = issue.SpentTokens + res.Usage.TotalTokens()
 	spentUSD = issue.SpentUSD + o.priceUsage(issue, res.Usage)
 	spentWall = issue.SpentWall + res.Elapsed
+	// The per-kind breakdown behind spentTokens, accumulated in lockstep so it threads forward
+	// reconciled to the scalar (display-only; budget checks below read only spentTokens).
+	spentUsage = issue.SpentUsage.Add(res.Usage)
 
 	if issue.Attempt >= o.opts.Config.Harness.Policy.MaxRetries {
 		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; retry cap (%d) exhausted", reason, o.opts.Config.Harness.Policy.MaxRetries))
-		return spentTokens, spentUSD, spentWall, false, t, e
+		return spentTokens, spentUSD, spentWall, spentUsage, false, t, e
 	}
 	// A zero budget dimension is uncapped (see config.Budget); only a configured cap that
 	// the cumulative spend has reached dead-letters. Checked before spawning so a breach
@@ -745,20 +750,20 @@ func (o *Orchestrator) chargeAndAuthorize(ctx context.Context, issue core.Issue,
 	b := o.opts.Config.Harness.Policy.Budget
 	if b.Tokens > 0 && spentTokens >= b.Tokens {
 		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue token budget exhausted (%d >= %d)", reason, spentTokens, b.Tokens))
-		return spentTokens, spentUSD, spentWall, false, t, e
+		return spentTokens, spentUSD, spentWall, spentUsage, false, t, e
 	}
 	if b.USD > 0 && spentUSD >= b.USD {
 		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue USD budget exhausted ($%.4f >= $%.2f)", reason, spentUSD, b.USD))
-		return spentTokens, spentUSD, spentWall, false, t, e
+		return spentTokens, spentUSD, spentWall, spentUsage, false, t, e
 	}
 	// Cumulative wall across the on_failure loop — the wall-clock analog of the token/dollar
 	// caps, distinct from the per-invocation sandbox ceiling: it bounds how long the whole
 	// feedback loop for one issue may run, not a single attempt (see specs/workflow.md).
 	if w := b.Wall.Duration(); w > 0 && spentWall >= w {
 		t, e := o.deadLetter(ctx, issue, fmt.Sprintf("%s; per-issue wall budget exhausted (%s >= %s)", reason, spentWall, w))
-		return spentTokens, spentUSD, spentWall, false, t, e
+		return spentTokens, spentUSD, spentWall, spentUsage, false, t, e
 	}
-	return spentTokens, spentUSD, spentWall, true, false, nil
+	return spentTokens, spentUSD, spentWall, spentUsage, true, false, nil
 }
 
 // resolveStage finds the DAG stage that handles merge-conflict resolution (kind: resolve),
@@ -799,7 +804,7 @@ func (o *Orchestrator) resolveConflict(ctx context.Context, issue core.Issue, re
 	if !ok {
 		return o.deadLetter(ctx, issue, reason+"; no resolve stage configured")
 	}
-	spentTokens, spentUSD, spentWall, ok, transient, err := o.chargeAndAuthorize(ctx, issue, res, reason)
+	spentTokens, spentUSD, spentWall, spentUsage, ok, transient, err := o.chargeAndAuthorize(ctx, issue, res, reason)
 	if !ok {
 		return transient, err
 	}
@@ -812,7 +817,7 @@ func (o *Orchestrator) resolveConflict(ctx context.Context, issue core.Issue, re
 	// along so the resolution stays on the epic's souls, keeps the traceability chain intact,
 	// and stays attributed to the same epic.
 	created, err := o.applyTracked(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: rstage.Role, Attempt: issue.Attempt + 1, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
+		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: rstage.Role, Attempt: issue.Attempt + 1, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, SpentUsage: spentUsage, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create conflict-resolution issue from %s: %w", issue.ID, err)

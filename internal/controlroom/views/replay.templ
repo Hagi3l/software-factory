@@ -56,6 +56,9 @@ templ ReplayPage(rep query.Replay) {
 						<h2 class="text-sm font-medium text-muted">Decision trail</h2>
 						<span class="text-xs text-muted">
 							{ strconv.Itoa(len(rep.Turns)) } turns · { strconv.Itoa(rep.TotalInput) } in · { strconv.Itoa(rep.TotalOutput) } out
+							if rep.TotalCache > 0 {
+								· { strconv.Itoa(rep.TotalCache) } cached
+							}
 						</span>
 					</div>
 					for _, t := range rep.Turns {
@@ -93,7 +96,10 @@ templ replayTurn(t query.ReplayTurn) {
 				@replayStopBadge(t.Stop)
 				<span class="tabular-nums">{ strconv.Itoa(t.InputTokens) } in · { strconv.Itoa(t.OutputTokens) } out</span>
 				if t.CacheRead > 0 {
-					<span class="tabular-nums text-faint">{ strconv.Itoa(t.CacheRead) } cached</span>
+					<span class="tabular-nums text-faint">{ strconv.Itoa(t.CacheRead) } cache read</span>
+				}
+				if t.CacheCreate > 0 {
+					<span class="tabular-nums text-faint">{ strconv.Itoa(t.CacheCreate) } cache write</span>
 				}
 			</div>
 		</header>

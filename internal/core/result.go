@@ -104,6 +104,19 @@ func (u Usage) TotalTokens() int {
 	return u.InputTokens + u.OutputTokens + u.CacheCreationTokens + u.CacheReadTokens
 }
 
+// Add returns the per-dimension sum of two usages. It is how the orchestrator accumulates
+// a breakdown across the on_failure retry chain (the cumulative SpentUsage) the same way it
+// sums the scalar SpentTokens — keeping the in/out/cache split that the control room renders
+// consistent with the single total the budget meter enforces against.
+func (u Usage) Add(o Usage) Usage {
+	return Usage{
+		InputTokens:         u.InputTokens + o.InputTokens,
+		OutputTokens:        u.OutputTokens + o.OutputTokens,
+		CacheCreationTokens: u.CacheCreationTokens + o.CacheCreationTokens,
+		CacheReadTokens:     u.CacheReadTokens + o.CacheReadTokens,
+	}
+}
+
 // TraceEntry is one row of the test↔spec traceability map: the acceptance test, and the
 // spec heading + sentence the author claims it encodes. The spec is pure prose, so this
 // is the author's own account of its interpretation — auditable after the fact, not a

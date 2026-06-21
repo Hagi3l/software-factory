@@ -65,9 +65,11 @@ type Beads interface {
 	// "Live state vs. durable state"). It also backs the cross-issue epic-budget aggregate read (sum
 	// the per-issue closing spend over all issues sharing an epic id; see authorizeEpic).
 	ListAll(ctx context.Context) ([]core.Issue, error)
-	// StampClosingSpend records an issue's own invocation marginal (tokens, USD) so the epic
-	// budget can be summed across all issues of an epic (see core.Issue.ClosingTokens).
-	StampClosingSpend(ctx context.Context, id string, tokens int, usd float64) error
+	// StampClosingSpend records an issue's own invocation marginal (the usage breakdown and its
+	// priced USD) so the epic budget can be summed across all issues of an epic (it stamps the
+	// scalar ClosingTokens=usage.TotalTokens() the aggregate reads, plus the display-only
+	// per-kind ClosingUsage; see core.Issue.ClosingTokens / ClosingUsage).
+	StampClosingSpend(ctx context.Context, id string, usage core.Usage, usd float64) error
 	// StampTranscript records the artifact hash of an issue's most recent invocation transcript
 	// so the decision trail is reachable from the issue for in-flight/dead-lettered work, not
 	// only from a merge trailer (see core.Issue.Transcript, the plan's T4.15).
