@@ -1,0 +1,4 @@
+E0622 11:17:03.806688  735603 library.go:122] Failed to find license for example.com/foo: cannot find a known open source license for "/work/example.com/foo" whose name matches regexp ^(?i)((UN)?LICEN(S|C)E|COPYING|README|NOTICE).*$ and locates up until "/work/example.com/foo"
+Forbidden license type GPL-3.0 found for library github.com/example/copyleft
+Not allowed license AGPL-3.0 found for library github.com/example/network-copyleft
+Unknown license type  found for library example.com/foo

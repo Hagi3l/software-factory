@@ -1,0 +1,4 @@
+{"config":{"protocol_version":"v1.0.0","scanner_name":"govulncheck","scanner_version":"v1.1.4","db":"https://vuln.go.dev","db_last_modified":"2026-06-22T00:00:00Z","go_version":"go1.21","scan_level":"symbol","scan_mode":"source"}}
+{"SBOM":{"go_version":"go1.21","modules":[{"path":"cleanpkg","version":""}],"roots":["cleanpkg"]}}
+{"progress":{"message":"Scanning your code and 0 packages across 0 dependent modules for known vulnerabilities..."}}
+{"progress":{"message":"No vulnerabilities found."}}

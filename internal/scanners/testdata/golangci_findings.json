@@ -1,0 +1,76 @@
+{
+  "Issues": [
+    {
+      "FromLinter": "forbidigo",
+      "Text": "use of `fmt.Printf` forbidden by pattern `^(fmt\\.Print(|f|ln)|print|println)$`",
+      "Severity": "",
+      "SourceLines": [
+        "\t\tfmt.Printf(s)"
+      ],
+      "Pos": {
+        "Filename": "bad.go",
+        "Offset": 91,
+        "Line": 8,
+        "Column": 3
+      },
+      "ExpectNoLint": false,
+      "ExpectedNoLintLinter": ""
+    },
+    {
+      "FromLinter": "nlreturn",
+      "Text": "return with no blank line before",
+      "Severity": "",
+      "SourceLines": [
+        "\treturn"
+      ],
+      "Pos": {
+        "Filename": "bad.go",
+        "Offset": 109,
+        "Line": 10,
+        "Column": 2
+      },
+      "SuggestedFixes": [
+        {
+          "Message": "",
+          "TextEdits": [
+            {
+              "Pos": 109,
+              "End": 109,
+              "NewText": "Cg=="
+            }
+          ]
+        }
+      ],
+      "ExpectNoLint": false,
+      "ExpectedNoLintLinter": ""
+    },
+    {
+      "FromLinter": "revive",
+      "Text": "package-comments: should have a package comment",
+      "Severity": "warning",
+      "SourceLines": [
+        "package badpkg"
+      ],
+      "Pos": {
+        "Filename": "bad.go",
+        "Offset": 0,
+        "Line": 1,
+        "Column": 1
+      },
+      "LineRange": {
+        "From": 1,
+        "To": 1
+      },
+      "ExpectNoLint": false,
+      "ExpectedNoLintLinter": ""
+    }
+  ],
+  "Report": {
+    "Linters": [
+      {
+        "Name": "forbidigo",
+        "Enabled": true
+      }
+    ]
+  }
+}
