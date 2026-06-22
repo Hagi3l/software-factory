@@ -43,7 +43,9 @@ design pass: every gate check becomes a thin per-tool adapter emitting compact, 
 `Finding`s, so raw `go test`/scanner dumps stop blowing the agent's context window and burying
 the signal — the same failure mode (a flailing agent against a growing, noise-filled history)
 that drove ~80% of the 2026-06-18 demo-run cost. The **spec landed first** (commit 653824a); the
-code is pending (T9.1–T9.8). **`./demo/vault` is the exercising use case** — it is Go (the shipped
+code is landing incrementally: **T9.1 (core.Finding + tri-state), T9.2 (`internal/gotest` parser),
+and T9.6 (scanner adapters) are done** — the two parser tasks built in parallel worktree subagents;
+T9.3/T9.4/T9.5/T9.7/T9.8 remain. **`./demo/vault` is the exercising use case** — it is Go (the shipped
 adapters' language), its `qa` gate already runs gosec/govulncheck/license-scan on agent output,
 and its inner loop runs `go test`, which is exactly where context blows up today. See Phase 9.
 
@@ -660,11 +662,21 @@ work; ordered so the inner-loop context win lands first):
   `TestFindingsFormat{EmptyIsBlank,RendersComponentsCompactly,IndentsMultiLineDetail,IsCacheStable}`,
   `TestCheckStatusOf`, `TestVerdictRecordCarriesStatusAndFindings`.
   ([verification.md](specs/verification.md), [glossary.md](specs/glossary.md))
-- [ ] **T9.2 `internal/gotest` parser** — `go test -json` ndjson → findings. Owns the edge cases the
-  raw-`cat` approach punts to a human (CLAUDE.md's "if jq fails, check `.stderr`"): **compile
-  failure** (non-JSON / build-failed events → surface the compiler error, that *is* the signal),
-  **data race** (keep the `WARNING: DATA RACE` stanza verbatim), **panic/timeout** (keep the message
-  + triggering test, drop the goroutine dump). Pure, table-tested, no model, no TCB exposure.
+- [x] **T9.2 `internal/gotest` parser** — *done.* New pure, dependency-free `internal/gotest`
+  package: `func Parse(stdout []byte) core.Findings` turns a `go test -json` ndjson stream into
+  compact `core.Findings`. Each edge-case branch preserves the one signal a raw dump buries:
+  **test failure** → finding anchored at the printed `foo_test.go:NN` (Rule=test name, Message=the
+  assertion line, Detail=the failure body); **compile/build failure** → surfaces the *compiler
+  error* (handles both structured `build-output`/`build-fail` events **and** a raw non-JSON build
+  block printed to stdout — a non-JSON line never crashes the parser, owning CLAUDE.md's "if jq
+  fails check .stderr" case); **data race** → `WARNING: DATA RACE` stanza kept verbatim; **panic/
+  timeout** → message + triggering test kept, goroutine dump dropped (a package-level sweep recovers
+  a timeout that kills the binary before a per-test `fail` fires). Jitter (Elapsed/timestamps) is
+  stripped at parse time; output is deterministic (re-run byte-identical, asserted). Real captured
+  fixtures under `testdata/` ({pass,fail,compile,race,panic,timeout}.json). Tests:
+  `TestParse{PassYieldsNoFindings,TestFailure,CompileFailureStructured,RawNonJSONNeverCrashes,
+  DataRace,Panic,Timeout,IsCacheStable,EmptyInput}`. Built in a parallel worktree subagent. No spec
+  change (verification.md written ahead). (next consumer: **T9.3** `run_tests`)
 - [ ] **T9.3 `run_tests` agent tool (first consumer)** — wraps `go test -json <scope>`, returns
   `Findings.Format()` not a raw dump; raw json → artifact store. The inner-loop context win (the
   implementor runs tests via the generic `run` today, dumping raw output into the very loop that
@@ -680,10 +692,22 @@ work; ordered so the inner-loop context win lands first):
   so `core.GateVerdict` holds per-check findings; the [verification view](specs/control-room.md)
   (T4.23) renders them. One parser, multiple consumers.
   ([verification.md](specs/verification.md), [control-room.md](specs/control-room.md))
-- [ ] **T9.6 Scanner finding adapters** — golangci-lint (`--output.json`), gosec (`-fmt=json`),
-  govulncheck (`-json`), license-scan, each parsing structured output → findings (the scanners are
-  where raw output is *worst*). A command with no adapter still grades on exit code with raw output
-  as evidence (graceful fallback). ([configuration.md](specs/configuration.md))
+- [x] **T9.6 Scanner finding adapters** — *done.* New `internal/scanners` package, one pure adapter
+  per scanner → `core.Findings`: `ParseGolangciLint` (issues→{File,Line,Rule=linter,Message,Severity};
+  streaming decoder reads the first JSON value so the trailing human "N issues." line doesn't break
+  the parse), `ParseGosec` (`Issues[]`→{File,Line,Rule=rule_id,Severity lowercased,Message,Detail=code
+  excerpt}; `"11-13"` line range→first line), `ParseGovulncheck` (correlates `osv` summaries with
+  `finding` traces, emits one finding per **called** symbol-level vuln, dropping module/package-only
+  informational ones — the signal-density point; {Rule=GO id,Message=summary,File:Line=call site,
+  Detail=aliases+fix+call path}), `ParseLicenseScan` (`go-licenses check` text; drops timestamped glog
+  jitter, keys off its stable format strings → {Rule=module,Message=disallowed license}). Every parser
+  degrades to "what it could parse, or empty" on a truncated/non-JSON blob without panicking (the
+  exit-code verdict still stands — **a command with no adapter still grades on exit code with raw
+  output as evidence**). Deterministic (cache-stable, asserted). Fixtures under `testdata/`: golangci/
+  gosec captured real from dev-box tools; govuln distilled from a real `golang.org/x/text@v0.3.0`
+  scan; license hand-authored from go-licenses' format strings (no JSON mode). 12 tests incl.
+  `TestMalformedInputDegradesGracefully` + `TestCacheStability`. Built in a parallel worktree subagent.
+  Additive only — **T9.5** wires these into the gate verdict. No spec change. ([configuration.md](specs/configuration.md))
 - [ ] **T9.7 `run_gate` full self-check tool** — runs the full check registry pre-`submit`,
   structured (the producer-self-check, T2.14, generalized to the whole suite): cheap checks in-loop
   (`run_tests`), full suite once before submit. Still zero-trust (untrusted sandbox; the gate
