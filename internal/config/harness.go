@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os"
+
+	"github.com/Loxstomper/harness/internal/core"
 )
 
 // Harness is harness.yaml: the workflow DAG plus the termination policy. It changes
@@ -88,6 +90,38 @@ func (h *Harness) Mode() string {
 		return IntegrationPerItem
 	}
 	return h.Integration.Mode
+}
+
+// CommandCheckCommands returns the gate's command checks across the whole DAG — registry
+// name → shell command — for the producer's `run_gate` self-check to run the *same* commands
+// the gate will (specs/verification.md "Producer self-checks ... resolve the same check
+// registry command"). It walks every stage's postconditions and resolves each to a command:
+// a reserved proof (red→green, tests-red) reuses the acceptance-test command, and every other
+// postcondition is looked up in the registry. Two classes are excluded *by construction*,
+// because they are not registry keys: a **metric comparison** like `mutation>=0.8` (a metric
+// grades a score against a threshold, not an exit code, so a producer self-check that ran it
+// would misread the tool's exit-0 as a pass), and reserved non-check postconditions like
+// `human-approved`. The result is the set of exit-code-graded command checks safe and
+// meaningful to run once in the producing sandbox before submit.
+func (h *Harness) CommandCheckCommands() map[string]string {
+	out := make(map[string]string)
+	add := func(name string) {
+		if cmd, ok := h.Checks[name]; ok {
+			out[name] = cmd
+		}
+	}
+	for _, st := range h.DAG {
+		for _, pc := range st.Postcondition {
+			if pc == core.PostconditionRedGreen || pc == core.PostconditionTestsRed {
+				add(core.CheckAcceptanceTests)
+				continue
+			}
+			// A metric comparison ("mutation>=0.8") and reserved postconditions ("human-approved")
+			// are not registry keys, so add() skips them — only plain command checks resolve.
+			add(pc)
+		}
+	}
+	return out
 }
 
 // RequirementsPlanner is the requirements-stage planner config: the interactive,

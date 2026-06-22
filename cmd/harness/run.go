@@ -454,10 +454,15 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// transformation tools (T6.2/T6.3) query it. It is closed via the returned cleanup
 	// when the invocation ends. A sandbox without streamed-session support leaves it
 	// inert (edits no-op, queries degrade to the text floor).
+	// The command checks the gate will run, resolved once from config (invocation-independent):
+	// run_gate runs these same commands in the producing sandbox as the full pre-submit
+	// self-check, so the producer and the gate resolve one command set, not two. Proofs and the
+	// mutation metric are excluded by construction (see CommandCheckCommands).
+	selfCheckChecks := cfg.Harness.CommandCheckCommands()
 	toolSource := func(inv agent.Invocation) ([]agent.Tool, func(), error) {
 		sessions := agent.NewSessions(inv.Sandbox, log)
 		ledger := agent.NewTransformLedger()
-		// The run_tests self-check accumulates the raw `go test -json` it ran (by
+		// The run_tests / run_gate self-checks accumulate the raw output they ran (by
 		// content-address hash) into this ledger; the cleanup closure harvests those
 		// streams into the shared artifact store after the invocation, exactly as the
 		// runner harvests the trace map and transform log. The agent has no store access
@@ -466,7 +471,10 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		tools := agent.WorkspaceTools(inv.Sandbox, sessions)
 		tools = append(tools, agent.SemanticReadTools(sessions)...)
 		tools = append(tools, agent.SemanticWriteTools(sessions, ledger)...)
-		tools = append(tools, agent.RunTestsTool(inv.Sandbox, testEvidence))
+		tools = append(tools,
+			agent.RunTestsTool(inv.Sandbox, testEvidence),
+			agent.RunGateTool(inv.Sandbox, selfCheckChecks, testEvidence),
+		)
 		tools = append(tools, agent.LifecycleTools(inv.Brief, inv.Broker, ledger)...)
 		cleanup := func() {
 			harvestTestEvidence(context.Background(), store, testEvidence, log)

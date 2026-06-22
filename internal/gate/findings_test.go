@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Loxstomper/harness/internal/checkfindings"
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/sandbox"
@@ -41,10 +42,10 @@ func TestAdapterForSelectsByCheckIdentity(t *testing.T) {
 		{Check{Name: core.CheckAcceptanceTests, kind: cmdCheck}, false},
 		{Check{Name: core.PostconditionRedGreen, kind: redGreenProof}, false},
 		{Check{Name: core.PostconditionTestsRed, kind: redProof}, false},
-		{Check{Name: checkGosec, kind: cmdCheck}, false},
-		{Check{Name: checkGovulncheck, kind: cmdCheck}, false},
-		{Check{Name: checkGolangciLint, kind: cmdCheck}, false},
-		{Check{Name: checkLicenseScan, kind: cmdCheck}, false},
+		{Check{Name: checkfindings.Gosec, kind: cmdCheck}, false},
+		{Check{Name: checkfindings.Govulncheck, kind: cmdCheck}, false},
+		{Check{Name: checkfindings.GolangciLint, kind: cmdCheck}, false},
+		{Check{Name: checkfindings.LicenseScan, kind: cmdCheck}, false},
 		{Check{Name: "mutation", kind: metricCheck}, true},
 		{Check{Name: "some-bespoke-scanner", kind: cmdCheck}, true},
 	}
@@ -92,14 +93,14 @@ func TestRunPopulatesPerCheckFindings(t *testing.T) {
 		testsCmd: {ExitCode: 0, Stdout: []byte(goTestJSONPass)},
 		gosecCmd: {ExitCode: 1, Stdout: []byte(gosecJSON)},
 	}}
-	registry := Registry{core.CheckAcceptanceTests: testsCmd, checkGosec: gosecCmd}
+	registry := Registry{core.CheckAcceptanceTests: testsCmd, checkfindings.Gosec: gosecCmd}
 	store := testStore(t)
-	g := New(&fakeBackend{sb: sb}, registry, store, t.TempDir(), nil, nil, WithIndependentChecks([]string{checkGosec}))
+	g := New(&fakeBackend{sb: sb}, registry, store, t.TempDir(), nil, nil, WithIndependentChecks([]string{checkfindings.Gosec}))
 
 	cand := Candidate{
 		Repo:           "/repo",
 		Ref:            core.CandidateBranch("issue-1"),
-		Postconditions: []string{core.CheckAcceptanceTests, checkGosec},
+		Postconditions: []string{core.CheckAcceptanceTests, checkfindings.Gosec},
 		Profile:        "go-toolchain",
 		Limits:         config.SandboxLimits{CPU: 2, Mem: "2Gi", Wall: config.Duration(time.Minute)},
 	}
@@ -119,7 +120,7 @@ func TestRunPopulatesPerCheckFindings(t *testing.T) {
 	}
 	// gosec: the scanner adapter parsed the G401 hit.
 	gs := report.Checks[1]
-	if gs.Name != checkGosec || len(gs.Findings) != 1 || gs.Findings[0].Rule != "G401" {
+	if gs.Name != checkfindings.Gosec || len(gs.Findings) != 1 || gs.Findings[0].Rule != "G401" {
 		t.Errorf("gosec findings = %+v, want one G401 finding", gs.Findings)
 	}
 	// The harvested verdict carries the findings (the verification view reads this record).

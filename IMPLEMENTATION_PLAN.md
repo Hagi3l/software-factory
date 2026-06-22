@@ -47,8 +47,10 @@ code is landing incrementally: **T9.1 (core.Finding + tri-state), T9.2 (`interna
 T9.3 (`run_tests` tool), T9.4 (build precondition + tri-state cascade), and T9.6 (scanner adapters)
 and T9.5 (gate verdict carries findings + verification view renders them) are done** — the parsers
 built in parallel worktree subagent waves (T9.2+T9.6, then T9.3+T9.4), T9.5 wired sequentially;
-**T9.7, T9.8 remain** (both edit the gate/orchestrator, sequential — T9.7 the full `run_gate`
-self-check, T9.8 the failure-aware retry Brief, which threads T9.5's findings into the fix Brief).
+and T9.7 (`run_gate` full pre-submit self-check, sharing the gate's adapters via the new
+`internal/checkfindings` leaf) are done. **Only T9.8 remains** — the failure-aware retry Brief that
+threads T9.5's parsed findings into the `on_failure` fix Brief (today the fix re-derives blind); it
+is the task that closes the loop Phase 9 was opened for.
 **`./demo/vault` is the exercising use case** — it is Go (the shipped
 adapters' language), its `qa` gate already runs gosec/govulncheck/license-scan on agent output,
 and its inner loop runs `go test`, which is exactly where context blows up today. See Phase 9.
@@ -762,10 +764,27 @@ work; ordered so the inner-loop context win lands first):
   scan; license hand-authored from go-licenses' format strings (no JSON mode). 12 tests incl.
   `TestMalformedInputDegradesGracefully` + `TestCacheStability`. Built in a parallel worktree subagent.
   Additive only — **T9.5** wires these into the gate verdict. No spec change. ([configuration.md](specs/configuration.md))
-- [ ] **T9.7 `run_gate` full self-check tool** — runs the full check registry pre-`submit`,
-  structured (the producer-self-check, T2.14, generalized to the whole suite): cheap checks in-loop
-  (`run_tests`), full suite once before submit. Still zero-trust (untrusted sandbox; the gate
-  re-runs authoritatively). ([verification.md](specs/verification.md))
+- [x] **T9.7 `run_gate` full self-check tool** — *done.* New `agent.RunGateTool`
+  (`internal/agent/rungate.go`): the producer self-check generalized from `run_tests`' single test
+  pass to the **whole command-check suite** the gate will run (acceptance tests + scanners). It runs
+  each configured check's command once in the untrusted producing sandbox (`sh -c <cmd>`, sorted for
+  cache-stability), parses each via the shared adapter, and returns a compact tally + per-check
+  findings (never the raw scanner dumps) with each check's raw output harvested as evidence (reusing
+  T9.3's `TestEvidenceLedger` + the run.go cleanup harvest). Zero-trust (feedback, not a grade — the
+  gate re-runs authoritatively). **Deliberately omits** the red→green proof (needs a base-ref sandbox
+  only the gate has) and the **mutation metric** (graded on a score-vs-threshold, not an exit code —
+  running it would misread the tool's exit-0 as a pass). **Single source via new `internal/checkfindings`
+  leaf:** the per-tool adapter selection (`ByName`/`GoTest` with the ndjson guard) was extracted from
+  T9.5's gate code into a neutral package that **both** the gate (`adapterFor` now delegates) and
+  `run_gate` import — so "the gate checks it" and "I checked it" share one command *and* one parser.
+  New `config.Harness.CommandCheckCommands()` computes the self-check set from the DAG (proofs resolve
+  to `tests-pass`; metrics + reserved postconditions excluded by construction since they aren't
+  registry keys); `run.go` resolves it once and wires `RunGateTool` into the toolSource. **No spec
+  change** — components/agent.md "Verification (self-check)" + verification.md "Producer self-checks"
+  written ahead; docs don't enumerate agent tools, so no docs/ change. Tests:
+  `TestRunGateRunsEveryCheckAndReturnsFindings`, `TestRunGateAllCleanIsNotError`,
+  `TestRunGateNoChecksConfigured`, `TestCommandCheckCommands`, `internal/checkfindings` suite (`ByName`/
+  `GoTest` guard/`Parse` fallback); gate suite still green after the refactor. ([verification.md](specs/verification.md))
 - [ ] **T9.8 Failure-aware retry Brief** — thread the failing `Finding`s into the `on_failure`
   fix-issue Brief (today the gate verdict is *not* threaded — the fix re-derives blind). The parsed
   verdict is the natural payload: the fix is tight (exactly the N failing findings, not the whole
