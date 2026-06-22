@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -456,11 +457,22 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	toolSource := func(inv agent.Invocation) ([]agent.Tool, func(), error) {
 		sessions := agent.NewSessions(inv.Sandbox, log)
 		ledger := agent.NewTransformLedger()
+		// The run_tests self-check accumulates the raw `go test -json` it ran (by
+		// content-address hash) into this ledger; the cleanup closure harvests those
+		// streams into the shared artifact store after the invocation, exactly as the
+		// runner harvests the trace map and transform log. The agent has no store access
+		// of its own (no network) — it only computes and cites the hash inline.
+		testEvidence := agent.NewTestEvidenceLedger()
 		tools := agent.WorkspaceTools(inv.Sandbox, sessions)
 		tools = append(tools, agent.SemanticReadTools(sessions)...)
 		tools = append(tools, agent.SemanticWriteTools(sessions, ledger)...)
+		tools = append(tools, agent.RunTestsTool(inv.Sandbox, testEvidence))
 		tools = append(tools, agent.LifecycleTools(inv.Brief, inv.Broker, ledger)...)
-		return tools, sessions.Close, nil
+		cleanup := func() {
+			harvestTestEvidence(context.Background(), store, testEvidence, log)
+			sessions.Close()
+		}
+		return tools, cleanup, nil
 	}
 	loop := agent.New(toolSource, agent.BudgetFromPolicy(cfg.Harness.Policy), log)
 
@@ -530,6 +542,23 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 // nil o (pre-wiring, or a never-co-located run) reads as an empty graph rather than panicking — the
 // board would briefly show empty, but o is always set before ListenAndServe serves any request.
 type lateWorkGraph struct{ o *orchestrator.Orchestrator }
+
+// harvestTestEvidence persists the raw `go test -json` streams the run_tests self-check
+// produced into the content-addressed artifact store, under ArtifactKindGateEvidence (the
+// same kind the gate's captured check output uses). It runs in the toolSource cleanup —
+// the trusted side, with store access the untrusted agent lacks — mirroring how the runner
+// harvests the trace map and transform log before a sandbox is torn down. Each stream is
+// Put under its own content address; because the store is content-addressed, the hash the
+// agent already cited inline resolves once the bytes land here. A Put failure degrades
+// provenance (the cited hash will not resolve) but never fails the invocation — the
+// self-check is feedback, not a graded artifact.
+func harvestTestEvidence(ctx context.Context, store artifact.Store, ledger *agent.TestEvidenceLedger, log *slog.Logger) {
+	for hash, raw := range ledger.Evidence() {
+		if _, err := store.Put(ctx, core.ArtifactKindGateEvidence, bytes.NewReader(raw)); err != nil {
+			log.WarnContext(ctx, "run: harvest run_tests evidence", "hash", hash, "err", err)
+		}
+	}
+}
 
 func (l *lateWorkGraph) Snapshot(ctx context.Context) ([]core.Issue, error) {
 	if l.o == nil {
