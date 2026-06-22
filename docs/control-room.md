@@ -66,8 +66,14 @@ Drill-through pages (not in the nav):
   made legible: the producer≠verifier soul split (the `author-tests` and `implement`
   souls side by side, with the `qa` gate marked as running independently in the clean
   [verification sandbox](../specs/glossary.md#verification-sandbox) — no verifier soul,
-  and that is the point), the red→green proof per check, the mutation score vs threshold,
-  the scanners, the test↔spec traceability map, and — when the issue ran semantic write
+  and that is the point), each check's **tri-state outcome** — pass / fail / **not-run** (a
+  check the [build precondition](../specs/verification.md) short-circuited because nothing can
+  run on a tree that does not compile, rendered as its own state rather than a misleading
+  fail), the red→green proof per check, the mutation score vs threshold, the scanners, and —
+  per check that has a per-tool adapter — its parsed **[findings](../specs/verification.md)**
+  (the compact `file:line severity rule: message` form the gate extracted from the tool's
+  machine-readable output, the same representation a failed candidate's retry Brief carries;
+  the raw dump stays the linked evidence). The test↔spec traceability map, and — when the issue ran semantic write
   tools — the **transformation log** (T6.3): each `rename`/`code_action` tagged with the
   mechanism it ran through (**semantic**, the language server's own edit, vs **text fallback**,
   the degraded word-boundary floor that can rewrite comments and string literals), with the

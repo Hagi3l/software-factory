@@ -595,6 +595,11 @@ func runCheck(ctx context.Context, check Check, base, cand sandbox.Sandbox) (Che
 		Stdout:   res.Stdout,
 		Stderr:   res.Stderr,
 		kind:     check.kind,
+		// Parse the tool's machine-readable output into structured findings (the compact form
+		// the verdict, the verification view, and a retry Brief carry instead of the raw dump).
+		// A check with no adapter, or whose output is not machine-readable, yields nil here and
+		// still grades on its exit code with its raw output as evidence (T9.5).
+		Findings: findingsFor(check, res.Stdout, res.Stderr),
 	}, nil
 }
 
@@ -621,6 +626,10 @@ func runRedGreen(ctx context.Context, check Check, base, cand sandbox.Sandbox) (
 		Stderr:   greenRes.Stderr,
 		Base:     &RunResult{ExitCode: redRes.ExitCode, Stdout: redRes.Stdout, Stderr: redRes.Stderr},
 		kind:     redGreenProof,
+		// Findings come from the candidate (green) run — a failed proof's candidate output
+		// names which tests failed, the signal a retry Brief needs (T9.5). The base (red) run
+		// is expected to fail and is recorded by exit code on Base, not parsed for findings.
+		Findings: findingsFor(check, greenRes.Stdout, greenRes.Stderr),
 	}, nil
 }
 

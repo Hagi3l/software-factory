@@ -71,6 +71,18 @@ metric name and grades the trailing numeric token of stdout. The reserved proofs
 `tests-pass` run against the candidate and/or its base, so the acceptance tests stay a
 single source of truth.
 
+Beyond grading the exit code, the gate parses a check's output into structured
+**[findings](../specs/verification.md)** — the compact `file:line severity rule: message`
+form shown in the [verification view](control-room.md) and threaded into a failed
+candidate's retry Brief, instead of the raw dump. The parsing is built-in per-tool infra:
+the kernel ships adapters for `go test`, `golangci-lint`, `gosec`, and `govulncheck`,
+**selected by the check's name** (so the registry stays a plain name→command map). For the
+findings to populate, point the check at the tool's **machine-readable mode** — e.g.
+`go test -json`, `golangci-lint --output.json`, `gosec -fmt=json`, `govulncheck -json` (the
+exit code, and so the pass/fail grade, is unchanged). A check whose command emits a plain
+human summary, or whose tool has no adapter, simply carries no findings — it still grades on
+its exit code with its raw output kept as evidence (a graceful fallback, never an error).
+
 `independent_checks` is the optional list of command checks the gate keeps running **past**
 a failure, so one `qa` pass surfaces *every* scanner finding at once instead of stopping at
 the first — the human triaging the dead-letter queue (or the agent re-routed to `implement`)

@@ -148,7 +148,7 @@ templ verdictCheck(c core.GateCheckOutcome) {
 	<li class="space-y-2 rounded-md border border-border bg-surface px-3 py-2.5 text-sm">
 		<div class="flex flex-wrap items-center justify-between gap-3">
 			<div class="flex items-center gap-3">
-				@checkPassBadge(c.Passed)
+				@checkStatusBadge(c)
 				<span class="text-fg">{ orDash(c.Name) }</span>
 				<span class="rounded-full bg-canvas px-2 py-0.5 text-xs text-muted">{ checkKindLabel(c.Kind) }</span>
 			</div>
@@ -188,6 +188,16 @@ templ verdictCheck(c core.GateCheckOutcome) {
 		} else if c.ExitCode != 0 {
 			<div class="text-xs text-muted">exit { strconv.Itoa(c.ExitCode) }</div>
 		}
+		if len(c.Findings) > 0 {
+			// The structured findings the gate's per-tool adapter parsed from this check's raw
+			// output — the compact, signal-dense form (the raw dump stays the linked evidence).
+			// Rendered as the same cache-stable Findings.Format() a failed candidate's retry Brief
+			// carries, so the human and the agent read one representation (T9.5).
+			<div class="space-y-1">
+				<div class="text-xs text-muted">{ strconv.Itoa(len(c.Findings)) } findings</div>
+				<pre class="overflow-x-auto whitespace-pre-wrap rounded bg-canvas p-2 text-xs text-fg">{ c.Findings.Format() }</pre>
+			</div>
+		}
 	</li>
 }
 
@@ -201,7 +211,27 @@ templ verdictBadge(passed bool) {
 	}
 }
 
-// checkPassBadge tints one check's pass/fail.
+// checkStatusBadge tints one check's tri-state outcome (passed / failed / not-run). not-run
+// is its own state — a check the build precondition short-circuited because nothing can run
+// on a tree that does not compile (T9.4); rendering it as a plain "fail" would lie about
+// whether the gate actually checked it. A record predating the tri-state (empty Status) falls
+// back to the two-valued Passed badge so old verdicts still render. The class literals stay
+// inline (a templ switch, not a Go helper) so the Tailwind scanner sees them.
+templ checkStatusBadge(c core.GateCheckOutcome) {
+	switch c.Status {
+		case core.CheckStatusNotRun:
+			<span class="rounded-full bg-st-warn-bg px-2 py-0.5 text-xs text-st-warn">not-run</span>
+		case core.CheckStatusFailed:
+			<span class="rounded-full bg-st-blocked-bg px-2 py-0.5 text-xs text-st-blocked">fail</span>
+		case core.CheckStatusPassed:
+			<span class="rounded-full bg-st-ok-bg px-2 py-0.5 text-xs text-st-ok">pass</span>
+		default:
+			@checkPassBadge(c.Passed)
+	}
+}
+
+// checkPassBadge tints one check's pass/fail — the back-compat path for a verdict recorded
+// before the tri-state Status existed.
 templ checkPassBadge(passed bool) {
 	if passed {
 		<span class="rounded-full bg-st-ok-bg px-2 py-0.5 text-xs text-st-ok">pass</span>

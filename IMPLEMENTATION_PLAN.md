@@ -45,9 +45,10 @@ the signal — the same failure mode (a flailing agent against a growing, noise-
 that drove ~80% of the 2026-06-18 demo-run cost. The **spec landed first** (commit 653824a); the
 code is landing incrementally: **T9.1 (core.Finding + tri-state), T9.2 (`internal/gotest` parser),
 T9.3 (`run_tests` tool), T9.4 (build precondition + tri-state cascade), and T9.6 (scanner adapters)
-are done** — built in parallel worktree subagent waves (T9.2+T9.6, then T9.3+T9.4); **T9.5, T9.7,
-T9.8 remain** (all edit the gate/orchestrator and are sequential — T9.5 wires the T9.2/T9.6 parsers
-into the gate verdict, T9.7 the full `run_gate` self-check, T9.8 the failure-aware retry Brief).
+and T9.5 (gate verdict carries findings + verification view renders them) are done** — the parsers
+built in parallel worktree subagent waves (T9.2+T9.6, then T9.3+T9.4), T9.5 wired sequentially;
+**T9.7, T9.8 remain** (both edit the gate/orchestrator, sequential — T9.7 the full `run_gate`
+self-check, T9.8 the failure-aware retry Brief, which threads T9.5's findings into the fix Brief).
 **`./demo/vault` is the exercising use case** — it is Go (the shipped
 adapters' language), its `qa` gate already runs gosec/govulncheck/license-scan on agent output,
 and its inner loop runs `go test`, which is exactly where context blows up today. See Phase 9.
@@ -719,9 +720,31 @@ work; ordered so the inner-loop context win lands first):
   Tests: `TestRunBuildPreconditionShortCircuitsDependents`, `TestRunBuildPassesThenIndependentScannersAggregate`,
   `TestRunNoBuildCommandNoPrecondition`, + updated `TestRunStopsAtFirstFailure`/`TestRunVerdictRecordsFailure`.
   No spec change (verification.md "A check is tri-state" written ahead). ([verification.md](specs/verification.md))
-- [ ] **T9.5 Gate verdict carries findings** — the gate reuses the T9.2 parser (and T9.6 adapters)
-  so `core.GateVerdict` holds per-check findings; the [verification view](specs/control-room.md)
-  (T4.23) renders them. One parser, multiple consumers.
+- [x] **T9.5 Gate verdict carries findings** — *done.* New `internal/gate/findings.go`:
+  `adapterFor(check)` selects the per-tool parser **by the check's identity** (the spec's "registry
+  stays a name→command map" — no config field): proofs (red→green/tests-red) + the `tests-pass`
+  acceptance check → `gotest.Parse`; `gosec`/`govulncheck`/`golangci-lint`/`license-scan` → the
+  matching `internal/scanners` adapter; anything else → nil (graceful fallback — grade on exit code,
+  raw output stays evidence). `findingsFor` parses captured **stdout** (stderr only when stdout is
+  empty) and populates `CheckResult.Findings` in `runCheck` (command/red-proof path) and `runRedGreen`
+  (the candidate/green run); `verdictRecord` (T9.1) already carries them into `core.GateVerdict`, so
+  the harvested record holds per-check findings. **Load-bearing guard:** the go-test adapter only fires
+  on ndjson-shaped output (`looksLikeNDJSON`) — a human-format test command (the shipped `make
+  test-unit`, which routes `-json` to a file) is graded identically on exit code but its plain text
+  would otherwise be misread by T9.2's compile-failure path as a bogus "build" finding; a real build
+  failure at the gate is T9.4's job, so nothing is lost. **Verification view** (`verification.templ`):
+  new tri-state `checkStatusBadge` (pass/fail/**not-run**, falling back to the old Passed badge for
+  pre-tri-state records) replaces the two-valued badge, and each check renders its `Findings.Format()`
+  (the same cache-stable compact form the retry Brief will carry) in a `<pre>` — raw dump stays the
+  linked evidence. Regenerated `verification_templ.go` (templ generate from repo root); reused existing
+  Tailwind tokens (no CSS rebuild). **Activation note:** findings populate only when the check command
+  emits machine-readable output (`go test -json`, `gosec -fmt=json`, …) — documented in
+  docs/configuration.md; the shipped configs are unchanged (graceful-empty until an operator opts in,
+  e.g. the vault re-run). TCB-touching (gate) — done sequentially with review, not a worktree. No spec
+  change (verification.md "Findings…", configuration.md "per-tool adapters" written ahead); docs updated
+  (control-room.md verification view, configuration.md findings activation). Tests:
+  `TestAdapterForSelectsByCheckIdentity`, `TestFindingsForFallsBackToStderr`,
+  `TestRunPopulatesPerCheckFindings`, `TestRunFailingTestCheckCarriesFindings`.
   ([verification.md](specs/verification.md), [control-room.md](specs/control-room.md))
 - [x] **T9.6 Scanner finding adapters** — *done.* New `internal/scanners` package, one pure adapter
   per scanner → `core.Findings`: `ParseGolangciLint` (issues→{File,Line,Rule=linter,Message,Severity};
