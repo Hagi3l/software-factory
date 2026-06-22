@@ -131,6 +131,12 @@ format. They split along the trust boundary:
   - *Transformation (write):* `rename` (semantic, project-wide), `code_action` (apply
     the server's own fix — organise imports, add import, quickfix, extract), plus the
     text floor `edit_file`, `write_file`, `run` (build/test/lint/fmt).
+  - *Verification (self-check):* `run_tests` (the project's tests) and `run_gate` (the
+    full [check registry](../configuration.md) pre-`submit`) return the gate's parsed
+    **[findings](../verification.md)** — `file:line` + message, raw output kept as
+    evidence — instead of a raw dump. The infra parses the tool output, so even a weak
+    model gets a focused result; the self-check is feedback, never a grade (see
+    [verification.md](../verification.md) "Producer self-checks").
 - **Lifecycle** (control the invocation, produce the Result): `submit` (candidate
   ready), `submit_plan` (a decomposition is ready — ends a planning task with the
   proposed children and **no** candidate branch), `escalate` (raise

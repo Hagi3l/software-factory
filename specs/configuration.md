@@ -134,6 +134,15 @@ policy:
   `govulncheck`, licence metadata for `license-scan`) reads it from data baked into the
   role's sandbox image, never the network — the same offline guarantee the build relies
   on (see [sandbox](components/sandbox.md), and rootfs composition in the build plan).
+  Beyond grading the exit code, the gate parses each tool's machine-readable output
+  (`-json` / `--output.json`) into structured **[findings](verification.md)** for the
+  agent's context, the verdict, and dead-letter triage — the parsing is built-in per-tool
+  infra (the kernel ships adapters for `go test`, `golangci-lint`, `gosec`,
+  `govulncheck`), so the registry stays a name→command map and a deployment adds a scanner
+  without writing a parser (a command with no adapter still grades on exit code with its
+  raw output as evidence). Grading the verdict over finding *severity* — a `fail_on:`
+  threshold — is a **planned refinement**; today every check still fails closed on a
+  non-zero exit.
 - `independent_checks:` is the optional list of command checks the gate keeps running
   **past** a failure, so one `qa` pass aggregates *every* independent-scanner finding
   instead of stopping at the first — better dead-letter triage, since the human (or the

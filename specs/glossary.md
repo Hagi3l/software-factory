@@ -56,18 +56,30 @@ for [`epic_budget`](#budget) aggregation and — under
 [`integration.mode: epic`](integration.md) — atomic feature landing. See
 [workflow.md](workflow.md), [integration.md](integration.md).
 
+### Finding
+A single structured result parsed from a [check](#gate)'s tool output — `{file, line,
+severity, rule, message}` plus a typed detail that keeps the tool-specific essential (a
+test's assertion diff, a vulnerability's call path). Findings are the compact,
+signal-dense, cache-stable form of a check's raw output (which is kept as
+[gate evidence](#artifact-store)); they feed the agent's context, the
+[gate verdict](#gate-verdict), the [verification view](control-room.md), and a failed
+candidate's retry [Brief](#brief). They are *evidence*, not the grade — pass/fail stays
+the check's exit code / proof / metric. See [verification.md](verification.md).
+
 ### Gate
 A postcondition check (build, test, mutation score, security scan) the orchestrator
 runs in a clean [verification sandbox](#verification-sandbox) to decide whether a
-candidate is accepted. See [verification.md](verification.md).
+candidate is accepted. Each check ends **passed / failed / not-run** (a broken build
+precondition leaves dependent checks not-run, never a misleading green). See
+[verification.md](verification.md).
 
 ### Gate verdict
-The assembled, persisted result of one [gate](#gate) run — per-check pass/fail,
-red→green base/candidate, mutation score vs. threshold, scanner exits — harvested to
-the [artifact store](#artifact-store) (kind `gate-verdict`) for every run, pass or
-fail, so the [verification view](control-room.md) can render the trust argument after
-the fact. Distinct from the per-check *evidence* it indexes. See
-[verification.md](verification.md).
+The assembled, persisted result of one [gate](#gate) run — per-check passed/failed/not-run,
+its parsed [findings](#finding), the red→green base/candidate pair, mutation score vs.
+threshold, scanner exits — harvested to the [artifact store](#artifact-store) (kind
+`gate-verdict`) for every run, pass or fail, so the [verification view](control-room.md)
+can render the trust argument after the fact. Distinct from the per-check *evidence* it
+indexes. See [verification.md](verification.md).
 
 ### Integrated
 The durable state of a child work item whose verified candidate has **landed on the

@@ -127,6 +127,14 @@ producer's sandbox, authoritative grading in the clean one. Because it is byte-f
 the same command, "I linted it" and "the gate lints it" can never quietly mean different
 things.
 
+The producer reaches these through the same **structured** surface the gate produces:
+`run_tests` for the fast inner-loop check and `run_gate` for the full pre-`submit` suite,
+each returning the same [findings](glossary.md#finding) the gate would — so the producer
+works against a compact, signal-dense result instead of a raw dump (and stops blowing its
+own context window on a noisy test log), and "I checked it" and "the gate checks it" share
+not just one command but one result shape. It is still zero trust: the tool runs in the
+untrusted sandbox, only the independent re-run grades.
+
 ---
 
 ## The trust mechanisms
@@ -277,6 +285,58 @@ argument — red→green, mutation score, scanners, and the producing-soul split
 **forensic snapshot** without the gate being live. It is recorded for every gate run,
 pass or fail: a *rejected* candidate's verdict is as worth auditing as an accepted
 one (it is what a human triaging the [dead-letter queue](control-room.md) needs).
+
+### Findings: structured evidence, not the grade
+
+Every check captures its tool's output, but a raw `go test` dump or a `govulncheck`
+stream is mostly noise — and that noise is exactly what dilutes an agent's context and
+buries the one line that matters. So a check is also a **thin per-tool adapter**: it runs
+the tool in its machine-readable mode (`go test -json`, `golangci-lint --output.json`,
+`gosec -fmt=json`, `govulncheck -json`) and parses the output into structured
+**[findings](glossary.md#finding)** — each a `{file, line, severity, rule, message}` plus
+a typed `detail` that preserves the one tool-specific thing that matters (a test's
+assertion diff, a vulnerability's call path). This is the same canonical-interface /
+thin-adapter split the [model layer](models.md) and the [semantic tools](components/agent.md)
+already use — *provider adapter : model :: check adapter : tool output* — so the findings
+*shape* is **language-neutral** while the parsing lives in a per-tool (per-language)
+adapter; the kernel ships the Go adapters, and a command with no adapter still grades on
+its exit code with its raw output as evidence.
+
+The raw output still travels — it remains the gate-evidence artifact, by hash, as before.
+The findings are the **compact, signal-dense, cache-stable** representation that enters the
+agent's context, the [gate-verdict record](#the-gate-verdict-is-recorded-not-just-acted-on),
+the [verification view](control-room.md), and a failed candidate's retry [Brief](glossary.md#brief).
+The extraction is done **once, by the infra, not by the agent** — so even a weak producing
+model gets a focused result whether or not it would have known to ask for one (the same
+"the tool layer picks the mechanism, never the agent" stance as the semantic tools).
+Findings are sorted deterministically and stripped of run-to-run jitter (elapsed times,
+timestamps), so an unchanged re-run yields byte-identical findings — which keeps the
+conversation prefix cacheable and lets a "findings not shrinking across attempts" signal
+mean what it says.
+
+**Grading is unchanged.** Pass/fail is still decided by the exit code (or the reserved
+proof / metric comparison) exactly as above — findings are *evidence*, not the grade, so
+the gate stays agnostic to any one tool's report. Grading the verdict *over* the findings
+— a severity threshold like "fail on a high-severity `gosec` hit, treat the rest as
+advisory" — is a deliberate **later refinement**, not part of this contract; today a check
+that exits non-zero fails closed regardless of what its findings say.
+
+### A check is tri-state; a broken build never reads as green
+
+A check ends in one of three states, not two: **passed**, **failed**, or **not-run**. The
+third matters because checks have a dependency — nothing else can run on a tree that does
+not compile, and a scanner that never executed must never be recorded as "ran, found
+nothing." A misleading green is worse than a red here, because [producer ≠ verifier](#producer--verifier)
+cannot catch a candidate that merely *looks* clean. So the gate runs a **build
+precondition** first; if it fails, the gate records the build error as a finding and marks
+every dependent check **not-run**, instead of letting each tool independently rediscover
+the broken build in its own error format. This is the fail-fast rule (above) made honest:
+the precondition short-circuits the dependent checks while the
+[independent scanners](#independent-scanners) still aggregate among themselves. Crucially,
+**not-run never counts as a pass** — the gate still fails closed on anything that is not a
+clean pass, so an unverified candidate is never accepted; the tri-state changes only what
+the verdict *records* (we-checked-and-it's-clean vs. we-never-got-to-check), which is what
+a human triaging the dead-letter queue, and the retry Brief, actually need.
 
 ---
 

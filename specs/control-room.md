@@ -252,7 +252,9 @@ the whole argument for one issue, forensically, from the persisted
   [verification sandbox](glossary.md#verification-sandbox) — there is no verifier *soul*
   to show, and that is the point.
 - **Red→green proof** — tests fail on the base, pass on the candidate, per check.
-- **Mutation score** vs. its threshold; **scanners** with their pass/fail.
+- **Mutation score** vs. its threshold; **scanners** with their parsed
+  [findings](verification.md) (`file:line` + message, not a raw log), each check shown
+  passed / failed / **not-run** (a check the build precondition short-circuited).
 - **The [test↔spec traceability map](verification.md)** — each test against the spec
   heading and sentence it claims to encode: the only window into how the author read the
   prose.
