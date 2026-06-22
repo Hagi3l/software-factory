@@ -191,7 +191,8 @@ This spins one **OpenObserve** container (authenticated OTLP/gRPC on `5081` — 
 ride that one port — and the UI/REST API on `5080`), points the demo's `otel.endpoint` at it
 with the org/stream/auth headers an authenticated backend needs, and auto-provisions a
 three-panel **completeness overview** dashboard (one panel per signal). Open
-<http://127.0.0.1:5080>, log in as `root@harness.demo` / `Harness#Demo1`, and watch traces,
+<http://127.0.0.1:5080>, log in as `admin@admin.com` / `admin` (OpenObserve logs in by
+email, so the username is the full address), and watch traces,
 logs, and metrics arrive together as the pipeline runs. The container is **ephemeral** (`--rm`,
 no volume, `--memory`-capped so it doesn't crowd the gate sandboxes) — all data dies with it on
 exit, by design. `JAEGER=1` and `OPENOBSERVE=1` are mutually exclusive (one `otel.endpoint`).

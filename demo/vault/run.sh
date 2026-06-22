@@ -51,8 +51,8 @@ JAEGER_IMAGE='jaegertracing/all-in-one:1.76.0'  # single-binary OTLP collector +
 # tag is overridable so a schema bump (dashboard v5 is pinned in observe/) can be tracked.
 OPENOBSERVE_NAME='harness-vault-openobserve'
 OPENOBSERVE_IMAGE="${OPENOBSERVE_IMAGE:-public.ecr.aws/zinclabs/openobserve:v0.14.7}"
-OO_EMAIL='root@harness.demo'        # OO root user (ingestion token = base64(email:password))
-OO_PASSWORD='Harness#Demo1'         # ephemeral container, dies on exit — not a real secret
+OO_EMAIL='admin@admin.com'          # OO root user — login is by EMAIL (ingestion token = base64(email:password))
+OO_PASSWORD='admin'                 # ephemeral container, dies on exit — not a real secret
 OO_ORG='default'                    # OO default organization (REST path + OTLP `organization` header)
 
 # JAEGER and OPENOBSERVE both retarget the single otel.endpoint, so they are mutually exclusive.
