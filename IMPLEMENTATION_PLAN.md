@@ -38,6 +38,15 @@ the spec already mandated it). **T8.7** (wizard one-root-in-epic hardening) has 
 is now complete. See Phase 8 below,
 [`demo-run-issues.md`](demo-run-issues.md), and [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md).
 
+**Phase 9 (structured check findings) is newly opened** (2026-06-22) from a context-management
+design pass: every gate check becomes a thin per-tool adapter emitting compact, structured
+`Finding`s, so raw `go test`/scanner dumps stop blowing the agent's context window and burying
+the signal — the same failure mode (a flailing agent against a growing, noise-filled history)
+that drove ~80% of the 2026-06-18 demo-run cost. The **spec landed first** (commit 653824a); the
+code is pending (T9.1–T9.8). **`./demo/vault` is the exercising use case** — it is Go (the shipped
+adapters' language), its `qa` gate already runs gosec/govulncheck/license-scan on agent output,
+and its inner loop runs `go test`, which is exactly where context blows up today. See Phase 9.
+
 **Development mode for Phases 2–6: built by hand with Claude Code, human-reviewed —
 not self-hosted.** Bootstrap's threshold (a) ("the harness builds itself as a
 trusted dev tool, human reviews diffs") assumes a capable model drives the
@@ -594,6 +603,90 @@ switchable to de-risk rollout.
   it. Tests: `TestEpicModeFoldsOneRootRuleIntoPrompt` + `TestPerItemModeLeavesPromptUnchanged`
   (grounding is opt-in, never leaks into the transcript); existing `TestValidateEpicRequiresSingleRoot`
   still green. ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md), [integration.md](specs/integration.md))
+
+---
+
+## Phase 9 — Structured check findings & agent context discipline
+
+Opened from a **2026-06-22 design pass** on reducing agent context-window size and raising
+first-pass success (the failure the 2026-06-18 demo run exposed: ~80% of cost was one agent
+flailing against a growing, noise-filled history). The organizing principle is **signal
+density** — strip noise (raw test/scanner dumps, duplicate reads), preserve signal (the
+contract, the failure evidence). The chosen first investment is **structured check output**:
+every gate check becomes a *thin per-tool adapter* that parses its tool's machine-readable
+output into language-neutral `Finding`s, so the compact findings — not a multi-thousand-line
+dump — are what enter the agent's context, the gate verdict, the verification view, and the
+retry Brief. The extraction is **infra, not persona**: the model never has to know to run
+`-json | jq`, consistent with the "tool layer picks the mechanism, never the agent" stance
+(Phase 6 LSP). Complements T8.5: that bounds the failure at *planning* time (decompose smaller);
+this bounds it at *runtime* (smaller, signal-dense histories).
+
+**Spec landed first** (per CLAUDE.md, commit 653824a): `verification.md` ("Findings: structured
+evidence, not the grade"; tri-state passed/failed/not-run + build precondition; structured
+producer self-check), `glossary.md` (`Finding`), `configuration.md` (per-tool adapters; `fail_on`
+deferred), `components/agent.md` (`run_tests`/`run_gate`), `components/artifact-store.md`,
+`control-room.md`. **Grading is unchanged** — pass/fail stays the exit code / proof / metric;
+findings are evidence, not the grade. Severity-threshold grading (`fail_on`) is a deliberate
+later refinement.
+
+**`./demo/vault` is the exercising use case.** Go (the shipped adapters' language), a `qa` gate
+that already runs gosec + govulncheck + license-scan doing real work on agent output, and an
+inner loop that runs `go test` — exactly where raw output blows the window today. A live
+wizard-drafted feature taking plan → author-tests → implement → qa is the end-to-end exercise:
+the implementor's `run_tests` returns compact findings, the gate verdict carries them, and the
+verification view renders them. **Validate the context/cost reduction on a vault re-run.**
+
+Build order (each a single, independently testable concern — T8.5 granularity applied to our own
+work; ordered so the inner-loop context win lands first):
+
+- [ ] **T9.1 `core.Finding` + findings on `CheckResult`/`GateVerdict`** — add `core.Finding{File,
+  Line, Severity, Rule, Message, Detail}` (language-neutral; `Detail` typed/free for the
+  tool-specific essential — a test's assertion diff, a vuln's call path) and a `Findings.Format()`
+  for compact context rendering (sorted, jitter-stripped → cache-stable). `core` is the right home
+  (already holds `GateVerdict`; dependency-free leaf). Additive (new field + tri-state status) so
+  existing consumers — incl. the verification view — keep working as it fills in.
+  ([verification.md](specs/verification.md), [glossary.md](specs/glossary.md))
+- [ ] **T9.2 `internal/gotest` parser** — `go test -json` ndjson → findings. Owns the edge cases the
+  raw-`cat` approach punts to a human (CLAUDE.md's "if jq fails, check `.stderr`"): **compile
+  failure** (non-JSON / build-failed events → surface the compiler error, that *is* the signal),
+  **data race** (keep the `WARNING: DATA RACE` stanza verbatim), **panic/timeout** (keep the message
+  + triggering test, drop the goroutine dump). Pure, table-tested, no model, no TCB exposure.
+- [ ] **T9.3 `run_tests` agent tool (first consumer)** — wraps `go test -json <scope>`, returns
+  `Findings.Format()` not a raw dump; raw json → artifact store. The inner-loop context win (the
+  implementor runs tests via the generic `run` today, dumping raw output into the very loop that
+  blows up). Scoped-to-changed-packages for the self-check; the gate stays `./...`.
+  ([components/agent.md](specs/components/agent.md))
+- [ ] **T9.4 Build precondition + tri-state in the gate** — explicit `go build ./...` precondition
+  that short-circuits and marks dependent checks **not-run** (never a misleading green); the verdict
+  records passed/failed/not-run, and not-run still fails closed. Build cache makes it near-free for
+  the type-checking tools (the toolchain image already warms GOCACHE); the `-race` test build is
+  separate and unavoidable. TCB-adjacent (gate ordering) — stays human-reviewed.
+  ([verification.md](specs/verification.md))
+- [ ] **T9.5 Gate verdict carries findings** — the gate reuses the T9.2 parser (and T9.6 adapters)
+  so `core.GateVerdict` holds per-check findings; the [verification view](specs/control-room.md)
+  (T4.23) renders them. One parser, multiple consumers.
+  ([verification.md](specs/verification.md), [control-room.md](specs/control-room.md))
+- [ ] **T9.6 Scanner finding adapters** — golangci-lint (`--output.json`), gosec (`-fmt=json`),
+  govulncheck (`-json`), license-scan, each parsing structured output → findings (the scanners are
+  where raw output is *worst*). A command with no adapter still grades on exit code with raw output
+  as evidence (graceful fallback). ([configuration.md](specs/configuration.md))
+- [ ] **T9.7 `run_gate` full self-check tool** — runs the full check registry pre-`submit`,
+  structured (the producer-self-check, T2.14, generalized to the whole suite): cheap checks in-loop
+  (`run_tests`), full suite once before submit. Still zero-trust (untrusted sandbox; the gate
+  re-runs authoritatively). ([verification.md](specs/verification.md))
+- [ ] **T9.8 Failure-aware retry Brief** — thread the failing `Finding`s into the `on_failure`
+  fix-issue Brief (today the gate verdict is *not* threaded — the fix re-derives blind). The parsed
+  verdict is the natural payload: the fix is tight (exactly the N failing findings, not the whole
+  transcript) and the selector can route by finding type. (needs T9.5)
+  ([verification.md](specs/verification.md), [components/orchestrator.md](specs/components/orchestrator.md))
+
+**Deferred (named, not in this slice):** **severity-threshold grading** (`fail_on` — findings-first,
+thresholds-second; it makes findings influence the verdict, which the contract currently forbids);
+**progress-based termination** (abort a non-progressing invocation early — "findings not shrinking
+across attempts" is the strong signal the structured findings unlock, complementing T8.5);
+**semantic-first read steering** (the LSP tools return spans not files; the findings' `file:line`
+anchors feed them); **a measurement loop** (the OTel/OpenObserve telemetry from T5.12–T5.15 is what
+would rank these techniques by measured token / pass-rate impact rather than by guess).
 
 ---
 
