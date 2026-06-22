@@ -376,7 +376,7 @@ where relevant, and the vault README's telemetry section) per the doc-tracking r
   with no volume** (`public.ecr.aws/zinclabs/openobserve`, tag overridable via
   `OPENOBSERVE_IMAGE`), `--memory=1g`-capped so it can't crowd the gate sandboxes' share of the
   ~8Gi VM; exposes the authenticated OTLP/gRPC port `5081` (**all three signals ride that one
-  port** — confirmed against OO's OTLP design) + UI/REST on `5080`; **health-waits** on
+  port** — verified live, see below) + UI/REST on `5080`; **health-waits** on
   `GET /healthz`; derives the ingestion **token locally as `base64(email:password)`** (offline,
   no API round-trip — exactly what OO's Ingestion page shows) and exports it as **`OTEL_OTLP_AUTH`**
   (the env var the overlay's `authorization: ${OTEL_OTLP_AUTH}` header references); **best-effort
@@ -393,8 +393,15 @@ where relevant, and the vault README's telemetry section) per the doc-tracking r
   instrument names → underscores; sourced from `internal/telemetry/conventions.go`); traces+logs
   panels count over the `default` stream. `JAEGER`/`OPENOBSERVE` are mutually exclusive (one
   `otel.endpoint`). No Go code changed — the unit is the shell bootstrap + committed assets;
-  verified by `bash -n`, a simulated overlay rewrite, and a real `harness validate` (both the
-  accept and reject cases). docs: `demo/vault/README.md` telemetry section gained the
+  verified by `bash -n`, a simulated overlay rewrite, and a real `harness validate` (accept +
+  reject cases). **Verified live against a booted OpenObserve `v0.14.7`** (network is available
+  in this dev box): the pinned image pulls + boots healthy in ~4s; the dashboard JSON POSTs
+  **HTTP 200** (OO assigned a dashboardId — the v5 schema is correct); and driving the harness's
+  *real* `telemetry.Setup` pipeline at `127.0.0.1:5081` with the demo's
+  `authorization`/`organization`/`stream-name` headers landed **all three signals** — confirmed
+  by OO's stream list showing `default:traces`, `default:logs`, and `harness_invocations:metrics`
+  (the exact PromQL series the metrics panel queries; dots→underscores confirmed). docs:
+  `demo/vault/README.md` telemetry section gained the
   `OPENOBSERVE=1` subsection; `demo/vault/observe/README.md` documents the dashboard + auth. No
   spec change — observability.md ("three signals, one endpoint"; "a single-binary multi-signal
   sink e.g. OpenObserve") was written ahead. **The whole T5.12–T5.15 block is now complete.**
