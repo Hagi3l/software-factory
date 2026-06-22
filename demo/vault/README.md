@@ -85,6 +85,8 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
   from ~0.7s to ~0.2s and stops stampeding under concurrency, which is what prevents `bd list`
   timeouts during a busy run. Nothing leaks into the public repo (`.beads/` stays git-excluded).
 - Go + `make` (to build the `harness` binary).
+- *(only for `OPENOBSERVE=1`)* **`curl`** on your `PATH` — `run.sh` uses it to health-check
+  OpenObserve and POST the dashboard. Not needed for a default or `JAEGER=1` run.
 - *(optional, for the public-repo + deploy story)* a **public GitHub repo** you can push to
   (default `git@github.com:Loxstomper/vault.git`; override with `VAULT_REMOTE=`) and a **VPS**
   for the deploy. Run with `VAULT_REMOTE=''` to stay purely local — the full pipeline still
