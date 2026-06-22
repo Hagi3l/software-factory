@@ -1,0 +1,6 @@
+{"ImportPath":"scratch [scratch.test]","Action":"build-output","Output":"# scratch [scratch.test]\n"}
+{"ImportPath":"scratch [scratch.test]","Action":"build-output","Output":"./compile_test.go:6:6: undefined: Undefined\n"}
+{"ImportPath":"scratch [scratch.test]","Action":"build-fail"}
+{"Time":"2026-06-22T11:14:38.739151704+10:00","Action":"start","Package":"scratch"}
+{"Time":"2026-06-22T11:14:38.739170831+10:00","Action":"output","Package":"scratch","Output":"FAIL\tscratch [build failed]\n"}
+{"Time":"2026-06-22T11:14:38.739173996+10:00","Action":"fail","Package":"scratch","Elapsed":0,"FailedBuild":"scratch [scratch.test]"}

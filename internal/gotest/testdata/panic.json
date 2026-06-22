@@ -1,0 +1,22 @@
+{"Time":"2026-06-22T11:14:33.792695325+10:00","Action":"start","Package":"scratch"}
+{"Time":"2026-06-22T11:14:33.794037131+10:00","Action":"run","Package":"scratch","Test":"TestPanics"}
+{"Time":"2026-06-22T11:14:33.794045598+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"=== RUN   TestPanics\n"}
+{"Time":"2026-06-22T11:14:33.794076846+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"--- FAIL: TestPanics (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.796187221+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"panic: runtime error: index out of range [3] with length 0 [recovered, repanicked]\n"}
+{"Time":"2026-06-22T11:14:33.796190547+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"\n"}
+{"Time":"2026-06-22T11:14:33.796192761+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"goroutine 6 [running]:\n"}
+{"Time":"2026-06-22T11:14:33.796196228+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"testing.tRunner.func1.2({0x56e680, 0xc00001c0d8})\n"}
+{"Time":"2026-06-22T11:14:33.796198893+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"\t/usr/local/go/src/testing/testing.go:1872 +0x237\n"}
+{"Time":"2026-06-22T11:14:33.796201388+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"testing.tRunner.func1()\n"}
+{"Time":"2026-06-22T11:14:33.796205927+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"\t/usr/local/go/src/testing/testing.go:1875 +0x35b\n"}
+{"Time":"2026-06-22T11:14:33.79620799+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"panic({0x56e680?, 0xc00001c0d8?})\n"}
+{"Time":"2026-06-22T11:14:33.796211357+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"\t/usr/local/go/src/runtime/panic.go:783 +0x132\n"}
+{"Time":"2026-06-22T11:14:33.79621344+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"scratch.TestPanics(0xc000003880?)\n"}
+{"Time":"2026-06-22T11:14:33.796216406+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"\t/tmp/tmp.BkOvvTeX4j/panic_test.go:7 +0x14\n"}
+{"Time":"2026-06-22T11:14:33.79621853+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"testing.tRunner(0xc000003880, 0x58be80)\n"}
+{"Time":"2026-06-22T11:14:33.796221486+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"\t/usr/local/go/src/testing/testing.go:1934 +0xea\n"}
+{"Time":"2026-06-22T11:14:33.796224501+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"created by testing.(*T).Run in goroutine 1\n"}
+{"Time":"2026-06-22T11:14:33.796228139+10:00","Action":"output","Package":"scratch","Test":"TestPanics","Output":"\t/usr/local/go/src/testing/testing.go:1997 +0x465\n"}
+{"Time":"2026-06-22T11:14:33.796430892+10:00","Action":"fail","Package":"scratch","Test":"TestPanics","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.796436735+10:00","Action":"output","Package":"scratch","Output":"FAIL\tscratch\t0.004s\n"}
+{"Time":"2026-06-22T11:14:33.796440332+10:00","Action":"fail","Package":"scratch","Elapsed":0.004}

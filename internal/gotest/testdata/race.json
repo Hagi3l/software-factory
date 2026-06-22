@@ -1,0 +1,61 @@
+{"Time":"2026-06-22T11:14:37.581804369+10:00","Action":"start","Package":"scratch"}
+{"Time":"2026-06-22T11:14:37.588599122+10:00","Action":"run","Package":"scratch","Test":"TestRace"}
+{"Time":"2026-06-22T11:14:37.588625181+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"=== RUN   TestRace\n"}
+{"Time":"2026-06-22T11:14:37.589276046+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"==================\n"}
+{"Time":"2026-06-22T11:14:37.589280494+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"WARNING: DATA RACE\n"}
+{"Time":"2026-06-22T11:14:37.589282909+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"Read at 0x00c000014268 by goroutine 9:\n"}
+{"Time":"2026-06-22T11:14:37.589285514+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  scratch.TestRace.func1()\n"}
+{"Time":"2026-06-22T11:14:37.589287538+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /tmp/tmp.BkOvvTeX4j/race_test.go:16 +0x99\n"}
+{"Time":"2026-06-22T11:14:37.589289932+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"\n"}
+{"Time":"2026-06-22T11:14:37.589291927+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"Previous write at 0x00c000014268 by goroutine 8:\n"}
+{"Time":"2026-06-22T11:14:37.58929379+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  scratch.TestRace.func1()\n"}
+{"Time":"2026-06-22T11:14:37.589295463+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /tmp/tmp.BkOvvTeX4j/race_test.go:16 +0xab\n"}
+{"Time":"2026-06-22T11:14:37.589297056+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"\n"}
+{"Time":"2026-06-22T11:14:37.589298628+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"Goroutine 9 (running) created at:\n"}
+{"Time":"2026-06-22T11:14:37.589300252+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  scratch.TestRace()\n"}
+{"Time":"2026-06-22T11:14:37.589301875+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /tmp/tmp.BkOvvTeX4j/race_test.go:13 +0x78\n"}
+{"Time":"2026-06-22T11:14:37.589303448+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  testing.tRunner()\n"}
+{"Time":"2026-06-22T11:14:37.589305081+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /usr/local/go/src/testing/testing.go:1934 +0x21c\n"}
+{"Time":"2026-06-22T11:14:37.589306694+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  testing.(*T).Run.gowrap1()\n"}
+{"Time":"2026-06-22T11:14:37.589309109+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /usr/local/go/src/testing/testing.go:1997 +0x44\n"}
+{"Time":"2026-06-22T11:14:37.589312254+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"\n"}
+{"Time":"2026-06-22T11:14:37.589313977+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"Goroutine 8 (finished) created at:\n"}
+{"Time":"2026-06-22T11:14:37.58931566+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  scratch.TestRace()\n"}
+{"Time":"2026-06-22T11:14:37.589317263+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /tmp/tmp.BkOvvTeX4j/race_test.go:13 +0x78\n"}
+{"Time":"2026-06-22T11:14:37.589318837+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  testing.tRunner()\n"}
+{"Time":"2026-06-22T11:14:37.58932042+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /usr/local/go/src/testing/testing.go:1934 +0x21c\n"}
+{"Time":"2026-06-22T11:14:37.589322032+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  testing.(*T).Run.gowrap1()\n"}
+{"Time":"2026-06-22T11:14:37.589323755+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /usr/local/go/src/testing/testing.go:1997 +0x44\n"}
+{"Time":"2026-06-22T11:14:37.58932534+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"==================\n"}
+{"Time":"2026-06-22T11:14:37.589332934+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"==================\n"}
+{"Time":"2026-06-22T11:14:37.589334787+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"WARNING: DATA RACE\n"}
+{"Time":"2026-06-22T11:14:37.589336561+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"Write at 0x00c000014268 by goroutine 9:\n"}
+{"Time":"2026-06-22T11:14:37.589338415+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  scratch.TestRace.func1()\n"}
+{"Time":"2026-06-22T11:14:37.589340638+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /tmp/tmp.BkOvvTeX4j/race_test.go:16 +0xab\n"}
+{"Time":"2026-06-22T11:14:37.589342292+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"\n"}
+{"Time":"2026-06-22T11:14:37.589343844+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"Previous write at 0x00c000014268 by goroutine 8:\n"}
+{"Time":"2026-06-22T11:14:37.589345557+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  scratch.TestRace.func1()\n"}
+{"Time":"2026-06-22T11:14:37.589347191+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /tmp/tmp.BkOvvTeX4j/race_test.go:16 +0xab\n"}
+{"Time":"2026-06-22T11:14:37.589348934+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"\n"}
+{"Time":"2026-06-22T11:14:37.589350527+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"Goroutine 9 (running) created at:\n"}
+{"Time":"2026-06-22T11:14:37.58935222+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  scratch.TestRace()\n"}
+{"Time":"2026-06-22T11:14:37.589353863+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /tmp/tmp.BkOvvTeX4j/race_test.go:13 +0x78\n"}
+{"Time":"2026-06-22T11:14:37.589355717+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  testing.tRunner()\n"}
+{"Time":"2026-06-22T11:14:37.58935746+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /usr/local/go/src/testing/testing.go:1934 +0x21c\n"}
+{"Time":"2026-06-22T11:14:37.589359263+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  testing.(*T).Run.gowrap1()\n"}
+{"Time":"2026-06-22T11:14:37.589361057+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /usr/local/go/src/testing/testing.go:1997 +0x44\n"}
+{"Time":"2026-06-22T11:14:37.58936269+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"\n"}
+{"Time":"2026-06-22T11:14:37.589364214+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"Goroutine 8 (finished) created at:\n"}
+{"Time":"2026-06-22T11:14:37.589366017+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  scratch.TestRace()\n"}
+{"Time":"2026-06-22T11:14:37.5893676+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /tmp/tmp.BkOvvTeX4j/race_test.go:13 +0x78\n"}
+{"Time":"2026-06-22T11:14:37.589369213+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  testing.tRunner()\n"}
+{"Time":"2026-06-22T11:14:37.589370816+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /usr/local/go/src/testing/testing.go:1934 +0x21c\n"}
+{"Time":"2026-06-22T11:14:37.589372469+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"  testing.(*T).Run.gowrap1()\n"}
+{"Time":"2026-06-22T11:14:37.589374142+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"      /usr/local/go/src/testing/testing.go:1997 +0x44\n"}
+{"Time":"2026-06-22T11:14:37.589375775+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"==================\n"}
+{"Time":"2026-06-22T11:14:37.589379702+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"    testing.go:1617: race detected during execution of test\n"}
+{"Time":"2026-06-22T11:14:37.58939944+10:00","Action":"output","Package":"scratch","Test":"TestRace","Output":"--- FAIL: TestRace (0.00s)\n"}
+{"Time":"2026-06-22T11:14:37.589404279+10:00","Action":"fail","Package":"scratch","Test":"TestRace","Elapsed":0}
+{"Time":"2026-06-22T11:14:37.589422223+10:00","Action":"output","Package":"scratch","Output":"FAIL\n"}
+{"Time":"2026-06-22T11:14:37.59038462+10:00","Action":"output","Package":"scratch","Output":"FAIL\tscratch\t0.008s\n"}
+{"Time":"2026-06-22T11:14:37.590394788+10:00","Action":"fail","Package":"scratch","Elapsed":0.009}

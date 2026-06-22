@@ -1,0 +1,13 @@
+{"Time":"2026-06-22T11:14:33.692900696+10:00","Action":"start","Package":"scratch"}
+{"Time":"2026-06-22T11:14:33.693970266+10:00","Action":"run","Package":"scratch","Test":"TestAdd"}
+{"Time":"2026-06-22T11:14:33.693978452+10:00","Action":"output","Package":"scratch","Test":"TestAdd","Output":"=== RUN   TestAdd\n"}
+{"Time":"2026-06-22T11:14:33.694006145+10:00","Action":"output","Package":"scratch","Test":"TestAdd","Output":"    fail_test.go:9: Add() = 4, want 5\n"}
+{"Time":"2026-06-22T11:14:33.694011013+10:00","Action":"output","Package":"scratch","Test":"TestAdd","Output":"--- FAIL: TestAdd (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.694013658+10:00","Action":"fail","Package":"scratch","Test":"TestAdd","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.694017406+10:00","Action":"run","Package":"scratch","Test":"TestOK"}
+{"Time":"2026-06-22T11:14:33.694019549+10:00","Action":"output","Package":"scratch","Test":"TestOK","Output":"=== RUN   TestOK\n"}
+{"Time":"2026-06-22T11:14:33.694022335+10:00","Action":"output","Package":"scratch","Test":"TestOK","Output":"--- PASS: TestOK (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.694024759+10:00","Action":"pass","Package":"scratch","Test":"TestOK","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.694027184+10:00","Action":"output","Package":"scratch","Output":"FAIL\n"}
+{"Time":"2026-06-22T11:14:33.694138856+10:00","Action":"output","Package":"scratch","Output":"FAIL\tscratch\t0.001s\n"}
+{"Time":"2026-06-22T11:14:33.694144487+10:00","Action":"fail","Package":"scratch","Elapsed":0.001}

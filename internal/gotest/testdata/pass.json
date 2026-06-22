@@ -1,0 +1,100 @@
+{"Time":"2026-06-22T11:14:33.584717561+10:00","Action":"start","Package":"github.com/Loxstomper/harness/internal/core"}
+{"Time":"2026-06-22T11:14:33.585907258+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseMetricComparison"}
+{"Time":"2026-06-22T11:14:33.585928659+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseMetricComparison","Output":"=== RUN   TestParseMetricComparison\n"}
+{"Time":"2026-06-22T11:14:33.58593417+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseMetricComparison","Output":"--- PASS: TestParseMetricComparison (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.585936945+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseMetricComparison","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.585940241+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestCompareMetric"}
+{"Time":"2026-06-22T11:14:33.585942836+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestCompareMetric","Output":"=== RUN   TestCompareMetric\n"}
+{"Time":"2026-06-22T11:14:33.585945381+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestCompareMetric","Output":"--- PASS: TestCompareMetric (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.585948517+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestCompareMetric","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.585950361+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestEpicOf"}
+{"Time":"2026-06-22T11:14:33.585952093+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestEpicOf","Output":"=== RUN   TestEpicOf\n"}
+{"Time":"2026-06-22T11:14:33.585954047+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestEpicOf","Output":"--- PASS: TestEpicOf (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.585955971+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestEpicOf","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.585957804+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip"}
+{"Time":"2026-06-22T11:14:33.585959397+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip","Output":"=== RUN   TestProvenanceRoundTrip\n"}
+{"Time":"2026-06-22T11:14:33.585961171+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/empty"}
+{"Time":"2026-06-22T11:14:33.585962693+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/empty","Output":"=== RUN   TestProvenanceRoundTrip/empty\n"}
+{"Time":"2026-06-22T11:14:33.585964598+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/empty","Output":"--- PASS: TestProvenanceRoundTrip/empty (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.585966481+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/empty","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.585968235+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/full"}
+{"Time":"2026-06-22T11:14:33.585969748+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/full","Output":"=== RUN   TestProvenanceRoundTrip/full\n"}
+{"Time":"2026-06-22T11:14:33.585971661+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/full","Output":"--- PASS: TestProvenanceRoundTrip/full (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.585973405+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/full","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.585976771+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/no_tests-soul_(no_author-tests_stage_in_lineage)"}
+{"Time":"2026-06-22T11:14:33.585982551+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/no_tests-soul_(no_author-tests_stage_in_lineage)","Output":"=== RUN   TestProvenanceRoundTrip/no_tests-soul_(no_author-tests_stage_in_lineage)\n"}
+{"Time":"2026-06-22T11:14:33.585986229+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/no_tests-soul_(no_author-tests_stage_in_lineage)","Output":"--- PASS: TestProvenanceRoundTrip/no_tests-soul_(no_author-tests_stage_in_lineage) (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.585988112+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/no_tests-soul_(no_author-tests_stage_in_lineage)","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.585990026+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/no_traceability_or_prompt"}
+{"Time":"2026-06-22T11:14:33.58599215+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/no_traceability_or_prompt","Output":"=== RUN   TestProvenanceRoundTrip/no_traceability_or_prompt\n"}
+{"Time":"2026-06-22T11:14:33.585994164+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/no_traceability_or_prompt","Output":"--- PASS: TestProvenanceRoundTrip/no_traceability_or_prompt (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.585996016+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip/no_traceability_or_prompt","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.58599788+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip","Output":"--- PASS: TestProvenanceRoundTrip (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.585999874+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestProvenanceRoundTrip","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586001667+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestTrailerCitesTestsSoul"}
+{"Time":"2026-06-22T11:14:33.58600316+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestTrailerCitesTestsSoul","Output":"=== RUN   TestTrailerCitesTestsSoul\n"}
+{"Time":"2026-06-22T11:14:33.586005065+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestTrailerCitesTestsSoul","Output":"--- PASS: TestTrailerCitesTestsSoul (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586006838+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestTrailerCitesTestsSoul","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586008561+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestCommitMessageSubject"}
+{"Time":"2026-06-22T11:14:33.586010054+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestCommitMessageSubject","Output":"=== RUN   TestCommitMessageSubject\n"}
+{"Time":"2026-06-22T11:14:33.586015103+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestCommitMessageSubject","Output":"--- PASS: TestCommitMessageSubject (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586016927+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestCommitMessageSubject","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.58601862+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseCommitMessageRejectsNonProvenance"}
+{"Time":"2026-06-22T11:14:33.586020253+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseCommitMessageRejectsNonProvenance","Output":"=== RUN   TestParseCommitMessageRejectsNonProvenance\n"}
+{"Time":"2026-06-22T11:14:33.586024911+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseCommitMessageRejectsNonProvenance","Output":"--- PASS: TestParseCommitMessageRejectsNonProvenance (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586027276+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseCommitMessageRejectsNonProvenance","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.58602911+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseTrailerToleratesExtraLines"}
+{"Time":"2026-06-22T11:14:33.586030903+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseTrailerToleratesExtraLines","Output":"=== RUN   TestParseTrailerToleratesExtraLines\n"}
+{"Time":"2026-06-22T11:14:33.586033447+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseTrailerToleratesExtraLines","Output":"--- PASS: TestParseTrailerToleratesExtraLines (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586035161+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestParseTrailerToleratesExtraLines","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586036894+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestIssueIDFromCandidateBranch"}
+{"Time":"2026-06-22T11:14:33.586038447+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestIssueIDFromCandidateBranch","Output":"=== RUN   TestIssueIDFromCandidateBranch\n"}
+{"Time":"2026-06-22T11:14:33.586040431+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestIssueIDFromCandidateBranch","Output":"--- PASS: TestIssueIDFromCandidateBranch (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586042194+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestIssueIDFromCandidateBranch","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586043948+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestResultStatusWireValues"}
+{"Time":"2026-06-22T11:14:33.586045441+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestResultStatusWireValues","Output":"=== RUN   TestResultStatusWireValues\n"}
+{"Time":"2026-06-22T11:14:33.586047255+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestResultStatusWireValues","Output":"--- PASS: TestResultStatusWireValues (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586049008+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestResultStatusWireValues","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586050631+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches"}
+{"Time":"2026-06-22T11:14:33.586052214+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches","Output":"=== RUN   TestSoulMatches\n"}
+{"Time":"2026-06-22T11:14:33.586055259+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/empty_selector_matches_anything"}
+{"Time":"2026-06-22T11:14:33.586056843+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/empty_selector_matches_anything","Output":"=== RUN   TestSoulMatches/empty_selector_matches_anything\n"}
+{"Time":"2026-06-22T11:14:33.586058876+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/empty_selector_matches_anything","Output":"--- PASS: TestSoulMatches/empty_selector_matches_anything (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.58606077+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/empty_selector_matches_anything","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586062483+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/empty_selector_matches_no_tags"}
+{"Time":"2026-06-22T11:14:33.5860662+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/empty_selector_matches_no_tags","Output":"=== RUN   TestSoulMatches/empty_selector_matches_no_tags\n"}
+{"Time":"2026-06-22T11:14:33.586068193+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/empty_selector_matches_no_tags","Output":"--- PASS: TestSoulMatches/empty_selector_matches_no_tags (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586069967+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/empty_selector_matches_no_tags","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.58607169+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/exact_single_match"}
+{"Time":"2026-06-22T11:14:33.586073253+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/exact_single_match","Output":"=== RUN   TestSoulMatches/exact_single_match\n"}
+{"Time":"2026-06-22T11:14:33.586075126+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/exact_single_match","Output":"--- PASS: TestSoulMatches/exact_single_match (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.58607688+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/exact_single_match","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586078513+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/subset_of_tags_matches"}
+{"Time":"2026-06-22T11:14:33.586080086+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/subset_of_tags_matches","Output":"=== RUN   TestSoulMatches/subset_of_tags_matches\n"}
+{"Time":"2026-06-22T11:14:33.58608198+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/subset_of_tags_matches","Output":"--- PASS: TestSoulMatches/subset_of_tags_matches (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586083724+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/subset_of_tags_matches","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586086219+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/value_mismatch_fails"}
+{"Time":"2026-06-22T11:14:33.586087822+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/value_mismatch_fails","Output":"=== RUN   TestSoulMatches/value_mismatch_fails\n"}
+{"Time":"2026-06-22T11:14:33.586089755+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/value_mismatch_fails","Output":"--- PASS: TestSoulMatches/value_mismatch_fails (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586091448+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/value_mismatch_fails","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586093091+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/missing_key_fails"}
+{"Time":"2026-06-22T11:14:33.586094715+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/missing_key_fails","Output":"=== RUN   TestSoulMatches/missing_key_fails\n"}
+{"Time":"2026-06-22T11:14:33.586096668+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/missing_key_fails","Output":"--- PASS: TestSoulMatches/missing_key_fails (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586098872+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/missing_key_fails","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586100746+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/multi-key_all_must_match"}
+{"Time":"2026-06-22T11:14:33.586102419+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/multi-key_all_must_match","Output":"=== RUN   TestSoulMatches/multi-key_all_must_match\n"}
+{"Time":"2026-06-22T11:14:33.586107107+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/multi-key_all_must_match","Output":"--- PASS: TestSoulMatches/multi-key_all_must_match (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586109121+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/multi-key_all_must_match","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586111005+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/multi-key_one_mismatch_fails"}
+{"Time":"2026-06-22T11:14:33.586112888+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/multi-key_one_mismatch_fails","Output":"=== RUN   TestSoulMatches/multi-key_one_mismatch_fails\n"}
+{"Time":"2026-06-22T11:14:33.586114942+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/multi-key_one_mismatch_fails","Output":"--- PASS: TestSoulMatches/multi-key_one_mismatch_fails (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.586116776+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/multi-key_one_mismatch_fails","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586118519+10:00","Action":"run","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/non-empty_selector_vs_no_tags_fails"}
+{"Time":"2026-06-22T11:14:33.586120222+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/non-empty_selector_vs_no_tags_fails","Output":"=== RUN   TestSoulMatches/non-empty_selector_vs_no_tags_fails\n"}
+{"Time":"2026-06-22T11:14:33.586122397+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/non-empty_selector_vs_no_tags_fails","Output":"--- PASS: TestSoulMatches/non-empty_selector_vs_no_tags_fails (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.5861243+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches/non-empty_selector_vs_no_tags_fails","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586126475+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches","Output":"--- PASS: TestSoulMatches (0.00s)\n"}
+{"Time":"2026-06-22T11:14:33.58612882+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Test":"TestSoulMatches","Elapsed":0}
+{"Time":"2026-06-22T11:14:33.586132275+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Output":"PASS\n"}
+{"Time":"2026-06-22T11:14:33.586316405+10:00","Action":"output","Package":"github.com/Loxstomper/harness/internal/core","Output":"ok  \tgithub.com/Loxstomper/harness/internal/core\t0.001s\n"}
+{"Time":"2026-06-22T11:14:33.586543946+10:00","Action":"pass","Package":"github.com/Loxstomper/harness/internal/core","Elapsed":0.002}

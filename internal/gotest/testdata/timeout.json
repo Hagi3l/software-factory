@@ -1,0 +1,38 @@
+{"Time":"2026-06-22T11:14:37.697055946+10:00","Action":"start","Package":"scratch"}
+{"Time":"2026-06-22T11:14:37.698197362+10:00","Action":"run","Package":"scratch","Test":"TestSlow"}
+{"Time":"2026-06-22T11:14:37.698205998+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"=== RUN   TestSlow\n"}
+{"Time":"2026-06-22T11:14:38.700397262+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"panic: test timed out after 1s\n"}
+{"Time":"2026-06-22T11:14:38.700430324+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\trunning tests:\n"}
+{"Time":"2026-06-22T11:14:38.700433391+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t\tTestSlow (1s)\n"}
+{"Time":"2026-06-22T11:14:38.700435705+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\n"}
+{"Time":"2026-06-22T11:14:38.7004382+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"goroutine 17 [running]:\n"}
+{"Time":"2026-06-22T11:14:38.700446054+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"testing.(*M).startAlarm.func1()\n"}
+{"Time":"2026-06-22T11:14:38.700448318+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t/usr/local/go/src/testing/testing.go:2682 +0x345\n"}
+{"Time":"2026-06-22T11:14:38.700450712+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"created by time.goFunc\n"}
+{"Time":"2026-06-22T11:14:38.700452738+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t/usr/local/go/src/time/sleep.go:215 +0x2d\n"}
+{"Time":"2026-06-22T11:14:38.700454851+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\n"}
+{"Time":"2026-06-22T11:14:38.700456956+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"goroutine 1 [chan receive]:\n"}
+{"Time":"2026-06-22T11:14:38.700475701+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"testing.(*T).Run(0xc0000036c0, {0x57e8a6?, 0xc000106b30?}, 0x58be80)\n"}
+{"Time":"2026-06-22T11:14:38.700482123+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t/usr/local/go/src/testing/testing.go:2005 +0x485\n"}
+{"Time":"2026-06-22T11:14:38.700488274+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"testing.runTests.func1(0xc0000036c0)\n"}
+{"Time":"2026-06-22T11:14:38.700490619+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t/usr/local/go/src/testing/testing.go:2477 +0x37\n"}
+{"Time":"2026-06-22T11:14:38.700492733+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"testing.tRunner(0xc0000036c0, 0xc000106c70)\n"}
+{"Time":"2026-06-22T11:14:38.700494857+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t/usr/local/go/src/testing/testing.go:1934 +0xea\n"}
+{"Time":"2026-06-22T11:14:38.700497011+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"testing.runTests(0xc0000102e8, {0x6b1fb0, 0x1, 0x1}, {0x7?, 0xc000032900?, 0x6bc560?})\n"}
+{"Time":"2026-06-22T11:14:38.700499626+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t/usr/local/go/src/testing/testing.go:2475 +0x4b4\n"}
+{"Time":"2026-06-22T11:14:38.700501991+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"testing.(*M).Run(0xc00010a780)\n"}
+{"Time":"2026-06-22T11:14:38.700504105+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t/usr/local/go/src/testing/testing.go:2337 +0x63a\n"}
+{"Time":"2026-06-22T11:14:38.700506148+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"main.main()\n"}
+{"Time":"2026-06-22T11:14:38.700508182+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t_testmain.go:45 +0x9b\n"}
+{"Time":"2026-06-22T11:14:38.700510176+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\n"}
+{"Time":"2026-06-22T11:14:38.70051218+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"goroutine 6 [sleep]:\n"}
+{"Time":"2026-06-22T11:14:38.700514193+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"time.Sleep(0x2540be400)\n"}
+{"Time":"2026-06-22T11:14:38.70052322+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t/usr/local/go/src/runtime/time.go:363 +0x165\n"}
+{"Time":"2026-06-22T11:14:38.700525344+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"scratch.TestSlow(0xc000003880?)\n"}
+{"Time":"2026-06-22T11:14:38.700527428+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t/tmp/tmp.BkOvvTeX4j/timeout_test.go:9 +0x1d\n"}
+{"Time":"2026-06-22T11:14:38.700529482+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"testing.tRunner(0xc000003880, 0x58be80)\n"}
+{"Time":"2026-06-22T11:14:38.700536256+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t/usr/local/go/src/testing/testing.go:1934 +0xea\n"}
+{"Time":"2026-06-22T11:14:38.70053847+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"created by testing.(*T).Run in goroutine 1\n"}
+{"Time":"2026-06-22T11:14:38.700540544+10:00","Action":"output","Package":"scratch","Test":"TestSlow","Output":"\t/usr/local/go/src/testing/testing.go:1997 +0x465\n"}
+{"Time":"2026-06-22T11:14:38.700756433+10:00","Action":"output","Package":"scratch","Output":"FAIL\tscratch\t1.004s\n"}
+{"Time":"2026-06-22T11:14:38.70076552+10:00","Action":"fail","Package":"scratch","Elapsed":1.004}
