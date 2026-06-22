@@ -639,12 +639,26 @@ verification view renders them. **Validate the context/cost reduction on a vault
 Build order (each a single, independently testable concern — T8.5 granularity applied to our own
 work; ordered so the inner-loop context win lands first):
 
-- [ ] **T9.1 `core.Finding` + findings on `CheckResult`/`GateVerdict`** — add `core.Finding{File,
-  Line, Severity, Rule, Message, Detail}` (language-neutral; `Detail` typed/free for the
-  tool-specific essential — a test's assertion diff, a vuln's call path) and a `Findings.Format()`
-  for compact context rendering (sorted, jitter-stripped → cache-stable). `core` is the right home
-  (already holds `GateVerdict`; dependency-free leaf). Additive (new field + tri-state status) so
-  existing consumers — incl. the verification view — keep working as it fills in.
+- [x] **T9.1 `core.Finding` + findings on `CheckResult`/`GateVerdict`** — *done.* New
+  `internal/core/finding.go`: `core.Finding{File, Line, Severity, Rule, Message, Detail}`
+  (language-neutral leaf; `Detail` is verbatim free text for the tool-specific essential — a test's
+  assertion diff, a vuln's call path — jitter is stripped at *parse* time, T9.2/T9.6, not here) and
+  `core.Findings` (a named slice, not bare `[]Finding`, so its `Format()` is the *one* renderer — no
+  divergent second path). `Findings.Format()` sorts a copy into canonical order (file→line→rule→
+  severity→message) and renders `file:line [severity] rule: message` with empty components dropped +
+  Detail indented under it; **cache-stable** — byte-identical regardless of parser emit order (the
+  load-bearing property for prefix caching + "findings not shrinking" signals). **Additive fields:**
+  `core.GateCheckOutcome` gained `Findings` + a **tri-state `Status`** (passed/failed/not-run) with
+  constants `core.CheckStatus{Passed,Failed,NotRun}` + helper `CheckStatusOf(bool)`; `Passed bool`
+  kept so older readers still see not-run as `Passed==false`. `gate.CheckResult` gained matching
+  `Findings`/`Status` fields; `verdictRecord` derives `Status` from `Passed` for a check that ran but
+  **preserves an explicit not-run** (set later by the T9.4 build precondition) and carries `Findings`
+  through. Fields are nil/empty until the parsers (T9.2+) populate them, so every existing consumer
+  (incl. the verification view) keeps working unchanged. **No spec change** — `verification.md`
+  ("Findings: structured evidence…", tri-state) + `glossary.md` (`Finding`) were written ahead
+  (commit 653824a); no CLI/config/control-room surface change, so no docs/ update. Tests:
+  `TestFindingsFormat{EmptyIsBlank,RendersComponentsCompactly,IndentsMultiLineDetail,IsCacheStable}`,
+  `TestCheckStatusOf`, `TestVerdictRecordCarriesStatusAndFindings`.
   ([verification.md](specs/verification.md), [glossary.md](specs/glossary.md))
 - [ ] **T9.2 `internal/gotest` parser** — `go test -json` ndjson → findings. Owns the edge cases the
   raw-`cat` approach punts to a human (CLAUDE.md's "if jq fails, check `.stderr`"): **compile

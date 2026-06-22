@@ -33,13 +33,25 @@ type GateVerdict struct {
 // detail — non-nil only for the kind that produces it — so the assembled record holds
 // everything the verification view needs without re-reading each evidence blob.
 type GateCheckOutcome struct {
-	Name     string `json:"name"`
-	Kind     string `json:"kind"`
+	Name string `json:"name"`
+	Kind string `json:"kind"`
+	// Passed stays the two-valued grade existing consumers read; Status is the tri-state
+	// (passed / failed / not-run) the build precondition needs — a check the precondition
+	// short-circuited never ran, and recording it as a failed (rather than not-run) check
+	// would lie about why. Status is the authoritative field; Passed is kept additive so a
+	// not-run check still reads Passed == false (it is not a clean pass) for older readers.
 	Passed   bool   `json:"passed"`
+	Status   string `json:"status,omitempty"`
 	ExitCode int    `json:"exit_code"`
 	// Evidence is the artifact-store hash of this check's captured-output record
 	// (ArtifactKindGateEvidence), or "" when it could not be persisted.
 	Evidence string `json:"evidence,omitempty"`
+	// Findings is the structured, signal-dense parse of this check's tool output (a
+	// per-tool adapter's product) — the compact representation the verification view and a
+	// retry Brief render instead of the raw dump (which stays gate evidence, by hash). It
+	// is nil for a check whose tool has no adapter yet; that check still grades on its exit
+	// code with its raw output as evidence (graceful fallback). See specs/verification.md.
+	Findings Findings `json:"findings,omitempty"`
 	// Base is the red half of a red→green proof: the acceptance tests run against the
 	// pre-implementation base, which must FAIL. Non-nil only for a GateCheckRedGreen.
 	Base *GateRunOutcome `json:"base,omitempty"`
@@ -78,3 +90,26 @@ const (
 	// GateCheckMetric is a metric comparison (e.g. mutation>=0.8) graded against a threshold.
 	GateCheckMetric = "metric"
 )
+
+// CheckStatus* are the tri-state a check ends in (specs/verification.md "A check is
+// tri-state"). A check is passed, failed, or not-run; the third state matters because a
+// broken build precondition leaves dependent checks unable to run, and recording one as a
+// misleading green — or even as a failed check that never executed — would lie about what
+// the gate actually verified. not-run never counts as a pass: the gate still fails closed
+// on anything that is not a clean pass, so the tri-state changes only what the verdict
+// *records*, never the verdict.
+const (
+	CheckStatusPassed = "passed"
+	CheckStatusFailed = "failed"
+	CheckStatusNotRun = "not-run"
+)
+
+// CheckStatusOf maps the two-valued pass grade to its tri-state spelling for a check that
+// actually ran (passed or failed). A not-run check is recorded as CheckStatusNotRun
+// directly by the build precondition, not derived here.
+func CheckStatusOf(passed bool) string {
+	if passed {
+		return CheckStatusPassed
+	}
+	return CheckStatusFailed
+}

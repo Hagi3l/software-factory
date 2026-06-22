@@ -185,6 +185,17 @@ type CheckResult struct {
 	// the score read from the command's stdout and the comparison it was graded against,
 	// kept for the evidence record. It is nil for every other kind.
 	Metric *metricResult
+	// Findings is the structured parse of this check's tool output, produced by the
+	// check's per-tool adapter (T9.2/T9.6) when one exists. It is the compact, signal-dense
+	// form the verdict and a retry Brief carry instead of the raw Stdout/Stderr (which stay
+	// the gate-evidence record, by hash). It is nil for a check with no adapter yet — that
+	// check still grades on ExitCode with its raw output as evidence. See
+	// specs/verification.md "Findings: structured evidence, not the grade".
+	Findings core.Findings
+	// Status is the tri-state outcome (passed / failed / not-run). It is empty for a check
+	// that ran (verdictRecord derives passed/failed from Passed); the build precondition
+	// (T9.4) sets it to core.CheckStatusNotRun for a check it short-circuited.
+	Status string
 }
 
 // metricResult is the graded outcome of a metric check: the numeric score the measurement
@@ -681,12 +692,20 @@ func (r *Runner) persistVerdict(ctx context.Context, ref string, report *Report)
 func verdictRecord(report Report) core.GateVerdict {
 	v := core.GateVerdict{Passed: report.Passed, Checks: make([]core.GateCheckOutcome, 0, len(report.Checks))}
 	for _, cr := range report.Checks {
+		status := cr.Status
+		if status == "" {
+			// A check that ran carries no explicit Status; derive its tri-state from the
+			// pass grade. Only the build precondition records core.CheckStatusNotRun.
+			status = core.CheckStatusOf(cr.Passed)
+		}
 		out := core.GateCheckOutcome{
 			Name:     cr.Name,
 			Kind:     verdictKind(cr.kind),
 			Passed:   cr.Passed,
+			Status:   status,
 			ExitCode: cr.ExitCode,
 			Evidence: cr.Evidence.Hash,
+			Findings: cr.Findings,
 		}
 		if cr.Base != nil {
 			out.Base = &core.GateRunOutcome{ExitCode: cr.Base.ExitCode}

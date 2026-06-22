@@ -61,6 +61,38 @@ func TestRunHarvestsCommandVerdict(t *testing.T) {
 	}
 }
 
+// TestVerdictRecordCarriesStatusAndFindings proves the Report→core.GateVerdict mapping
+// derives the tri-state Status from the pass grade for a check that ran, honors an explicit
+// not-run Status (set by the build precondition, T9.4), and carries each check's structured
+// findings into the verdict the verification view reads (T9.1).
+func TestVerdictRecordCarriesStatusAndFindings(t *testing.T) {
+	findings := core.Findings{{File: "a.go", Line: 7, Severity: "high", Rule: "G401", Message: "weak crypto"}}
+	report := Report{
+		Passed: false,
+		Checks: []CheckResult{
+			{Name: "build", kind: cmdCheck, Passed: true},
+			{Name: "gosec", kind: cmdCheck, Passed: false, Findings: findings},
+			{Name: "test", kind: cmdCheck, Status: core.CheckStatusNotRun},
+		},
+	}
+	v := verdictRecord(report)
+	if len(v.Checks) != 3 {
+		t.Fatalf("want 3 checks, got %d", len(v.Checks))
+	}
+	if got := v.Checks[0].Status; got != core.CheckStatusPassed {
+		t.Errorf("passed check Status = %q, want %q", got, core.CheckStatusPassed)
+	}
+	if got := v.Checks[1].Status; got != core.CheckStatusFailed {
+		t.Errorf("failed check Status = %q, want %q", got, core.CheckStatusFailed)
+	}
+	if got := v.Checks[2].Status; got != core.CheckStatusNotRun {
+		t.Errorf("not-run check Status = %q, want %q (explicit status must be preserved)", got, core.CheckStatusNotRun)
+	}
+	if got := v.Checks[1].Findings; len(got) != 1 || got[0].Rule != "G401" {
+		t.Errorf("findings not carried into verdict: %+v", got)
+	}
+}
+
 // TestRunHarvestsRedGreenVerdict proves the verdict records a red→green proof with the base
 // run's exit (the red half) alongside the candidate verdict, so the verification view can
 // render "fails on base, passes on candidate" without re-reading the evidence blob.
