@@ -207,8 +207,10 @@ func TestRunAllChecksPass(t *testing.T) {
 	}
 }
 
-// A failing check fails the gate and stops the run (fail-fast): a failed build means
-// the test never runs.
+// A failed build precondition (T9.4) fails the gate and short-circuits the dependent
+// checks: the build runs first, fails, and the test is recorded not-run (never executed)
+// rather than being run against an uncompilable tree. The build itself is failed with a
+// build-error finding; the test is not-run, not failed, not passed.
 func TestRunStopsAtFirstFailure(t *testing.T) {
 	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
 		"make build":     {ExitCode: 2, Stderr: []byte("compile error")},
@@ -225,21 +227,40 @@ func TestRunStopsAtFirstFailure(t *testing.T) {
 	if report.Passed {
 		t.Errorf("report.Passed = true, want false")
 	}
-	if len(report.Checks) != 1 {
-		t.Fatalf("ran %d checks, want 1 (fail-fast after build)", len(report.Checks))
+	// Both checks are recorded: the failed build precondition and the dependent test marked
+	// not-run — the cascade records what it skipped rather than dropping it.
+	if len(report.Checks) != 2 {
+		t.Fatalf("ran %d checks, want 2 (build failed + test recorded not-run)", len(report.Checks))
 	}
-	if report.Checks[0].ExitCode != 2 || string(report.Checks[0].Stderr) != "compile error" {
-		t.Errorf("build result = %+v, want exit 2 with captured stderr", report.Checks[0])
+	build := report.Checks[0]
+	if build.Name != "build" || build.Passed || build.ExitCode != 2 || string(build.Stderr) != "compile error" {
+		t.Errorf("build result = %+v, want failed exit 2 with captured stderr", build)
+	}
+	// The build ran, so its CheckResult.Status stays empty — verdictRecord derives failed
+	// from Passed. Only short-circuited (not-run) checks carry an explicit Status.
+	if build.Status != "" {
+		t.Errorf("build Status = %q, want empty (a check that ran derives its status)", build.Status)
+	}
+	// The build error is captured as a finding — that compiler output IS the signal the
+	// retry Brief needs, not another tool's rediscovery of the broken build.
+	if len(build.Findings) != 1 || build.Findings[0].Rule != "build" || !bytes.Contains([]byte(build.Findings[0].Detail), []byte("compile error")) {
+		t.Errorf("build findings = %+v, want one build finding carrying the compiler error", build.Findings)
+	}
+	// The dependent test never ran: recorded not-run (NOT failed, NOT passed) with no exit.
+	test := report.Checks[1]
+	if test.Name != "test" || test.Status != core.CheckStatusNotRun || test.Passed {
+		t.Errorf("test result = %+v, want not-run and not passed", test)
 	}
 	// A rejected gate's output is exactly what a human triages, so the failing check's
 	// evidence must be persisted too — recording the fail verdict and captured stderr.
-	if report.Checks[0].Evidence.Hash == "" {
-		t.Fatal("failing check has no persisted evidence ref")
+	if build.Evidence.Hash == "" {
+		t.Fatal("failing build has no persisted evidence ref")
 	}
-	ev := readArtifact(t, store, report.Checks[0].Evidence.Hash)
+	ev := readArtifact(t, store, build.Evidence.Hash)
 	if !bytes.Contains(ev, []byte("status: fail")) || !bytes.Contains(ev, []byte("compile error")) {
 		t.Errorf("failing-check evidence = %q, want it to record the fail status and stderr", ev)
 	}
+	// Only the build command ran — the test was short-circuited, not executed.
 	if len(sb.execed) != 1 || sb.execed[0] != "make build" {
 		t.Errorf("commands run = %v, want only [make build]", sb.execed)
 	}
@@ -399,6 +420,132 @@ func TestRunEvidencePersistenceIsBestEffort(t *testing.T) {
 		if cr.Evidence.Hash != "" {
 			t.Errorf("%s check has evidence ref %q, want empty (store write failed)", cr.Name, cr.Evidence.Hash)
 		}
+	}
+}
+
+// --- build precondition + tri-state (T9.4) -----------------------------------
+
+// A failed build precondition short-circuits EVERY dependent check — including the
+// independent scanners — and records each as not-run. The build is failed once with a
+// build-error finding; no dependent check is re-run, because rediscovering the broken build
+// in each tool's own error format is exactly what the precondition exists to prevent. The
+// verdict still fails closed: not-run is never a pass.
+func TestRunBuildPreconditionShortCircuitsDependents(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"make build":       {ExitCode: 2, Stderr: []byte("pkg/x.go:3:1: undefined: Foo")},
+		"make test-unit":   {ExitCode: 0},
+		"make gosec":       {ExitCode: 0},
+		"make license-scan": {ExitCode: 0},
+	}}
+	be := &fakeBackend{sb: sb}
+	store := testStore(t)
+	reg := Registry{"build": "make build", "tests-pass": "make test-unit", "gosec": "make gosec", "license-scan": "make license-scan"}
+	g := New(be, reg, store, t.TempDir(), nil, nil, WithIndependentChecks([]string{"gosec", "license-scan"}))
+
+	cand := testCandidate()
+	cand.Postconditions = []string{"build", "tests-pass", "gosec", "license-scan"}
+	report, err := g.Run(context.Background(), cand)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Passed {
+		t.Error("report.Passed = true, want false (build failed; not-run is never a pass)")
+	}
+	// All four checks are recorded: the failed build + three dependents marked not-run.
+	if len(report.Checks) != 4 {
+		t.Fatalf("recorded %d checks, want 4 (build failed + 3 not-run dependents)", len(report.Checks))
+	}
+	if report.Checks[0].Name != "build" || report.Checks[0].Passed {
+		t.Errorf("first check = %+v, want the failed build precondition", report.Checks[0])
+	}
+	if len(report.Checks[0].Findings) != 1 || !bytes.Contains([]byte(report.Checks[0].Findings[0].Detail), []byte("undefined: Foo")) {
+		t.Errorf("build findings = %+v, want one carrying the compiler error", report.Checks[0].Findings)
+	}
+	for _, cr := range report.Checks[1:] {
+		if cr.Status != core.CheckStatusNotRun || cr.Passed {
+			t.Errorf("dependent %q = %+v, want not-run and not passed", cr.Name, cr)
+		}
+	}
+	// Only the build ran — no dependent (independent scanner included) was executed.
+	if len(sb.execed) != 1 || sb.execed[0] != "make build" {
+		t.Errorf("commands run = %v, want only [make build] (dependents short-circuited)", sb.execed)
+	}
+}
+
+// When the build precondition passes, the normal flow is unchanged: the build is not
+// re-run as a postcondition, and the independent scanners still aggregate among themselves
+// past a failure (T2.12 semantics preserved). gosec and license-scan both fail; all checks
+// run and both failures are recorded in one pass.
+func TestRunBuildPassesThenIndependentScannersAggregate(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"make build":        {ExitCode: 0, Stdout: []byte("built")},
+		"make test-unit":    {ExitCode: 0, Stdout: []byte("ok")},
+		"make gosec":        {ExitCode: 1, Stdout: []byte("G104 unhandled error")},
+		"make license-scan": {ExitCode: 1, Stdout: []byte("forbidden GPL dep")},
+	}}
+	be := &fakeBackend{sb: sb}
+	store := testStore(t)
+	reg := Registry{"build": "make build", "tests-pass": "make test-unit", "gosec": "make gosec", "license-scan": "make license-scan"}
+	g := New(be, reg, store, t.TempDir(), nil, nil, WithIndependentChecks([]string{"gosec", "license-scan"}))
+
+	cand := testCandidate()
+	cand.Postconditions = []string{"build", "tests-pass", "gosec", "license-scan"}
+	report, err := g.Run(context.Background(), cand)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if report.Passed {
+		t.Error("report.Passed = true, want false (two scanners failed)")
+	}
+	// build (passed) + tests-pass (passed) + gosec (failed) + license-scan (failed): all run,
+	// the build recorded exactly once, the two scanner failures aggregated in one pass.
+	if len(report.Checks) != 4 {
+		t.Fatalf("recorded %d checks, want 4", len(report.Checks))
+	}
+	if report.Checks[0].Name != "build" || !report.Checks[0].Passed {
+		t.Errorf("first check = %+v, want the passing build precondition", report.Checks[0])
+	}
+	byName := map[string]bool{}
+	for _, cr := range report.Checks {
+		if cr.Status == core.CheckStatusNotRun {
+			t.Errorf("check %q is not-run, want it to have run (build passed)", cr.Name)
+		}
+		byName[cr.Name] = cr.Passed
+	}
+	for name, wantPass := range map[string]bool{"build": true, "tests-pass": true, "gosec": false, "license-scan": false} {
+		if byName[name] != wantPass {
+			t.Errorf("check %q passed = %v, want %v", name, byName[name], wantPass)
+		}
+	}
+	// Every check ran exactly once — the build was not re-run as a postcondition.
+	if len(sb.execed) != 4 {
+		t.Errorf("commands run = %v, want all 4 exactly once", sb.execed)
+	}
+}
+
+// With no `build` command registered, there is no precondition: the gate behaves exactly as
+// before (the build is folded into another check, e.g. tests-pass), so a deployment that
+// never registers a build entry is unaffected by T9.4.
+func TestRunNoBuildCommandNoPrecondition(t *testing.T) {
+	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
+		"make test-unit": {ExitCode: 0, Stdout: []byte("ok")},
+	}}
+	be := &fakeBackend{sb: sb}
+	store := testStore(t)
+	reg := Registry{"tests-pass": "make test-unit"}
+	g := New(be, reg, store, t.TempDir(), nil, nil)
+
+	cand := testCandidate()
+	cand.Postconditions = []string{"tests-pass"}
+	report, err := g.Run(context.Background(), cand)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !report.Passed || len(report.Checks) != 1 || report.Checks[0].Name != "tests-pass" {
+		t.Fatalf("report = %+v, want a green single tests-pass verdict (no build precondition)", report)
+	}
+	if len(sb.execed) != 1 || sb.execed[0] != "make test-unit" {
+		t.Errorf("commands run = %v, want only [make test-unit]", sb.execed)
 	}
 }
 

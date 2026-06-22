@@ -174,8 +174,23 @@ func TestRunVerdictRecordsFailure(t *testing.T) {
 	if v.Passed {
 		t.Error("verdict Passed = true, want false (build failed)")
 	}
-	if len(v.Checks) != 1 || v.Checks[0].Passed || v.Checks[0].ExitCode != 2 {
-		t.Errorf("verdict checks = %+v, want one failed build at exit 2", v.Checks)
+	// The verdict records the failed build precondition AND the dependent test it
+	// short-circuited (not-run) — the tri-state captures what the gate never got to check.
+	if len(v.Checks) != 2 {
+		t.Fatalf("verdict checks = %+v, want two (failed build + not-run test)", v.Checks)
+	}
+	build := v.Checks[0]
+	if build.Name != "build" || build.Passed || build.ExitCode != 2 || build.Status != core.CheckStatusFailed {
+		t.Errorf("build outcome = %+v, want failed build at exit 2 with status failed", build)
+	}
+	if len(build.Findings) != 1 || build.Findings[0].Rule != "build" {
+		t.Errorf("build findings = %+v, want one build finding", build.Findings)
+	}
+	// not-run never reads as a pass: the test is recorded not-run with Passed==false, so the
+	// verdict still fails closed (the tri-state changes the record, not the verdict).
+	test := v.Checks[1]
+	if test.Name != "test" || test.Passed || test.Status != core.CheckStatusNotRun {
+		t.Errorf("test outcome = %+v, want not-run and not passed", test)
 	}
 }
 

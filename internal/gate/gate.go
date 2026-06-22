@@ -48,6 +48,17 @@ const (
 	metricCheck
 )
 
+// checkBuildName is the registry key whose command the gate runs as the build
+// precondition — the one check every other depends on, since nothing meaningful can run on
+// a tree that does not compile (see specs/verification.md "A check is tri-state; a broken
+// build never reads as green"). It is the same key a stage may declare as a plain
+// postcondition, so the precondition reuses that one configured command (single source of
+// truth) rather than hardcoding a toolchain: the gate grades a command, not `go build`. A
+// deployment with no `build` entry registered gets no precondition (the build still runs
+// folded into another check, e.g. `make test-unit`), so this is opt-in by configuration and
+// changes nothing for a config that does not register it.
+const checkBuildName = "build"
+
 // Check is one verification the gate runs in the clean sandbox. A command check passes
 // iff its command exits zero; the red→green proof passes iff the command fails on the
 // base and passes on the candidate. The command is operator-configured (not agent
@@ -393,7 +404,57 @@ func (r *Runner) Run(ctx context.Context, c Candidate) (Report, error) {
 	}
 
 	report := Report{Passed: true}
-	for _, check := range checks {
+
+	// Build precondition (T9.4): the build is the one dependency every other check shares —
+	// a tree that does not compile makes a test run, a scanner, or a mutation score
+	// meaningless. So when a build command is registered, the gate runs it FIRST and, if it
+	// fails, short-circuits the dependent checks and records each as not-run, instead of
+	// letting every downstream tool independently rediscover the broken build in its own
+	// error format (one honest compiler error beats N tool-specific renderings of it). The
+	// build error itself is captured as a finding — that compiler output IS the signal the
+	// retry Brief needs. not-run never counts as a pass: report.Passed is already forced
+	// false below, so the gate still fails closed; the tri-state changes only what the
+	// verdict *records* (we-never-got-to-check vs. we-checked-and-it's-clean), never the
+	// verdict. This is the existing fail-fast rule (a non-independent failure stops the run)
+	// made honest about the checks it skipped — and it does not touch independent-scanner
+	// aggregation, which still applies among the remaining checks in the normal path below.
+	remaining := checks
+	if buildCmd, ok := r.registry[checkBuildName]; ok {
+		buildCheck := Check{Name: checkBuildName, Cmd: buildCmd, kind: cmdCheck}
+		cr, err := runCheck(ctx, buildCheck, base, cand)
+		if err != nil {
+			return Report{}, err
+		}
+		report.Checks = append(report.Checks, cr)
+		if !cr.Passed {
+			report.Passed = false
+			cr := &report.Checks[len(report.Checks)-1]
+			cr.Findings = buildFailureFindings(*cr)
+			r.logFailure(c.Ref, buildCheck, *cr)
+			// Short-circuit: every dependent check is not-run (recorded, never re-run), so the
+			// verdict says "we never got to check this" rather than a misleading green or a
+			// failure that never executed. A declared `build` postcondition is the precondition
+			// itself and is excluded so it is not recorded twice.
+			for _, check := range dropByName(remaining, checkBuildName) {
+				report.Checks = append(report.Checks, notRunResult(check))
+			}
+			r.persistEvidence(ctx, c.Ref, &report)
+			r.persistVerdict(ctx, c.Ref, &report)
+			span.SetAttributes(
+				attribute.Bool(telemetry.AttrGatePassed, report.Passed),
+				attribute.Int(telemetry.AttrGateChecksRun, len(report.Checks)),
+			)
+			r.tel.RecordGateRun(ctx, report.Passed, time.Since(start))
+			r.log.InfoContext(ctx, "gate: verdict", "ref", c.Ref, "passed", report.Passed, "checks_run", len(report.Checks))
+			return report, nil
+		}
+		r.log.DebugContext(ctx, "gate: check passed", "ref", c.Ref, "check", buildCheck.Name)
+		// The precondition already graded a declared `build` postcondition; drop it from the
+		// loop so the same command is not run twice.
+		remaining = dropByName(remaining, checkBuildName)
+	}
+
+	for _, check := range remaining {
 		cr, err := runCheck(ctx, check, base, cand)
 		if err != nil {
 			// Could not run the check at all (sandbox gone) — not a gate failure, a gate
@@ -451,6 +512,56 @@ func requiresBase(checks []Check) bool {
 		}
 	}
 	return false
+}
+
+// dropByName returns checks with any whose Name == name removed, preserving order. The build
+// precondition uses it so a declared `build` postcondition (which the precondition already
+// ran) is neither re-run in the normal loop nor recorded twice in the not-run cascade.
+func dropByName(checks []Check, name string) []Check {
+	out := make([]Check, 0, len(checks))
+	for _, c := range checks {
+		if c.Name == name {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+// notRunResult builds the CheckResult for a check the build precondition short-circuited: it
+// never executed, so it carries no exit code or output and is explicitly Status==not-run with
+// Passed==false. not-run is NOT a pass — the verdict still fails closed — but it is recorded
+// as "we never got to check this" rather than a misleading green or a failure that never ran,
+// which is the distinction a human triaging the dead-letter queue (and the retry Brief) needs.
+func notRunResult(check Check) CheckResult {
+	return CheckResult{
+		Name:   check.Name,
+		Cmd:    check.Cmd,
+		Passed: false,
+		kind:   check.kind,
+		Status: core.CheckStatusNotRun,
+	}
+}
+
+// buildFailureFindings turns a failed build precondition into a single structured finding: the
+// compiler output IS the signal, so it is preserved verbatim as the finding's Detail (the raw
+// dump still travels as gate evidence by hash). A build failure has no single file/line — the
+// stderr already carries the locations — so the finding is locationless with severity "error"
+// and rule "build". This deliberately does NOT parse the output into per-error findings: the
+// structured per-tool build parser is T9.5's to wire in; T9.4 owns only the precondition and
+// the not-run cascade. The build's stderr is preferred (compilers write errors there); its
+// stdout is the fallback so the finding is never empty when a tool prints errors to stdout.
+func buildFailureFindings(cr CheckResult) core.Findings {
+	detail := strings.TrimRight(string(cr.Stderr), "\n")
+	if detail == "" {
+		detail = strings.TrimRight(string(cr.Stdout), "\n")
+	}
+	return core.Findings{{
+		Severity: "error",
+		Rule:     "build",
+		Message:  fmt.Sprintf("build precondition failed (exit %d): no dependent check could run", cr.ExitCode),
+		Detail:   detail,
+	}}
 }
 
 // runCheck dispatches one check to its execution shape: a command check runs once
