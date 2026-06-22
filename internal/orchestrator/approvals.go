@@ -217,7 +217,7 @@ func (o *Orchestrator) resumeApproved(ctx context.Context, issue core.Issue, sta
 func (o *Orchestrator) rejectParked(ctx context.Context, issue core.Issue, stage config.Stage, req core.ApprovalRequest) (bool, error) {
 	res := core.Result{IssueID: issue.ID, Branch: core.Branch{Ref: issue.CandidateRef}}
 	o.log.WarnContext(ctx, "orchestrator: human rejected integrate candidate", "issue", issue.ID, "approver", req.Approver, "ref", issue.CandidateRef)
-	return o.route(ctx, issue, stage, res, "human rejected integrate candidate")
+	return o.route(ctx, issue, stage, res, "human rejected integrate candidate", nil)
 }
 
 // gitChangedFiles lists the repo-relative paths a candidate ref changed relative to base,

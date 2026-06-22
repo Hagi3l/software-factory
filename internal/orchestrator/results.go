@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/nats-io/nats.go/jetstream"
@@ -238,7 +239,7 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 	case core.StatusFailed:
 		// The agent could not produce a usable candidate. Route via on_failure or, if the
 		// retry cap or budget is spent, dead-letter.
-		return o.route(ctx, issue, stage, res, "agent reported failure")
+		return o.route(ctx, issue, stage, res, "agent reported failure", nil)
 
 	case core.StatusDone:
 		if stage.Kind == config.StageKindPlan {
@@ -250,7 +251,7 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 		if res.Branch.Ref == "" {
 			// "done" with no candidate branch is not gradable; treat it as a failure to
 			// produce a candidate and route it.
-			return o.route(ctx, issue, stage, res, "done result carried no candidate branch")
+			return o.route(ctx, issue, stage, res, "done result carried no candidate branch", nil)
 		}
 		report, gerr := o.runGate(ctx, issue, stage, res)
 		if gerr != nil {
@@ -271,7 +272,7 @@ func (o *Orchestrator) handleResult(ctx context.Context, res core.Result) (trans
 			return o.accept(ctx, issue, stage, res, report)
 		}
 		o.log.InfoContext(ctx, "orchestrator: gate rejected candidate", "issue", issue.ID, "checks_run", len(report.Checks))
-		return o.route(ctx, issue, stage, res, "gate rejected candidate")
+		return o.route(ctx, issue, stage, res, "gate rejected candidate", failingFindings(report))
 
 	default:
 		return o.deadLetter(ctx, issue, fmt.Sprintf("unknown result status %q", res.Status))
@@ -436,7 +437,7 @@ func (o *Orchestrator) acceptPlan(ctx context.Context, issue core.Issue, stage c
 	if len(res.Proposes) == 0 {
 		// A planner that proposed nothing did not decompose the work; route it as a failure
 		// so the retry cap eventually dead-letters rather than silently stalling the pipeline.
-		return o.route(ctx, issue, stage, res, "planner produced no child issues")
+		return o.route(ctx, issue, stage, res, "planner produced no child issues", nil)
 	}
 	allowed := map[string]bool{}
 	for _, target := range stage.Produces {
@@ -635,7 +636,7 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 			// through the normal retry/budget machinery rather than dead-lettering. route
 			// closes this issue and spawns the fix, so signal the caller to stop without
 			// closing it again.
-			if transient, rerr := o.route(ctx, issue, srcStage, res, "integrate: re-gate of rebased result failed"); rerr != nil {
+			if transient, rerr := o.route(ctx, issue, srcStage, res, "integrate: re-gate of rebased result failed", nil); rerr != nil {
 				return transient, rerr
 			}
 			return false, errMergeRegateRouted
@@ -682,7 +683,57 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 // termination section). Spend is threaded exactly like Attempt: each route adds this
 // attempt's spend (Result.Usage, priced through the selected soul's per-model cost table)
 // to the predecessor's running total and stamps the sum on the fix issue.
-func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result, reason string) (bool, error) {
+// failingFindings gathers the parsed findings from every check the gate failed, in the
+// gate's own check order. Passing checks contribute nothing; a failed check with no per-tool
+// adapter (no structured findings, e.g. a mutation metric below threshold) contributes
+// nothing here either — its failure is still in the recorded verdict, but there is no
+// structured finding to thread. The result is the tight, signal-dense payload a retry needs:
+// exactly the N findings the candidate must fix (T9.5/T9.8).
+func failingFindings(report gate.Report) core.Findings {
+	var out core.Findings
+	for _, c := range report.Checks {
+		if !c.Passed {
+			out = append(out, c.Findings...)
+		}
+	}
+	return out
+}
+
+// gateFeedbackMarker delimits the auto-appended "previous attempt" gate feedback in a fix
+// issue's body. bodyWithGateFeedback strips any existing section before appending the current
+// one, so a candidate that fails repeatedly carries only the LATEST gate's findings — never a
+// growing pile of stale ones across attempts.
+const gateFeedbackMarker = "\n\n<!-- harness:gate-feedback -->\n"
+
+// bodyWithGateFeedback threads a failed gate's findings into the fix issue's body, so the
+// retry attempt sees exactly the checks it must fix instead of re-deriving blind from the
+// spec (the failure mode the parsed verdict exists to fix — specs/verification.md "Findings ...
+// a failed candidate's retry Brief", T9.8). It appends the compact, cache-stable
+// Findings.Format() — the same representation the verdict and the verification view carry,
+// never the raw tool dumps. The section is delimited and idempotent: any prior section (from
+// an earlier failed attempt whose body this one was copied from) is stripped first, so the
+// retry carries only the latest findings. With no findings (e.g. a findingless metric failure)
+// the body is returned unchanged — never an empty heading.
+func bodyWithGateFeedback(body string, findings core.Findings) string {
+	if i := strings.Index(body, gateFeedbackMarker); i >= 0 {
+		body = strings.TrimRight(body[:i], "\n")
+	}
+	if len(findings) == 0 {
+		return body
+	}
+	return body + gateFeedbackMarker +
+		"## A previous attempt failed the gate\n\n" +
+		"Your last attempt did not pass these checks. Address exactly these findings, then resubmit:\n\n" +
+		"```\n" + findings.Format() + "\n```\n"
+}
+
+// route spawns the on_failure fix issue for a rejected candidate and closes the failed one.
+// findings are the gate's parsed findings for a gate rejection (nil for the other failure
+// routes, which carry no gate verdict): they are threaded into the fix issue's body so the
+// retry attempt sees exactly the checks it must fix rather than re-deriving blind from the
+// spec — the failure the parsed verdict exists to fix (specs/verification.md "Findings ... a
+// failed candidate's retry Brief", T9.8).
+func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config.Stage, res core.Result, reason string, findings core.Findings) (bool, error) {
 	spentTokens, spentUSD, spentWall, spentUsage, ok, transient, err := o.chargeAndAuthorize(ctx, issue, res, reason)
 	if !ok {
 		return transient, err
@@ -705,7 +756,7 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	}
 
 	created, err := o.applyTracked(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, SpentUsage: spentUsage, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
+		Issue: core.Issue{Title: issue.Title, Body: bodyWithGateFeedback(issue.Body, findings), Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, SpentUsage: spentUsage, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create on_failure fix issue from %s: %w", issue.ID, err)

@@ -38,7 +38,7 @@ the spec already mandated it). **T8.7** (wizard one-root-in-epic hardening) has 
 is now complete. See Phase 8 below,
 [`demo-run-issues.md`](demo-run-issues.md), and [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md).
 
-**Phase 9 (structured check findings) is newly opened** (2026-06-22) from a context-management
+**Phase 9 (structured check findings) is complete** (opened + built 2026-06-22) — from a context-management
 design pass: every gate check becomes a thin per-tool adapter emitting compact, structured
 `Finding`s, so raw `go test`/scanner dumps stop blowing the agent's context window and burying
 the signal — the same failure mode (a flailing agent against a growing, noise-filled history)
@@ -48,9 +48,12 @@ T9.3 (`run_tests` tool), T9.4 (build precondition + tri-state cascade), and T9.6
 and T9.5 (gate verdict carries findings + verification view renders them) are done** — the parsers
 built in parallel worktree subagent waves (T9.2+T9.6, then T9.3+T9.4), T9.5 wired sequentially;
 and T9.7 (`run_gate` full pre-submit self-check, sharing the gate's adapters via the new
-`internal/checkfindings` leaf) are done. **Only T9.8 remains** — the failure-aware retry Brief that
-threads T9.5's parsed findings into the `on_failure` fix Brief (today the fix re-derives blind); it
-is the task that closes the loop Phase 9 was opened for.
+`internal/checkfindings` leaf) are done. **Phase 9 is complete** — T9.8 (the failure-aware retry
+Brief threading the parsed findings into the `on_failure` fix issue) landed, closing the loop the
+phase was opened for: structured findings now flow from the gate into the agent's context (run_tests/
+run_gate), the verdict, the verification view, and the retry. **Next: validate the context/cost
+reduction on a `./demo/vault` re-run** (the exercising use case), and consider the deferred
+refinements below (severity-threshold grading, progress-based termination, finding-type routing).
 **`./demo/vault` is the exercising use case** — it is Go (the shipped
 adapters' language), its `qa` gate already runs gosec/govulncheck/license-scan on agent output,
 and its inner loop runs `go test`, which is exactly where context blows up today. See Phase 9.
@@ -785,13 +788,33 @@ work; ordered so the inner-loop context win lands first):
   `TestRunGateRunsEveryCheckAndReturnsFindings`, `TestRunGateAllCleanIsNotError`,
   `TestRunGateNoChecksConfigured`, `TestCommandCheckCommands`, `internal/checkfindings` suite (`ByName`/
   `GoTest` guard/`Parse` fallback); gate suite still green after the refactor. ([verification.md](specs/verification.md))
-- [ ] **T9.8 Failure-aware retry Brief** — thread the failing `Finding`s into the `on_failure`
-  fix-issue Brief (today the gate verdict is *not* threaded — the fix re-derives blind). The parsed
-  verdict is the natural payload: the fix is tight (exactly the N failing findings, not the whole
-  transcript) and the selector can route by finding type. (needs T9.5)
+- [x] **T9.8 Failure-aware retry Brief** — *done.* The `on_failure` route now threads the failed
+  gate's parsed findings into the fix issue so the retry sees exactly the N checks it must fix
+  instead of re-deriving blind from the spec (the failure mode the whole phase targets).
+  `internal/orchestrator/results.go`: new `failingFindings(report)` collects the findings of every
+  *failed* check (passing checks and findingless metric failures contribute nothing — the tight
+  payload), and `route(...)` gained a `findings core.Findings` param threaded into the fix issue's
+  **body** via new `bodyWithGateFeedback` — a delimited (`<!-- harness:gate-feedback -->`),
+  **idempotent** section (any prior attempt's section is stripped first, so a multi-retry carries
+  only the latest findings, never a growing pile) rendering the compact, cache-stable
+  `Findings.Format()`. The body is the existing beads-persisted carrier that already survives the
+  create→schedule round-trip and renders into the agent's opening turn via `agent.buildContext`
+  (and into the control-room issue view) — no new persistence/Brief/render plumbing. Only the
+  gate-rejected callsite (results.go:274) passes findings; the five other `route` callers (agent
+  failure, no-candidate, planner-no-children, human-reject, re-gate-failed) pass `nil`. **No spec
+  change** — verification.md ("Findings … a failed candidate's retry Brief") + glossary written ahead;
+  the fix body shows in the existing issue-view Body render, so no CLI/config/view-surface change and
+  no docs/ update. Tests: `TestFailingFindings`, `TestBodyWithGateFeedback` (append / no-findings /
+  idempotent-across-retries), `TestHandleResultGateFailThreadsFindingsIntoFixBody`; existing
+  `TestHandleResultGateFailRetries` still green. **Deferred:** routing the fix by *finding type*
+  (a soul selector keyed on a finding-type tag) — it needs a finding-type taxonomy + a consuming
+  soul, a separate decision; the threading this task lands is the prerequisite. (needs T9.5)
   ([verification.md](specs/verification.md), [components/orchestrator.md](specs/components/orchestrator.md))
 
-**Deferred (named, not in this slice):** **severity-threshold grading** (`fail_on` — findings-first,
+**Deferred (named, not in this slice):** **finding-type routing** (route the `on_failure` fix to a
+specialized soul via a selector keyed on a finding-type tag — T9.8 threads the findings; this needs a
+finding-type taxonomy + a consuming soul, a separate decision); **severity-threshold grading**
+(`fail_on` — findings-first,
 thresholds-second; it makes findings influence the verdict, which the contract currently forbids);
 **progress-based termination** (abort a non-progressing invocation early — "findings not shrinking
 across attempts" is the strong signal the structured findings unlock, complementing T8.5);
