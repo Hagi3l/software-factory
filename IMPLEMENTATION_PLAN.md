@@ -44,8 +44,11 @@ design pass: every gate check becomes a thin per-tool adapter emitting compact, 
 the signal — the same failure mode (a flailing agent against a growing, noise-filled history)
 that drove ~80% of the 2026-06-18 demo-run cost. The **spec landed first** (commit 653824a); the
 code is landing incrementally: **T9.1 (core.Finding + tri-state), T9.2 (`internal/gotest` parser),
-and T9.6 (scanner adapters) are done** — the two parser tasks built in parallel worktree subagents;
-T9.3/T9.4/T9.5/T9.7/T9.8 remain. **`./demo/vault` is the exercising use case** — it is Go (the shipped
+T9.3 (`run_tests` tool), T9.4 (build precondition + tri-state cascade), and T9.6 (scanner adapters)
+are done** — built in parallel worktree subagent waves (T9.2+T9.6, then T9.3+T9.4); **T9.5, T9.7,
+T9.8 remain** (all edit the gate/orchestrator and are sequential — T9.5 wires the T9.2/T9.6 parsers
+into the gate verdict, T9.7 the full `run_gate` self-check, T9.8 the failure-aware retry Brief).
+**`./demo/vault` is the exercising use case** — it is Go (the shipped
 adapters' language), its `qa` gate already runs gosec/govulncheck/license-scan on agent output,
 and its inner loop runs `go test`, which is exactly where context blows up today. See Phase 9.
 
@@ -677,17 +680,45 @@ work; ordered so the inner-loop context win lands first):
   `TestParse{PassYieldsNoFindings,TestFailure,CompileFailureStructured,RawNonJSONNeverCrashes,
   DataRace,Panic,Timeout,IsCacheStable,EmptyInput}`. Built in a parallel worktree subagent. No spec
   change (verification.md written ahead). (next consumer: **T9.3** `run_tests`)
-- [ ] **T9.3 `run_tests` agent tool (first consumer)** — wraps `go test -json <scope>`, returns
-  `Findings.Format()` not a raw dump; raw json → artifact store. The inner-loop context win (the
-  implementor runs tests via the generic `run` today, dumping raw output into the very loop that
-  blows up). Scoped-to-changed-packages for the self-check; the gate stays `./...`.
-  ([components/agent.md](specs/components/agent.md))
-- [ ] **T9.4 Build precondition + tri-state in the gate** — explicit `go build ./...` precondition
-  that short-circuits and marks dependent checks **not-run** (never a misleading green); the verdict
-  records passed/failed/not-run, and not-run still fails closed. Build cache makes it near-free for
-  the type-checking tools (the toolchain image already warms GOCACHE); the `-race` test build is
-  separate and unavoidable. TCB-adjacent (gate ordering) — stays human-reviewed.
-  ([verification.md](specs/verification.md))
+- [x] **T9.3 `run_tests` agent tool (first consumer)** — *done.* New `agent.RunTestsTool` (`internal/agent/runtests.go`):
+  wraps `go test -json <scope>` (optional `scope` arg, positional — no shell injection — defaults to
+  `./...`), parses with `gotest.Parse`, returns the compact `core.Findings.Format()` string instead
+  of the raw multi-thousand-line dump (the headline inner-loop context win — the implementor's
+  self-check stops dumping noisy logs into the very history that blows its window). `IsError` set when
+  findings exist (failure feedback); a non-zero exit / build failure is **not** a tool error (the
+  parser turns it into findings). **Zero-trust** (runs in the untrusted producing sandbox; feedback,
+  never a grade — only the independent gate re-run grades). **Artifact harvest** mirrors the trace-map/
+  transform-log discipline exactly: the agent has no store access (no network), so raw json
+  accumulates in a per-invocation `TestEvidenceLedger` keyed by content-address, and the trusted
+  `toolSource` cleanup (`harvestTestEvidence` in `cmd/harness/run.go`) Puts each stream under
+  `core.ArtifactKindGateEvidence`. The agent computes the address locally as `sha256:`+hex (mirrors
+  `artifact.FilesStore.Put` — **verified identical**, so the inline-cited hash resolves once the
+  trusted Put lands) without importing `internal/artifact` (keeps the untrusted package off the
+  trusted store). Wired for all souls via the shared `toolSource` (no per-soul tool allowlist in
+  config — no config change needed). Built in a parallel worktree subagent (disjoint from T9.4).
+  Tests: `TestRunTests{ReturnsFindingsNotRawDump,HarvestsRawEvidenceByContentAddress,
+  DefaultsScopeToWholeModule,NilLedgerStillCitesHash,BuildFailureBecomesFinding}`. No spec change
+  (agent.md/verification.md written ahead). ([components/agent.md](specs/components/agent.md))
+- [x] **T9.4 Build precondition + tri-state in the gate** — *done.* `internal/gate/gate.go` `Run` now
+  runs a **build precondition first** when a `build` command is registered (`checkBuildName="build"`):
+  it reuses the configured `build` registry command (single source of truth — the gate grades a
+  command, not a hardcoded `go build`), and on failure **short-circuits the dependent checks**,
+  recording each as `core.CheckStatusNotRun` via new `notRunResult` (never re-run, never a misleading
+  green or a failure that never executed) instead of letting every downstream tool rediscover the
+  broken build in its own format. The build error is captured as a single `core.Finding`
+  (`buildFailureFindings`, Detail=compiler output verbatim — the signal the retry Brief needs).
+  **not-run never counts as a pass**: `report.Passed` is forced false, so the gate still fails closed;
+  the tri-state changes only what the verdict *records*. Independent-scanner aggregation (T2.12) is
+  untouched on the build-passes path; a declared `build` postcondition is consumed by the precondition
+  (`dropByName`) so the command never runs twice. **Inert for the shipped config** — `config/harness.yaml`
+  registers no `build` check (build is folded into `make test-unit`), so this is a pure no-op until a
+  deployment adds a `build:` entry (+ optionally declares it first in the qa/resolve postconditions);
+  that config wiring is left for whoever activates it. Deliberately did **not** pull in `internal/gotest`
+  (T9.5 owns wiring the structured parsers into the gate). TCB-touching (gate ordering) — kept minimal/
+  surgical; reviewed before integration. Built in a parallel worktree subagent (disjoint from T9.3).
+  Tests: `TestRunBuildPreconditionShortCircuitsDependents`, `TestRunBuildPassesThenIndependentScannersAggregate`,
+  `TestRunNoBuildCommandNoPrecondition`, + updated `TestRunStopsAtFirstFailure`/`TestRunVerdictRecordsFailure`.
+  No spec change (verification.md "A check is tri-state" written ahead). ([verification.md](specs/verification.md))
 - [ ] **T9.5 Gate verdict carries findings** — the gate reuses the T9.2 parser (and T9.6 adapters)
   so `core.GateVerdict` holds per-check findings; the [verification view](specs/control-room.md)
   (T4.23) renders them. One parser, multiple consumers.
