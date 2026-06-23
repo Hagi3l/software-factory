@@ -208,7 +208,8 @@ roll-up counts genuinely-integrated children, not any `closed` bead — see
 orchestrator several concurrent loops write beads — the event-driven Result and
 approval consumers, and the tick loop that dispatches and sweeps. This is safe not
 because writes are globally serialised behind a lock (there is none), but because (a)
-two loops never touch the *same* issue at once — the work-graph projection gates
+for an issue the projection **already knows**, two loops never touch it at once — the
+work-graph projection gates
 same-issue contention: a Result is acted on only while the projection shows its issue
 `in_progress`, a dispatch skips an issue the projection shows in-flight or settled, and
 serial Result handling transitions an issue out of `in_progress` before the next is
@@ -219,6 +220,40 @@ because the coordination is the projection plus serial Result handling, not a mu
 This is why splitting dispatch's fast cadence from the slow full-table sweep keeps
 them on one loop's serialisation rather than introducing an independent writer.
 
+**The creation window — where the projection does not yet gate.** The gate in (a)
+holds only *once the projection knows an issue*. A freshly **created** issue is the
+exception, and a sharp one: a planner's decomposition children, a re-derivation plan's
+children, or a routed fix are written to beads by the **creating loop** (a Result
+consumer running `bd.Apply`) *before* that loop records them in the projection, and the
+dispatch loop's candidate oracle (`bd.ready()`) can observe them in that gap. Worse,
+`bd.Apply` creates the issue and adds its blocking edges as **separate** writes, so
+there is a sub-window in which the child exists with **no blockers** — `bd.ready()`
+returns it as dispatchable even though its decomposition is not yet committed and its
+inter-sibling ordering does not yet exist. In that window the dispatch loop can *claim*
+a child the creating loop is mid-way through recording — exactly the same-issue
+contention (a) is supposed to forbid. Two invariants close it, and **every creation
+path must honour both**:
+
+1. **A child is not dispatchable until both its blocking edges and its projection record
+   exist.** Creation must be atomic with respect to the dispatch oracle — e.g. the child
+   is created already-blocked (so `bd.ready()` never returns a half-built child), or
+   dispatch is held off a decomposition until its edges are committed. Without this the
+   parent gate the planner relies on (children become ready only when the plan closes)
+   *and* the inter-sibling order are both silently bypassed — every child dispatches at
+   once, in no order.
+2. **A creation (or reopen) projection write must never *downgrade* a live claim.** If
+   the dispatch loop records `in_progress` before the creating loop's record runs, the
+   creation record — which would set `open` — must **preserve** the `in_progress`
+   status, exactly as the settle path preserves the monotonic
+   [`integrated`](../integration.md) marker. A claim is a real state advance and wins.
+
+Violating either **wedges the issue permanently**: the projection reads `open` while
+beads reads `in_progress`, so the returning Result is discarded as a stale/duplicate
+(see *Result gating* above) **and** `bd.ready()` — which correctly sees `in_progress` —
+never re-surfaces it, so it is never retried or dead-lettered. This is not theoretical:
+it stalled the **2026-06-23 vault-demo run** (the creation-tracking added in T8.4 met
+the non-atomic `bd.Apply` window). The remediation is **Phase 10**.
+
 ---
 
 ## What it must never do
@@ -228,6 +263,10 @@ them on one loop's serialisation rather than introducing an independent writer.
 - **Never let a sandboxed agent write beads directly.** Proposals only.
 - **Never advance a stage on an agent's self-report.** Only a passing gate
   advances the graph.
+- **Never let a freshly-created child reach the dispatch oracle before its blocking
+  edges and its projection record exist**, and never let a creation/reopen write
+  downgrade a live claim. Creation must be atomic with respect to `bd.ready()` (see
+  *The creation window*) — the alternative wedges the issue silently.
 
 ---
 

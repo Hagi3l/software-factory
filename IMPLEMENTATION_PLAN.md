@@ -579,6 +579,10 @@ switchable to de-risk rollout.
   `TestProjectionMarkIntegratedSurvivesSettle`, `TestApplyTrackedRecordsCreatedIssues`,
   `TestOrchestratorTrackAndSnapshot`, `TestTransitionStampsStateEnteredIntoProjection`,
   `TestProjectionIssueReader`, `TestReaderLiveVsForensicSplit`.
+  **Follow-up (Phase 10):** the `applyTracked`→`track(open)` creation path added here can race a
+  concurrent dispatch claim and downgrade a live `in_progress` entry back to `open` (the 2026-06-23
+  stall) — the projection's creation write was not guarded against an already-claimed issue. Closed
+  by T10.1 (`track` no-downgrade) + T10.2 (creation atomic w.r.t. `bd.ready()`).
   ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md), [messaging.md](specs/messaging.md))
 - [x] **T8.5 Planner decomposition granularity** *(fixes #5 — the cost driver)* — *done.* Both
   decomposition-planner personas (`config/souls/prompts/planner.md` +
@@ -824,6 +828,100 @@ across attempts" is the strong signal the structured findings unlock, complement
 **semantic-first read steering** (the LSP tools return spans not files; the findings' `file:line`
 anchors feed them); **a measurement loop** (the OTel/OpenObserve telemetry from T5.12–T5.15 is what
 would rank these techniques by measured token / pass-rate impact rather than by guess).
+
+---
+
+## Phase 10 — Read-model concurrency correctness (demo-hardening II)
+
+Opened from the **2026-06-23 live vault-demo run**. The feature *"one-time share links for
+secrets"* planned and decomposed cleanly into four children (`tbs`→`0sp`→{`8wi`,`vzr`}), and the
+test-author stage ran — but **every harvested result was dropped** (`orchestrator: result for issue
+not in flight, ignoring as stale/duplicate`) and the run wedged at `author-tests`: no child advanced
+to `implement`, no failure retried or dead-lettered. Root cause is a **three-part concurrency race**
+that Phase 8's read-model work introduced the last ingredient of:
+
+1. **`bd.Apply` is non-atomic** (`internal/beads/transitions.go`): Phase 1 `bd create`s each child
+   (no dependency edges yet); Phase 2 adds the `blocked-by` edges as *separate* `bd dep add` calls.
+   Between the two, a child is visible to `bd.ready()` as **dispatchable** (no blockers).
+2. **Three loops mutate the projection with no shared serialisation** beyond the per-op mutex inside
+   `inflightProjection` — the Result consumer, the approval consumer, and the tick loop. The
+   "single writer = single process" reasoning in `orchestrator.md` assumed the projection always
+   gates same-issue contention; it does **not** for an issue still being *created* (see that spec's
+   new "*The creation window*").
+3. **`inflight.track()` unconditionally writes `status=open`** (`internal/orchestrator/inflight.go`)
+   — the creation-tracking added in **T8.4** — so when the tick loop claims a child (`add`,
+   `in_progress`) inside the `bd.Apply` window and the creating loop's `applyTracked` `track()` then
+   runs, it **clobbers the live claim back to `open`**. From then on `has()` is false forever, the
+   result is dropped, and `bd.ready()` (which sees `in_progress`) never re-surfaces it. Permanent
+   stall. The same window also **bypassed the dependency order** — all four children dispatched at
+   once because their edges did not yet exist when claimed.
+
+The spec change landed first (per CLAUDE.md): `orchestrator.md` "*The creation window — where the
+projection does not yet gate*" (the two invariants any creation path must honour) + a "What it must
+never do" bullet; `control-room.md` promotes the inter-child `blocked-by` "waits-for" edge from a
+deferred "may later" to a committed board overlay (T10.4). T10.1–T10.3 are the correctness spine
+(do first; they are TCB — orchestrator — so stay human-reviewed, land behind tests); T10.4–T10.5
+are clarity/discipline. **A clean re-run gates T10's close** (and re-opens the #6 question below).
+
+- [x] **T10.1 `track()` must not downgrade a live claim** *(Fix A — unblocks the stall; also fixes
+  the "open card on work-in-progress" the board showed)* — *done.* `inflightProjection.track()`
+  (`internal/orchestrator/inflight.go`) now **returns early, leaving the entry untouched, when the
+  existing projected status is `in_progress`** — preserving the claim's status, lease, AND its richer
+  claim-time snapshot (strictly safer than the plan's "update the snapshot": the bd.Apply-fresh issue
+  track() receives carries fewer fields than the claim's `add()` recorded, so overwriting would
+  regress the board timers). This mirrors how `settle()` preserves the monotonic `Integrated` marker.
+  Correct in every interleaving: a claim is a real state advance and wins over a creation/reopen
+  record written by the creating loop inside `bd.Apply`'s non-atomic window. **Did not** make `has()`
+  fall back to a beads `in_progress` read (that reintroduces the lagging read the projection exists to
+  avoid). The guard fires **only** on an `in_progress` entry, so the Resolve-wizard reopen
+  (blocked→open) still works. This alone restores `has()=true` and unblocks the pipeline. No spec
+  change — orchestrator.md "The creation window" (invariant 2) was written ahead. No CLI/config/view
+  surface change, so no docs/ update. Tests: `TestProjectionTrackDoesNotDowngradeLiveClaim`
+  (claim survives track, status + lease both preserved), `TestProjectionTrackReopensBlockedIssue`
+  (guard does not block the legitimate blocked→open reopen); existing
+  `TestProjectionTrackRecordsCreatedOpenIssue`/`TestApplyTracked*` still green.
+  **Remaining for a clean re-run:** T10.2 (creation atomic w.r.t. `bd.ready()` — restores dependency
+  ordering) + T10.3 (concurrent two-phase-`Apply` regression test). T10.1 stops the stall; T10.2
+  stops the out-of-order burst. ([components/orchestrator.md](specs/components/orchestrator.md) "The creation window")
+- [ ] **T10.2 Creation atomic w.r.t. the dispatch oracle** *(Fix B — restores dependency ordering;
+  the deeper fix)* — stop `bd.ready()` ever returning a half-built decomposition child. Preferred:
+  create children **already-blocked** so they are never dispatchable until their edges (and the
+  parent-plan gate) are committed — e.g. apply the `blocked-by` edges before the child can satisfy
+  `bd.ready()`, or create in a state the oracle excludes until Phase 2 completes. Alternative:
+  narrowly serialise `acceptPlan`'s `Apply`+`track`+`close` against `dispatchPass` — scoped to the
+  projection/claim-sensitive region, **not** a coarse mutex around slow gate/merge work in
+  `handleResult` (that would stall dispatch for the merge duration). Honours invariant (1) of "The
+  creation window". ([components/orchestrator.md](specs/components/orchestrator.md) "The creation window")
+- [ ] **T10.3 Regression test — concurrent decomposition under a two-phase `Apply`** — run the real
+  tick loop concurrently with `handleResult` processing a planner decomposition, using a Beads fake
+  whose `Apply` is two-phase/slow (children visible-and-ready after Phase 1, before Phase 2 adds the
+  edges), mirroring `bd.Apply`. Assert (a) **no** harvested result is dropped as "not in flight" and
+  (b) children dispatch only after the plan closes, **in dependency order** (no all-at-once burst).
+  This timing case is exactly what the fast in-memory fakes never exercised — its absence is why the
+  bug shipped. Guards T10.1 + T10.2.
+- [ ] **T10.4 Board "waits-for" dependency edges** *(the original observation; spec promoted from
+  deferred)* — draw the inter-child `blocked-by` edges as a distinct **dashed "waits-for"** overlay
+  on the board (faint by default; included in the hover/focus path highlight), so a staggered start
+  reads as a dependency being honoured, not a stall. Note: this is *visualisation* of an ordering
+  T10.2 must first make real — until T10.2 lands, the edges often do not exist at dispatch time.
+  The full blocker graph already renders server-side in the DAG view (`board.templ` /
+  `internal/controlroom/views`). ([control-room.md](specs/control-room.md) "The board, in motion")
+- [ ] **T10.5 Agent build-command discipline** *(persona/conventions, not a core-spec change)* — the
+  souls verified with raw `go build ./...` rather than the project's declared make targets, risking a
+  skipped `make generate` (stale `*_templ.go` → qa-gate compile failure) even though
+  `demo/vault/app/specs/conventions.md` documents the targets and they ride every Brief via
+  `ambient_specs`. Steer the implementor/test-author personas (and/or the stage `criteria`) to the
+  project's declared verification commands. **No core-spec change** — the kernel is language-neutral
+  by design and must not mandate `make`; this is demo-conventions + persona text, adjacent to Phase
+  9's agent-context-discipline theme.
+
+**Carried forward / not separate tasks:** `trace_test` (list item #1) is **not a bug** — it is the
+test-author's test↔spec traceability tool (`verification.md`, `components/agent.md`); no change. The
+board showing `open`/`queued` on active work (#2) is a faithful render of the projection corrupted by
+this race — **fixed by T10.1**, verify on the re-run. The `vault-8wi` 50-turn exhaustion (#6) was
+worsened by out-of-order dispatch (it was implemented-against a `0sp` store layer that did not yet
+exist) — **re-measure after T10.2**; only then decide the deferred test-author turn-budget backstop
+(left open by T8.5).
 
 ---
 

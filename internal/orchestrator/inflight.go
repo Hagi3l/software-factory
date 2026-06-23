@@ -107,6 +107,21 @@ func (p *inflightProjection) settle(issue core.Issue, status string) {
 func (p *inflightProjection) track(issue core.Issue, now time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	// A creation/reopen record must NEVER downgrade a live claim (T10.1). bd.Apply is non-atomic —
+	// it creates a child, then adds its blocking edges as separate writes — so a freshly created
+	// child is briefly visible to bd.ready() as dispatchable before the creating loop records it
+	// here. If the dispatch loop claims it (add → in_progress) inside that window, the creating
+	// loop's track() then runs with the bd.Apply-fresh issue, which would set status=open and
+	// CLOBBER the live claim. From then on has() reads false forever, the returning Result is
+	// dropped as stale/duplicate, and bd.ready() — which correctly sees in_progress — never
+	// re-surfaces it: a permanent stall (the 2026-06-23 vault-demo run). So a claim, being a real
+	// state advance, wins: we leave the in_progress entry (status, lease, and the richer claim-time
+	// snapshot) untouched, mirroring how settle() preserves the monotonic Integrated marker. Safe
+	// for the Resolve-wizard reopen, which targets a blocked entry (blocked→open), never in_progress.
+	// See specs/components/orchestrator.md "The creation window".
+	if prev, ok := p.m[issue.ID]; ok && prev.status == statusInProgress {
+		return
+	}
 	status := issue.Status
 	if status == "" {
 		status = statusOpen

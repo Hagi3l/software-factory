@@ -357,6 +357,48 @@ func TestProjectionTrackRecordsCreatedOpenIssue(t *testing.T) {
 	}
 }
 
+// TestProjectionTrackDoesNotDowngradeLiveClaim proves T10.1: a creation/reopen track() that races
+// a dispatch claim must NOT clobber the live in_progress status back to open. bd.Apply is non-atomic,
+// so a freshly created child can be claimed (add → in_progress) inside the creation window, before
+// the creating loop's track() runs with the bd.Apply-fresh issue. If track() downgraded that claim,
+// has() would read false forever, the returning Result would be dropped as stale, and bd.ready()
+// (seeing in_progress) would never re-surface it — the permanent stall of the 2026-06-23 vault run.
+func TestProjectionTrackDoesNotDowngradeLiveClaim(t *testing.T) {
+	p := newInflightProjection()
+	now := time.Now().UTC()
+	lease := now.Add(time.Hour)
+
+	// The dispatch loop claims the child first (creation window), then the creating loop tracks it.
+	p.add(core.Issue{ID: "child-1", Role: "implement"}, lease)
+	p.track(core.Issue{ID: "child-1", Role: "implement"}, now) // bd.Apply-fresh: no Status
+
+	if got, ok := p.statusOf("child-1"); !ok || got != statusInProgress {
+		t.Fatalf("statusOf = (%q,%v), want (in_progress,true) — track must not downgrade a live claim", got, ok)
+	}
+	if !p.has("child-1") || p.size() != 1 {
+		t.Errorf("the live claim must survive track (has=%v size=%d)", p.has("child-1"), p.size())
+	}
+	// The claim's lease must be preserved too, or the lease sweep would mis-time the in-flight work.
+	exp := p.expired(now)
+	if len(exp) != 0 {
+		t.Errorf("preserved claim's lease was lost: %d entries reported expired at claim time", len(exp))
+	}
+}
+
+// TestProjectionTrackReopensBlockedIssue proves the guard added in T10.1 does NOT block the
+// legitimate Resolve-wizard reopen: a blocked entry (a dead-letter) is reopened by track() to open,
+// because the no-downgrade guard fires only on an in_progress entry, never a settled one.
+func TestProjectionTrackReopensBlockedIssue(t *testing.T) {
+	p := newInflightProjection()
+	now := time.Now().UTC()
+	p.settle(core.Issue{ID: "dl-1", Role: "implement"}, statusBlocked)
+	p.track(core.Issue{ID: "dl-1", Role: "implement"}, now) // wizard reopen, blocked→open
+
+	if got, ok := p.statusOf("dl-1"); !ok || got != statusOpen {
+		t.Fatalf("statusOf = (%q,%v), want (open,true) — a blocked dead-letter must reopen", got, ok)
+	}
+}
+
 // TestProjectionMarkIntegratedSurvivesSettle proves the durable integration marker (T8.4) is
 // mirrored into the projection in the merge path (markIntegrated, while the bead is still
 // in_progress) and CARRIED FORWARD by the close transition that settles it — so the board hero's
