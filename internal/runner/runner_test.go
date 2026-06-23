@@ -140,7 +140,7 @@ func testBrief() core.Brief {
 	}
 }
 
-func newRunner(t *testing.T, b *fakeBackend, inv Invoker) (*Runner, *nats.Conn) {
+func newRunner(t *testing.T, b *fakeBackend, inv Invoker, mod ...func(*Options)) (*Runner, *nats.Conn) {
 	t.Helper()
 	srv, err := messaging.NewEmbeddedServer(messaging.ServerConfig{})
 	if err != nil {
@@ -164,7 +164,7 @@ func newRunner(t *testing.T, b *fakeBackend, inv Invoker) (*Runner, *nats.Conn) 
 	if err != nil {
 		t.Fatalf("artifact store: %v", err)
 	}
-	r, err := New(Options{
+	opts := Options{
 		Roles:     []string{"implement"},
 		Repo:      "/repo",
 		SocketDir: t.TempDir(),
@@ -174,7 +174,11 @@ func newRunner(t *testing.T, b *fakeBackend, inv Invoker) (*Runner, *nats.Conn) 
 		ResolveImage: func(profile string) string {
 			return "harness/" + profile + "@sha256:test"
 		},
-	}, b, fakeResolver{}, nc, inv, store, js)
+	}
+	for _, m := range mod {
+		m(&opts)
+	}
+	r, err := New(opts, b, fakeResolver{}, nc, inv, store, js)
 	if err != nil {
 		t.Fatalf("New runner: %v", err)
 	}
@@ -601,6 +605,60 @@ func TestNewValidatesOptions(t *testing.T) {
 	if err == nil {
 		t.Fatal("New with empty options: want error, got nil")
 	}
+}
+
+// blockingInvoker announces each invocation on entered, then blocks on release — so a test can
+// observe how many invocations of one role run at the same time.
+type blockingInvoker struct {
+	entered chan core.Brief
+	release chan struct{}
+	result  core.Result
+}
+
+func (i *blockingInvoker) Invoke(_ context.Context, _ sandbox.Sandbox, brief core.Brief, _ sandbox.Endpoint) (core.Result, error) {
+	i.entered <- brief
+	<-i.release
+	return i.result, nil
+}
+
+// With MaxConcurrency=2 a role's runner serves two same-role siblings at once: both
+// invocations enter before either is released. At the default (serial) concurrency the second
+// would not start until the first returned, so the test would time out at one. This is the
+// lever that fans out a wide decomposition instead of serializing it on the slowest stage.
+func TestMaxConcurrencyRunsSameRoleSiblingsInParallel(t *testing.T) {
+	inv := &blockingInvoker{
+		entered: make(chan core.Brief, 2),
+		release: make(chan struct{}),
+		result:  core.Result{Status: core.StatusDone},
+	}
+	r, nc := newRunner(t, &fakeBackend{}, inv, func(o *Options) { o.MaxConcurrency = 2 })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+
+	b1 := testBrief()
+	b1.Issue.ID = "iss-1"
+	b2 := testBrief()
+	b2.Issue.ID = "iss-2"
+	publishWork(t, nc, b1)
+	publishWork(t, nc, b2)
+
+	// Both siblings must ENTER before either is released — only possible if they run at once.
+	for n := 0; n < 2; n++ {
+		select {
+		case <-inv.entered:
+		case <-time.After(3 * time.Second):
+			close(inv.release) // unblock any in-flight invoker so the runner can drain and Run returns
+			cancel()
+			<-done
+			t.Fatalf("only %d of 2 same-role siblings ran concurrently — runner serialized the work", n)
+		}
+	}
+	close(inv.release) // let both complete and ack
+
+	cancel()
+	<-done
 }
 
 // waitTrue polls cond for up to a second; teardown happens in a deferred goroutine

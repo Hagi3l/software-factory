@@ -286,6 +286,30 @@ func TestTurnBudgetExhausted(t *testing.T) {
 	}
 }
 
+// A per-soul MaxTurns (core.Soul.MaxTurns, yaml max_tool_turns) caps the loop below its own
+// budget for that invocation — the operator's per-invocation turn knob for a flail-prone soul.
+func TestSoulMaxTurnsOverridesBudget(t *testing.T) {
+	conn := &fakeConn{responses: []model.Response{
+		{Stop: model.StopEndTurn, Text: "still thinking"},
+	}}
+	// The loop budget is generous (50); the soul tightens it to 4, so the loop must stop at 4,
+	// not 50. This is the fast-fail backstop for a soul that fills turns without submitting.
+	l := newLoop(t, Budget{MaxTurns: 50}, conn)
+	brief := testBrief()
+	brief.Soul.MaxTurns = 4
+
+	got, err := run(t, l, brief)
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if got.Status != core.StatusFailed {
+		t.Errorf("status = %q, want failed", got.Status)
+	}
+	if reqs := conn.requests(); len(reqs) != 4 {
+		t.Fatalf("model calls = %d, want exactly the soul's MaxTurns=4 (not the loop budget 50)", len(reqs))
+	}
+}
+
 // The cumulative input+output token cap stops the loop with failed.
 func TestTokenBudgetExhausted(t *testing.T) {
 	conn := &fakeConn{responses: []model.Response{

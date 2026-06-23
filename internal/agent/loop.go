@@ -118,7 +118,15 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 	messages := []model.Message{{Role: model.RoleUser, Text: buildContext(brief)}}
 	var total model.Usage
 
-	for turn := 1; turn <= l.budget.MaxTurns; turn++ {
+	// The per-soul turn cap (if set) overrides the loop's default for this invocation only —
+	// the Loop is shared across every soul, so this stays a local rather than mutating
+	// l.budget. A soul prone to flailing can fail fast at a tighter cap; 0 keeps the default.
+	maxTurns := l.budget.MaxTurns
+	if brief.Soul.MaxTurns > 0 {
+		maxTurns = brief.Soul.MaxTurns
+	}
+
+	for turn := 1; turn <= maxTurns; turn++ {
 		req := model.Request{
 			System:    persona,
 			Messages:  messages,
@@ -182,7 +190,7 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 		messages = append(messages, model.Message{Role: model.RoleTool, ToolResults: results})
 	}
 
-	l.log.WarnContext(ctx, "agent: turn budget exhausted, stopping", "issue", brief.Issue.ID, "max_turns", l.budget.MaxTurns)
+	l.log.WarnContext(ctx, "agent: turn budget exhausted, stopping", "issue", brief.Issue.ID, "max_turns", maxTurns)
 	return core.Result{Status: core.StatusFailed}, nil
 }
 

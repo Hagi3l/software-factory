@@ -77,6 +77,14 @@ type Options struct {
 	// Limits is the per-sandbox resource ceiling, passed straight through to every Spec
 	// (single source of truth — config.Infra.Sandbox.Limits).
 	Limits config.SandboxLimits
+	// MaxConcurrency is how many invocations this runner serves PER ROLE at once
+	// (config.Infra.Sandbox.MaxConcurrency). 0 or 1 is serial — a role's ready siblings run
+	// back-to-back; >1 binds that many worker loops per role so same-role siblings run
+	// concurrently. It is the lever that fans out a wide decomposition instead of serializing
+	// it on the slowest stage. Peak RAM is bounded by (MaxConcurrency x Limits.Mem) per busy
+	// role, so size it to the host. Each worker holds its own one-message iterator, so a
+	// message's lease (AckWait) ticks only while a worker is actually processing it.
+	MaxConcurrency int
 	// ResolveImage maps a soul's logical sandbox profile to the concrete artifact the
 	// backend boots (config.Infra.Sandbox.ResolveImage). Nil leaves Spec.Image empty, so
 	// the backend falls back to the profile name — the test-only path; production always
@@ -220,10 +228,20 @@ func (r *Runner) Run(ctx context.Context) error {
 	return nil
 }
 
-// serveRole pulls and handles work for one role until ctx is canceled. Canceling ctx
-// stops the iterator, which unblocks Next with a closed-iterator error treated as a
-// clean shutdown.
+// serveRole pulls and handles work for one role until ctx is canceled. Canceling ctx stops
+// the iterator, which unblocks Next with a closed-iterator error treated as a clean shutdown.
+//
+// MaxConcurrency (>=1) sets how many same-role invocations run at once: at 1 it is the original
+// serial loop; above 1 it dispatches each message to a bounded worker pool so a wide
+// decomposition's sibling children fan out instead of serializing on the slowest stage. The
+// pull is gated on a free worker slot, so the runner never holds more *in-flight* work than it
+// can start — the one shared iterator and the semaphore bound concurrency, and a single queue
+// feeding N workers keeps the distribution fair without any per-worker prefetch tuning.
 func (r *Runner) serveRole(ctx context.Context, role string, cons jetstream.Consumer) error {
+	workers := r.opts.MaxConcurrency
+	if workers < 1 {
+		workers = 1
+	}
 	iter, err := cons.Messages()
 	if err != nil {
 		return fmt.Errorf("runner: open messages iterator for role %q: %w", role, err)
@@ -232,15 +250,47 @@ func (r *Runner) serveRole(ctx context.Context, role string, cons jetstream.Cons
 		<-ctx.Done()
 		iter.Stop()
 	}()
+
+	if workers == 1 {
+		for {
+			msg, err := iter.Next()
+			if err != nil {
+				if ctx.Err() != nil || errors.Is(err, jetstream.ErrMsgIteratorClosed) {
+					return nil //nolint:nilerr // ctx cancel stopped the iterator; this Next error is a clean shutdown, not a failure
+				}
+				return fmt.Errorf("runner: pull work for role %q: %w", role, err)
+			}
+			r.handle(ctx, role, msg)
+		}
+	}
+
+	// Concurrent path: acquire a worker slot, then pull — so we only fetch work we can start
+	// immediately — and run each handle in its own goroutine. On shutdown drain the in-flight
+	// invocations before returning so their sandboxes reap cleanly.
+	sem := make(chan struct{}, workers)
+	var wg sync.WaitGroup
 	for {
+		select {
+		case sem <- struct{}{}:
+		case <-ctx.Done():
+			wg.Wait()
+			return nil
+		}
 		msg, err := iter.Next()
 		if err != nil {
+			<-sem
+			wg.Wait()
 			if ctx.Err() != nil || errors.Is(err, jetstream.ErrMsgIteratorClosed) {
 				return nil //nolint:nilerr // ctx cancel stopped the iterator; this Next error is a clean shutdown, not a failure
 			}
 			return fmt.Errorf("runner: pull work for role %q: %w", role, err)
 		}
-		r.handle(ctx, role, msg)
+		wg.Add(1)
+		go func(m jetstream.Msg) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			r.handle(ctx, role, m)
+		}(msg)
 	}
 }
 

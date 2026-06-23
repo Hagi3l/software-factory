@@ -235,12 +235,21 @@ persona:  souls/prompts/implementor-go.md
 tools:    [fs, shell, git]
 sandbox:  go-toolchain         # logical profile; resolved to a concrete image via infra
 selector: { lang: go }         # which work this soul claims for its role
+max_tool_turns: 35             # optional — per-invocation ReAct turn cap (0/unset = kernel default)
 ```
 
 A **soul** is identity + persona + model + tools + sandbox. It is *stateless* — it
 carries no cross-task memory; all durable state lives in beads, git, and the specs. A
 role can map to several souls; the `selector` picks which soul claims a given work
 item.
+
+`max_tool_turns` (optional) caps how many ReAct turns one invocation of this soul may take
+before the loop gives up and returns `failed` (which routes to `on_failure`). Unset or `0`
+uses the kernel default. Lower it for a soul prone to flailing — e.g. a test-author that fills
+turns with tiny tool calls without ever submitting — so a doomed attempt fails fast and retries
+(or dead-letters) instead of burning the full default budget; the gate still independently
+verifies the result, so a tight cap trades only a stuck attempt's wasted time. It is the
+sandboxed-soul analog of the wizard's `requirements_planner.max_tool_turns`.
 
 > **Model diversity** (`producer ≠ verifier` strengthened): the harness *enables and
 > recommends* running the verifier on a different model family than the producer, but
@@ -264,6 +273,7 @@ sandbox:
   backend: docker            # bootstrap stand-in for Firecracker (Phase 5)
   egress:  broker-only       # zero direct network; all I/O via the broker
   limits:  { cpu: 2, mem: 2Gi, wall: 30m }   # per-invocation ceiling
+  max_concurrency: 1         # optional — same-role invocations a runner serves at once (1 = serial)
   profiles:                  # soul.sandbox name -> concrete artifact for this backend
     go-toolchain:
       image: harness/go-toolchain@sha256:…   # docker/gvisor: `image`; firecracker: `rootfs`
@@ -351,6 +361,15 @@ models:
   into an image; existence is not checked at validate time). A `remote` with no `github_app`
   pushes unauthenticated (valid for a `file://` remote). `git` must be in `broker.allowlist`
   for any push to be brokered. See [security.md](../specs/security.md) Control 3.
+- **`sandbox.max_concurrency`** (optional, default `1`) is how many invocations a runner
+  serves **per role** at once. `1` is serial — a role's ready siblings run back-to-back; `>1`
+  lets that many same-role invocations run concurrently, the lever that fans out a wide
+  decomposition instead of serializing its children on the slowest stage. It is bounded by
+  memory, not just this number: each sandbox may use up to `limits.mem`, so peak RAM is roughly
+  `max_concurrency × mem` per busy role plus the orchestrator's separate gate sandbox — size it
+  to the host (e.g. `2` at `4Gi` on an ~8 GiB VM). The orchestrator's verification gates run off
+  a single result consumer, so they stay serial regardless; this knob speeds the agent
+  (author/implement) stages.
 - **`sandbox.profiles`** resolves the logical profile a soul names (`sandbox: go-toolchain`)
   to the concrete artifact this backend boots — an `image` for docker/gvisor, a `rootfs`
   for firecracker. The soul stays env-agnostic; dev points the name at a local tag, prod

@@ -500,6 +500,10 @@ func (c *Config) validateSouls(add func(string, ...any)) {
 			}
 		}
 
+		if s.MaxTurns < 0 {
+			add("soul %q max_tool_turns is %d; it must be >= 0 (0 uses the loop default)", s.Name, s.MaxTurns)
+		}
+
 		c.validatePersona(s, add)
 	}
 
@@ -638,6 +642,10 @@ func (c *Config) validateSandbox(add func(string, ...any)) {
 		// image-shaped, so the field check below uses the same rule.
 	default:
 		add("sandbox.backend %q is unknown (want %q, %q, or %q)", backend, BackendDocker, BackendGVisor, BackendFirecracker)
+	}
+
+	if c.Infra.Sandbox.MaxConcurrency < 0 {
+		add("sandbox.max_concurrency is %d; it must be >= 0 (0 or 1 is serial)", c.Infra.Sandbox.MaxConcurrency)
 	}
 
 	field, kind := "image", "container image"

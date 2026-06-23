@@ -79,8 +79,8 @@ func TestValidateDemoConfig(t *testing.T) {
 
 // TestWarnShippedConfig pins the one accepted advisory on the bootstrap config (T2.13):
 // the implementor (producer) and the security reviewer (qa verifier) both resolve to the
-// anthropic provider, just different tiers, because anthropic is the only family wired in
-// dev. validate must surface this as a non-fatal N-version diversity advisory (so a
+// same model family (anthropic), just different tiers, because anthropic is the only family
+// wired in dev. validate must surface this as a non-fatal N-version diversity advisory (so a
 // yaml-only operator sees the recommendation), and TestValidateShippedConfig above
 // asserts it stays non-fatal. If a future edit points the verifier at a different family,
 // this guard flags that the accepted tradeoff has changed and should be reconsidered.
@@ -94,7 +94,7 @@ func TestWarnShippedConfig(t *testing.T) {
 	for _, w := range ws {
 		if strings.Contains(w, `producer role "implementor"`) &&
 			strings.Contains(w, `verifier role "security"`) &&
-			strings.Contains(w, `provider "anthropic"`) {
+			strings.Contains(w, `model family "anthropic"`) {
 			found = true
 		}
 	}

@@ -31,6 +31,16 @@ type SandboxConfig struct {
 	Egress   string                    `yaml:"egress"`  // "broker-only"
 	Limits   SandboxLimits             `yaml:"limits"`
 	Profiles map[string]SandboxProfile `yaml:"profiles,omitempty"` // logical soul.sandbox name -> concrete artifact
+	// MaxConcurrency is how many invocations a runner serves PER ROLE at once. 0 or 1 is
+	// serial (the default) — each role's ready siblings run back-to-back; >1 lets that many
+	// same-role invocations run concurrently, the lever that fans out a wide decomposition's
+	// sibling children instead of serializing them on the slowest stage. It is bounded by
+	// memory, not just this number: each sandbox may use up to Limits.Mem, so peak RAM is
+	// roughly (this x Mem) per busy role plus the orchestrator's separate gate sandbox — size
+	// it to the host (e.g. 2 at 4Gi on an ~8Gi VM). The orchestrator's verification gates run
+	// in their own sandboxes off the single result consumer, so they stay serial regardless;
+	// this knob speeds the agent (author/implement) stages. See specs/components/runner.md.
+	MaxConcurrency int `yaml:"max_concurrency,omitempty"`
 }
 
 // Backend identifiers for SandboxConfig.Backend. Docker and gVisor boot a container

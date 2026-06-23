@@ -245,6 +245,14 @@ func (s *Server) routes() {
 func (s *Server) render(w http.ResponseWriter, r *http.Request, c templ.Component) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := c.Render(r.Context(), w); err != nil {
+		// A canceled request context is a benign client disconnect — the browser navigated
+		// away or htmx superseded an in-flight fragment poll mid-render. It is not a render
+		// fault (htmx keeps the last good fragment), so log it at debug like handleEvents
+		// does, rather than as recurring red ERROR noise in the operator's terminal.
+		if errors.Is(err, context.Canceled) {
+			s.log.DebugContext(r.Context(), "controlroom: render canceled by client", "path", r.URL.Path, "err", err)
+			return
+		}
 		s.log.ErrorContext(r.Context(), "controlroom: render failed", "path", r.URL.Path, "err", err)
 	}
 }

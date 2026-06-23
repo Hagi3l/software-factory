@@ -26,9 +26,11 @@ import "github.com/Loxstomper/harness/internal/config"
 //
 // The other dimensions are intentionally not mapped here:
 //
-//   - turns: the spec lists turns as a per-invocation dimension, but config models
-//     only the per-issue budget; the turn cap is the loop's own knob and defaults
-//     to DefaultMaxTurns (see New). There is no operator turn knob in the kernel.
+//   - turns: the spec lists turns as a per-invocation dimension, but the per-issue
+//     policy budget models only tokens/usd/wall; the turn cap is the loop's own knob
+//     and defaults to DefaultMaxTurns (see New). The operator's per-invocation turn
+//     knob lives on the *soul* (core.Soul.MaxTurns, yaml max_tool_turns), applied per
+//     invocation in Loop.Invoke — not derived from policy here.
 //   - wall: enforced by the sandbox watchdog (plan T1.6), not the loop.
 //   - usd: needs a per-model cost table to convert tokens→dollars; deferred.
 //

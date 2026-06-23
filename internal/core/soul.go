@@ -16,6 +16,15 @@ type Soul struct {
 	Tools    []string          `yaml:"tools"`    // enabled capability names
 	Sandbox  string            `yaml:"sandbox"`  // sandbox profile name
 	Selector map[string]string `yaml:"selector"` // tag match that picks this soul for an issue, e.g. {lang: go}
+	// MaxTurns caps this soul's per-invocation ReAct turns, overriding the loop's default
+	// (agent.DefaultMaxTurns) when set (>0). A turn cap is the loop's own halting guarantee
+	// independent of the token budget; the kernel default is generous, so a soul that tends
+	// to flail (e.g. a test-author that fills turns with tiny tool calls and never submits)
+	// can set a tighter cap to fail fast and route to its on_failure retry, rather than
+	// burning the full default turn budget before giving up. 0 leaves the loop default in
+	// force. The trusted requirements-planner has its own MaxToolTurns knob (config); this is
+	// the equivalent for sandboxed souls. See specs/components/agent.md, specs/configuration.md.
+	MaxTurns int `yaml:"max_tool_turns,omitempty"`
 }
 
 // Matches reports whether this soul's Selector is satisfied by an issue's tags: every
