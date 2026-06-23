@@ -43,10 +43,11 @@ type fakeBeads struct {
 	transcripts map[string]string
 	seq         int
 
-	claimErr error
-	applyErr error
-	getErr   error
-	closeErr error
+	claimErr   error
+	applyErr   error
+	getErr     error
+	closeErr   error
+	repointErr error
 }
 
 func newFakeBeads() *fakeBeads { return &fakeBeads{issues: map[string]core.Issue{}} }
@@ -167,6 +168,43 @@ func (f *fakeBeads) Apply(_ context.Context, proposals []core.Proposal) ([]core.
 		f.applied = append(f.applied, p)
 	}
 	return created, nil
+}
+
+func (f *fakeBeads) RepointDependents(_ context.Context, oldID, newID string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.repointErr != nil {
+		return f.repointErr
+	}
+	// Mirror the real client: every issue blocked-by oldID is rewritten to be blocked-by newID,
+	// dropping the old edge and keeping its other blockers. The successor itself is never made to
+	// depend on itself.
+	for id, is := range f.issues {
+		if id == newID {
+			continue
+		}
+		var deps []string
+		var depended, hasNew bool
+		for _, d := range is.DependsOn {
+			if d == oldID {
+				depended = true
+				continue
+			}
+			if d == newID {
+				hasNew = true
+			}
+			deps = append(deps, d)
+		}
+		if !depended {
+			continue
+		}
+		if !hasNew {
+			deps = append(deps, newID)
+		}
+		is.DependsOn = deps
+		f.issues[id] = is
+	}
+	return nil
 }
 
 func (f *fakeBeads) Reissue(_ context.Context, id string) error {

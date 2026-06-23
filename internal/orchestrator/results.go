@@ -674,8 +674,12 @@ func (o *Orchestrator) mergeCandidate(ctx context.Context, issue core.Issue, src
 // termination guarantee is breached — the retry cap (number of attempts) or the
 // cumulative per-issue budget (tokens/dollars those attempts burned). Otherwise it
 // creates a new fix issue at the stage's on_failure target carrying an incremented retry
-// generation and the new cumulative spend, and closes the original (its attempt is spent;
-// the retry lives as a new issue, keeping the issue graph acyclic — see specs/workflow.md).
+// generation and the new cumulative spend, and closes the original (its attempt is spent). The
+// retry lives as a *new* issue — for immutable per-attempt provenance, each attempt its own
+// auditable record — so it must inherit the original's DAG position: the original's blockers ride
+// onto the fix issue's Proposal.DependsOn, and the original's dependents are repointed onto the
+// fix issue (RepointDependents) before the original closes, or the route would sever an ordering
+// edge. See specs/workflow.md "A retry preserves its predecessor's DAG position".
 //
 // The two guards are complementary: the retry cap alone bounds how many attempts run but
 // not how much each burns, so a spec the factory cannot satisfy could otherwise consume
@@ -756,10 +760,23 @@ func (o *Orchestrator) route(ctx context.Context, issue core.Issue, stage config
 	}
 
 	created, err := o.applyTracked(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: bodyWithGateFeedback(issue.Body, findings), Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, SpentUsage: spentUsage, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
+		// DependsOn carries the predecessor's blockers onto the fix issue so the retry keeps its
+		// place in the DAG: a closed parent-plan link is a satisfied no-op, but a live sibling
+		// prerequisite still gates it. The reverse direction — the predecessor's dependents — is
+		// repointed below. See specs/workflow.md "A retry preserves its predecessor's DAG position".
+		DependsOn: issue.DependsOn,
+		Issue:     core.Issue{Title: issue.Title, Body: bodyWithGateFeedback(issue.Body, findings), Role: target.Role, Attempt: issue.Attempt + 1, Base: issue.Base, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, SpentUsage: spentUsage, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create on_failure fix issue from %s: %w", issue.ID, err)
+	}
+	// Move the failed issue's dependents onto the fix issue BEFORE closing it: readiness reads a
+	// closed blocker as satisfied, so a dependent left pointing at the closed-and-replaced
+	// predecessor would unblock and dispatch against work the retry has not done yet.
+	if len(created) > 0 {
+		if err := o.bd.RepointDependents(ctx, issue.ID, created[0].ID); err != nil {
+			return true, fmt.Errorf("repoint dependents of %s onto %s: %w", issue.ID, created[0].ID, err)
+		}
 	}
 	if err := o.transition(ctx, issue, statusClosed, func(ctx context.Context) error {
 		return o.bd.Close(ctx, issue.ID)
@@ -868,10 +885,22 @@ func (o *Orchestrator) resolveConflict(ctx context.Context, issue core.Issue, re
 	// along so the resolution stays on the epic's souls, keeps the traceability chain intact,
 	// and stays attributed to the same epic.
 	created, err := o.applyTracked(ctx, []core.Proposal{{
-		Issue: core.Issue{Title: issue.Title, Body: issue.Body, Role: rstage.Role, Attempt: issue.Attempt + 1, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, SpentUsage: spentUsage, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
+		// Inherit the predecessor's blockers (same DAG-position rule as route): the resolution is a
+		// new issue replacing the conflicted one, so its dependents (repointed below) and its
+		// blockers must follow it. See specs/workflow.md "A retry preserves its predecessor's DAG
+		// position".
+		DependsOn: issue.DependsOn,
+		Issue:     core.Issue{Title: issue.Title, Body: issue.Body, Role: rstage.Role, Attempt: issue.Attempt + 1, Base: res.Branch.Ref, Spec: issue.Spec, TraceMap: issue.TraceMap, Tags: issue.Tags, SpentTokens: spentTokens, SpentUSD: spentUSD, SpentWall: spentWall, SpentUsage: spentUsage, EpicID: epicOf(issue), TestsSoul: issue.TestsSoul, ImplementSoul: issue.ImplementSoul},
 	}})
 	if err != nil {
 		return true, fmt.Errorf("create conflict-resolution issue from %s: %w", issue.ID, err)
+	}
+	// Repoint the conflicted issue's dependents onto the resolution issue before closing it (the
+	// unblock-window reason in route applies identically).
+	if len(created) > 0 {
+		if err := o.bd.RepointDependents(ctx, issue.ID, created[0].ID); err != nil {
+			return true, fmt.Errorf("repoint dependents of %s onto %s: %w", issue.ID, created[0].ID, err)
+		}
 	}
 	if err := o.transition(ctx, issue, statusClosed, func(ctx context.Context) error {
 		return o.bd.Close(ctx, issue.ID)

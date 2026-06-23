@@ -98,3 +98,54 @@ func TestHandleResultGateFailThreadsFindingsIntoFixBody(t *testing.T) {
 		}
 	}
 }
+
+// TestRouteRetryPreservesDAGPosition asserts the fix from the 2026-06 vault-demo finding: a
+// retry must keep its predecessor's place in the issue-DAG. The fix issue inherits the failed
+// issue's blockers, and every issue that depended on the failed issue is repointed onto the fix
+// issue — not orphaned onto the now-closed predecessor (whose closure Ready reads as "blocker
+// satisfied", which would free the dependent to run against work the retry has not done). See
+// specs/workflow.md "A retry preserves its predecessor's DAG position".
+func TestRouteRetryPreservesDAGPosition(t *testing.T) {
+	bd := newFakeBeads()
+	// The failing issue carries its own blocker (e.g. a closed parent-plan link).
+	gen := inProgress("gen", "implement", 0)
+	gen.DependsOn = []string{"plan-x"}
+	bd.put(gen)
+	// A sibling that must land AFTER gen: it depends on gen plus an unrelated blocker.
+	bd.put(core.Issue{ID: "reveal", Title: "t", Role: "implement", Status: statusOpen, DependsOn: []string{"gen", "other"}})
+
+	failing := gate.Report{Passed: false, Checks: []gate.CheckResult{{Name: "tests-pass", Passed: false}}}
+	o, _ := newOrch(t, kernelConfig(2), bd, &fakeGate{report: failing}, &fakeMerger{})
+
+	if _, err := o.handleResult(context.Background(), core.Result{IssueID: "gen", Status: core.StatusDone, Branch: core.Branch{Ref: "candidate/gen"}}); err != nil {
+		t.Fatalf("handleResult: %v", err)
+	}
+
+	_, _, closed, _, applied := bd.snap()
+	if len(applied) != 1 {
+		t.Fatalf("applied = %+v, want one fix issue", applied)
+	}
+	// (1) The fix issue inherits the predecessor's blockers.
+	if got := applied[0].DependsOn; len(got) != 1 || got[0] != "plan-x" {
+		t.Errorf("fix issue DependsOn = %v, want [plan-x] (inherited)", got)
+	}
+	// (2) The predecessor is closed.
+	if !containsStr(closed, "gen") {
+		t.Errorf("closed = %v, want it to include the superseded issue gen", closed)
+	}
+	// (3) The dependent is repointed off the closed predecessor onto the fix issue (new-1),
+	//     keeping its unrelated blocker.
+	rev, err := bd.Get(context.Background(), "reveal")
+	if err != nil {
+		t.Fatalf("get reveal: %v", err)
+	}
+	if containsStr(rev.DependsOn, "gen") {
+		t.Errorf("dependent still blocked by the closed predecessor gen: %v", rev.DependsOn)
+	}
+	if !containsStr(rev.DependsOn, "new-1") {
+		t.Errorf("dependent not repointed onto the fix issue new-1: %v", rev.DependsOn)
+	}
+	if !containsStr(rev.DependsOn, "other") {
+		t.Errorf("dependent lost its unrelated blocker: %v", rev.DependsOn)
+	}
+}

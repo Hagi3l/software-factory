@@ -9,8 +9,10 @@ model:   "deepseek/deepseek-v4-flash"
 persona: souls/prompts/implementor.md
 tools:   [fs, shell, git]
 sandbox: vault-toolchain
-# Cap per-invocation turns below the kernel default (50), same rationale as the test-author:
-# fail a flailing implement attempt fast and route to its on_failure retry rather than burning
-# the full default before giving up. The inherited acceptance tests + the qa gate verify the
-# result independently, so the tighter cap trades only a doomed attempt's wasted minutes.
-max_tool_turns: 35
+# Cap per-invocation turns at the kernel default (50), matching the test-author. Implementing a
+# 4-layer vertical slice (store+web+views) and getting it green through the qa gate is as turn-
+# heavy as authoring the tests for it, so the earlier 35 risked starving a healthy attempt the
+# same way it did the test-author (a live run reached a valid red ~7 turns short of submitting).
+# The inherited acceptance tests + the qa gate still verify the result independently, and the
+# per-issue wall/budget caps remain the real backstop against a genuine flail.
+max_tool_turns: 50

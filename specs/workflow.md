@@ -196,6 +196,17 @@ qa:
 loop** — `qa → implement → qa → …`. The [issue graph](glossary.md#issue-dependency-graph)
 stays acyclic (each retry is a *new* issue), but the role flow can cycle.
 
+**A retry preserves its predecessor's DAG position.** Because each retry is a *new* issue,
+the orchestrator must carry the predecessor's edges onto it, or the `on_failure` route would
+silently sever an ordering edge the planner created. Both directions move: the fix issue
+**inherits the predecessor's blockers** (a closed parent-plan link is a satisfied no-op; a
+live sibling prerequisite still gates the retry), and the predecessor's **dependents are
+repointed onto the fix issue** *before* the predecessor is closed. Ordering matters: readiness
+reads a *closed* blocker as satisfied, so a dependent left pointing at the closed-and-replaced
+predecessor would unblock and dispatch against work the retry has not yet done. A
+conflict-resolution issue supersedes its predecessor the same way. (The new-issue-per-attempt
+design buys immutable per-attempt provenance; this is the cost it must pay back.)
+
 **Acyclicity does not guarantee termination.** A spec the factory cannot satisfy
 would loop forever. Termination is guaranteed only by:
 

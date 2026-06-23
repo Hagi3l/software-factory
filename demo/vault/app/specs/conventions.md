@@ -44,7 +44,10 @@ specs/                the specs (this directory)
 - **Sessions are hardened.** Cookies are `HttpOnly` + `SameSite=Strict`; protected routes
   go through the `auth` middleware.
 - **htmx fragments.** Partial updates (search results, reveal, row delete) return a templ
-  fragment, not a full page.
+  fragment, not a full page. Wire interactions with `hx-get` / `hx-post` / `hx-target`
+  attributes, **not** an `onclick` handler: a Go expression interpolated into an `onclick`
+  (or any `on*`) attribute is parsed by templ as a script expression and fails to generate —
+  reach for an `hx-*` attribute (a plain string) and let the handler return the fragment.
 - **Generated artifacts are committed.** After editing any `*.templ` or `assets/app.tw.css`,
   run `make generate` (templ + Tailwind) and commit the regenerated `*_templ.go` / `app.css`.
   A handler that references a component you have not regenerated will not compile in the gate.

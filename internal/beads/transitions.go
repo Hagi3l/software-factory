@@ -622,6 +622,54 @@ func (c *Client) Apply(ctx context.Context, proposals []core.Proposal) ([]core.I
 	return created, nil
 }
 
+// RepointDependents rewrites every blocked-by edge that targets oldID to target newID instead.
+// When the orchestrator supersedes a closed issue with a successor — a retry fix issue (route)
+// or a conflict-resolution issue (resolveConflict) — the successor inherits the predecessor's
+// own blockers via Proposal.DependsOn; this is the reverse-direction complement, moving the
+// predecessor's DEPENDENTS onto the successor so they wait on the replacement rather than being
+// orphaned onto the closed predecessor. Without it, Ready reads the predecessor's closure as
+// "blocker satisfied" and frees the dependent to dispatch against work the successor has not yet
+// done — silently severing an ordering edge the planner created (see specs/workflow.md "A retry
+// preserves its predecessor's DAG position").
+//
+// It must run BEFORE the predecessor is closed, and for each dependent it ADDS the new edge
+// before REMOVING the old: an interruption then leaves the dependent over-constrained (blocked by
+// both, safe since the old is closed-or-closing) rather than under-constrained (the unblock
+// window). Both halves are idempotent — an already-present new edge or an already-absent old edge
+// is skipped — so a redelivery re-running it is a no-op. A dependent that is the successor itself
+// is skipped (no self-edge). Like acceptPlan's parent-link probe it reads ListAll (there is no
+// by-dependency beads query); a supersede is a rare event, never on the hot dispatch path.
+func (c *Client) RepointDependents(ctx context.Context, oldID, newID string) error {
+	all, err := c.ListAll(ctx)
+	if err != nil {
+		return fmt.Errorf("beads: list all to repoint dependents of %s: %w", oldID, err)
+	}
+	for _, is := range all {
+		if is.ID == newID || !idIn(is.DependsOn, oldID) {
+			continue
+		}
+		if !idIn(is.DependsOn, newID) {
+			if _, err := c.run(ctx, []string{"dep", "add", is.ID, newID}); err != nil {
+				return fmt.Errorf("beads: repoint %s onto %s: %w", is.ID, newID, err)
+			}
+		}
+		if _, err := c.run(ctx, []string{"dep", "remove", is.ID, oldID}); err != nil {
+			return fmt.Errorf("beads: repoint %s off %s: %w", is.ID, oldID, err)
+		}
+	}
+	return nil
+}
+
+// idIn reports whether id is in ids.
+func idIn(ids []string, id string) bool {
+	for _, x := range ids {
+		if x == id {
+			return true
+		}
+	}
+	return false
+}
+
 // create makes one issue and returns its assigned ID. bd create --json emits a
 // single issue object (not an array, unlike ready/show).
 func (c *Client) create(ctx context.Context, issue core.Issue) (string, error) {

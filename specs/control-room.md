@@ -198,7 +198,12 @@ single-issue epic) gets none of this — the chrome would only be noise.
   instead shows as the root reaching `done` and the hero completing). Each connector is drawn in
   its epic colour (`var(--epic)`) and is **faint by default**; hovering or focusing a card
   **highlights the whole path through it** (its ancestors *and* descendants) and **dims** the
-  rest, so relationships are explorable without the board ever looking busy. Connectors **settle
+  rest, so relationships are explorable without the board ever looking busy. Both connector kinds
+  carry a small **direction dot** at their *downstream* end — the produced child for a lineage
+  thread, the waiting sibling for a waits-for edge — so an edge reads as a direction (prerequisite
+  → dependent) rather than an ambiguous line. The dot is the connector's colour and shares the
+  faint-by-default / highlight-on-hover treatment, so it sharpens on exactly the path being
+  inspected. Connectors **settle
   after** a card's View-Transitions move rather than chasing it mid-tween, and the layer redraws
   from the cards' stable ids on each live refetch; it draws statically under
   `prefers-reduced-motion`. Sibling-ordering edges (a planner's inter-child `blocked-by`) are

@@ -9,6 +9,13 @@
 // inherently a client job; it pulls in no graph library and the full blocker graph stays in the
 // server-side DAG view, this overlay being its at-a-glance subset for the work in motion.
 //
+// Both connector kinds carry a small DIRECTION DOT at their downstream end (a shared SVG marker,
+// marker-end): the produced child for a lineage thread, the waiting sibling for a waits-for edge.
+// The dot makes an edge read as a direction (prerequisite -> dependent) rather than an ambiguous
+// line. It takes the edge's own colour via the SVG `context-stroke` keyword (one marker, every
+// colour), and because per-edge fading is applied as the path element's group `opacity` — not
+// `stroke-opacity`, which a marker ignores — the dot fades and brightens in lockstep with its line.
+//
 // It needs no new data: the server stamps each card with data-parent (its producer, derived in
 // query.parentOf from the candidate base / decomposition root), data-waits-for (its intra-epic
 // sibling blockers, query.waitsForOf), and data-epic (the shared epic id), and publishes the epic's
@@ -157,6 +164,31 @@
     svg.style.cssText =
       'position:absolute;top:0;left:0;pointer-events:none;overflow:visible;z-index:0';
 
+    // One shared direction-dot marker for every edge. fill:context-stroke makes the dot take the
+    // referencing path's stroke (the edge's --epic colour) so a single marker serves all colours;
+    // the fill="currentColor" attribute is the fallback a browser without context-stroke uses (a
+    // visible monochrome dot, not black). markerUnits=strokeWidth scales it with the hover
+    // thickening, like the line. refX/refY centre it on the path end, so it anchors to the
+    // downstream card. A circle is rotation-symmetric, so no orient is needed.
+    const defs = document.createElementNS(SVG_NS, 'defs');
+    const marker = document.createElementNS(SVG_NS, 'marker');
+    marker.setAttribute('id', 'lineage-dot');
+    marker.setAttribute('viewBox', '0 0 8 8');
+    marker.setAttribute('refX', '4');
+    marker.setAttribute('refY', '4');
+    marker.setAttribute('markerWidth', '4');
+    marker.setAttribute('markerHeight', '4');
+    marker.setAttribute('markerUnits', 'strokeWidth');
+    const dot = document.createElementNS(SVG_NS, 'circle');
+    dot.setAttribute('cx', '4');
+    dot.setAttribute('cy', '4');
+    dot.setAttribute('r', '3');
+    dot.setAttribute('fill', 'currentColor'); // fallback
+    dot.style.fill = 'context-stroke'; // modern: the edge's own colour
+    marker.appendChild(dot);
+    defs.appendChild(marker);
+    svg.appendChild(defs);
+
     for (const e of edges) {
       const from = contentRect(cardEl(e.from), scroll, base);
       const to = contentRect(cardEl(e.to), scroll, base);
@@ -166,11 +198,17 @@
       path.setAttribute('stroke', e.color);
       path.setAttribute('stroke-width', '1.5');
       path.setAttribute('stroke-linecap', 'round');
-      path.setAttribute('stroke-opacity', FAINT);
+      // Fade via the element's group `opacity`, not `stroke-opacity`: group opacity composites the
+      // stroke AND the marker dot together, so the direction dot fades and brightens with its line
+      // (a marker ignores stroke-opacity and would otherwise float at full opacity over a faint line).
+      path.setAttribute('opacity', FAINT);
+      // The downstream direction dot (prerequisite -> dependent). Shared marker; takes this edge's
+      // colour via context-stroke. On both edge kinds — the producer thread and the waits-for edge.
+      path.setAttribute('marker-end', 'url(#lineage-dot)');
       // A dashed stroke distinguishes a "waits-for" ordering edge from a solid producer edge, so a
       // staggered sibling start reads as a dependency honored, not a stall (T10.4).
       if (e.dashed) path.setAttribute('stroke-dasharray', '5 4');
-      if (!reduceMotion) path.style.transition = 'stroke-opacity 150ms, stroke-width 150ms';
+      if (!reduceMotion) path.style.transition = 'opacity 150ms, stroke-width 150ms';
       path.dataset.from = e.from;
       path.dataset.to = e.to;
       svg.appendChild(path);
@@ -194,12 +232,12 @@
     }
     svg.querySelectorAll('path').forEach((path) => {
       if (!nodes) {
-        path.setAttribute('stroke-opacity', FAINT);
+        path.setAttribute('opacity', FAINT);
         path.setAttribute('stroke-width', '1.5');
         return;
       }
       const on = nodes.has(path.dataset.from) && nodes.has(path.dataset.to);
-      path.setAttribute('stroke-opacity', on ? BRIGHT : DIM);
+      path.setAttribute('opacity', on ? BRIGHT : DIM);
       path.setAttribute('stroke-width', on ? '2.5' : '1.5');
     });
   }

@@ -55,6 +55,12 @@ type Beads interface {
 	// RecordApproval stamps a human's approval (who, which candidate sha) on a parked issue.
 	RecordApproval(ctx context.Context, id, approvedRef, approver string) error
 	Apply(ctx context.Context, proposals []core.Proposal) ([]core.Issue, error)
+	// RepointDependents moves every blocked-by edge from a superseded predecessor (oldID) onto its
+	// successor (newID) when route/resolveConflict replace a closed issue, so its dependents wait on
+	// the replacement instead of being freed by the predecessor's closure. It is the reverse-
+	// direction complement to the successor inheriting the predecessor's own blockers via
+	// Proposal.DependsOn (see specs/workflow.md "A retry preserves its predecessor's DAG position").
+	RepointDependents(ctx context.Context, oldID, newID string) error
 	PinSpecHash(ctx context.Context, id, hash string) error
 	Reissue(ctx context.Context, id string) error
 	// ListAll returns every issue regardless of status (including closed). It is the cold-start

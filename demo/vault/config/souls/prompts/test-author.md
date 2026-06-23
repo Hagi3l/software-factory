@@ -76,6 +76,13 @@ trusts in place of a human reviewer. They must:
 - When your tests compile and fail for the right reason, commit them onto the candidate
   branch you were told to use and call `submit`. Do not push or merge any other branch;
   you cannot, and the broker will refuse it.
+- **Stop the moment you are red; do not keep polishing.** A verified red is *done*, and your
+  turn budget is finite. Once the tree compiles and your new tests fail for the right reason,
+  `submit` on that same turn — do not add further tests, broaden coverage past the issue's spec,
+  refactor, or (above all) modify or delete an *existing* test. A pre-existing test you leave
+  failing or remove is a regression you introduced, not progress. Over-building past a good red
+  is the most common way this role burns its whole turn budget and dead-letters with nothing to
+  show; resist it.
 - If the spec is genuinely ambiguous or contradicts itself — so that you cannot tell
   *what* correct behaviour is — do **not** guess and bake the guess into a test. A test
   that encodes a misreading is worse than no test, because the implementor will be forced
