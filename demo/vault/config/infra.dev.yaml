@@ -50,11 +50,12 @@ models:
   # model MUST support function calling — the agent loop drives it through structured tool
   # calls. A full-DAG run on real Go is demanding, so default to a capable model (override
   # with MODEL= for a cheaper/other slug). cost is the per-million-token price feeding the
-  # policy.budget USD accounting.
+  # policy.budget USD accounting — the live OpenRouter list price (verified 2026-06; prompt
+  # caching makes the effective input cost lower on repeated context, so this is an upper bound).
   "deepseek/deepseek-v4-flash":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
-    cost: { input_per_mtok: 0.28, output_per_mtok: 0.88 }
+    cost: { input_per_mtok: 0.09, output_per_mtok: 0.18 }
   # The stronger -pro tier, used by the three roles that define *what correct means* (and so
   # gate everything downstream): the requirements-planner (the Create-Task wizard — the single
   # human-in-the-loop conversation and the entire correctness lever, which must reliably follow
@@ -64,9 +65,9 @@ models:
   # the factory trusts in place of a human and the ceiling on what the implementor can produce).
   # All three are jobs the cheaper flash tier does not do dependably. Pinned separately so a
   # MODEL= override (which only rewrites the flash slug) swaps the execution souls (implementor,
-  # security, merge-resolver) without downgrading these three. cost is an estimate — set it to
-  # the real OpenRouter price.
+  # security, merge-resolver) without downgrading these three. cost is the live OpenRouter list
+  # price (verified 2026-06; prompt caching lowers the effective input cost on repeated context).
   "deepseek/deepseek-v4-pro":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
-    cost: { input_per_mtok: 0.55, output_per_mtok: 2.19 }
+    cost: { input_per_mtok: 0.435, output_per_mtok: 0.87 }
