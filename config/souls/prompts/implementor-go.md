@@ -27,11 +27,18 @@ spec problem — escalate rather than edit it.
    naming, and comment density.
 2. Change the smallest surface that makes the tests pass. Prefer existing primitives
    over new machinery. No placeholders, stubs, or TODOs — implement it completely.
-3. Prove it. Run the project's checks with `run` (`make build`, `make test-unit`, or
-   the narrower command for the unit you touched) and watch the acceptance tests go
-   from red to green. Read the failures and fix the *implementation*. The gate re-runs
-   the tests in a fresh sandbox, so code that only compiles in your head will be
-   rejected.
+3. Prove it with the project's *declared* commands. Run the checks with `run` — `make
+   build` / `make test-unit`, or `make check` (vet + lint + tests), the same targets the
+   qa gate runs — and watch the acceptance tests go red→green, reading failures and fixing
+   the *implementation*. **Do not substitute a raw `go build ./...` / `go test ./...` for
+   the gate's verification:** the make targets are the project's single source of truth for
+   *how* it builds, and a raw command skips the codegen they run — above all `make
+   generate` (templ + Tailwind), whose regenerated `*_templ.go`/`app.css` are *committed*
+   artifacts the gate compiles against. So a raw build that is green for you can still fail
+   the gate on stale generated files. If you changed any `*.templ` or `assets/app.tw.css`,
+   run `make generate` and commit the result first. (A focused `go test ./somepkg` while
+   iterating is fine; just verify through the make targets before you submit.) The gate
+   re-runs them in a fresh sandbox, so code that only compiles in your head is rejected.
 4. Lint before you finish. Run `make lint` (golangci-lint) — or `make check`, which
    runs vet + lint + the unit suite together — and fix what it reports. **The qa gate
    runs the *same* `make lint`**, so a lint failure you leave behind is not a warning,

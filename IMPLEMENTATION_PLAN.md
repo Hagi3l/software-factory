@@ -943,14 +943,32 @@ are clarity/discipline. **A clean re-run gates T10's close** (and re-opens the #
   **pre-existing unrelated test failure** from commit c85db51 (`configview.TestBuildSurfacesWarnings`
   asserted the old `provider "anthropic"` wording; the diversity warning now says `model family`).
   ([control-room.md](specs/control-room.md) "The board, in motion")
-- [ ] **T10.5 Agent build-command discipline** *(persona/conventions, not a core-spec change)* — the
-  souls verified with raw `go build ./...` rather than the project's declared make targets, risking a
-  skipped `make generate` (stale `*_templ.go` → qa-gate compile failure) even though
-  `demo/vault/app/specs/conventions.md` documents the targets and they ride every Brief via
-  `ambient_specs`. Steer the implementor/test-author personas (and/or the stage `criteria`) to the
-  project's declared verification commands. **No core-spec change** — the kernel is language-neutral
-  by design and must not mandate `make`; this is demo-conventions + persona text, adjacent to Phase
-  9's agent-context-discipline theme.
+- [x] **T10.5 Agent build-command discipline** *(persona/conventions, not a core-spec change)* —
+  *done.* Root cause was in the persona text, not the conventions: the implementor step 3 listed
+  `make build`/`make test-unit` but trailed it with "*or the narrower command for the unit you
+  touched*", which invited a raw `go build ./...` — and a raw build **skips `make generate`**, so a
+  stale committed `*_templ.go` compiles green for the soul yet fails the qa gate's build. Reworked
+  the self-check step in **all four** affected personas (implementor + test-author, in both
+  `config/souls/prompts/` and `demo/vault/config/souls/prompts/`, kept in sync): verify with the
+  project's **declared** make targets (`make build`/`make test-unit`/`make check` — the same the qa
+  gate runs), **never substitute a raw `go build ./...` / `go test ./...`** for gate verification,
+  with the *why* spelled out — the make targets are the single source of truth for how the project
+  builds and run the codegen (`make generate`: templ + Tailwind) whose committed `*_templ.go`/
+  `app.css` the gate compiles against, so a raw build can pass for you and still fail the gate on
+  stale generated files. A focused `go test ./somepkg` while iterating is explicitly still fine; the
+  discipline is "verify through the make targets before you submit." The shipped `implementor-go.md`
+  also gained the `make generate` note it previously lacked (the harness self-host repo is itself
+  Go + templ). **No core-spec change** — the kernel stays language-neutral (it must not mandate
+  `make`); this is persona/config text, and the conventions.md "Gate"/"Generated artifacts" sections
+  (which ride every Brief via `ambient_specs`) already named the targets. No CLI/config-shape/view
+  change, so no docs/ update. Verified: `harness validate` on both configs = OK (only the pre-existing
+  T2.13 family advisory); persona content is not test-asserted (validation checks
+  existence/readability only). ([control-room.md](specs/control-room.md), [verification.md](specs/verification.md))
+
+**Phase 10 build items (T10.1–T10.5) are complete.** The remaining gate on closing the phase is a
+**clean `./demo/vault` re-run** (re-opens the #6 turn-budget question and verifies the board no longer
+shows `open`/`queued` on active work) — a runtime validation, not a build item, blocked only on a live
+run (Docker + a capable model).
 
 **Carried forward / not separate tasks:** `trace_test` (list item #1) is **not a bug** — it is the
 test-author's test↔spec traceability tool (`verification.md`, `components/agent.md`); no change. The

@@ -63,9 +63,13 @@ trusts in place of a human reviewer. They must:
    the same reasoning visible in the code. This is the only window a human has into how you
    read the prose, so trace honestly: name the sentence the test *actually* encodes, not
    the one you wish it did. It makes your interpretation auditable when something slips.
-4. Prove they are red. Run the project's acceptance-test command with `run` (e.g.
-   `make test-unit`) and read the output: the suite must fail *on your new assertions*.
-   Fix tests that fail to compile or fail for the wrong reason.
+4. Prove they are red with the project's *declared* command. Run the acceptance-test
+   target with `run` — `make test-unit`, the same target the gate runs, not a raw
+   `go test ./...` — and read the output: the suite must fail *on your new assertions*,
+   not at compile time. (If your compiling skeleton touched a `*.templ`, run `make
+   generate` first — a raw `go test` skips that codegen and would diverge from the gate's
+   build of the committed `*_templ.go`.) Fix tests that fail to compile or fail for the
+   wrong reason.
 
 ## Finishing
 
