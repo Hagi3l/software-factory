@@ -83,10 +83,15 @@ func (c *Config) warnGitPush(warn func(string, ...any)) {
 // N-version independence verification.md recommends — but model choice is the operator's,
 // so this is advisory, never fatal (it is why the warning channel exists, T2.13).
 //
-// Family is keyed on the configured provider (anthropic / openai / openai-compat), a
-// deliberate approximation: it cannot tell two openai-compat endpoints (genuinely
-// distinct families behind one provider tag) apart, so the message says so when the
-// shared provider is openai-compat rather than over-engineering a per-endpoint identity.
+// Family is the org that trained the weights (the correlated-blind-spot unit), derived per
+// model by ModelFamily: an explicit `family:`, else the vendor prefix of a "vendor/model"
+// aggregator slug ("deepseek/deepseek-v4-pro" → "deepseek"), else the provider tag. This is
+// what makes the check accurate behind a gateway like OpenRouter, where every model shares
+// one openai-compat provider yet the slug still names distinct vendors — so a deepseek
+// producer and an anthropic verifier (both openai-compat) correctly read as different
+// families. The only residual blind spot is a *bare-slug* openai-compat model (an Ollama
+// endpoint serving several models under non-vendored ids), which falls back to the provider
+// tag; the message says so and points at `family:` to disambiguate.
 //
 // Verifiers are scoped to the producer's produces-descendants, not "every gate stage", so
 // (a) a non-gate stage inserted between implement and qa does not hide the overlap, and
@@ -102,8 +107,8 @@ func (c *Config) warnModelDiversity(warn func(string, ...any)) {
 		if !c.isProducerStage(pst) {
 			continue
 		}
-		producerProviders := c.roleProviders(pst.Role)
-		if len(producerProviders) == 0 {
+		producerFamilies := c.roleFamilies(pst.Role)
+		if len(producerFamilies) == 0 {
 			continue
 		}
 		for _, vname := range sortedSet(c.downstreamStages(pname)) {
@@ -111,14 +116,14 @@ func (c *Config) warnModelDiversity(warn func(string, ...any)) {
 			if !c.isGateStage(vst) || vst.Role == pst.Role {
 				continue
 			}
-			verifierProviders := c.roleProviders(vst.Role)
-			for _, prov := range sharedProviders(producerProviders, verifierProviders) {
+			verifierFamilies := c.roleFamilies(vst.Role)
+			for _, fam := range sharedKeys(producerFamilies, verifierFamilies) {
 				note := ""
-				if prov == ProviderOpenAICompat {
-					note = " (family is keyed on provider, so two openai-compat endpoints read as the same family even when they are not)"
+				if fam == ProviderOpenAICompat {
+					note = " (these are bare-slug openai-compat models whose vendor can't be inferred from the slug, so they fall back to the provider tag and read as one family — set `family:` on the registry entry to declare the real vendor)"
 				}
-				warn("producer role %q and verifier role %q both resolve to model provider %q; a same-family producer and verifier share correlated blind spots, weakening the N-version independent verification specs/verification.md recommends — point the verifier at a different model family%s",
-					pst.Role, vst.Role, prov, note)
+				warn("producer role %q and verifier role %q both resolve to model family %q; a same-family producer and verifier share correlated blind spots, weakening the N-version independent verification specs/verification.md recommends — point the verifier at a different model family%s",
+					pst.Role, vst.Role, fam, note)
 			}
 		}
 	}
@@ -173,21 +178,24 @@ func (c *Config) runsGateCheck(pc string) bool {
 	return isMetricComparison(pc)
 }
 
-// roleProviders is the set of model providers the souls fulfilling a role resolve to, via
-// core.Soul.Model → the infra model registry → ModelProvider.Provider. A role may map to
-// several souls (selector-based), so it is a set; a soul whose model is unregistered
-// (already a Validate error) or whose registry entry has no provider is skipped.
-func (c *Config) roleProviders(role string) map[string]bool {
-	provs := map[string]bool{}
+// roleFamilies is the set of model families the souls fulfilling a role resolve to, via
+// core.Soul.Model → the infra model registry → ModelProvider.ModelFamily (the trainer org,
+// not the gateway provider — see warnModelDiversity). A role may map to several souls
+// (selector-based), so it is a set; a soul whose model is unregistered (already a Validate
+// error) or whose entry yields no family (no provider and no inferable vendor) is skipped.
+func (c *Config) roleFamilies(role string) map[string]bool {
+	fams := map[string]bool{}
 	for _, s := range c.Souls {
 		if s.Role != role {
 			continue
 		}
-		if mp, ok := c.Infra.Models[s.Model]; ok && mp.Provider != "" {
-			provs[mp.Provider] = true
+		if mp, ok := c.Infra.Models[s.Model]; ok {
+			if fam := mp.ModelFamily(s.Model); fam != "" {
+				fams[fam] = true
+			}
 		}
 	}
-	return provs
+	return fams
 }
 
 // downstreamStages returns the set of stage names reachable from start by following
@@ -210,8 +218,8 @@ func (c *Config) downstreamStages(start string) map[string]bool {
 	return seen
 }
 
-// sharedProviders returns the sorted intersection of two provider sets.
-func sharedProviders(a, b map[string]bool) []string {
+// sharedKeys returns the sorted intersection of two string sets.
+func sharedKeys(a, b map[string]bool) []string {
 	var shared []string
 	for p := range a {
 		if b[p] {

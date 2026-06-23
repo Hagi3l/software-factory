@@ -246,7 +246,13 @@ item.
 > recommends* running the verifier on a different model family than the producer, but
 > the assignment is yours — it's a config capability, not a built-in mechanism.
 > `harness validate` emits a non-fatal **warning** if a producer and its verifier share
-> a model family.
+> a model family. Family is the **trainer org**, not the provider adapter: a model served
+> through an aggregating gateway (e.g. OpenRouter — every model is one `openai-compat`
+> entry) is identified by the `vendor/` prefix of its slug (`deepseek/deepseek-v4-pro` →
+> `deepseek`), so two genuinely different vendors behind one gateway are *not* falsely
+> flagged, and two tiers of the same vendor (deepseek flash vs pro) still are. For a
+> bare-slug `openai-compat` model with no vendor in its key, set `family:` on the registry
+> entry to declare it (see below).
 
 ## `infra.<env>.yaml` — the infrastructure overlay
 
@@ -304,7 +310,10 @@ models:
   (`anthropic`, `openai`, or `openai-compat` with an `endpoint`) and an optional `cost`
   block — the per-million-token price table the orchestrator uses to convert recorded
   token usage into USD for budget enforcement. Prices are not secrets; API keys come
-  from the environment.
+  from the environment. An optional `family:` declares the model's trainer org for the
+  diversity warning above — only needed for a bare-slug `openai-compat` model (an
+  aggregator `vendor/model` slug and the direct `anthropic`/`openai` providers are
+  identified automatically) or to override the inferred value.
 - **`sandbox.backend`** selects the isolation backend and is honored at startup (not
   decorative): `docker` (the bootstrap default — weak shared-kernel isolation, dev only)
   and `gvisor` (medium-trust: the same container boot pinned to the `runsc` runtime, so

@@ -3,6 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/Loxstomper/harness/internal/core"
 )
@@ -304,6 +305,38 @@ type ModelProvider struct {
 	Provider string    `yaml:"provider"`           // one of the Provider* constants
 	Endpoint string    `yaml:"endpoint,omitempty"` // base URL for openai-compat backends (Ollama/vLLM)
 	Cost     ModelCost `yaml:"cost,omitempty"`     // per-million-token price, the tokens→USD table
+	// Family optionally declares the model's correlated-blind-spot family — the org that
+	// trained the weights (deepseek, anthropic, …) — for the N-version producer/verifier
+	// diversity warning (T2.13). It is only needed to disambiguate models whose registry
+	// key does not already carry the vendor: an aggregator slug ("deepseek/deepseek-v4-pro"
+	// behind one openai-compat endpoint) derives the family from the slug prefix
+	// automatically, so this is for bare-slug compat models (two distinct Ollama models on
+	// one endpoint) or to override the inferred value. Not a secret; see ModelFamily.
+	Family string `yaml:"family,omitempty"`
+}
+
+// ModelFamily returns the correlated-blind-spot family key for a registry entry under name
+// (the soul's model id). The family is the organization that trained the weights — that is
+// what shares blind spots — NOT the gateway that serves them, so an aggregator like
+// OpenRouter (every model behind one openai-compat endpoint) must not collapse genuinely
+// distinct vendors into one family. Resolution, most-authoritative first:
+//
+//  1. an explicit `family:` on the entry (the operator's declared truth);
+//  2. the vendor prefix of a "vendor/model" slug ("deepseek/deepseek-v4-pro" → "deepseek"),
+//     which OpenRouter and similar aggregators always carry;
+//  3. the provider tag (anthropic/openai are themselves single vendors; a bare-slug
+//     openai-compat model has no inferable vendor, so it falls back here — the residual
+//     imperfection the diversity warning still flags, resolvable with an explicit family:).
+//
+// Lowercased so "DeepSeek/…" and "deepseek/…" agree.
+func (mp ModelProvider) ModelFamily(name string) string {
+	if mp.Family != "" {
+		return strings.ToLower(mp.Family)
+	}
+	if i := strings.IndexByte(name, '/'); i > 0 {
+		return strings.ToLower(name[:i])
+	}
+	return mp.Provider
 }
 
 // ModelCost is a model's per-million-token price: the table that converts a recorded

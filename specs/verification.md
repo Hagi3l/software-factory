@@ -97,9 +97,18 @@ diversity but leaves the model assignment to the user who configures the pipelin
 
 Because same-family producer/verifier is weaker independence, config validation
 **should warn** (non-fatal) when a verifier role shares a model family with the
-producer — keyed on family/provider, not just an identical model id. The warning's
-natural home is `harness validate` (so yaml-only users see it); a control-room
-tooltip is a complementary surface once a souls/config view exists.
+producer — keyed on family, not just an identical model id. **Family is the
+organization that trained the weights** (the correlated-blind-spot unit), *not* the
+provider adapter that serves them: behind an aggregating gateway (e.g. OpenRouter,
+where every model is one `openai-compat` provider/endpoint) the vendor still lives in
+the model slug, so the family is derived from the slug's `vendor/` prefix
+(`deepseek/deepseek-v4-pro` → `deepseek`), falling back to the provider tag only for a
+bare-slug model with no inferable vendor, and overridable by an explicit `family:` on
+the registry entry ([configuration.md](configuration.md)). Keying on the gateway alone
+would both miss genuine same-family overlap and falsely flag a deepseek-vs-anthropic
+split that happens to share one gateway. The warning's natural home is `harness
+validate` (so yaml-only users see it); a control-room tooltip is a complementary
+surface once a souls/config view exists.
 
 ### Producer self-checks are feedback, not grades
 

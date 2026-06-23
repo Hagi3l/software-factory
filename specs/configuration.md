@@ -289,6 +289,16 @@ The `models` registry maps the `model` name a soul declares to a provider adapte
 see [models.md](models.md). Keys are injected from the environment, never written
 into config files.
 
+The optional `family:` field declares a model's **correlated-blind-spot family** — the
+organization that trained the weights — for the producer/verifier diversity warning
+([verification.md](verification.md)). It is only needed when the registry key does not
+already carry the vendor: an aggregator slug (`deepseek/deepseek-v4-pro` served via an
+`openai-compat` gateway like OpenRouter) derives the family from the `vendor/` prefix
+automatically, and a direct `anthropic`/`openai` provider is itself one vendor — so
+`family:` is for a **bare-slug** `openai-compat` model (e.g. two distinct Ollama models on
+one endpoint, which would otherwise both fall back to the provider tag and read as one
+family) or to override the inferred value. Not a secret; it lives in config.
+
 The optional `cost` block is the **per-million-token price** — the table that converts a
 recorded token `Usage` into USD so the orchestrator can enforce the dollar half of the
 [budget](workflow.md) that bounds the `on_failure` loop. Each dimension (full-rate input,
@@ -371,8 +381,11 @@ The known advisories are:
 
 - **Producer/verifier model-family overlap** — the verifier role shares a model family
   with the producer, weakening the N-version independence
-  [verification.md](verification.md) recommends (correlated blind spots). The model
-  assignment is the operator's call, so this is advised, never forced.
+  [verification.md](verification.md) recommends (correlated blind spots). Family is the
+  trainer org, derived per model from `family:`, else the aggregator slug's `vendor/`
+  prefix, else the provider tag — so two models behind one gateway (OpenRouter) are still
+  compared by their real vendor. The model assignment is the operator's call, so this is
+  advised, never forced.
 - **A package proxy named but not on the broker allowlist** — dead config: the named
   proxy is unreachable, and package fetches are denied deny-by-default
   ([security.md](security.md) Control 2).

@@ -85,7 +85,7 @@ func TestWarnSameProviderProducerVerifier(t *testing.T) {
 	ws := c.Warnings()
 	mustWarn(t, ws, `producer role "implementor"`)
 	mustWarn(t, ws, `verifier role "security"`)
-	mustWarn(t, ws, `provider "anthropic"`)
+	mustWarn(t, ws, `family "anthropic"`)
 }
 
 // A verifier on a different provider than the producer is exactly the recommended
@@ -132,10 +132,12 @@ func TestWarnNeverFailsValidate(t *testing.T) {
 	}
 }
 
-// Family is keyed on the provider tag, so two distinct openai-compat endpoints read as the
-// same family. The advisory says so when the shared provider is openai-compat, naming the
-// known imperfection rather than over-engineering a per-endpoint identity.
-func TestWarnOpenAICompatNotesEndpointBlindSpot(t *testing.T) {
+// A *bare-slug* openai-compat model carries no vendor in its registry key, so its family
+// falls back to the provider tag — two distinct such models then read as one family. The
+// advisory names this residual blind spot and points at `family:` to disambiguate (the
+// aggregator-slug case, where the vendor IS in the key, is handled accurately — see
+// TestNoWarnDifferentVendorBehindOneGateway).
+func TestWarnBareSlugOpenAICompatNotesVendorBlindSpot(t *testing.T) {
 	c := validConfig()
 	c.Infra.Models["local-a"] = ModelProvider{Provider: ProviderOpenAICompat, Endpoint: "http://a:11434/v1"}
 	c.Infra.Models["local-b"] = ModelProvider{Provider: ProviderOpenAICompat, Endpoint: "http://b:11434/v1"}
@@ -144,8 +146,79 @@ func TestWarnOpenAICompatNotesEndpointBlindSpot(t *testing.T) {
 	setRoleModel(souls, "security", "local-b")
 	c.Souls = souls
 	ws := c.Warnings()
-	mustWarn(t, ws, `provider "openai-compat"`)
-	mustWarn(t, ws, "openai-compat endpoints read as the same family")
+	mustWarn(t, ws, `family "openai-compat"`)
+	mustWarn(t, ws, "set `family:` on the registry entry")
+}
+
+// The headline OpenRouter fix: two models served by ONE openai-compat gateway (same
+// provider, same endpoint) but naming DIFFERENT vendors in their "vendor/model" slugs are
+// genuinely different families, so the producer/verifier diversity check must NOT warn —
+// the old provider-keyed heuristic falsely flagged this.
+func TestNoWarnDifferentVendorBehindOneGateway(t *testing.T) {
+	c := validConfig()
+	const ep = "https://openrouter.ai/api/v1"
+	c.Infra.Models["deepseek/deepseek-v4-flash"] = ModelProvider{Provider: ProviderOpenAICompat, Endpoint: ep}
+	c.Infra.Models["anthropic/claude-3.5-sonnet"] = ModelProvider{Provider: ProviderOpenAICompat, Endpoint: ep}
+	souls := fullSouls(t)
+	setRoleModel(souls, "implementor", "deepseek/deepseek-v4-flash")
+	setRoleModel(souls, "security", "anthropic/claude-3.5-sonnet")
+	c.Souls = souls
+	mustNotWarn(t, c.Warnings())
+}
+
+// Conversely, two slugs from the SAME vendor behind one gateway (deepseek flash vs pro —
+// the vault demo's actual shape) share a family and must warn, named by the vendor prefix
+// rather than the gateway provider.
+func TestWarnSameVendorBehindOneGateway(t *testing.T) {
+	c := validConfig()
+	const ep = "https://openrouter.ai/api/v1"
+	c.Infra.Models["deepseek/deepseek-v4-flash"] = ModelProvider{Provider: ProviderOpenAICompat, Endpoint: ep}
+	c.Infra.Models["deepseek/deepseek-v4-pro"] = ModelProvider{Provider: ProviderOpenAICompat, Endpoint: ep}
+	souls := fullSouls(t)
+	setRoleModel(souls, "implementor", "deepseek/deepseek-v4-flash")
+	setRoleModel(souls, "security", "deepseek/deepseek-v4-pro")
+	c.Souls = souls
+	mustWarn(t, c.Warnings(), `family "deepseek"`)
+}
+
+// An explicit `family:` is the operator's declared truth and wins over the slug/provider
+// inference — here it collapses two different-vendor slugs into one declared family, so the
+// check warns; the inverse (declaring two bare-slug models distinct) is what clears the
+// fallback blind spot in TestWarnBareSlugOpenAICompatNotesVendorBlindSpot.
+func TestExplicitFamilyOverridesInference(t *testing.T) {
+	c := validConfig()
+	const ep = "https://openrouter.ai/api/v1"
+	c.Infra.Models["deepseek/deepseek-v4-flash"] = ModelProvider{Provider: ProviderOpenAICompat, Endpoint: ep, Family: "house"}
+	c.Infra.Models["anthropic/claude-3.5-sonnet"] = ModelProvider{Provider: ProviderOpenAICompat, Endpoint: ep, Family: "house"}
+	souls := fullSouls(t)
+	setRoleModel(souls, "implementor", "deepseek/deepseek-v4-flash")
+	setRoleModel(souls, "security", "anthropic/claude-3.5-sonnet")
+	c.Souls = souls
+	mustWarn(t, c.Warnings(), `family "house"`)
+}
+
+// ModelFamily resolves most-authoritative-first: explicit family, then aggregator-slug
+// vendor prefix, then the provider tag — and lowercases the result.
+func TestModelFamily(t *testing.T) {
+	cases := []struct {
+		name  string
+		mp    ModelProvider
+		model string
+		want  string
+	}{
+		{"explicit family wins", ModelProvider{Provider: ProviderOpenAICompat, Family: "DeepSeek"}, "anything/x", "deepseek"},
+		{"slug vendor prefix", ModelProvider{Provider: ProviderOpenAICompat}, "Deepseek/deepseek-v4-pro", "deepseek"},
+		{"direct provider, bare slug", ModelProvider{Provider: ProviderAnthropic}, "claude-opus-4-8", "anthropic"},
+		{"bare-slug compat falls back to provider", ModelProvider{Provider: ProviderOpenAICompat}, "llama3", "openai-compat"},
+		{"leading slash is not a vendor prefix", ModelProvider{Provider: ProviderOpenAI}, "/weird", "openai"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.mp.ModelFamily(tc.model); got != tc.want {
+				t.Fatalf("ModelFamily(%q) = %q, want %q", tc.model, got, tc.want)
+			}
+		})
+	}
 }
 
 // A role may resolve to several souls (selector-based), so the producer/verifier
@@ -173,7 +246,7 @@ func TestWarnRoleProviderSetIntersection(t *testing.T) {
 	if err := c.Validate(); err != nil {
 		t.Fatalf("config should be valid: %v", err)
 	}
-	mustWarn(t, c.Warnings(), `provider "anthropic"`)
+	mustWarn(t, c.Warnings(), `family "anthropic"`)
 }
 
 // The conflict-spawned resolve stage is gated but is not produced by implement and does
