@@ -121,6 +121,37 @@ in the [Brief](components/agent.md#the-brief). The slice is assembled determinis
 so it can be content-hashed for version pinning (below). An issue naming no spec gets no
 slice and the agent falls back to the tree in its worktree.
 
+### Ambient specs
+
+The bounded slice is issue-scoped — it carries the *contract*. But a project's
+**conventions and gotchas** (parameterized-SQL-only, `crypto/rand` for tokens, "run
+`make generate` after editing a `.templ`", "no new modules — the sandbox is zero-network")
+are not specific to one issue, and a stateless agent that never sees them rediscovers them
+every run, or trips one and dead-letters. Reaching them via cross-links is fragile: a
+conventions file two hops from the governing spec falls outside `spec_depth`, and raising
+`spec_depth` to reach it taxes *every* slice.
+
+So a project may declare a small set of **ambient specs** — files injected into **every**
+agent's [Brief](components/agent.md#the-brief) regardless of the issue, via the
+`ambient_specs` list (see [configuration.md](configuration.md)). The convention is two
+anchors: the `specs/README.md` **index** (the navigational map — from it the agent can
+`read_file` any other spec in its worktree) and a `specs/conventions.md` (the engineering
+conventions and pitfalls). This yields a three-layer context model:
+
+1. **Ambient** — `ambient_specs`, the same for every issue project-wide (map + conventions).
+2. **Slice** — the issue's governing spec + its `spec_depth` neighbours (the contract).
+3. **On-demand** — everything else, reached from the index via `read_file` in the worktree.
+
+Ambient specs are **opt-in** (the list defaults empty — a project sets it explicitly) and
+must be kept **lean**, because they ride in every invocation; the index in particular should
+be a thin hub of pointers, not a content dump. They are prepended **ahead of** the
+issue-scoped slice — the most stable prefix across all of a project's invocations, which the
+[model layer](models.md)'s prompt cache reuses — de-duplicated against the slice (an ambient
+file that is already the governing spec or a neighbour is not injected twice), and they are
+part of the deterministic bytes the content hash covers, so a conventions edit is pinned in
+provenance exactly like a contract edit. Because ambient delivery no longer depends on
+cross-link reachability, `spec_depth` can stay low.
+
 ---
 
 ## Spec drift

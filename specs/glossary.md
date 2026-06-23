@@ -180,6 +180,13 @@ An agent's identity package: name, role, model, persona/prompt, tools, sandbox
 profile. Stateless — carries no cross-task memory. Souls fulfil roles. See
 [components/agent.md](components/agent.md), [configuration.md](configuration.md).
 
+### Ambient specs
+Spec files injected into **every** agent's [Brief](components/agent.md#the-brief)
+regardless of the issue — conventionally a project's spec index and its conventions doc —
+so a stateless agent always carries the project's map and conventions, not just one issue's
+contract. Opt-in via `ambient_specs`; prepended to and de-duplicated against the
+[spec slice](#spec-slice). See [specs-process.md](specs-process.md#ambient-specs).
+
 ### Spec slice
 The bounded portion of the `specs/` tree handed to an agent: the referenced file
 plus its linked neighbours to a depth, not the whole tree. See

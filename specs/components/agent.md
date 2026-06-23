@@ -60,7 +60,11 @@ The **spec slice** is bounded: the referenced spec file plus its linked neighbou
 to a configured depth — *not* the whole `specs/` tree, which would blow context
 and dilute focus. The orchestrator resolves it from the issue's structured spec
 reference (a repo-relative path threaded forward across the epic) and embeds it here,
-so the agent receives the contract in-context rather than reading the tree. The Brief
+so the agent receives the contract in-context rather than reading the tree. When the
+project declares [`ambient_specs`](../configuration.md), those files (conventionally the
+spec index and the conventions doc) are **prepended** to the slice — the same for every
+issue, so the agent always carries the project's map and conventions, not just one issue's
+contract (see [specs-process.md](../specs-process.md#ambient-specs)). The Brief
 also pins the slice's **content hash** (stored on the issue), recording the exact spec
 version the work was derived from for drift detection. See
 [../specs-process.md](../specs-process.md).

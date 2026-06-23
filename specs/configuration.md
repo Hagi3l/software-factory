@@ -53,6 +53,7 @@ checks:                          # command-check postcondition -> shell command
 independent_checks: [gosec, govulncheck, license-scan]   # run past a failure (see below)
 
 spec_depth: 1                    # spec-slice link-hop horizon (see below)
+ambient_specs: []                # files injected into every Brief (see below); opt-in
 
 policy:
   max_retries: 3
@@ -66,6 +67,13 @@ policy:
   neighbours within this many link hops — rather than the whole `specs/` tree (0 = just
   the referenced file; 1 = it plus its direct neighbours). See
   [specs-process.md](specs-process.md).
+- `ambient_specs` is a list of repo-relative spec files **injected into every agent's
+  Brief**, regardless of the issue — for a project's cross-cutting conventions and the spec
+  index, which the issue-scoped slice does not reliably carry. It is **opt-in** (empty by
+  default); the conventional pair is `[specs/README.md, specs/conventions.md]`. The files are
+  prepended ahead of the bounded slice (a stable, cache-friendly prefix), de-duplicated
+  against it, and covered by the slice's content hash. Keep them **lean** — they ride in
+  every invocation. See [specs-process.md](specs-process.md#ambient-specs).
 - `integration.mode` selects how verified work reaches `main` ([integration.md](integration.md)):
   **`per-item`** (default — the kernel behaviour) lands each work item on `main` as its own
   chain verifies; **`epic`** lands a whole feature **atomically** — children integrate onto an
