@@ -13,50 +13,26 @@ in-process orchestrator + runner carry a seed issue through implement → gate �
 merge to `main` with a provenance trailer. Verified end-to-end against a real model
 (local Ollama via `openai-compat`) and real Docker sandboxes.
 
-**Phases 2, 3, 4, 6, and 7 are complete; only Phase 5 has live work, and all of it is
-optional or hardware-blocked.** Phase 2 (independent verification) is complete — only
+**Phases 2, 3, 4, 6, 7, 8, 9, and 10 are complete; only Phase 5 has live work, and all of it
+is optional or hardware-blocked.** Phase 2 (independent verification) is complete — only
 the optional T2.11 decision-note remains (resolved as configuration, not a build item).
 Phase 3 (full DAG, decomposition, merge queue) is complete (T3.13 and T3.14 landed). Phase 4
 (control room + Create/Resolve wizard) is complete. Phase 6 (agent semantic LSP tooling)
 is complete (T6.1–T6.3). Phase 7 (atomic feature integration / epic mode) is complete
-(T7.1–T7.8; the vault demo now runs `integration.mode: epic`). The only remaining
-*engineering* of new substrate is Phase 5 (production isolation & distribution), and within
-it every still-open item is either **optional** (T5.11 warm pools + HA orchestrator) or
-**hardware-blocked** (T5.2 Firecracker, needs KVM the dev box lacks). T5.5 (gVisor backend)
-is now **done** — and landing it wired up the previously-missing config→backend selection,
-so `sandbox.backend` is finally honored at startup (firecracker fails closed rather than
-silently degrading to Docker).
+(T7.1–T7.8; the vault demo now runs `integration.mode: epic`). Phase 8 (demo-hardening:
+authoritative read model + decomposition granularity), Phase 9 (structured check findings
+& agent context discipline), and Phase 10 (read-model concurrency correctness) are complete.
+The only remaining *engineering* of new substrate is Phase 5 (production isolation &
+distribution), and within it every still-open item is either **optional** (T5.11 warm pools +
+HA orchestrator) or **hardware-blocked** (T5.2 Firecracker, needs KVM the dev box lacks). T5.5
+(gVisor backend) is now **done** — and landing it wired up the previously-missing config→backend
+selection, so `sandbox.backend` is finally honored at startup (firecracker fails closed rather
+than silently degrading to Docker).
 
-**Phase 8 (demo-hardening) is complete** (T8.1–T8.7 all landed). The 2026-06-18 live vault-demo run surfaced read-model
-consistency bugs (scheduler + control room read beads directly) and a planner over-bundling cost
-issue. The **read-model spine is complete** (T8.1–T8.4, T8.6): the orchestrator's work-graph
-projection is now the authoritative live read model — the scheduler dispatches off it (T8.2), it is
-durable-stamped + correctly rolled up (T8.3), and the control room's live work-state views read it
-instead of polling beads (T8.4). The cost-driver fix has also landed: **T8.5** hardened both
-decomposition-planner personas to require single-concern children (closing the spec↔persona gap —
-the spec already mandated it). **T8.7** (wizard one-root-in-epic hardening) has landed — Phase 8
-is now complete. See Phase 8 below,
-[`demo-run-issues.md`](demo-run-issues.md), and [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md).
-
-**Phase 9 (structured check findings) is complete** (opened + built 2026-06-22) — from a context-management
-design pass: every gate check becomes a thin per-tool adapter emitting compact, structured
-`Finding`s, so raw `go test`/scanner dumps stop blowing the agent's context window and burying
-the signal — the same failure mode (a flailing agent against a growing, noise-filled history)
-that drove ~80% of the 2026-06-18 demo-run cost. The **spec landed first** (commit 653824a); the
-code is landing incrementally: **T9.1 (core.Finding + tri-state), T9.2 (`internal/gotest` parser),
-T9.3 (`run_tests` tool), T9.4 (build precondition + tri-state cascade), and T9.6 (scanner adapters)
-and T9.5 (gate verdict carries findings + verification view renders them) are done** — the parsers
-built in parallel worktree subagent waves (T9.2+T9.6, then T9.3+T9.4), T9.5 wired sequentially;
-and T9.7 (`run_gate` full pre-submit self-check, sharing the gate's adapters via the new
-`internal/checkfindings` leaf) are done. **Phase 9 is complete** — T9.8 (the failure-aware retry
-Brief threading the parsed findings into the `on_failure` fix issue) landed, closing the loop the
-phase was opened for: structured findings now flow from the gate into the agent's context (run_tests/
-run_gate), the verdict, the verification view, and the retry. **Next: validate the context/cost
-reduction on a `./demo/vault` re-run** (the exercising use case), and consider the deferred
-refinements below (severity-threshold grading, progress-based termination, finding-type routing).
-**`./demo/vault` is the exercising use case** — it is Go (the shipped
-adapters' language), its `qa` gate already runs gosec/govulncheck/license-scan on agent output,
-and its inner loop runs `go test`, which is exactly where context blows up today. See Phase 9.
+**Outstanding runtime validation:** a clean `./demo/vault` re-run (the exercising use case — Go,
+a `qa` gate running gosec/govulncheck/license-scan, an inner loop running `go test`) to confirm
+the read-model concurrency fixes and the structured-findings context/cost reduction; that needs a
+live run (Docker + a capable model), not a build item.
 
 **Development mode for Phases 2–6: built by hand with Claude Code, human-reviewed —
 not self-hosted.** Bootstrap's threshold (a) ("the harness builds itself as a
@@ -74,13 +50,13 @@ autonomous implementation) — a later validation concern, never an engineering 
 ## How to read this
 
 - **Completed tasks are collapsed to a one-line `— *done.*` checklist entry.** Phases
-  0–1, 2, 3, 4, 6, and 7 are done; the verbose per-task findings were pruned once complete —
-  that history lives in git, the code, and the specs they informed (each task updated its
-  `(spec)` as it landed).
+  0–1, 2, 3, 4, 6, 7, 8, 9, and 10 are done; the verbose per-task findings were pruned once
+  complete — that history lives in git, the code, and the specs they informed (each task updated
+  its `(spec)` as it landed).
 - **Open tasks (`- [ ]`) keep their full detail.** Only **Phase 5** (production
   isolation) has open lines — the Firecracker backend T5.2 is hardware-blocked and deliberately
   last; the one remaining optional item is T5.11 warm pools + HA (T5.5 gVisor is now done).
-  Everything else (Phases 0–4, 6, 7) is complete and collapsed.
+  Everything else (Phases 0–4, 6, 7, 8, 9, 10) is complete and collapsed.
 - **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
   verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
@@ -497,130 +473,13 @@ addresses cost; T8.6–T8.7 are clarity/hardening. **TCB note:** T8.1/T8.2 touch
 + scheduler (TCB) — stay human-reviewed; land behind tests, keep the beads-backed reader
 switchable to de-risk rollout.
 
-- [x] **T8.1 Full work-graph projection + cold-start rebuild** — *done.* Generalized the
-  in-flight cache (`internal/orchestrator/inflight.go`, `inflightProjection`) into the single
-  writer's authoritative view of *every* known issue. Each `projectedEntry` now carries
-  `{issue, status, lease}`; the `o.transition` choke point `settle`s an issue AWAY from in_progress
-  (retains it under its new status) instead of dropping it; `rebuildInflight` hydrates the **full
-  graph** from `bd.ListAll` (one heavy read at cold start, not the hot path) instead of
-  `InProgress`. The in-flight accessors (`has`/`issues`/`expired`/`size`) preserve their old meaning
-  by filtering to `in_progress`; new readers `statusOf(id)` (the spine **T8.2** reads to skip
-  just-settled candidates) and `snapshot()` (the whole-graph read **T8.4** consumes snapshot-then-
-  stream) expose settled state. Removed the now-orphaned `InProgress` from the orchestrator `Beads`
-  seam (and its fake); `beads.Client.InProgress` stays (own test). **No spec change needed** — the
-  specs were already written ahead (orchestrator.md "Live state vs. durable state — the work-graph
-  projection", observability.md "The live read model", glossary "Projection"). Tests:
-  `TestRebuildHydratesFullWorkGraph` (full-graph cold-start parity + idempotent re-rebuild),
-  `TestProjectionRetainsSettledIssue` (settle-not-delete; `statusOf`/`snapshot`).
-  ([observability.md](specs/observability.md), [components/orchestrator.md](specs/components/orchestrator.md) "Live state vs. durable state", [glossary.md](specs/glossary.md))
-- [x] **T8.2 Scheduler dispatches off projection status** *(fixes #2)* — *done.* `scheduleReady`
-  (`internal/orchestrator/schedule.go`) now filters candidates through the work-graph projection via
-  `o.inflight.statusOf(issue.ID)` instead of the in_progress-only `o.inflight.has()`: `bd.Ready()`
-  stays the candidate oracle (no open blockers + precondition), but a candidate the projection knows
-  is `in_progress` **or settled (`closed`/`blocked`)** is skipped (`known && st != statusOpen`) — so a
-  just-closed/just-decomposed issue (e.g. a plan closed at decomposition, or a dead-lettered one) is
-  not re-dispatched before beads' lagging read catches up (closes demo finding #2's redundant
-  re-dispatch). A known-but-`open` candidate (re-derived ready, e.g. released after a failed publish,
-  or hydrated open at cold start) still dispatches; a not-known issue is new and dispatches. No spec
-  change — orchestrator.md "Live state vs. durable state" already specified the in_progress-*or*-settled
-  skip. Tests: `TestScheduleReadySkipsSettledCandidate` (closed + blocked sub-tests),
-  `TestScheduleReadyDispatchesKnownOpenCandidate` (inverse guard — open known candidate still dispatches).
-  ([components/orchestrator.md](specs/components/orchestrator.md))
-- [x] **T8.3 `integrated` as a durable state + correct epic rollup** *(fixes #7)* — *done.* The
-  marker is durable **issue metadata** (`MetadataKeyIntegrated = "integrated"`, value JSON `true`),
-  consistent with the existing `Stamp*` family — not a selector *label* (Tags are the soul-selector
-  namespace; bd only sets labels at create, so a post-hoc label write was the wrong seam). New
-  `beads.Client.StampIntegrated(id)` (idempotent set), decoded by `metaBool` into the new
-  `core.Issue.Integrated` field; added to the orchestrator `Beads` seam + its fake. The merge path
-  (`results.go` `mergeCandidate`) stamps it the instant a candidate lands (before the bead is
-  closed; best-effort — a stamp failure logs, never undoes a landed merge), in **both** per-item and
-  epic mode (an integration is an integration). `epicSummaries`
-  (`internal/controlroom/query/query.go`) now counts the **marker**, not `closed`, and excludes the
-  epic root (`i.ID == ep`) and any closed-but-not-integrated bead (a superseded retry or an advanced
-  intermediate stage); **spend still aggregates over every bead** so the hero matches the Budgets
-  view. The spec's rule collapses each lineage to one frontier bead (its integrated bead or its
-  current active stage), so a two-child feature reads `0/2 → 1/2 → 2/2`, never `1/4`. **Cold-start
-  re-derivation is automatic** — the projection's `reset()` carries the full `core.Issue` (incl.
-  `Integrated`) hydrated from `bd.ListAll`, no git read. Specs were written ahead (integration.md
-  "Integrated vs. closed", glossary "Integrated") — no spec change. Tests:
-  `TestStampIntegratedRoundTripIntegration` (bd round-trip + idempotent),
-  `TestMergeCandidateStampsIntegratedMarker` (write-side: stamped on land, survives close),
-  `TestBoardEpicProgressExcludesRootAndSupersededBeads` (1/2 not 4/6; spend unaffected); existing
-  epic-hero fixtures updated to the marker. ([integration.md](specs/integration.md), [glossary.md](specs/glossary.md))
-- [x] **T8.4 Control-room projection-backed read model** *(fixes #4, #6, #8)* — *done.* The LIVE
-  work-state views now read the orchestrator's in-memory work-graph projection; the FORENSIC pages
-  keep reading beads (the durable truth) — a deliberate **two-reader split** in `query.Reader`
-  (`live` vs `issues`), spec-faithful (observability.md "live read model" vs control-room.md
-  "Historical/forensic"). Realized as a **co-located direct in-process read**, not a second
-  delta-applied copy (single source of truth, no drift): `orchestrator.Snapshot(ctx)` exposes the
-  projection (`inflight.snapshot()`); `query.NewProjectionIssueReader(WorkGraphSnapshot, fallback)`
-  is the projection-backed `IssueReader` (ListAll→snapshot, List→status-filter incl. comma sets,
-  Get→scan-then-beads-fallback). `NewReaderWithLive` wires it for **Board, DAG, DeadLetters, Status**
-  (Status decoupled from Budgets via the shared `aggregateBudgets`); everything else stays beads.
-  Standalone `harness serve` keeps `NewReader` (live==issues==beads). The browser still refetches on
-  the existing `issue-state` SSE nudge (T4.17/T4.18) + periodic backstop, now rendering from the
-  projection — so "snapshot-then-stream" is realized as re-snapshot-on-nudge (strictly gap-free).
-  **Projection completeness (the load-bearing write-side work):** the projection was only maintained
-  at status `transition()`; it now also captures (a) **creation** — `applyTracked` wraps every
-  `bd.Apply` site (accept/acceptPlan/advance/route/resolveConflict) and records created issues as
-  `open` (else a freshly created child is invisible until first claimed); (b) **fresh render fields
-  on settle** — `transition` stamps `StateEnteredAt` (board timers), `handleResult` mirrors closing
-  spend (hero roll-up), `deadLetter` mirrors the DLQ reason, and `mergeCandidate`→`markIntegrated`
-  + a **monotonic `settle` preserve** carries the `Integrated` marker through the close (hero
-  progress); (c) **external human-approved writes** — public `orchestrator.Track(...)` keeps the
-  projection in step with the two wizard write paths that bypass the reconcile loop. **Latent T8.2
-  bug fixed here:** the Resolve wizard reopens a dead-letter via `bd.Reissue` (blocked→open) directly,
-  so the projection still read it `blocked` and the **T8.2 scheduler would skip it forever** — the
-  Resolve path now `Track`s the reopen as open. run.go late-binds the projection into the reader
-  (the orchestrator is built after the control room, needing the in-block log bridge) and sets the
-  wizard's track callback post-construction. **No spec change** — observability.md/control-room.md
-  were written ahead and already say co-located reads the in-process projection live; docs/control-room.md
-  updated (status bar + liveness note). Tests: `TestProjectionTrackRecordsCreatedOpenIssue`,
-  `TestProjectionMarkIntegratedSurvivesSettle`, `TestApplyTrackedRecordsCreatedIssues`,
-  `TestOrchestratorTrackAndSnapshot`, `TestTransitionStampsStateEnteredIntoProjection`,
-  `TestProjectionIssueReader`, `TestReaderLiveVsForensicSplit`.
-  **Follow-up (Phase 10):** the `applyTracked`→`track(open)` creation path added here can race a
-  concurrent dispatch claim and downgrade a live `in_progress` entry back to `open` (the 2026-06-23
-  stall) — the projection's creation write was not guarded against an already-claimed issue. Closed
-  by T10.1 (`track` no-downgrade) + T10.2 (creation atomic w.r.t. `bd.ready()`).
-  ([control-room.md](specs/control-room.md), [observability.md](specs/observability.md), [messaging.md](specs/messaging.md))
-- [x] **T8.5 Planner decomposition granularity** *(fixes #5 — the cost driver)* — *done.* Both
-  decomposition-planner personas (`config/souls/prompts/planner.md` +
-  `demo/vault/config/souls/prompts/planner.md`, kept byte-identical) now carry the binding
-  granularity principle in their "A good decomposition" list: point 2 was promoted from a soft
-  "Is independently testable" to **"Is a single, independently testable concern"** — *one*
-  behaviour boundary, **not** several concerns bundled; each child must be carryable **in one
-  pass** (one `implement` invocation, one `author-tests` pass); bundling multiple
-  subsystems/handlers/features is named as the single most damaging mistake (it drives the
-  turn/token-ceiling churn → dead-letter/retry that was ~80% of the demo-run cost); the rule
-  closes with **"when in doubt, split"** + the one-sentence-without-"and" heuristic and the
-  tradeoff (finer breadth's fixed overhead ≪ one runaway). The **spec was already written ahead**
-  — `specs/workflow.md` "Emergent within a stage…" already states granularity-is-a-correctness-
-  property as "a binding principle the planner persona carries"; this task is what makes the
-  persona actually carry it (closing the spec↔persona gap), so **no spec change needed**. No
-  test asserts persona text (only existence/readability is validated — confirmed by repo search);
-  both configs still `validate` OK. Optional test-author turn-budget backstop deferred — decide
-  after a re-run measures whether finer decomposition alone tames the cost. ([workflow.md](specs/workflow.md))
-- [x] **T8.6 Name the real merge target in the log** *(fixes #9)* — *done* (folded into T8.3's
-  `results.go` pass). The `mergeCandidate` success log is now `orchestrator: merged candidate` with a
-  `target=<integrationBranchName(issue)>` field — `epic/<id>` in epic mode, `main` in per-item — so
-  the log never claims a child advanced `main` when it landed on the epic branch. (No spec change.)
-- [x] **T8.7 Wizard one-root-in-epic hardening** *(fixes #1)* — *done.* The root cause was that
-  the requirements-planner persona is a **static prompt shared across deployments** — it had no way
-  to know the run's `integration.mode`, so it split the feature at the *seed* level (two roots) and
-  the consent gate refused the APPROVE after the fact. Fix is **systemic, not just persona text**:
-  a new `wizard.WithEpicMode()` option (`internal/controlroom/wizard/wizard.go`) folds a one-root
-  directive into the Create session's **system prompt** at `New()` (via `epicGrounding()`, mirroring
-  `projectGrounding`/T4.28) — it rides the system channel, never the human↔planner transcript;
-  `cmd/harness/run.go` sets it only when `cfg.Harness.Mode() == config.IntegrationEpic`, so per-item
-  sessions are byte-for-byte unchanged. Both personas (`config/` + `demo/vault/config/`, kept
-  in-sync) also gained an explicit one-root-in-epic bullet in "The draft" rules. The consent-gate
-  error (`wizard_seed.go`) was clarified to name *why* (epic keyed on a single root id) and the
-  action (ask the planner to consolidate; decomposition splits it back). **No spec change** —
-  integration.md ("exactly one root") and control-room.md already mandate it; docs already document
-  it. Tests: `TestEpicModeFoldsOneRootRuleIntoPrompt` + `TestPerItemModeLeavesPromptUnchanged`
-  (grounding is opt-in, never leaks into the transcript); existing `TestValidateEpicRequiresSingleRoot`
-  still green. ([specs-process.md](specs/specs-process.md), [control-room.md](specs/control-room.md), [integration.md](specs/integration.md))
+- [x] **T8.1 Full work-graph projection + cold-start rebuild** — *done.*
+- [x] **T8.2 Scheduler dispatches off projection status** — *done.*
+- [x] **T8.3 `integrated` as a durable state + correct epic rollup** — *done.*
+- [x] **T8.4 Control-room projection-backed read model** — *done.*
+- [x] **T8.5 Planner decomposition granularity** — *done.*
+- [x] **T8.6 Name the real merge target in the log** — *done.*
+- [x] **T8.7 Wizard one-root-in-epic hardening** — *done.*
 
 ---
 
@@ -657,166 +516,14 @@ verification view renders them. **Validate the context/cost reduction on a vault
 Build order (each a single, independently testable concern — T8.5 granularity applied to our own
 work; ordered so the inner-loop context win lands first):
 
-- [x] **T9.1 `core.Finding` + findings on `CheckResult`/`GateVerdict`** — *done.* New
-  `internal/core/finding.go`: `core.Finding{File, Line, Severity, Rule, Message, Detail}`
-  (language-neutral leaf; `Detail` is verbatim free text for the tool-specific essential — a test's
-  assertion diff, a vuln's call path — jitter is stripped at *parse* time, T9.2/T9.6, not here) and
-  `core.Findings` (a named slice, not bare `[]Finding`, so its `Format()` is the *one* renderer — no
-  divergent second path). `Findings.Format()` sorts a copy into canonical order (file→line→rule→
-  severity→message) and renders `file:line [severity] rule: message` with empty components dropped +
-  Detail indented under it; **cache-stable** — byte-identical regardless of parser emit order (the
-  load-bearing property for prefix caching + "findings not shrinking" signals). **Additive fields:**
-  `core.GateCheckOutcome` gained `Findings` + a **tri-state `Status`** (passed/failed/not-run) with
-  constants `core.CheckStatus{Passed,Failed,NotRun}` + helper `CheckStatusOf(bool)`; `Passed bool`
-  kept so older readers still see not-run as `Passed==false`. `gate.CheckResult` gained matching
-  `Findings`/`Status` fields; `verdictRecord` derives `Status` from `Passed` for a check that ran but
-  **preserves an explicit not-run** (set later by the T9.4 build precondition) and carries `Findings`
-  through. Fields are nil/empty until the parsers (T9.2+) populate them, so every existing consumer
-  (incl. the verification view) keeps working unchanged. **No spec change** — `verification.md`
-  ("Findings: structured evidence…", tri-state) + `glossary.md` (`Finding`) were written ahead
-  (commit 653824a); no CLI/config/control-room surface change, so no docs/ update. Tests:
-  `TestFindingsFormat{EmptyIsBlank,RendersComponentsCompactly,IndentsMultiLineDetail,IsCacheStable}`,
-  `TestCheckStatusOf`, `TestVerdictRecordCarriesStatusAndFindings`.
-  ([verification.md](specs/verification.md), [glossary.md](specs/glossary.md))
-- [x] **T9.2 `internal/gotest` parser** — *done.* New pure, dependency-free `internal/gotest`
-  package: `func Parse(stdout []byte) core.Findings` turns a `go test -json` ndjson stream into
-  compact `core.Findings`. Each edge-case branch preserves the one signal a raw dump buries:
-  **test failure** → finding anchored at the printed `foo_test.go:NN` (Rule=test name, Message=the
-  assertion line, Detail=the failure body); **compile/build failure** → surfaces the *compiler
-  error* (handles both structured `build-output`/`build-fail` events **and** a raw non-JSON build
-  block printed to stdout — a non-JSON line never crashes the parser, owning CLAUDE.md's "if jq
-  fails check .stderr" case); **data race** → `WARNING: DATA RACE` stanza kept verbatim; **panic/
-  timeout** → message + triggering test kept, goroutine dump dropped (a package-level sweep recovers
-  a timeout that kills the binary before a per-test `fail` fires). Jitter (Elapsed/timestamps) is
-  stripped at parse time; output is deterministic (re-run byte-identical, asserted). Real captured
-  fixtures under `testdata/` ({pass,fail,compile,race,panic,timeout}.json). Tests:
-  `TestParse{PassYieldsNoFindings,TestFailure,CompileFailureStructured,RawNonJSONNeverCrashes,
-  DataRace,Panic,Timeout,IsCacheStable,EmptyInput}`. Built in a parallel worktree subagent. No spec
-  change (verification.md written ahead). (next consumer: **T9.3** `run_tests`)
-- [x] **T9.3 `run_tests` agent tool (first consumer)** — *done.* New `agent.RunTestsTool` (`internal/agent/runtests.go`):
-  wraps `go test -json <scope>` (optional `scope` arg, positional — no shell injection — defaults to
-  `./...`), parses with `gotest.Parse`, returns the compact `core.Findings.Format()` string instead
-  of the raw multi-thousand-line dump (the headline inner-loop context win — the implementor's
-  self-check stops dumping noisy logs into the very history that blows its window). `IsError` set when
-  findings exist (failure feedback); a non-zero exit / build failure is **not** a tool error (the
-  parser turns it into findings). **Zero-trust** (runs in the untrusted producing sandbox; feedback,
-  never a grade — only the independent gate re-run grades). **Artifact harvest** mirrors the trace-map/
-  transform-log discipline exactly: the agent has no store access (no network), so raw json
-  accumulates in a per-invocation `TestEvidenceLedger` keyed by content-address, and the trusted
-  `toolSource` cleanup (`harvestTestEvidence` in `cmd/harness/run.go`) Puts each stream under
-  `core.ArtifactKindGateEvidence`. The agent computes the address locally as `sha256:`+hex (mirrors
-  `artifact.FilesStore.Put` — **verified identical**, so the inline-cited hash resolves once the
-  trusted Put lands) without importing `internal/artifact` (keeps the untrusted package off the
-  trusted store). Wired for all souls via the shared `toolSource` (no per-soul tool allowlist in
-  config — no config change needed). Built in a parallel worktree subagent (disjoint from T9.4).
-  Tests: `TestRunTests{ReturnsFindingsNotRawDump,HarvestsRawEvidenceByContentAddress,
-  DefaultsScopeToWholeModule,NilLedgerStillCitesHash,BuildFailureBecomesFinding}`. No spec change
-  (agent.md/verification.md written ahead). ([components/agent.md](specs/components/agent.md))
-- [x] **T9.4 Build precondition + tri-state in the gate** — *done.* `internal/gate/gate.go` `Run` now
-  runs a **build precondition first** when a `build` command is registered (`checkBuildName="build"`):
-  it reuses the configured `build` registry command (single source of truth — the gate grades a
-  command, not a hardcoded `go build`), and on failure **short-circuits the dependent checks**,
-  recording each as `core.CheckStatusNotRun` via new `notRunResult` (never re-run, never a misleading
-  green or a failure that never executed) instead of letting every downstream tool rediscover the
-  broken build in its own format. The build error is captured as a single `core.Finding`
-  (`buildFailureFindings`, Detail=compiler output verbatim — the signal the retry Brief needs).
-  **not-run never counts as a pass**: `report.Passed` is forced false, so the gate still fails closed;
-  the tri-state changes only what the verdict *records*. Independent-scanner aggregation (T2.12) is
-  untouched on the build-passes path; a declared `build` postcondition is consumed by the precondition
-  (`dropByName`) so the command never runs twice. **Inert for the shipped config** — `config/harness.yaml`
-  registers no `build` check (build is folded into `make test-unit`), so this is a pure no-op until a
-  deployment adds a `build:` entry (+ optionally declares it first in the qa/resolve postconditions);
-  that config wiring is left for whoever activates it. Deliberately did **not** pull in `internal/gotest`
-  (T9.5 owns wiring the structured parsers into the gate). TCB-touching (gate ordering) — kept minimal/
-  surgical; reviewed before integration. Built in a parallel worktree subagent (disjoint from T9.3).
-  Tests: `TestRunBuildPreconditionShortCircuitsDependents`, `TestRunBuildPassesThenIndependentScannersAggregate`,
-  `TestRunNoBuildCommandNoPrecondition`, + updated `TestRunStopsAtFirstFailure`/`TestRunVerdictRecordsFailure`.
-  No spec change (verification.md "A check is tri-state" written ahead). ([verification.md](specs/verification.md))
-- [x] **T9.5 Gate verdict carries findings** — *done.* New `internal/gate/findings.go`:
-  `adapterFor(check)` selects the per-tool parser **by the check's identity** (the spec's "registry
-  stays a name→command map" — no config field): proofs (red→green/tests-red) + the `tests-pass`
-  acceptance check → `gotest.Parse`; `gosec`/`govulncheck`/`golangci-lint`/`license-scan` → the
-  matching `internal/scanners` adapter; anything else → nil (graceful fallback — grade on exit code,
-  raw output stays evidence). `findingsFor` parses captured **stdout** (stderr only when stdout is
-  empty) and populates `CheckResult.Findings` in `runCheck` (command/red-proof path) and `runRedGreen`
-  (the candidate/green run); `verdictRecord` (T9.1) already carries them into `core.GateVerdict`, so
-  the harvested record holds per-check findings. **Load-bearing guard:** the go-test adapter only fires
-  on ndjson-shaped output (`looksLikeNDJSON`) — a human-format test command (the shipped `make
-  test-unit`, which routes `-json` to a file) is graded identically on exit code but its plain text
-  would otherwise be misread by T9.2's compile-failure path as a bogus "build" finding; a real build
-  failure at the gate is T9.4's job, so nothing is lost. **Verification view** (`verification.templ`):
-  new tri-state `checkStatusBadge` (pass/fail/**not-run**, falling back to the old Passed badge for
-  pre-tri-state records) replaces the two-valued badge, and each check renders its `Findings.Format()`
-  (the same cache-stable compact form the retry Brief will carry) in a `<pre>` — raw dump stays the
-  linked evidence. Regenerated `verification_templ.go` (templ generate from repo root); reused existing
-  Tailwind tokens (no CSS rebuild). **Activation note:** findings populate only when the check command
-  emits machine-readable output (`go test -json`, `gosec -fmt=json`, …) — documented in
-  docs/configuration.md; the shipped configs are unchanged (graceful-empty until an operator opts in,
-  e.g. the vault re-run). TCB-touching (gate) — done sequentially with review, not a worktree. No spec
-  change (verification.md "Findings…", configuration.md "per-tool adapters" written ahead); docs updated
-  (control-room.md verification view, configuration.md findings activation). Tests:
-  `TestAdapterForSelectsByCheckIdentity`, `TestFindingsForFallsBackToStderr`,
-  `TestRunPopulatesPerCheckFindings`, `TestRunFailingTestCheckCarriesFindings`.
-  ([verification.md](specs/verification.md), [control-room.md](specs/control-room.md))
-- [x] **T9.6 Scanner finding adapters** — *done.* New `internal/scanners` package, one pure adapter
-  per scanner → `core.Findings`: `ParseGolangciLint` (issues→{File,Line,Rule=linter,Message,Severity};
-  streaming decoder reads the first JSON value so the trailing human "N issues." line doesn't break
-  the parse), `ParseGosec` (`Issues[]`→{File,Line,Rule=rule_id,Severity lowercased,Message,Detail=code
-  excerpt}; `"11-13"` line range→first line), `ParseGovulncheck` (correlates `osv` summaries with
-  `finding` traces, emits one finding per **called** symbol-level vuln, dropping module/package-only
-  informational ones — the signal-density point; {Rule=GO id,Message=summary,File:Line=call site,
-  Detail=aliases+fix+call path}), `ParseLicenseScan` (`go-licenses check` text; drops timestamped glog
-  jitter, keys off its stable format strings → {Rule=module,Message=disallowed license}). Every parser
-  degrades to "what it could parse, or empty" on a truncated/non-JSON blob without panicking (the
-  exit-code verdict still stands — **a command with no adapter still grades on exit code with raw
-  output as evidence**). Deterministic (cache-stable, asserted). Fixtures under `testdata/`: golangci/
-  gosec captured real from dev-box tools; govuln distilled from a real `golang.org/x/text@v0.3.0`
-  scan; license hand-authored from go-licenses' format strings (no JSON mode). 12 tests incl.
-  `TestMalformedInputDegradesGracefully` + `TestCacheStability`. Built in a parallel worktree subagent.
-  Additive only — **T9.5** wires these into the gate verdict. No spec change. ([configuration.md](specs/configuration.md))
-- [x] **T9.7 `run_gate` full self-check tool** — *done.* New `agent.RunGateTool`
-  (`internal/agent/rungate.go`): the producer self-check generalized from `run_tests`' single test
-  pass to the **whole command-check suite** the gate will run (acceptance tests + scanners). It runs
-  each configured check's command once in the untrusted producing sandbox (`sh -c <cmd>`, sorted for
-  cache-stability), parses each via the shared adapter, and returns a compact tally + per-check
-  findings (never the raw scanner dumps) with each check's raw output harvested as evidence (reusing
-  T9.3's `TestEvidenceLedger` + the run.go cleanup harvest). Zero-trust (feedback, not a grade — the
-  gate re-runs authoritatively). **Deliberately omits** the red→green proof (needs a base-ref sandbox
-  only the gate has) and the **mutation metric** (graded on a score-vs-threshold, not an exit code —
-  running it would misread the tool's exit-0 as a pass). **Single source via new `internal/checkfindings`
-  leaf:** the per-tool adapter selection (`ByName`/`GoTest` with the ndjson guard) was extracted from
-  T9.5's gate code into a neutral package that **both** the gate (`adapterFor` now delegates) and
-  `run_gate` import — so "the gate checks it" and "I checked it" share one command *and* one parser.
-  New `config.Harness.CommandCheckCommands()` computes the self-check set from the DAG (proofs resolve
-  to `tests-pass`; metrics + reserved postconditions excluded by construction since they aren't
-  registry keys); `run.go` resolves it once and wires `RunGateTool` into the toolSource. **No spec
-  change** — components/agent.md "Verification (self-check)" + verification.md "Producer self-checks"
-  written ahead; docs don't enumerate agent tools, so no docs/ change. Tests:
-  `TestRunGateRunsEveryCheckAndReturnsFindings`, `TestRunGateAllCleanIsNotError`,
-  `TestRunGateNoChecksConfigured`, `TestCommandCheckCommands`, `internal/checkfindings` suite (`ByName`/
-  `GoTest` guard/`Parse` fallback); gate suite still green after the refactor. ([verification.md](specs/verification.md))
-- [x] **T9.8 Failure-aware retry Brief** — *done.* The `on_failure` route now threads the failed
-  gate's parsed findings into the fix issue so the retry sees exactly the N checks it must fix
-  instead of re-deriving blind from the spec (the failure mode the whole phase targets).
-  `internal/orchestrator/results.go`: new `failingFindings(report)` collects the findings of every
-  *failed* check (passing checks and findingless metric failures contribute nothing — the tight
-  payload), and `route(...)` gained a `findings core.Findings` param threaded into the fix issue's
-  **body** via new `bodyWithGateFeedback` — a delimited (`<!-- harness:gate-feedback -->`),
-  **idempotent** section (any prior attempt's section is stripped first, so a multi-retry carries
-  only the latest findings, never a growing pile) rendering the compact, cache-stable
-  `Findings.Format()`. The body is the existing beads-persisted carrier that already survives the
-  create→schedule round-trip and renders into the agent's opening turn via `agent.buildContext`
-  (and into the control-room issue view) — no new persistence/Brief/render plumbing. Only the
-  gate-rejected callsite (results.go:274) passes findings; the five other `route` callers (agent
-  failure, no-candidate, planner-no-children, human-reject, re-gate-failed) pass `nil`. **No spec
-  change** — verification.md ("Findings … a failed candidate's retry Brief") + glossary written ahead;
-  the fix body shows in the existing issue-view Body render, so no CLI/config/view-surface change and
-  no docs/ update. Tests: `TestFailingFindings`, `TestBodyWithGateFeedback` (append / no-findings /
-  idempotent-across-retries), `TestHandleResultGateFailThreadsFindingsIntoFixBody`; existing
-  `TestHandleResultGateFailRetries` still green. **Deferred:** routing the fix by *finding type*
-  (a soul selector keyed on a finding-type tag) — it needs a finding-type taxonomy + a consuming
-  soul, a separate decision; the threading this task lands is the prerequisite. (needs T9.5)
-  ([verification.md](specs/verification.md), [components/orchestrator.md](specs/components/orchestrator.md))
+- [x] **T9.1 `core.Finding` + findings on `CheckResult`/`GateVerdict`** — *done.*
+- [x] **T9.2 `internal/gotest` parser** — *done.*
+- [x] **T9.3 `run_tests` agent tool (first consumer)** — *done.*
+- [x] **T9.4 Build precondition + tri-state in the gate** — *done.*
+- [x] **T9.5 Gate verdict carries findings** — *done.*
+- [x] **T9.6 Scanner finding adapters** — *done.*
+- [x] **T9.7 `run_gate` full self-check tool** — *done.*
+- [x] **T9.8 Failure-aware retry Brief** — *done.*
 
 **Deferred (named, not in this slice):** **finding-type routing** (route the `on_failure` fix to a
 specialized soul via a selector keyed on a finding-type tag — T9.8 threads the findings; this needs a
@@ -863,113 +570,11 @@ deferred "may later" to a committed board overlay (T10.4). T10.1–T10.3 are the
 (do first; they are TCB — orchestrator — so stay human-reviewed, land behind tests); T10.4–T10.5
 are clarity/discipline. **A clean re-run gates T10's close** (and re-opens the #6 question below).
 
-- [x] **T10.1 `track()` must not downgrade a live claim** *(Fix A — unblocks the stall; also fixes
-  the "open card on work-in-progress" the board showed)* — *done.* `inflightProjection.track()`
-  (`internal/orchestrator/inflight.go`) now **returns early, leaving the entry untouched, when the
-  existing projected status is `in_progress`** — preserving the claim's status, lease, AND its richer
-  claim-time snapshot (strictly safer than the plan's "update the snapshot": the bd.Apply-fresh issue
-  track() receives carries fewer fields than the claim's `add()` recorded, so overwriting would
-  regress the board timers). This mirrors how `settle()` preserves the monotonic `Integrated` marker.
-  Correct in every interleaving: a claim is a real state advance and wins over a creation/reopen
-  record written by the creating loop inside `bd.Apply`'s non-atomic window. **Did not** make `has()`
-  fall back to a beads `in_progress` read (that reintroduces the lagging read the projection exists to
-  avoid). The guard fires **only** on an `in_progress` entry, so the Resolve-wizard reopen
-  (blocked→open) still works. This alone restores `has()=true` and unblocks the pipeline. No spec
-  change — orchestrator.md "The creation window" (invariant 2) was written ahead. No CLI/config/view
-  surface change, so no docs/ update. Tests: `TestProjectionTrackDoesNotDowngradeLiveClaim`
-  (claim survives track, status + lease both preserved), `TestProjectionTrackReopensBlockedIssue`
-  (guard does not block the legitimate blocked→open reopen); existing
-  `TestProjectionTrackRecordsCreatedOpenIssue`/`TestApplyTracked*` still green.
-  T10.1 stops the stall; T10.2 (landed) stops the out-of-order burst; T10.3 (landed) guards both.
-  ([components/orchestrator.md](specs/components/orchestrator.md) "The creation window")
-- [x] **T10.2 Creation atomic w.r.t. the dispatch oracle** *(Fix B — restores dependency ordering;
-  the deeper fix)* — *done.* Took the spec's **serialization** alternative over create-already-blocked,
-  because `bd.Apply` is a CLI wrapper whose `create` is itself a separate call from `dep add` — so
-  "create already-blocked" still leaves an irreducible micro-window between `bd create` and a
-  follow-up status write (bd 1.0.4 has no atomic create-blocked-with-edges), whereas a lock closes
-  the window with no bd-semantics dependency, fewer bd calls, and no transient `blocked` status that
-  a forensic read could misread as a dead-letter. New `Orchestrator.createMu` serializes the
-  **creation choke point** (`applyTracked`: `bd.Apply` + projection `track`, held under the lock as
-  one unit) against the **dispatch oracle read** (`scheduleReady`'s `bd.Ready()`, wrapped). So
-  `bd.ready()` only ever observes a decomposition that is **not-yet-started or fully built** — every
-  child's blocking edges present, so each is blocked-by its still-open plan and excluded — never the
-  Phase-1↔Phase-2 gap. Lock scope is deliberately narrow: only the fast beads writes, **not** the
-  slow gate/merge work in `handleResult` that calls `applyTracked` (the spec's scope caveat) — the
-  lock is acquired *inside* `applyTracked`, so `accept`'s gate/advance runs unlocked. Lock order is
-  always `createMu → projection mutex` (never inverted — projection methods call back into no
-  orchestrator lock), so no deadlock. Covers **all** creation (decomposition, accept's emergent
-  children, on_failure fixes) since `applyTracked` is the one creation path. No spec change —
-  orchestrator.md "The creation window" invariant 1 written ahead. No CLI/config/view surface, so no
-  docs/. Guarded by T10.3 (verified the test fails with the lock removed). ([components/orchestrator.md](specs/components/orchestrator.md) "The creation window")
-- [x] **T10.3 Regression test — concurrent decomposition under a two-phase `Apply`** — *done.* New
-  `internal/orchestrator/creationwindow_test.go`: a `windowBeads` fake (embeds `*fakeBeads`,
-  overrides `Apply`/`Ready`) models `bd.Apply`'s non-atomicity — Phase 1 creates the children **open
-  and edge-less** (so its graph-computing `Ready`, an issue is ready iff open ∧ all deps closed,
-  returns them as dispatchable), then blocks on a barrier; Phase 2 (after the test releases it) adds
-  the `blocked-by` edges. `TestCreationWindowConcurrentDecompositionRespectsOrdering` runs
-  `handleResult(decomposition)` and a real `scheduleReady` **concurrently**: it `<-entered` to open
-  the window, launches a dispatch goroutine, and asserts the dispatch **parks** (does not complete /
-  claims nothing) while the creation is half-built — then releases the window and asserts (a) the
-  claimed child is `in_progress` in the projection so its Result is **not** dropped as "not in
-  flight" (T10.1), and (b) only child A (blocked solely by the now-closed plan) dispatches while B
-  waits on its open sibling — **dependency order, no all-at-once burst** (T10.2). Verified it **fails
-  with the fix removed** ("dispatch completed during the creation window") and is stable under
-  `-race -count=5`. This timing case is exactly what the fast in-memory fakes never exercised — its
-  absence is why the bug shipped. Guards T10.1 + T10.2.
-- [x] **T10.4 Board "waits-for" dependency edges** *(the original observation; spec promoted from
-  deferred)* — *done.* The board's lineage overlay (`lineage.js`) now draws, alongside the solid
-  producer thread, a distinct **dashed "waits-for" edge** between siblings a planner's inter-child
-  `blocked-by` ordering imposes — faint by default, included in the hover/focus path highlight (the
-  hovered card's waits-for predecessors *and* successors light with its lineage path) — so a
-  staggered start reads as a dependency being honored, not a stall. **Load-bearing data fix (the real
-  work):** the live read model lacked the edges. `core.Issue.DependsOn` is populated only on the
-  beads *read* path, but a freshly-created decomposition child enters the work-graph projection via
-  `applyTracked → track` **without** a re-read, so its blocked-by edges were absent live (exactly
-  when the overlay matters). Fixed at the single source: `beads.Apply` now carries each **resolved**
-  blocked-by target onto the returned issue's `DependsOn`, so the projection holds the same edges a
-  read would. New `query.waitsForOf` derives each card's `WaitsFor` = its intra-epic blocker ids
-  **minus its lineage producer** (`ParentID` — the parent-plan link), so a producer edge is never
-  double-drawn and an external/cross-epic blocker is left to the server-side DAG view; gated like
-  EpicID/ParentID (multi-issue epic only). `board.templ` stamps `data-waits-for`; the JS reads it,
-  shares the one `--epic` color source, and uses a position-aware geometry (left→right cubic for
-  cross-column, right-edge bow for same-column stacked siblings). Regenerated `board_templ.go` at the
-  **pinned** templ v0.3.1001 (the local v0.3.1020 churns all files with a version-header bump — used
-  `go run github.com/a-h/templ/cmd/templ@v0.3.1001` so only board changed). Spec was promoted ahead
-  (control-room.md "Lineage thread"); docs/control-room.md Board entry updated. **Spec backport (the
-  projection-completeness learning):** the work-graph projection's field enumeration in
-  orchestrator.md "Live state vs. durable state" + glossary "Projection" now lists the read-side
-  `blocked-by` edges and states that a *created* record must carry its **resolved** edges (not only
-  status), because the live DAG view and this waits-for overlay read the dependency graph from the
-  projection — `blocked-by` is otherwise a read-path-only facet a fresh issue lacks until cold-start
-  rehydration, leaving the live graph edge-incomplete. Tests:
-  `query.TestBoardWaitsForSiblingEdges` (sibling included, parent-plan link + external blocker
-  excluded), `beads.TestApplyResolvesSiblingKey` extended (resolved edge carried onto the created
-  issue); `lineage.js` syntax-checked (`node --check`). **Not visually verified in a browser** — the
-  overlay needs a live multi-issue-epic run; data + JS logic are unit-tested/reviewed. Also fixed a
-  **pre-existing unrelated test failure** from commit c85db51 (`configview.TestBuildSurfacesWarnings`
-  asserted the old `provider "anthropic"` wording; the diversity warning now says `model family`).
-  ([control-room.md](specs/control-room.md) "The board, in motion")
-- [x] **T10.5 Agent build-command discipline** *(persona/conventions, not a core-spec change)* —
-  *done.* Root cause was in the persona text, not the conventions: the implementor step 3 listed
-  `make build`/`make test-unit` but trailed it with "*or the narrower command for the unit you
-  touched*", which invited a raw `go build ./...` — and a raw build **skips `make generate`**, so a
-  stale committed `*_templ.go` compiles green for the soul yet fails the qa gate's build. Reworked
-  the self-check step in **all four** affected personas (implementor + test-author, in both
-  `config/souls/prompts/` and `demo/vault/config/souls/prompts/`, kept in sync): verify with the
-  project's **declared** make targets (`make build`/`make test-unit`/`make check` — the same the qa
-  gate runs), **never substitute a raw `go build ./...` / `go test ./...`** for gate verification,
-  with the *why* spelled out — the make targets are the single source of truth for how the project
-  builds and run the codegen (`make generate`: templ + Tailwind) whose committed `*_templ.go`/
-  `app.css` the gate compiles against, so a raw build can pass for you and still fail the gate on
-  stale generated files. A focused `go test ./somepkg` while iterating is explicitly still fine; the
-  discipline is "verify through the make targets before you submit." The shipped `implementor-go.md`
-  also gained the `make generate` note it previously lacked (the harness self-host repo is itself
-  Go + templ). **No core-spec change** — the kernel stays language-neutral (it must not mandate
-  `make`); this is persona/config text, and the conventions.md "Gate"/"Generated artifacts" sections
-  (which ride every Brief via `ambient_specs`) already named the targets. No CLI/config-shape/view
-  change, so no docs/ update. Verified: `harness validate` on both configs = OK (only the pre-existing
-  T2.13 family advisory); persona content is not test-asserted (validation checks
-  existence/readability only). ([control-room.md](specs/control-room.md), [verification.md](specs/verification.md))
+- [x] **T10.1 `track()` must not downgrade a live claim** — *done.*
+- [x] **T10.2 Creation atomic w.r.t. the dispatch oracle** — *done.*
+- [x] **T10.3 Regression test — concurrent decomposition under a two-phase `Apply`** — *done.*
+- [x] **T10.4 Board "waits-for" dependency edges** — *done.*
+- [x] **T10.5 Agent build-command discipline** — *done.*
 
 **Phase 10 build items (T10.1–T10.5) are complete.** The remaining gate on closing the phase is a
 **clean `./demo/vault` re-run** (re-opens the #6 turn-budget question and verifies the board no longer
