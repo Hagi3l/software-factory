@@ -880,25 +880,42 @@ are clarity/discipline. **A clean re-run gates T10's close** (and re-opens the #
   (claim survives track, status + lease both preserved), `TestProjectionTrackReopensBlockedIssue`
   (guard does not block the legitimate blocked→open reopen); existing
   `TestProjectionTrackRecordsCreatedOpenIssue`/`TestApplyTracked*` still green.
-  **Remaining for a clean re-run:** T10.2 (creation atomic w.r.t. `bd.ready()` — restores dependency
-  ordering) + T10.3 (concurrent two-phase-`Apply` regression test). T10.1 stops the stall; T10.2
-  stops the out-of-order burst. ([components/orchestrator.md](specs/components/orchestrator.md) "The creation window")
-- [ ] **T10.2 Creation atomic w.r.t. the dispatch oracle** *(Fix B — restores dependency ordering;
-  the deeper fix)* — stop `bd.ready()` ever returning a half-built decomposition child. Preferred:
-  create children **already-blocked** so they are never dispatchable until their edges (and the
-  parent-plan gate) are committed — e.g. apply the `blocked-by` edges before the child can satisfy
-  `bd.ready()`, or create in a state the oracle excludes until Phase 2 completes. Alternative:
-  narrowly serialise `acceptPlan`'s `Apply`+`track`+`close` against `dispatchPass` — scoped to the
-  projection/claim-sensitive region, **not** a coarse mutex around slow gate/merge work in
-  `handleResult` (that would stall dispatch for the merge duration). Honours invariant (1) of "The
-  creation window". ([components/orchestrator.md](specs/components/orchestrator.md) "The creation window")
-- [ ] **T10.3 Regression test — concurrent decomposition under a two-phase `Apply`** — run the real
-  tick loop concurrently with `handleResult` processing a planner decomposition, using a Beads fake
-  whose `Apply` is two-phase/slow (children visible-and-ready after Phase 1, before Phase 2 adds the
-  edges), mirroring `bd.Apply`. Assert (a) **no** harvested result is dropped as "not in flight" and
-  (b) children dispatch only after the plan closes, **in dependency order** (no all-at-once burst).
-  This timing case is exactly what the fast in-memory fakes never exercised — its absence is why the
-  bug shipped. Guards T10.1 + T10.2.
+  T10.1 stops the stall; T10.2 (landed) stops the out-of-order burst; T10.3 (landed) guards both.
+  ([components/orchestrator.md](specs/components/orchestrator.md) "The creation window")
+- [x] **T10.2 Creation atomic w.r.t. the dispatch oracle** *(Fix B — restores dependency ordering;
+  the deeper fix)* — *done.* Took the spec's **serialization** alternative over create-already-blocked,
+  because `bd.Apply` is a CLI wrapper whose `create` is itself a separate call from `dep add` — so
+  "create already-blocked" still leaves an irreducible micro-window between `bd create` and a
+  follow-up status write (bd 1.0.4 has no atomic create-blocked-with-edges), whereas a lock closes
+  the window with no bd-semantics dependency, fewer bd calls, and no transient `blocked` status that
+  a forensic read could misread as a dead-letter. New `Orchestrator.createMu` serializes the
+  **creation choke point** (`applyTracked`: `bd.Apply` + projection `track`, held under the lock as
+  one unit) against the **dispatch oracle read** (`scheduleReady`'s `bd.Ready()`, wrapped). So
+  `bd.ready()` only ever observes a decomposition that is **not-yet-started or fully built** — every
+  child's blocking edges present, so each is blocked-by its still-open plan and excluded — never the
+  Phase-1↔Phase-2 gap. Lock scope is deliberately narrow: only the fast beads writes, **not** the
+  slow gate/merge work in `handleResult` that calls `applyTracked` (the spec's scope caveat) — the
+  lock is acquired *inside* `applyTracked`, so `accept`'s gate/advance runs unlocked. Lock order is
+  always `createMu → projection mutex` (never inverted — projection methods call back into no
+  orchestrator lock), so no deadlock. Covers **all** creation (decomposition, accept's emergent
+  children, on_failure fixes) since `applyTracked` is the one creation path. No spec change —
+  orchestrator.md "The creation window" invariant 1 written ahead. No CLI/config/view surface, so no
+  docs/. Guarded by T10.3 (verified the test fails with the lock removed). ([components/orchestrator.md](specs/components/orchestrator.md) "The creation window")
+- [x] **T10.3 Regression test — concurrent decomposition under a two-phase `Apply`** — *done.* New
+  `internal/orchestrator/creationwindow_test.go`: a `windowBeads` fake (embeds `*fakeBeads`,
+  overrides `Apply`/`Ready`) models `bd.Apply`'s non-atomicity — Phase 1 creates the children **open
+  and edge-less** (so its graph-computing `Ready`, an issue is ready iff open ∧ all deps closed,
+  returns them as dispatchable), then blocks on a barrier; Phase 2 (after the test releases it) adds
+  the `blocked-by` edges. `TestCreationWindowConcurrentDecompositionRespectsOrdering` runs
+  `handleResult(decomposition)` and a real `scheduleReady` **concurrently**: it `<-entered` to open
+  the window, launches a dispatch goroutine, and asserts the dispatch **parks** (does not complete /
+  claims nothing) while the creation is half-built — then releases the window and asserts (a) the
+  claimed child is `in_progress` in the projection so its Result is **not** dropped as "not in
+  flight" (T10.1), and (b) only child A (blocked solely by the now-closed plan) dispatches while B
+  waits on its open sibling — **dependency order, no all-at-once burst** (T10.2). Verified it **fails
+  with the fix removed** ("dispatch completed during the creation window") and is stable under
+  `-race -count=5`. This timing case is exactly what the fast in-memory fakes never exercised — its
+  absence is why the bug shipped. Guards T10.1 + T10.2.
 - [ ] **T10.4 Board "waits-for" dependency edges** *(the original observation; spec promoted from
   deferred)* — draw the inter-child `blocked-by` edges as a distinct **dashed "waits-for"** overlay
   on the board (faint by default; included in the hover/focus path highlight), so a staggered start

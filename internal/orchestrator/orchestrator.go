@@ -196,6 +196,17 @@ type Orchestrator struct {
 	// (specs/components/orchestrator.md "Live state vs. durable state").
 	inflight *inflightProjection
 
+	// createMu serializes the creation choke point (applyTracked's bd.Apply+track) against the
+	// dispatch oracle read (scheduleReady's bd.Ready). bd.Apply is non-atomic — it creates a child,
+	// then adds its blocking edges as separate writes — so without this lock the dispatch loop's
+	// bd.ready() can observe a half-built decomposition child (created, no edges yet) and claim it,
+	// bypassing both the parent-plan gate and the inter-sibling order, then wedging it permanently
+	// (the 2026-06-23 vault-demo stall). Holding it makes creation atomic w.r.t. the oracle: bd.ready()
+	// sees a decomposition either not-yet-started or fully built. It is deliberately NOT a coarse lock
+	// around handleResult's slow gate/merge work — only the fast beads writes — so dispatch is never
+	// stalled for a merge (T10.2, specs/components/orchestrator.md "The creation window").
+	createMu sync.Mutex
+
 	// diffFiles returns the repo-relative paths a candidate ref changed relative to base.
 	// It is the input to the TCB-touching approval decision (T2.10) and a seam so the
 	// decision is unit-testable without a real repo; New defaults it to a git-backed impl.

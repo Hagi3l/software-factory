@@ -1050,6 +1050,16 @@ func (o *Orchestrator) deadLetter(ctx context.Context, issue core.Issue, reason 
 // bd.Apply returns the proposal fields plus the assigned id but no status/timestamps, so the tracked
 // entries take the open status and now-stamped time anchors track() supplies.
 func (o *Orchestrator) applyTracked(ctx context.Context, proposals []core.Proposal) ([]core.Issue, error) {
+	// Hold createMu across the WHOLE creation — bd.Apply's two-phase create+edge writes AND the
+	// projection track — so it is atomic w.r.t. the dispatch oracle (scheduleReady's bd.Ready). This
+	// closes the creation window (T10.2): the dispatch loop can only observe a decomposition that is
+	// either not-yet-started or fully built (every child's blocking edges present, so a child is
+	// blocked-by its still-open plan and bd.ready() excludes it) — never the gap where a child exists
+	// with no blockers. Both calls are fast beads writes; the slow gate/merge work in the callers
+	// (accept) runs outside this lock, so dispatch is never stalled for a merge (the spec's scope
+	// caveat under "The creation window"). See specs/components/orchestrator.md.
+	o.createMu.Lock()
+	defer o.createMu.Unlock()
 	created, err := o.bd.Apply(ctx, proposals)
 	if err != nil {
 		return nil, err

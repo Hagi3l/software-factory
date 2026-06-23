@@ -18,7 +18,17 @@ import (
 // issue never blocks the others — the loop logs and moves on, and the issue is retried
 // on a later tick.
 func (o *Orchestrator) scheduleReady(ctx context.Context) {
+	// Read the dispatch oracle under createMu so it is mutually exclusive with the creation choke
+	// point (applyTracked's bd.Apply+track). bd.Apply is two-phase (create children, then add their
+	// blocking edges), so without this serialization bd.ready() could observe a half-built
+	// decomposition child — created but edge-less — and return it as dispatchable, bypassing both the
+	// parent-plan gate and the inter-sibling order (T10.2, specs/components/orchestrator.md "The
+	// creation window", invariant 1). The lock spans only the oracle read; the claim/publish loop
+	// below runs unlocked so dispatch latency is unaffected and a concurrent creation is not blocked
+	// on a slow publish.
+	o.createMu.Lock()
 	ready, err := o.bd.Ready(ctx)
+	o.createMu.Unlock()
 	if err != nil {
 		o.log.ErrorContext(ctx, "orchestrator: query ready work", "err", err)
 		return
