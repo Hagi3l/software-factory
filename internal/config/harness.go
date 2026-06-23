@@ -40,6 +40,19 @@ type Harness struct {
 	// Unset (0) is a safe minimal slice; the bootstrap sets 1.
 	SpecDepth int `yaml:"spec_depth,omitempty"`
 
+	// AmbientSpecs is a list of repo-relative spec files injected into EVERY agent's Brief,
+	// regardless of the issue — for a project's cross-cutting conventions and its spec index,
+	// which the issue-scoped slice (SpecDepth) does not reliably carry. A stateless agent that
+	// never sees them rediscovers conventions every run or trips one and dead-letters; reaching
+	// them via cross-links is fragile (a conventions file beyond spec_depth falls out, and
+	// raising spec_depth taxes every slice). They are prepended ahead of the bounded slice (a
+	// stable, cache-friendly prefix), de-duplicated against it, and covered by the slice's
+	// content hash — so a conventions edit is pinned in provenance like a contract edit (T3.14).
+	// Opt-in (empty by default); the conventional pair is [specs/README.md, specs/conventions.md].
+	// Keep them lean — they ride in every invocation. Validated by validateAmbientSpecs. See
+	// specs/specs-process.md "Ambient specs", specs/configuration.md, internal/spec.ResolveWithAmbient.
+	AmbientSpecs []string `yaml:"ambient_specs,omitempty"`
+
 	// RequirementsPlanner configures the trusted, non-sandboxed requirements planner —
 	// the interactive LLM behind the control-room Create-Task wizard (T4.12,
 	// specs/control-room.md, specs/workflow.md). Unlike a soul it fulfills no DAG role and

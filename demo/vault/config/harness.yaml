@@ -34,6 +34,16 @@
 # the contract and the conventions it leans on).
 spec_depth: 1
 
+# Ambient specs (T3.14): the spec index + the engineering conventions, injected into EVERY agent's
+# Brief regardless of which feature spec the issue points at. The vault's conventions
+# (parameterized-SQL-only, crypto/rand, encryption-non-negotiable, "make generate after a .templ
+# edit", no-new-modules under the zero-network sandbox) are the same for every change but are NOT in
+# any one feature spec — so an agent that only saw auth.md would rediscover or trip them. Prepended
+# ahead of the bounded slice (a cache-stable prefix) and covered by the spec content hash, so editing
+# conventions.md re-derives work like a contract edit. specs/README.md is a thin index (the agent
+# read_file's the rest on demand). See specs/specs-process.md "Ambient specs".
+ambient_specs: [specs/README.md, specs/conventions.md]
+
 # The requirements planner behind the control-room Create-Task wizard: the trusted model that
 # converses with the operator, converges on testable intent, and drafts the spec + seed
 # issue(s). The conversation runs host-side (canonical model layer directly, not the

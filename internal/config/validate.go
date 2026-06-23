@@ -5,6 +5,7 @@ import (
 	"net"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -89,6 +90,7 @@ func (c *Config) Validate() error {
 		c.validateDAG(add)
 		c.validatePolicy(add)
 		c.validateIntegration(add)
+		c.validateAmbientSpecs(add)
 	}
 	c.validateSouls(add)
 	c.validateRequirementsPlanner(add)
@@ -393,6 +395,41 @@ func (c *Config) validateIntegration(add func(string, ...any)) {
 		// "" defaults to per-item; both named modes are valid.
 	default:
 		add("integration.mode %q is unknown (want %q or %q)", c.Harness.Integration.Mode, IntegrationPerItem, IntegrationEpic)
+	}
+}
+
+// validateAmbientSpecs checks the ambient_specs list (T3.14): every entry must be a
+// non-empty, repo-relative path that stays within the repository. The files are injected into
+// EVERY agent's Brief, so an absolute path or a `../` escape would pull host content from
+// outside the repo into untrusted-agent context — a confinement fault caught loud at startup,
+// not a surprise mid-run (the resolver also drops an escaping path, but config is the single
+// source of truth and a typo must fail validation). A duplicate is dead config (one entry is
+// redundant). Existence is deliberately NOT checked here: the paths are repo-relative but
+// `harness validate` need not run from the repo root, and the orchestrator resolves them
+// best-effort at dispatch (a missing ambient file is logged loudly and omitted, like an
+// unreadable spec slice), so a typo degrades context rather than wedging a run — mirroring why
+// validatePolicy checks glob shape but not the files a TCB glob matches.
+func (c *Config) validateAmbientSpecs(add func(string, ...any)) {
+	seen := map[string]bool{}
+	for _, p := range c.Harness.AmbientSpecs {
+		if strings.TrimSpace(p) == "" {
+			add("ambient_specs contains an empty path")
+			continue
+		}
+		if filepath.IsAbs(p) {
+			add("ambient_specs path %q must be repo-relative, not absolute", p)
+			continue
+		}
+		clean := filepath.ToSlash(filepath.Clean(filepath.FromSlash(p)))
+		if clean == ".." || strings.HasPrefix(clean, "../") {
+			add("ambient_specs path %q escapes the repository root", p)
+			continue
+		}
+		if seen[clean] {
+			add("ambient_specs lists %q more than once", p)
+			continue
+		}
+		seen[clean] = true
 	}
 }
 

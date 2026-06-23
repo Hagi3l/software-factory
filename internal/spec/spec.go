@@ -69,6 +69,15 @@ func Resolve(root, ref string, depth int) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	return render(order, contents), nil
+}
+
+// render concatenates the visited files into the slice document: each prefixed by its
+// `<!-- spec: <path> -->` marker (the path slash-normalized so the bytes are stable across
+// OSes), the body, and a trailing blank line. It is the single renderer shared by Resolve
+// (the issue slice) and ResolveAmbient (the ambient prefix), so both content-address by the
+// exact same byte layout — the load-bearing property for the spec-version pin (T3.6).
+func render(order []string, contents map[string]string) string {
 	var b strings.Builder
 	for _, rel := range order {
 		fmt.Fprintf(&b, "<!-- spec: %s -->\n", filepath.ToSlash(rel))
@@ -78,7 +87,80 @@ func Resolve(root, ref string, depth int) (string, error) {
 		}
 		b.WriteByte('\n')
 	}
-	return b.String(), nil
+	return b.String()
+}
+
+// ResolveAmbient renders the ambient prefix: the repo-relative markdown paths in `paths`,
+// read and emitted once each in listed order, in the same per-file form Resolve uses,
+// skipping any path already present in `exclude` (the issue slice's members) and any
+// duplicate within `paths` — so an ambient file that is also the governing spec or one of
+// its neighbors is injected exactly once (specs/specs-process.md "Ambient specs").
+//
+// Unlike Resolve it does NOT follow cross-links: ambient files are deliberately leaves — a
+// spec index of pointers and a conventions doc — and the agent reaches the rest on demand
+// via read_file in its worktree, so cross-link reachability never inflates the prefix and
+// spec_depth can stay low. Each path is confined under root exactly as Resolve confines link
+// targets (a `../` escape is dropped). A path that fails to read (a typo, a not-yet-authored
+// conventions file) is reported in `missing` and omitted — best-effort, never fatal, so the
+// orchestrator dispatches with degraded context rather than wedging the issue. The result is
+// deterministic, so it content-addresses stably as part of the hashed slice.
+func ResolveAmbient(root string, paths, exclude []string) (slice string, missing []string) {
+	excluded := make(map[string]bool, len(exclude))
+	for _, e := range exclude {
+		excluded[e] = true
+	}
+	seen := make(map[string]bool, len(paths))
+	var order []string
+	contents := map[string]string{}
+	for _, p := range paths {
+		key := filepath.ToSlash(filepath.Clean(filepath.FromSlash(strings.TrimSpace(p))))
+		if key == "" || key == "." || seen[key] || excluded[key] {
+			continue
+		}
+		seen[key] = true
+		// walk at depth 0 yields just this file (no neighbors), reusing the confinement and
+		// read logic — an unreadable or escaping path returns no entry, which we record as missing.
+		ord, cts, err := walk(root, p, 0)
+		if err != nil || len(ord) == 0 {
+			missing = append(missing, key)
+			continue
+		}
+		order = append(order, ord[0])
+		contents[ord[0]] = cts[ord[0]]
+	}
+	return render(order, contents), missing
+}
+
+// ResolveWithAmbient assembles the full slice an agent is briefed against: the project's
+// ambient specs (conventions + index, the same for every issue) prepended AHEAD of the
+// issue-scoped bounded slice (ref plus its neighbors to depth), de-duplicated so an ambient
+// file that is also the governing spec or a neighbor appears once. ref may be empty (a seed
+// naming no spec) — then the slice is the ambient prefix alone, which is why ambient context
+// reaches even spec-less work. The ambient prefix is the most stable text across all of a
+// project's invocations, so placing it first maximizes the model layer's prompt-cache reuse.
+//
+// Missing ambient files are returned for the caller to log loudly and are omitted
+// (best-effort); a missing *referenced* spec is still the fatal seed/planner fault Resolve
+// surfaces. The result is deterministic and is exactly what the Brief content-hashes, so a
+// conventions edit is pinned in provenance like a contract edit and the recompile-the-delta
+// sweeps (which must re-resolve through this same function) re-hash identically — otherwise
+// every sweep would see false drift. See specs/specs-process.md "Ambient specs", T3.6/T3.7.
+func ResolveWithAmbient(root, ref string, depth int, ambient []string) (string, []string, error) {
+	var order []string
+	var contents map[string]string
+	if strings.TrimSpace(ref) != "" {
+		o, c, err := walk(root, ref, depth)
+		if err != nil {
+			return "", nil, err
+		}
+		order, contents = o, c
+	}
+	exclude := make([]string, len(order))
+	for i, rel := range order {
+		exclude[i] = filepath.ToSlash(rel)
+	}
+	ambientSlice, missing := ResolveAmbient(root, ambient, exclude)
+	return ambientSlice + render(order, contents), missing, nil
 }
 
 // Members returns the root-relative slash paths of the files that make up the bounded slice

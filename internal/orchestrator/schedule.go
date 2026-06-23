@@ -124,14 +124,22 @@ func (o *Orchestrator) buildBrief(issue core.Issue, stage config.Stage, soul cor
 	if issue.Base != "" {
 		base = issue.Base
 	}
+	// Resolve the full slice: the project's ambient specs (conventions + index, the same for
+	// every issue) prepended ahead of the issue's bounded slice, de-duplicated and content-hashed
+	// as one document (T3.14). Called even for a spec-less seed, so ambient context still reaches
+	// it. Best-effort: a missing referenced spec degrades to an empty slice (dispatch anyway, the
+	// same discipline harvest uses), and a missing ambient file is logged loudly but never wedges
+	// the issue — the rest of the prefix and the slice still go.
 	specSlice := ""
-	if issue.Spec != "" {
-		s, err := spec.Resolve(o.opts.Repo, issue.Spec, o.opts.Config.Harness.SpecDepth)
-		if err != nil {
-			o.log.ErrorContext(context.Background(), "orchestrator: resolve spec slice; dispatching with empty slice",
-				"issue", issue.ID, "spec", issue.Spec, "err", err)
-		} else {
-			specSlice = s
+	s, missing, err := spec.ResolveWithAmbient(o.opts.Repo, issue.Spec, o.opts.Config.Harness.SpecDepth, o.opts.Config.Harness.AmbientSpecs)
+	if err != nil {
+		o.log.ErrorContext(context.Background(), "orchestrator: resolve spec slice; dispatching with empty slice",
+			"issue", issue.ID, "spec", issue.Spec, "err", err)
+	} else {
+		specSlice = s
+		if len(missing) > 0 {
+			o.log.ErrorContext(context.Background(), "orchestrator: ambient_specs file(s) unreadable; dispatching without them",
+				"issue", issue.ID, "missing", missing)
 		}
 	}
 	// Pin the slice's content address so the exact spec version this invocation works

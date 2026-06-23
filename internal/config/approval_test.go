@@ -111,3 +111,42 @@ func TestValidateEmptyTCBGlob(t *testing.T) {
 	c.Harness.Policy.TCBPaths = []string{""}
 	mustContain(t, problems(t, c), "empty glob")
 }
+
+// A sound ambient_specs list (repo-relative paths) must validate cleanly (T3.14) — existence is
+// not checked at validation time (the paths are repo-relative, resolved best-effort at dispatch).
+func TestValidateAmbientSpecsHappyPath(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Harness.AmbientSpecs = []string{"specs/README.md", "specs/conventions.md"}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidateAmbientSpecsRejectsEmpty(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Harness.AmbientSpecs = []string{""}
+	mustContain(t, problems(t, c), "ambient_specs contains an empty path")
+}
+
+func TestValidateAmbientSpecsRejectsAbsolute(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Harness.AmbientSpecs = []string{"/etc/passwd"}
+	mustContain(t, problems(t, c), "must be repo-relative")
+}
+
+func TestValidateAmbientSpecsRejectsEscape(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Harness.AmbientSpecs = []string{"../../secret.md"}
+	mustContain(t, problems(t, c), "escapes the repository root")
+}
+
+func TestValidateAmbientSpecsRejectsDuplicate(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Harness.AmbientSpecs = []string{"specs/conventions.md", "specs/conventions.md"}
+	mustContain(t, problems(t, c), "more than once")
+}

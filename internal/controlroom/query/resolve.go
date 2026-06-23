@@ -113,8 +113,10 @@ type BlastRadius struct {
 // what the sweep will do; see specs/specs-process.md "Spec drift"). It is best-effort: an issue
 // with no spec or no pin, or whose slice fails to resolve (mid-edit), is skipped rather than
 // guessed at — the same conservatism the sweep applies. repo and depth are supplied by the
-// caller. editedPaths are the repo-relative spec paths the draft would write.
-func (r *Reader) BlastRadius(ctx context.Context, repo string, depth int, editedPaths []string) (BlastRadius, error) {
+// caller. editedPaths are the repo-relative spec paths the draft would write; ambient is the
+// configured ambient_specs list (T3.14), which rides in EVERY slice — so editing one drifts all
+// pinned work, exactly as the recompile sweeps now re-resolve ambient-aware.
+func (r *Reader) BlastRadius(ctx context.Context, repo string, depth int, ambient, editedPaths []string) (BlastRadius, error) {
 	edited := map[string]bool{}
 	out := BlastRadius{}
 	for _, p := range editedPaths {
@@ -132,6 +134,17 @@ func (r *Reader) BlastRadius(ctx context.Context, repo string, depth int, edited
 		return out, nil
 	}
 
+	// An ambient spec is prepended to every issue's slice, so editing one drifts every pinned
+	// issue regardless of its governing spec — short-circuit membership to true in that case so
+	// the preview matches what the ambient-aware recompile sweeps will reissue/re-derive.
+	ambientEdited := false
+	for _, a := range ambient {
+		if edited[filepath.ToSlash(filepath.Clean(filepath.FromSlash(a)))] {
+			ambientEdited = true
+			break
+		}
+	}
+
 	all, err := r.issues.ListAll(ctx)
 	if err != nil {
 		return BlastRadius{}, fmt.Errorf("query: blast radius: %w", err)
@@ -139,8 +152,12 @@ func (r *Reader) BlastRadius(ctx context.Context, repo string, depth int, edited
 
 	// includesEdit reports whether the bounded slice rooted at the issue's spec includes any
 	// edited path — memoized by spec path so a fan-out of issues sharing a spec resolves it once.
+	// When an ambient file was edited it is unconditionally true (ambient rides in every slice).
 	memo := map[string]bool{}
 	includesEdit := func(specPath string) bool {
+		if ambientEdited {
+			return true
+		}
 		if hit, ok := memo[specPath]; ok {
 			return hit
 		}

@@ -44,12 +44,18 @@ import (
 // reducing the Dolt read pressure that causes the write-visibility lag the projection tolerates.
 func (o *Orchestrator) recompileSpecDelta(ctx context.Context) {
 	for _, issue := range o.inflight.issues() {
-		// No spec reference (nothing to resolve) or no pin yet (dispatched before the slice
-		// could be pinned — degraded, not drifted): there is no version to diff against.
-		if issue.Spec == "" || issue.SpecHash == "" {
+		// No pin yet (dispatched before the slice could be pinned — degraded, not drifted): there
+		// is no version to diff against. The pin is the signal, not the spec path — a spec-less
+		// issue still pins a hash when ambient_specs are configured (T3.14), and an ambient edit
+		// must reissue it too, so we key on the pin's presence, not issue.Spec.
+		if issue.SpecHash == "" {
 			continue
 		}
-		slice, err := spec.Resolve(o.opts.Repo, issue.Spec, o.opts.Config.Harness.SpecDepth)
+		// Re-resolve through the SAME ambient-aware path buildBrief pins with (T3.14): the pinned
+		// hash covers the ambient prefix, so re-hashing with plain Resolve would mismatch on every
+		// sweep and reissue all live work spuriously. Missing ambient files are ignored here — the
+		// dispatch already logged them; what matters is the hash matches what was pinned.
+		slice, _, err := spec.ResolveWithAmbient(o.opts.Repo, issue.Spec, o.opts.Config.Harness.SpecDepth, o.opts.Config.Harness.AmbientSpecs)
 		if err != nil {
 			o.log.ErrorContext(ctx, "orchestrator: resolve spec slice for drift check; leaving in-flight work untouched",
 				"issue", issue.ID, "spec", issue.Spec, "err", err)
@@ -148,7 +154,11 @@ func (o *Orchestrator) recompileMergedDelta(ctx context.Context) {
 
 	for _, k := range keys {
 		members := closed[k]
-		slice, err := spec.Resolve(o.opts.Repo, k.spec, o.opts.Config.Harness.SpecDepth)
+		// Re-resolve ambient-aware so the re-hash matches what buildBrief pinned (T3.14) — see
+		// recompileSpecDelta. An ambient (conventions/index) edit therefore re-derives every epic's
+		// merged work too, exactly as a governing-spec edit does: ambient context is part of the
+		// contract the merged code was built against.
+		slice, _, err := spec.ResolveWithAmbient(o.opts.Repo, k.spec, o.opts.Config.Harness.SpecDepth, o.opts.Config.Harness.AmbientSpecs)
 		if err != nil {
 			o.log.ErrorContext(ctx, "orchestrator: resolve spec slice for merged drift check; leaving merged work untouched",
 				"epic", k.epic, "spec", k.spec, "err", err)

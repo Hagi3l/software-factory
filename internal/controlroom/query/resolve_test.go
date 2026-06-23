@@ -45,7 +45,7 @@ func TestBlastRadiusInFlightMembership(t *testing.T) {
 	}}
 	r := NewReader(issues, &fakeArts{}, &fakeProv{})
 
-	br, err := r.BlastRadius(context.Background(), repo, 1, []string{"specs/b.md"})
+	br, err := r.BlastRadius(context.Background(), repo, 1, nil, []string{"specs/b.md"})
 	if err != nil {
 		t.Fatalf("BlastRadius: %v", err)
 	}
@@ -75,7 +75,7 @@ func TestBlastRadiusMergedGrouping(t *testing.T) {
 	}}
 	r := NewReader(issues, &fakeArts{}, &fakeProv{})
 
-	br, err := r.BlastRadius(context.Background(), repo, 1, []string{"specs/b.md"})
+	br, err := r.BlastRadius(context.Background(), repo, 1, nil, []string{"specs/b.md"})
 	if err != nil {
 		t.Fatalf("BlastRadius: %v", err)
 	}
@@ -88,11 +88,42 @@ func TestBlastRadiusMergedGrouping(t *testing.T) {
 	}
 }
 
+// TestBlastRadiusAmbientEditTouchesAllPinned proves editing an ambient spec (T3.14) drifts
+// EVERY pinned issue regardless of its governing spec — ambient files ride in every slice, so
+// the recompile sweeps re-hash them all. h-2's slice does not include the edited path, but the
+// edit IS an ambient file, so it is affected anyway; the unpinned h-3 is still skipped (no
+// version to diff). The preview must match the ambient-aware sweeps.
+func TestBlastRadiusAmbientEditTouchesAllPinned(t *testing.T) {
+	repo := writeSpecs(t, map[string]string{
+		"specs/conventions.md": "# Conventions\n",
+		"specs/a.md":           "# A\n",
+		"specs/c.md":           "# C\n",
+	})
+	issues := &fakeIssues{all: []core.Issue{
+		{ID: "h-1", Role: "implement", Status: "in_progress", Spec: "specs/a.md", SpecHash: "sha256:pin1"},
+		{ID: "h-2", Role: "qa", Status: "in_progress", Spec: "specs/c.md", SpecHash: "sha256:pin2"}, // unrelated spec, still drifts
+		{ID: "h-3", Role: "implement", Status: "in_progress", Spec: "specs/a.md", SpecHash: ""},      // no pin → skipped
+		{ID: "h-4", Status: "closed", EpicID: "e1", Spec: "specs/a.md", SpecHash: "sha256:z1"},       // merged group, also re-derived
+	}}
+	r := NewReader(issues, &fakeArts{}, &fakeProv{})
+
+	br, err := r.BlastRadius(context.Background(), repo, 1, []string{"specs/conventions.md"}, []string{"specs/conventions.md"})
+	if err != nil {
+		t.Fatalf("BlastRadius: %v", err)
+	}
+	if len(br.InFlight) != 2 {
+		t.Fatalf("InFlight = %+v, want both pinned in-flight issues (an ambient edit drifts all)", br.InFlight)
+	}
+	if len(br.Merged) != 1 || br.Merged[0].Epic != "e1" {
+		t.Fatalf("Merged = %+v, want the e1 group re-derived by the ambient edit", br.Merged)
+	}
+}
+
 // TestBlastRadiusEmptyEditNoWork proves an empty draft (no edited paths) assesses nothing — the
 // preview reads as "nothing to assess yet" rather than scanning every issue.
 func TestBlastRadiusEmptyEditNoWork(t *testing.T) {
 	r := NewReader(&fakeIssues{all: []core.Issue{{ID: "h-1", Status: "in_progress", Spec: "specs/a.md", SpecHash: "x"}}}, &fakeArts{}, &fakeProv{})
-	br, err := r.BlastRadius(context.Background(), t.TempDir(), 1, nil)
+	br, err := r.BlastRadius(context.Background(), t.TempDir(), 1, nil, nil)
 	if err != nil {
 		t.Fatalf("BlastRadius: %v", err)
 	}
@@ -103,7 +134,7 @@ func TestBlastRadiusEmptyEditNoWork(t *testing.T) {
 
 func TestBlastRadiusListAllError(t *testing.T) {
 	r := NewReader(&fakeIssues{allErr: errors.New("bd down")}, &fakeArts{}, &fakeProv{})
-	if _, err := r.BlastRadius(context.Background(), t.TempDir(), 1, []string{"specs/a.md"}); err == nil {
+	if _, err := r.BlastRadius(context.Background(), t.TempDir(), 1, nil, []string{"specs/a.md"}); err == nil {
 		t.Fatal("BlastRadius swallowed a ListAll error")
 	}
 }

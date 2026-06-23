@@ -64,6 +64,46 @@ func TestBuildBriefResolvesSpecSlice(t *testing.T) {
 	}
 }
 
+// TestBuildBriefInjectsAmbientSpecs proves buildBrief prepends the configured ambient specs
+// (T3.14) ahead of the issue's bounded slice and content-hashes the whole document — so the
+// agent always carries the project's conventions, and a conventions edit is pinned like a
+// contract edit. The ambient prefix precedes the governing spec (the cache-stable prefix).
+func TestBuildBriefInjectsAmbientSpecs(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteSpec(t, filepath.Join(repo, "specs", "conventions.md"), "# Conventions\nno new modules\n")
+	mustWriteSpec(t, filepath.Join(repo, "specs", "orders.md"), "# Orders\nreject negatives\n")
+
+	o := orchWithRepo(repo, 1)
+	o.opts.Config.Harness.AmbientSpecs = []string{"specs/conventions.md"}
+	brief := o.buildBrief(core.Issue{ID: "iss-1", Role: "implement", Spec: "specs/orders.md"}, config.Stage{}, core.Soul{})
+
+	if !strings.Contains(brief.Spec, "# Conventions") {
+		t.Errorf("brief missing the ambient conventions:\n%s", brief.Spec)
+	}
+	if iConv, iOrders := strings.Index(brief.Spec, "specs/conventions.md"), strings.Index(brief.Spec, "specs/orders.md"); iConv < 0 || iConv > iOrders {
+		t.Errorf("ambient conventions must be prepended ahead of the governing spec (conv at %d, orders at %d)", iConv, iOrders)
+	}
+	if brief.SpecHash == "" || brief.SpecHash != spec.Hash(brief.Spec) {
+		t.Errorf("brief.SpecHash must cover the full ambient+slice document; got %q", brief.SpecHash)
+	}
+}
+
+// TestBuildBriefAmbientReachesSpeclessIssue proves ambient context reaches a seed naming no spec
+// (and pins a hash) — "injected into every agent's Brief regardless of the issue".
+func TestBuildBriefAmbientReachesSpeclessIssue(t *testing.T) {
+	repo := t.TempDir()
+	mustWriteSpec(t, filepath.Join(repo, "specs", "conventions.md"), "# Conventions\n")
+	o := orchWithRepo(repo, 1)
+	o.opts.Config.Harness.AmbientSpecs = []string{"specs/conventions.md"}
+	brief := o.buildBrief(core.Issue{ID: "iss-1", Role: "implement"}, config.Stage{}, core.Soul{})
+	if !strings.Contains(brief.Spec, "# Conventions") {
+		t.Errorf("a spec-less issue must still get the ambient prefix:\n%s", brief.Spec)
+	}
+	if brief.SpecHash == "" {
+		t.Error("an ambient-only slice must be pinned (non-empty hash)")
+	}
+}
+
 // An issue that names no spec gets an empty slice (and the agent falls back to the specs/
 // tree in its worktree) — the kernel path, which must keep working unchanged.
 func TestBuildBriefNoSpecYieldsEmptySlice(t *testing.T) {

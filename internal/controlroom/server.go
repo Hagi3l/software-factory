@@ -1110,7 +1110,11 @@ func (s *Server) handleResolveBlast(w http.ResponseWriter, r *http.Request) {
 	for _, sp := range draft.Specs {
 		paths = append(paths, sp.Path)
 	}
-	br, err := s.reader.BlastRadius(r.Context(), s.repo, s.specDepth, paths)
+	var ambient []string
+	if s.cfg != nil && s.cfg.Harness != nil {
+		ambient = s.cfg.Harness.AmbientSpecs
+	}
+	br, err := s.reader.BlastRadius(r.Context(), s.repo, s.specDepth, ambient, paths)
 	if err != nil {
 		s.log.ErrorContext(r.Context(), "controlroom: blast radius read failed", "session", sess.ID, "err", err)
 		http.Error(w, "could not compute the blast radius\n", http.StatusInternalServerError)

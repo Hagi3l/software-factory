@@ -56,6 +56,16 @@
 # neighbours (enough to carry a contract and the terms it leans on); see specs/specs-process.md.
 spec_depth: 1
 
+# Ambient specs (T3.14): repo-relative spec files injected into EVERY agent's Brief regardless of
+# the issue — for a project's cross-cutting conventions/gotchas and its spec index, which the
+# issue-scoped slice does not reliably carry. Prepended ahead of the bounded slice (a stable,
+# cache-friendly prefix), de-duplicated against it, and covered by the spec content hash (so a
+# conventions edit is pinned and re-derives work like a contract edit). Opt-in (empty default);
+# keep them LEAN — they ride in every invocation. Conventional pair shown below. This harness's
+# own conventions live in CLAUDE.md (invisible to agents); a specs/conventions.md would be needed
+# to self-host, so the shipped config leaves this empty. See specs/specs-process.md "Ambient specs".
+# ambient_specs: [specs/README.md, specs/conventions.md]
+
 # The requirements planner (T4.12): the trusted, NON-sandboxed LLM behind the control-room
 # Create-Task wizard. It is the one place a human is in the loop — a steered conversation
 # that converges on testable intent (and, later T4.14, drafts specs + seed issues). It runs

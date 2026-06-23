@@ -180,6 +180,122 @@ func TestHash(t *testing.T) {
 	}
 }
 
+// TestResolveWithAmbientPrependsAndDedupes proves the ambient specs (T3.14) are injected ahead
+// of the issue's bounded slice, in listed order, and de-duplicated against it: an ambient file
+// that is also the governing spec or one of its neighbors appears exactly once, and the ambient
+// prefix comes first (the cache-stable prefix). The whole document is one hashable slice.
+func TestResolveWithAmbientPrependsAndDedupes(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"specs/README.md":      "# Index\n",
+		"specs/conventions.md": "# Conventions\nno new modules\n",
+		"specs/orders.md":      "# Orders\nsee [validation](validation.md)\n",
+		"specs/validation.md":  "# Validation\n",
+	})
+	ambient := []string{"specs/README.md", "specs/conventions.md", "specs/orders.md"} // orders is also the governing spec
+	got, missing, err := ResolveWithAmbient(root, "specs/orders.md", 1, ambient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missing) != 0 {
+		t.Errorf("no ambient file is missing, got %v", missing)
+	}
+	for _, want := range []string{"# Index", "# Conventions", "# Orders", "# Validation"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("slice missing %q:\n%s", want, got)
+		}
+	}
+	// Ambient prefix comes first: the index precedes the governing spec.
+	if iIndex, iOrders := strings.Index(got, "specs/README.md"), strings.Index(got, "specs/orders.md"); iIndex < 0 || iIndex > iOrders {
+		t.Errorf("ambient index must be prepended ahead of the issue slice (index at %d, orders at %d)", iIndex, iOrders)
+	}
+	// De-dup: orders.md is both an ambient entry and the governing spec — emitted once.
+	if n := strings.Count(got, "<!-- spec: specs/orders.md -->"); n != 1 {
+		t.Errorf("orders.md emitted %d times, want exactly 1 (de-duped against the slice):\n%s", n, got)
+	}
+}
+
+// TestResolveWithAmbientNoSpecStillInjectsAmbient proves ambient context reaches even a
+// spec-less seed (ref empty): the slice is the ambient prefix alone, and it hashes non-empty —
+// which is why an ambient edit can drift spec-less in-flight work.
+func TestResolveWithAmbientNoSpecStillInjectsAmbient(t *testing.T) {
+	root := writeTree(t, map[string]string{"specs/conventions.md": "# Conventions\n"})
+	got, _, err := ResolveWithAmbient(root, "", 1, []string{"specs/conventions.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got, "# Conventions") {
+		t.Errorf("a spec-less issue must still get the ambient prefix:\n%s", got)
+	}
+	if Hash(got) == "" {
+		t.Error("an ambient-only slice must hash non-empty (so it is pinned and drift-checked)")
+	}
+}
+
+// TestResolveWithAmbientMissingFileIsBestEffort proves an unreadable ambient file is reported
+// and omitted, never fatal — degraded context, not a dead pipeline — while a missing REFERENCED
+// spec stays the fatal seed fault Resolve surfaces.
+func TestResolveWithAmbientMissingFileIsBestEffort(t *testing.T) {
+	root := writeTree(t, map[string]string{"specs/orders.md": "# Orders\n"})
+	got, missing, err := ResolveWithAmbient(root, "specs/orders.md", 1, []string{"specs/gone.md", "specs/orders.md"})
+	if err != nil {
+		t.Fatalf("a missing ambient file must not fail resolution: %v", err)
+	}
+	if len(missing) != 1 || missing[0] != "specs/gone.md" {
+		t.Errorf("missing = %v, want [specs/gone.md]", missing)
+	}
+	if !strings.Contains(got, "# Orders") {
+		t.Errorf("the readable content must still appear:\n%s", got)
+	}
+	// A missing referenced spec is still fatal.
+	if _, _, err := ResolveWithAmbient(root, "specs/missing.md", 1, nil); err == nil {
+		t.Error("a missing referenced spec must error even with ambient configured")
+	}
+}
+
+// TestResolveWithAmbientIsDeterministic guards the load-bearing property: the slice (and so its
+// hash) is byte-identical across calls, so the recompile sweeps re-hash to the pinned value
+// rather than seeing false drift every tick.
+func TestResolveWithAmbientIsDeterministic(t *testing.T) {
+	root := writeTree(t, map[string]string{
+		"specs/conventions.md": "# Conventions\n",
+		"specs/orders.md":      "# Orders\n",
+	})
+	a, _, err := ResolveWithAmbient(root, "specs/orders.md", 1, []string{"specs/conventions.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _, err := ResolveWithAmbient(root, "specs/orders.md", 1, []string{"specs/conventions.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a != b {
+		t.Error("ResolveWithAmbient is not deterministic across calls")
+	}
+}
+
+// TestResolveAmbientConfinesToRoot proves an ambient path escaping the repo (a `../` traversal)
+// is dropped, not read — ambient files ride into untrusted-agent context, so a hostile config
+// path cannot pull host files in (the same confinement Resolve gives link targets).
+func TestResolveAmbientConfinesToRoot(t *testing.T) {
+	root := writeTree(t, map[string]string{"specs/conventions.md": "# Conventions\n"})
+	outside := filepath.Join(filepath.Dir(root), "secret.md")
+	if err := os.WriteFile(outside, []byte("# SECRET\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(outside)
+
+	got, missing := ResolveAmbient(root, []string{"../secret.md", "specs/conventions.md"}, nil)
+	if strings.Contains(got, "SECRET") {
+		t.Errorf("an escaping ambient path must not be read:\n%s", got)
+	}
+	if !strings.Contains(got, "# Conventions") {
+		t.Errorf("the confined ambient file must still resolve:\n%s", got)
+	}
+	if len(missing) != 1 || missing[0] != "../secret.md" {
+		t.Errorf("missing = %v, want the escaping path reported as missing", missing)
+	}
+}
+
 // TestMembersAreTheSliceFiles proves Members returns exactly the files Resolve concatenates, in
 // BFS order — the membership the Resolve-mode blast-radius preview tests "does this slice include
 // the edited spec" against (T4.15). It must share Resolve's traversal so the preview cannot

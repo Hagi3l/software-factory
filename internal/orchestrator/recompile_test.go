@@ -61,6 +61,44 @@ func TestRecompileSpecDeltaReissuesDriftedWork(t *testing.T) {
 	}
 }
 
+// TestRecompileSpecDeltaAmbientConsistency guards the load-bearing T3.14 property: the drift
+// sweep re-resolves through the SAME ambient-aware path the pin was made with, so (a) an ambient
+// config causes NO false drift on an unchanged tree (the bug a plain-Resolve re-hash would cause:
+// reissuing all live work every tick), and (b) editing an AMBIENT file (not the governing spec)
+// still drifts the work — a conventions edit propagates like a contract edit.
+func TestRecompileSpecDeltaAmbientConsistency(t *testing.T) {
+	repo := t.TempDir()
+	convPath := filepath.Join(repo, "specs", "conventions.md")
+	mustWriteSpec(t, convPath, "# Conventions\nno new modules\n")
+	mustWriteSpec(t, filepath.Join(repo, "specs", "orders.md"), "# Orders\nreject negatives\n")
+
+	ambient := []string{"specs/conventions.md"}
+	orig, _, err := spec.ResolveWithAmbient(repo, "specs/orders.md", 1, ambient)
+	if err != nil {
+		t.Fatalf("resolve original slice: %v", err)
+	}
+	pinned := spec.Hash(orig)
+
+	o := orchWithRepo(repo, 1)
+	o.opts.Config.Harness.AmbientSpecs = ambient
+	bd := newFakeBeads()
+	o.bd = bd
+	o.inflight.add(core.Issue{ID: "iss-1", Role: "implement", Status: statusInProgress, Spec: "specs/orders.md", SpecHash: pinned}, testLease())
+
+	// (a) No edit, ambient configured: the re-resolve matches the pin — no false drift.
+	o.recompileSpecDelta(context.Background())
+	if len(bd.reissued) != 0 {
+		t.Fatalf("reissued %v with no edit; ambient must not cause false drift", bd.reissued)
+	}
+
+	// (b) Edit the ambient conventions file (not orders.md): the pinned hash is now stale.
+	mustWriteSpec(t, convPath, "# Conventions\nno new modules AND crypto/rand only\n")
+	o.recompileSpecDelta(context.Background())
+	if len(bd.reissued) != 1 || bd.reissued[0] != "iss-1" {
+		t.Fatalf("reissued = %v, want [iss-1] after the ambient (conventions) edit", bd.reissued)
+	}
+}
+
 // TestScheduleReadyRecordsPinnedSpecHashForDriftSweep proves the wiring T3.13 depends on: the
 // in-memory spec-drift sweep reads the pinned spec hash from the in-flight projection, and
 // scheduleReady records that hash into the projection (updateIssue) AFTER it pins — because the

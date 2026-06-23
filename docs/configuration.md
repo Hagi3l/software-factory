@@ -139,6 +139,35 @@ How many cross-link hops of the spec tree each agent receives: `1` = the issue's
 referenced spec file plus its direct neighbours. Bounds the agent's context to the
 relevant contract rather than the whole `specs/` tree.
 
+### `ambient_specs` — always-injected conventions + index
+
+```yaml
+ambient_specs: [specs/README.md, specs/conventions.md]   # opt-in; empty by default
+```
+
+Repo-relative spec files injected into **every** agent's Brief, regardless of the issue.
+The issue-scoped slice (`spec_depth`) carries the *contract*; `ambient_specs` carries the
+project's cross-cutting **conventions and gotchas** (parameterized-SQL-only, `crypto/rand`,
+"run `make generate` after a `.templ` edit", "no new modules — the sandbox is zero-network")
+and its spec **index**, which are the same for every issue. Without them a stateless agent
+rediscovers conventions every run or trips one and dead-letters; reaching them via cross-links
+is fragile (a conventions file beyond `spec_depth` falls out of the slice, and raising
+`spec_depth` to reach it taxes *every* slice), so they are delivered out-of-band instead — which
+also lets `spec_depth` stay low.
+
+The conventional pair is the `specs/README.md` index (a thin hub of pointers — the agent
+`read_file`s any other spec on demand) and a `specs/conventions.md`. The files are **prepended
+ahead of** the bounded slice (a stable, cache-friendly prefix the model layer's prompt cache
+reuses), **de-duplicated** against it (an ambient file that is also the governing spec or a
+neighbour is injected once), and **covered by the spec content hash** — so editing a conventions
+file is pinned in provenance and re-derives in-flight/merged work exactly like a contract edit.
+Keep them **lean**: they ride in every invocation.
+
+Opt-in (empty by default). `harness validate` rejects an absolute path, a `../` escape outside
+the repo, or a duplicate entry; file *existence* is resolved best-effort at dispatch (a missing
+ambient file is logged and omitted, never wedges a run). See
+[specs-process.md](../specs/specs-process.md#ambient-specs).
+
 ### `integration` — how work reaches `main`
 
 ```yaml
