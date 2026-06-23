@@ -21,9 +21,20 @@ FROM go-toolchain:latest
 # templ CLI + Tailwind standalone CLI (need network at build; never at run). The base set
 # GOPROXY=off, so re-enable a proxy just for the install.
 RUN GOPROXY=https://proxy.golang.org go install github.com/a-h/templ/cmd/templ@v0.3.1001
-RUN curl -sSfL https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.0/tailwindcss-linux-x64 \
+# Pick the Tailwind standalone binary that matches the IMAGE's architecture. The image inherits
+# the host's arch (arm64 on Apple Silicon, amd64 on x86), so a hardcoded -linux-x64 binary runs
+# under emulation on an arm64 image and crashes with SIGTRAP (exit 133, the "rosetta error") —
+# which breaks `make generate` (templ succeeds, tailwind crashes) inside the agent sandboxes.
+# `uname -m` reflects the build arch, so this resolves to the native binary on either platform.
+RUN ARCH="$(uname -m)" && case "$ARCH" in \
+      x86_64)  TW=tailwindcss-linux-x64 ;; \
+      aarch64) TW=tailwindcss-linux-arm64 ;; \
+      *) echo "unsupported arch for tailwind: $ARCH" >&2; exit 1 ;; \
+    esac \
+ && curl -sSfL "https://github.com/tailwindlabs/tailwindcss/releases/download/v4.3.0/$TW" \
       -o /usr/local/bin/tailwindcss \
- && chmod +x /usr/local/bin/tailwindcss
+ && chmod +x /usr/local/bin/tailwindcss \
+ && /usr/local/bin/tailwindcss --help >/dev/null   # fail the build loudly if the binary can't run
 
 # Warm the vault's module cache (build context = demo/vault/app). The base image set
 # GOPROXY=off; override it for this one download so the deps resolve, then it reverts.
