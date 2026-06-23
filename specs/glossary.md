@@ -120,8 +120,10 @@ vs. code, results vs. producer, and mutations vs. proposer. See
 
 ### Projection (work-graph read model)
 The orchestrator's volatile in-memory view of the live state of **every** issue it knows —
-status, role, attempt, epic, spend, `state_entered_at`, and the [Integrated](#integrated)
-marker. The single writer maintains it at its one transition choke point, so it is current
+status, role, attempt, epic, spend, `state_entered_at`, the [Integrated](#integrated)
+marker, and its read-side `blocked-by` edges (so the live DAG and the board's *waits-for*
+overlay are edge-complete — a created record carries its resolved edges, not only its
+status). The single writer maintains it at its one transition choke point, so it is current
 the instant a status is written; it is **derived, never authoritative** (rebuilt from beads
 on restart). It is the **read model** both hot paths use instead of polling beads: the
 scheduler reads it to skip already-dispatched or just-settled work, and the

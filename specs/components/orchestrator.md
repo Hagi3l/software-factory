@@ -118,11 +118,18 @@ All three are the same root cause: a direct beads read is not a consistent, scal
 The orchestrator is the **single writer**, so it already knows the live status of
 every issue at the instant it writes it. It therefore keeps a **work-graph
 projection**: a volatile in-memory view of the live state of **every** issue it knows —
-status, role, attempt, epic, spend, `state_entered_at`, lease, and the
-[`integrated`](../integration.md) marker. (This generalizes the original *in-flight*
-cache, which held only `in_progress` issues; retaining settled issues too is what closes
-re-dispatch case 2 and lets the control room read closed/blocked state.) Two rules make
-it correct and cheap:
+status, role, attempt, epic, spend, `state_entered_at`, lease, the
+[`integrated`](../integration.md) marker, and its read-side `blocked-by` edges. (This
+generalizes the original *in-flight* cache, which held only `in_progress` issues;
+retaining settled issues too is what closes re-dispatch case 2 and lets the control room
+read closed/blocked state.) The edges matter because the control room's live **DAG view**,
+and the board's sibling **waits-for** overlay, read the dependency graph from the
+projection — so a record the orchestrator *creates* (a decomposition child, a routed fix)
+must carry its **resolved** `blocked-by` edges at creation, not only its status. `blocked-by`
+is otherwise a read-path-only facet a freshly-created issue lacks until the next cold-start
+rehydration, which would leave the live graph edge-incomplete in the meantime — the same
+read-your-writes gap the projection exists to close, applied to edges rather than status.
+Two rules make it correct and cheap:
 
 - **It is derived, never authoritative.** It holds nothing that is not recoverable
   from beads. On restart it is rebuilt from beads (the in-flight set with their leases,

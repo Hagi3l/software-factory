@@ -935,7 +935,13 @@ are clarity/discipline. **A clean re-run gates T10's close** (and re-opens the #
   cross-column, right-edge bow for same-column stacked siblings). Regenerated `board_templ.go` at the
   **pinned** templ v0.3.1001 (the local v0.3.1020 churns all files with a version-header bump — used
   `go run github.com/a-h/templ/cmd/templ@v0.3.1001` so only board changed). Spec was promoted ahead
-  (control-room.md "Lineage thread"); docs/control-room.md Board entry updated. Tests:
+  (control-room.md "Lineage thread"); docs/control-room.md Board entry updated. **Spec backport (the
+  projection-completeness learning):** the work-graph projection's field enumeration in
+  orchestrator.md "Live state vs. durable state" + glossary "Projection" now lists the read-side
+  `blocked-by` edges and states that a *created* record must carry its **resolved** edges (not only
+  status), because the live DAG view and this waits-for overlay read the dependency graph from the
+  projection — `blocked-by` is otherwise a read-path-only facet a fresh issue lacks until cold-start
+  rehydration, leaving the live graph edge-incomplete. Tests:
   `query.TestBoardWaitsForSiblingEdges` (sibling included, parent-plan link + external blocker
   excluded), `beads.TestApplyResolvesSiblingKey` extended (resolved edge carried onto the created
   issue); `lineage.js` syntax-checked (`node --check`). **Not visually verified in a browser** — the
