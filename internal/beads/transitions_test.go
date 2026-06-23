@@ -284,6 +284,15 @@ func TestApplyResolvesSiblingKey(t *testing.T) {
 	if !sawEdge {
 		t.Errorf("did not add the resolved sibling edge dep add new-1 new-2; calls = %v", *calls)
 	}
+	// The resolved blocked-by edge is also carried onto the returned issue's read-side DependsOn, so
+	// the orchestrator's work-graph projection (which records created issues without re-reading beads)
+	// holds the same edges a read would — what lets the live board draw the waits-for overlay (T10.4).
+	if len(created[0].DependsOn) != 1 || created[0].DependsOn[0] != "new-2" {
+		t.Errorf("created[0].DependsOn = %v, want [new-2] (the resolved sibling id carried onto the issue)", created[0].DependsOn)
+	}
+	if len(created[1].DependsOn) != 0 {
+		t.Errorf("created[1].DependsOn = %v, want empty (it has no blockers)", created[1].DependsOn)
+	}
 }
 
 // A reused local key in one batch is ambiguous (which sibling does a reference mean?), so

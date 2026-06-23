@@ -202,9 +202,16 @@ single-issue epic) gets none of this — the chrome would only be noise.
   after** a card's View-Transitions move rather than chasing it mid-tween, and the layer redraws
   from the cards' stable ids on each live refetch; it draws statically under
   `prefers-reduced-motion`. Sibling-ordering edges (a planner's inter-child `blocked-by`) are
-  **not** drawn as lineage — the thread stays a clean producer tree; they may later surface as a
-  distinct (dashed) "waits-for" edge. This overlay is the one client-side-graph exception noted
-  under *Graph viz* above.
+  **not** drawn as lineage — the thread stays a clean producer tree — but they **are** drawn as a
+  distinct **dashed "waits-for" edge** between the siblings, so the operator can see *why* siblings
+  do not all start at once (e.g. a store-layer child must land before the handler children that
+  depend on it). Without this, a staggered start — a dependency being honoured — is indistinguishable
+  from the pipeline stalling, and the dependency order the planner imposed is invisible. The
+  waits-for edges share the lineage layer's restraint (faint by default; the hover/focus path
+  highlight includes a card's waits-for predecessors and successors) so the board never looks busy.
+  The full blocker graph also renders server-side in the [DAG view](#the-views); this overlay is the
+  at-a-glance subset for the work in motion. Both overlays are the one client-side-graph exception
+  noted under *Graph viz* above.
 - **The root card is the hero (epic mode).** Under [`integration.mode: epic`](integration.md) the
   epic root renders distinctly from its children, with a **progress indicator** (children
   **integrated** / total — counting the durable [`integrated`](integration.md) marker, and

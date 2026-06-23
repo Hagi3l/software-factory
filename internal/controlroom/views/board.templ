@@ -2,6 +2,7 @@ package views
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/Loxstomper/harness/internal/controlroom/query"
 )
@@ -113,6 +114,9 @@ templ boardCard(card query.IssueCard) {
 		}
 		if card.ParentID != "" {
 			data-parent={ card.ParentID }
+		}
+		if len(card.WaitsFor) > 0 {
+			data-waits-for={ strings.Join(card.WaitsFor, ",") }
 		}
 		class="block rounded-lg border border-border bg-raised p-3 shadow-card transition duration-150 hover:-translate-y-0.5 hover:border-border-strong hover:shadow-card-hover"
 	>

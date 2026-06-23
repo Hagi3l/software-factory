@@ -121,6 +121,15 @@ type IssueCard struct {
 	// descends directly from the epic root. The root itself has none. Set only for cards in a
 	// multi-issue epic (the same gate as EpicID), since a lone issue has no lineage to thread.
 	ParentID string
+	// WaitsFor carries the card's inter-sibling "waits-for" edges — the subset of its read-side
+	// blocked-by edges (core.Issue.DependsOn) that target another issue in the SAME multi-issue
+	// epic, excluding its lineage producer (ParentID) so a producer edge is never double-drawn as
+	// a waits-for edge. These are exactly the planner's inter-child ordering edges (acceptPlan
+	// stamps them), so the board can draw a dashed "waits-for" overlay (T10.4, control-room.md
+	// "Lineage thread") that explains *why* siblings do not all start at once — a staggered start
+	// is a dependency being honored (made real by T10.2), not a stall. Gated like EpicID/ParentID
+	// (multi-issue epic only); empty for a card with no sibling blocker.
+	WaitsFor []string
 	// Epic is the whole-feature summary, set only on an epic's *root* card (the hero) under
 	// epic mode — nil on a child card and in per-item mode. It carries the progress indicator
 	// (children integrated / total), the aggregate spend vs the epic_budget cap, and the
@@ -297,8 +306,14 @@ func (r *Reader) Board(ctx context.Context, stageOrder []string, epicMode bool, 
 	// Count issues per epic so the grouping chrome gates on a genuine multi-issue fan-out
 	// (epic count > 1), independent of integration.mode.
 	epicCounts := make(map[string]int)
+	// idEpic maps every issue id to its epic, so a card's blocked-by edge can be classified as an
+	// intra-epic sibling "waits-for" edge (drawn) vs an unrelated/external blocker (not drawn) — see
+	// waitsForOf.
+	idEpic := make(map[string]string, len(issues))
 	for _, i := range issues {
-		epicCounts[core.EpicOf(i)]++
+		ep := core.EpicOf(i)
+		epicCounts[ep]++
+		idEpic[i.ID] = ep
 	}
 	var summaries map[string]*EpicSummary
 	if epicMode {
@@ -325,6 +340,7 @@ func (r *Reader) Board(ctx context.Context, stageOrder []string, epicMode bool, 
 		if epicCounts[ep] > 1 {
 			c.EpicID = ep
 			c.ParentID = parentOf(i, ep)
+			c.WaitsFor = waitsForOf(i, ep, c.ParentID, idEpic)
 		}
 		// The hero is epic-mode-only and rides the epic root card (its own id == the epic id);
 		// children carry just the shared grouping chrome above.
@@ -361,6 +377,28 @@ func parentOf(i core.Issue, ep string) string {
 		return ep
 	}
 	return ""
+}
+
+// waitsForOf returns the inter-sibling "waits-for" edges to surface on the board (T10.4,
+// control-room.md "Lineage thread"): the issue's read-side blocked-by targets (core.Issue.DependsOn)
+// that are siblings in the SAME multi-issue epic, excluding its lineage producer (parentID) so a
+// producer edge is never double-drawn as a dashed waits-for edge. A decomposition child's DependsOn
+// holds its inter-sibling ordering edges plus the parent-plan link (acceptPlan); the plan is the
+// lineage parent of a top-level child, so excluding parentID drops that structural link and keeps
+// the genuine sibling-ordering edges (e.g. a store-layer child a handler child waits on). A blocker
+// outside this epic (or an unknown id) is not a sibling and is left to the server-side DAG view.
+// Deterministic order (DependsOn's order) for a stable data-waits-for attribute and stable tests.
+func waitsForOf(i core.Issue, ep, parentID string, idEpic map[string]string) []string {
+	var out []string
+	for _, dep := range i.DependsOn {
+		if dep == parentID {
+			continue
+		}
+		if idEpic[dep] == ep {
+			out = append(out, dep)
+		}
+	}
+	return out
 }
 
 // frontierColumn returns the index of the board's work frontier — the column the view

@@ -818,6 +818,51 @@ func TestBoardSingleIssueEpicStaysBare(t *testing.T) {
 	}
 }
 
+// TestBoardWaitsForSiblingEdges proves the board's dashed "waits-for" overlay data (T10.4): a card's
+// WaitsFor carries the subset of its blocked-by edges (core.Issue.DependsOn) that target an
+// intra-epic sibling, EXCLUDING its lineage producer (the parent-plan link, == ParentID) so a
+// producer edge is never double-drawn, and excluding any blocker outside the epic.
+func TestBoardWaitsForSiblingEdges(t *testing.T) {
+	issues := []core.Issue{
+		{ID: "feat-1", Title: "root", Role: "plan", Status: "closed"},
+		// store-layer child: blocked-by the plan only. The plan is its ParentID, so it is excluded
+		// — the store child has no waits-for edge.
+		{ID: "store", Title: "store", Role: "implement", Status: "in_progress", EpicID: "feat-1", DependsOn: []string{"feat-1"}},
+		// handler child: blocked-by the plan (parent link) AND the store sibling (ordering). Only the
+		// store edge is a waits-for; the plan link is its ParentID and drops out.
+		{ID: "handler", Title: "handler", Role: "implement", Status: "open", EpicID: "feat-1", DependsOn: []string{"feat-1", "store"}},
+		// a blocker outside the epic must not surface as a sibling waits-for edge.
+		{ID: "lonely", Title: "lonely", Role: "implement", Status: "open", EpicID: "feat-1", DependsOn: []string{"ext-99"}},
+	}
+	r := NewReader(&fakeIssues{all: issues}, &fakeArts{}, &fakeProv{})
+	board, err := r.Board(context.Background(), []string{"plan", "implement"}, false, BudgetCaps{})
+	if err != nil {
+		t.Fatalf("Board: %v", err)
+	}
+	want := map[string][]string{"feat-1": nil, "store": nil, "handler": {"store"}, "lonely": nil}
+	for id, ws := range want {
+		c := findCard(board, id)
+		if c == nil {
+			t.Fatalf("card %s missing", id)
+		}
+		if !equalStrs(c.WaitsFor, ws) {
+			t.Errorf("card %s WaitsFor = %v, want %v", id, c.WaitsFor, ws)
+		}
+	}
+}
+
+func equalStrs(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
 // TestBoardLineageParentID proves the lineage thread's edge target (ParentID) is derived with no
 // new beads data (T7.8): a card whose Base is a candidate branch threads to that producer's id; a
 // top-level decomposition child (no candidate base) threads to the epic root; the root has none.

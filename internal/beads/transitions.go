@@ -609,6 +609,14 @@ func (c *Client) Apply(ctx context.Context, proposals []core.Proposal) ([]core.I
 				rollback()
 				return nil, fmt.Errorf("beads: add dependency %s depends-on %s: %w", created[i].ID, target, err)
 			}
+			// Carry the resolved blocked-by edge onto the returned issue's read-side DependsOn (the
+			// same facet a beads read decodes), so the orchestrator's work-graph projection (T8.4),
+			// which records these created issues via applyTracked → track without re-reading beads,
+			// holds the same edges a read would. Without this a freshly-created decomposition child
+			// is edge-less in the live read model until a cold-start rebuild, so the board's
+			// "waits-for" overlay (T10.4) could not draw its sibling-ordering edges during the live
+			// window — exactly when they explain a staggered start.
+			created[i].DependsOn = append(created[i].DependsOn, target)
 		}
 	}
 	return created, nil

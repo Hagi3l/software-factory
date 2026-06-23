@@ -108,7 +108,7 @@ func TestBuildSurfacesWarnings(t *testing.T) {
 	}
 	var found bool
 	for _, w := range v.Warnings {
-		if strings.Contains(w, `producer role "implementor"`) && strings.Contains(w, `provider "anthropic"`) {
+		if strings.Contains(w, `producer role "implementor"`) && strings.Contains(w, `model family "anthropic"`) {
 			found = true
 		}
 	}

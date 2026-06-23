@@ -916,13 +916,33 @@ are clarity/discipline. **A clean re-run gates T10's close** (and re-opens the #
   with the fix removed** ("dispatch completed during the creation window") and is stable under
   `-race -count=5`. This timing case is exactly what the fast in-memory fakes never exercised — its
   absence is why the bug shipped. Guards T10.1 + T10.2.
-- [ ] **T10.4 Board "waits-for" dependency edges** *(the original observation; spec promoted from
-  deferred)* — draw the inter-child `blocked-by` edges as a distinct **dashed "waits-for"** overlay
-  on the board (faint by default; included in the hover/focus path highlight), so a staggered start
-  reads as a dependency being honoured, not a stall. Note: this is *visualisation* of an ordering
-  T10.2 must first make real — until T10.2 lands, the edges often do not exist at dispatch time.
-  The full blocker graph already renders server-side in the DAG view (`board.templ` /
-  `internal/controlroom/views`). ([control-room.md](specs/control-room.md) "The board, in motion")
+- [x] **T10.4 Board "waits-for" dependency edges** *(the original observation; spec promoted from
+  deferred)* — *done.* The board's lineage overlay (`lineage.js`) now draws, alongside the solid
+  producer thread, a distinct **dashed "waits-for" edge** between siblings a planner's inter-child
+  `blocked-by` ordering imposes — faint by default, included in the hover/focus path highlight (the
+  hovered card's waits-for predecessors *and* successors light with its lineage path) — so a
+  staggered start reads as a dependency being honored, not a stall. **Load-bearing data fix (the real
+  work):** the live read model lacked the edges. `core.Issue.DependsOn` is populated only on the
+  beads *read* path, but a freshly-created decomposition child enters the work-graph projection via
+  `applyTracked → track` **without** a re-read, so its blocked-by edges were absent live (exactly
+  when the overlay matters). Fixed at the single source: `beads.Apply` now carries each **resolved**
+  blocked-by target onto the returned issue's `DependsOn`, so the projection holds the same edges a
+  read would. New `query.waitsForOf` derives each card's `WaitsFor` = its intra-epic blocker ids
+  **minus its lineage producer** (`ParentID` — the parent-plan link), so a producer edge is never
+  double-drawn and an external/cross-epic blocker is left to the server-side DAG view; gated like
+  EpicID/ParentID (multi-issue epic only). `board.templ` stamps `data-waits-for`; the JS reads it,
+  shares the one `--epic` color source, and uses a position-aware geometry (left→right cubic for
+  cross-column, right-edge bow for same-column stacked siblings). Regenerated `board_templ.go` at the
+  **pinned** templ v0.3.1001 (the local v0.3.1020 churns all files with a version-header bump — used
+  `go run github.com/a-h/templ/cmd/templ@v0.3.1001` so only board changed). Spec was promoted ahead
+  (control-room.md "Lineage thread"); docs/control-room.md Board entry updated. Tests:
+  `query.TestBoardWaitsForSiblingEdges` (sibling included, parent-plan link + external blocker
+  excluded), `beads.TestApplyResolvesSiblingKey` extended (resolved edge carried onto the created
+  issue); `lineage.js` syntax-checked (`node --check`). **Not visually verified in a browser** — the
+  overlay needs a live multi-issue-epic run; data + JS logic are unit-tested/reviewed. Also fixed a
+  **pre-existing unrelated test failure** from commit c85db51 (`configview.TestBuildSurfacesWarnings`
+  asserted the old `provider "anthropic"` wording; the diversity warning now says `model family`).
+  ([control-room.md](specs/control-room.md) "The board, in motion")
 - [ ] **T10.5 Agent build-command discipline** *(persona/conventions, not a core-spec change)* — the
   souls verified with raw `go build ./...` rather than the project's declared make targets, risking a
   skipped `make generate` (stale `*_templ.go` → qa-gate compile failure) even though
