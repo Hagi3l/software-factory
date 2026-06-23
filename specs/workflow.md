@@ -124,6 +124,22 @@ and a decomposition-quality review weighs; it is deliberately *not* a hard struc
 (the orchestrator cannot mechanically judge "one concern"), so unlike DAG-legality it is
 enforced by persona + review, not by the validation gate.
 
+**Split vertically, not by layer.** Granularity controls *how many* children; this controls
+*along which axis*. "Single, coherent unit" means a child is provable through its own
+user-facing behaviour — a **vertical slice** that cuts through whatever architectural layers it
+needs (schema, store, handler, view) — **not** one horizontal layer of a larger feature.
+Splitting one feature into a schema child, a store child, a handler child, and a view child is
+the planner's other damaging failure mode, and it is *more* seductive than bundling because each
+layer looks single-concern. But layers are not independently testable: a view's tests need its
+handler, whose tests need its store. The test author for a leaf layer is then forced to write
+whole-*feature* acceptance tests that exercise siblings which do not yet exist, and the
+implementor for that layer finds either nothing in scope to build (a lower layer already
+supplied it) or the whole feature (out of its scope) — and it dead-letters. So a feature small
+enough to build and verify in one pass is **one** child; a larger one splits into vertical slices
+that are *each* demonstrable end-to-end (e.g. "generate" vs "reveal-and-burn"), ordered with
+dependency edges — never into layers. Like granularity, this is enforced by the planner persona
+and decomposition review, not a structural gate.
+
 **Each child also carries its own scope boundary.** Granularity bounds a child's *size*;
 its body must also fix its *scope*. A single spec file routinely describes more than one
 child's slice, and the downstream test author and implementor read the **whole** governing

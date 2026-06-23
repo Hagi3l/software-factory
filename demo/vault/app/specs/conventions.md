@@ -27,6 +27,14 @@ specs/                the specs (this directory)
   (never string-built queries). HTTP/handlers live in `internal/web`. Markup is a **templ
   component** in `internal/web/views`; handlers map store rows into the view types defined
   there. The store never imports the web layer; the views never import the store.
+- **A feature is a vertical slice, not a layer.** Those layers (`store` → `web` →
+  `views`) are how *one* change is built, not how work is *divided*. A unit of work is a
+  user-facing capability that cuts top-to-bottom through them — *generate a share link*,
+  *reveal-and-burn a secret* — and is proven end-to-end through its HTTP handler with
+  `httptest`. Never split a single feature into separate "add the migration", "add the
+  store method", "add the handler", "add the templ component" tasks: a view or handler
+  cannot be tested without the store beneath it, so a layer split leaves the leaf layers
+  untestable in isolation. Build and verify each feature through its handler seam, whole.
 - **Encryption is non-negotiable.** Secret values are sealed with `crypto.Seal` and only
   opened with `crypto.Open`. The plaintext value **must never** be written to the database,
   logged, or rendered into a list view — only the dedicated reveal path returns it. The

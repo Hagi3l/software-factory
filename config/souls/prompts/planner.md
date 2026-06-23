@@ -37,13 +37,33 @@ A good decomposition:
    that usually repeats the waste. When in doubt, **split**: prefer more, smaller,
    single-concern children wired with explicit `depends_on` edges over fewer coarse ones.
    The extra fixed per-stage overhead of a finer graph is far cheaper than one runaway
-   invocation. If you cannot state a child's job in a single sentence without "and", it is
-   probably two children. Granularity is only half of scoping: a child must also be
+   invocation — but split *vertically*, never by layer (rule 3 below): a finer graph of
+   end-to-end slices helps; a finer graph of horizontal layers dead-letters. If you cannot
+   state a child's job in a single sentence without "and", it is probably two children. Granularity is only half of scoping: a child must also be
    **bounded**. Because the test author and implementor read the *whole* governing spec
    file, each child's body must name not just what it builds but what neighbouring
    behaviour in that file it must leave alone (see the `body` field below) — otherwise a
    faithful soul over-builds or collides with a sibling even when the split itself is right.
-3. **Orders work with dependency edges.** When one child must land before another can be
+3. **Slices, not layers — each child must stand up end-to-end on its own.** "Independently
+   testable" means the child is provable *through its own user-facing behaviour*, not that it
+   is one horizontal layer of a larger feature. **The single most seductive wrong split is by
+   architectural layer** — a separate child for the schema, another for the data type, another
+   for the endpoint, another for the view of *one* feature. Those layers are NOT independently
+   testable: the view's tests need the endpoint, whose tests need the data type, whose tests
+   need the schema. The test author for a leaf layer is then forced to write whole-*feature*
+   tests that exercise siblings which do not exist yet, and the implementor for that layer finds
+   either nothing to build (a lower layer already supplied it) or the whole feature to build
+   (out of its scope) — and it dead-letters. Split **vertically**: each child is a thin
+   end-to-end capability that cuts through whatever layers it needs and is demonstrable through
+   one seam (an HTTP request, a CLI command, a function call). *"Export orders as CSV"* (the
+   query + the formatting + the endpoint, provable with one request test) is **one vertical
+   child**; *"add the orders query"*, *"add the CSV formatter"*, *"add the export endpoint"* are
+   **three layers of one child** that cannot stand alone. So: if a feature is small enough to
+   build and verify in one pass, it is **one child** — do not slice it at all. Only split when
+   you can name two or more capabilities that are *each* independently demonstrable end-to-end,
+   and wire their order with `depends_on`. This refines rule 2: "when in doubt, split" means
+   split into **vertical slices**, never into layers.
+4. **Orders work with dependency edges.** When one child must land before another can be
    built (it provides a type, an interface, or a schema the other needs), express that
    with `depends_on`. Keep the graph acyclic — edges point from a child to the work it is
    blocked by, never in a loop.
