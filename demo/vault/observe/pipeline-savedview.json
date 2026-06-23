@@ -1,0 +1,1173 @@
+{
+  "view_name": "Pipeline",
+  "data": {
+    "communicationMethod": "http",
+    "config": {
+      "fnLastSplitterPosition": 0,
+      "fnSplitterLimit": [
+        40,
+        100
+      ],
+      "fnSplitterModel": 60,
+      "lastSplitterPosition": 0,
+      "refreshTimes": [
+        [
+          {
+            "label": "5 sec",
+            "value": 5
+          },
+          {
+            "label": "1 min",
+            "value": 60
+          },
+          {
+            "label": "1 hr",
+            "value": 3600
+          }
+        ],
+        [
+          {
+            "label": "10 sec",
+            "value": 10
+          },
+          {
+            "label": "5 min",
+            "value": 300
+          },
+          {
+            "label": "2 hr",
+            "value": 7200
+          }
+        ],
+        [
+          {
+            "label": "15 sec",
+            "value": 15
+          },
+          {
+            "label": "15 min",
+            "value": 900
+          },
+          {
+            "label": "1 day",
+            "value": 86400
+          }
+        ],
+        [
+          {
+            "label": "30 sec",
+            "value": 30
+          },
+          {
+            "label": "30 min",
+            "value": 1800
+          }
+        ]
+      ],
+      "splitterLimit": [
+        0,
+        40
+      ],
+      "splitterModel": 20
+    },
+    "data": {
+      "actionId": null,
+      "actions": [],
+      "additionalErrorMsg": "",
+      "countErrorMsg": "",
+      "customDownloadQueryObj": {
+        "query": {
+          "end_time": 1782208104774000,
+          "from": 0,
+          "quick_mode": false,
+          "size": 50,
+          "sql": "select * from \"default\" ",
+          "start_time": 1782204504774000
+        }
+      },
+      "datetime": {
+        "endTime": 1782208104774000,
+        "queryRangeRestrictionInHour": -1,
+        "queryRangeRestrictionMsg": "",
+        "relativeTimePeriod": "1h",
+        "startTime": 1782204504774000,
+        "type": "relative"
+      },
+      "editorValue": "",
+      "errorCode": 0,
+      "errorDetail": "",
+      "errorMsg": "",
+      "filterErrMsg": "",
+      "functionError": "",
+      "hasSearchDataTimestampField": true,
+      "histogramInterval": 30000000,
+      "histogramQuery": {
+        "query": {
+          "end_time": 1782208104774000,
+          "size": -1,
+          "sql": "select histogram(_timestamp, '30 second') AS zo_sql_key, count(*) AS zo_sql_num from \"default\"  GROUP BY zo_sql_key ORDER BY zo_sql_key",
+          "sql_mode": "full",
+          "start_time": 1782208044774000
+        }
+      },
+      "isOperationCancelled": false,
+      "missingStreamMessage": "",
+      "originalDataCache": {},
+      "parsedQuery": {
+        "columns": [
+          {
+            "as": null,
+            "expr": {
+              "column": "*",
+              "table": null,
+              "type": "column_ref"
+            }
+          }
+        ],
+        "distinct": {
+          "type": null
+        },
+        "from": [
+          {
+            "as": null,
+            "db": null,
+            "table": "default"
+          }
+        ],
+        "groupby": null,
+        "having": null,
+        "into": {
+          "position": null
+        },
+        "limit": {
+          "seperator": "",
+          "value": []
+        },
+        "options": null,
+        "orderby": null,
+        "type": "select",
+        "where": null,
+        "window": null,
+        "with": null
+      },
+      "query": "",
+      "resultGrid": {
+        "colOrder": {
+          "default": [
+            "_timestamp",
+            "issue",
+            "harness_issue_id",
+            "role",
+            "harness_issue_role",
+            "harness_soul",
+            "harness_attempt",
+            "body"
+          ]
+        },
+        "colSizes": {
+          "default": [
+            260,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150,
+            150
+          ]
+        },
+        "columns": [
+          {
+            "align": "left",
+            "enableResizing": false,
+            "header": "timestamp (Australia/Brisbane)",
+            "id": "_timestamp",
+            "label": "timestamp (Australia/Brisbane)",
+            "meta": {
+              "closable": false,
+              "showWrap": false,
+              "wrapContent": false
+            },
+            "name": "_timestamp",
+            "size": 260,
+            "sortable": true
+          },
+          {
+            "enableResizing": true,
+            "header": "issue",
+            "id": "issue",
+            "maxSize": 1745,
+            "meta": {
+              "closable": true,
+              "showWrap": true,
+              "wrapContent": false
+            },
+            "name": "issue",
+            "size": 150,
+            "sortable": true,
+            "label": "issue"
+          },
+          {
+            "enableResizing": true,
+            "header": "harness_issue_id",
+            "id": "harness_issue_id",
+            "maxSize": 1745,
+            "meta": {
+              "closable": true,
+              "showWrap": true,
+              "wrapContent": false
+            },
+            "name": "harness_issue_id",
+            "size": 150,
+            "sortable": true,
+            "label": "harness_issue_id"
+          },
+          {
+            "enableResizing": true,
+            "header": "role",
+            "id": "role",
+            "maxSize": 1745,
+            "meta": {
+              "closable": true,
+              "showWrap": true,
+              "wrapContent": false
+            },
+            "name": "role",
+            "size": 150,
+            "sortable": true,
+            "label": "role"
+          },
+          {
+            "enableResizing": true,
+            "header": "harness_issue_role",
+            "id": "harness_issue_role",
+            "maxSize": 1745,
+            "meta": {
+              "closable": true,
+              "showWrap": true,
+              "wrapContent": false
+            },
+            "name": "harness_issue_role",
+            "size": 150,
+            "sortable": true,
+            "label": "harness_issue_role"
+          },
+          {
+            "enableResizing": true,
+            "header": "harness_soul",
+            "id": "harness_soul",
+            "maxSize": 1745,
+            "meta": {
+              "closable": true,
+              "showWrap": true,
+              "wrapContent": false
+            },
+            "name": "harness_soul",
+            "size": 150,
+            "sortable": true,
+            "label": "harness_soul"
+          },
+          {
+            "enableResizing": true,
+            "header": "harness_attempt",
+            "id": "harness_attempt",
+            "maxSize": 1745,
+            "meta": {
+              "closable": true,
+              "showWrap": true,
+              "wrapContent": false
+            },
+            "name": "harness_attempt",
+            "size": 150,
+            "sortable": true,
+            "label": "harness_attempt"
+          },
+          {
+            "enableResizing": true,
+            "header": "body",
+            "id": "body",
+            "maxSize": 1745,
+            "meta": {
+              "closable": true,
+              "showWrap": true,
+              "wrapContent": false
+            },
+            "name": "body",
+            "size": 150,
+            "sortable": true,
+            "label": "body"
+          }
+        ],
+        "currentDateTime": "2026-06-23T09:30:30.624Z",
+        "currentPage": 1
+      },
+      "savedViewFilterFields": "",
+      "searchAround": {
+        "histogramHide": false,
+        "indexTimestamp": -1,
+        "size": 0
+      },
+      "searchRequestTraceIds": [],
+      "searchRetriesCount": {},
+      "searchWebSocketRequestIdsAndTraceIds": [],
+      "selectedTransform": null,
+      "stream": {
+        "addToFilter": "",
+        "expandGroupRows": {
+          "common": true,
+          "default": true
+        },
+        "expandGroupRowsFieldCount": {
+          "common": 0,
+          "default": 70
+        },
+        "filterField": "",
+        "filteredField": [],
+        "interestingFieldList": [],
+        "loading": false,
+        "missingStreamMultiStreamFilter": [],
+        "pipelineQueryStream": [],
+        "selectedFields": [
+          "issue",
+          "harness_issue_id",
+          "role",
+          "harness_issue_role",
+          "harness_soul",
+          "harness_attempt",
+          "body"
+        ],
+        "selectedStream": [
+          "default"
+        ],
+        "selectedStreamFields": [
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "_timestamp",
+            "showValues": false,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "addr",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "attempt",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "base",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "base_exit",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "base_ref",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "base_stdout_tail",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "body",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "branch",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "cache_creation_tokens",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "cache_read_tokens",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "candidate_exit",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "candidate_stdout_tail",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "check",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "checks",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "checks_run",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "children",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "commit",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "dropped_attributes_count",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "elapsed",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "err",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "from",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "harness_attempt",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "harness_epic_id",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "harness_invocation_id",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "harness_issue_id",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "harness_issue_role",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "harness_model",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "harness_soul",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "id",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "in_flight",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "input_tokens",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "instrumentation_library_name",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "issue",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "issues",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "max_turns",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "messages",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "model",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "new",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "output_tokens",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "passed",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "produces",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "profile",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "prompt_sha",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "reason",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "ref",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "reopened",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "reply_chars",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "result_status",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "role",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "round",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "service_name",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "session",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "severity",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "soul",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "span_id",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "spent_tokens",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "spent_usd",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "spent_wall",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "stage",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "status",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "stop",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "target",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "to_stage",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "tool",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "tool_calls",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "tools",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "trace_id",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "turns",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          },
+          {
+            "ftsKey": false,
+            "group": "default",
+            "isInterestingField": false,
+            "isSchemaField": true,
+            "name": "verified",
+            "showValues": true,
+            "streams": [
+              "default"
+            ]
+          }
+        ],
+        "streamType": "logs",
+        "userDefinedSchema": []
+      },
+      "tempFunctionContent": "",
+      "tempFunctionLoading": false,
+      "tempFunctionName": "",
+      "timezone": "UTC",
+      "transformType": "function"
+    },
+    "loading": false,
+    "loadingCounter": false,
+    "loadingHistogram": false,
+    "loadingSavedView": false,
+    "loadingStream": false,
+    "meta": {
+      "clusters": [],
+      "functionEditorPlaceholderFlag": true,
+      "hasUserDefinedSchemas": false,
+      "histogramDirtyFlag": false,
+      "isActionsEnabled": false,
+      "jobId": "",
+      "jobRecords": "100",
+      "logsVisualizeToggle": "logs",
+      "pageType": "logs",
+      "queryEditorPlaceholderFlag": true,
+      "quickMode": false,
+      "refreshHistogram": false,
+      "refreshInterval": 0,
+      "refreshIntervalLabel": "Off",
+      "regions": [],
+      "resetPlotChart": false,
+      "resultGrid": {
+        "chartInterval": "30 second",
+        "chartKeyFormat": "HH:mm:ss",
+        "manualRemoveFields": true,
+        "navigation": {
+          "currentRowIndex": 4
+        },
+        "rowsPerPage": 50,
+        "showPagination": true,
+        "wrapCells": false
+      },
+      "searchApplied": true,
+      "selectedTraceStream": "",
+      "showDetailTab": false,
+      "showFields": true,
+      "showHistogram": true,
+      "showQuery": true,
+      "showSearchScheduler": false,
+      "showTransformEditor": true,
+      "sqlMode": false,
+      "toggleFunction": false,
+      "toggleSourceWrap": false,
+      "useUserDefinedSchemas": "user_defined_schema"
+    },
+    "organizationIdentifier": "default",
+    "runQuery": false,
+    "shouldIgnoreWatcher": false
+  }
+}

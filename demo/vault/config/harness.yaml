@@ -180,10 +180,18 @@ integration:
   mode: epic
 
 policy:
-  max_retries: 3
-  # Per-issue cumulative cap across the on_failure loop: tokens + dollars + wall. Generous
-  # so a slow live run on conference wifi doesn't dead-letter, while still bounding a runaway.
-  budget: { tokens: 8_000_000, usd: 10, wall: 1h }
+  # max_retries lowered from 3 to 1 for the time-boxed live demo: a child that keeps failing
+  # gets at most one retry (attempt 0 + attempt 1) before it dead-letters, instead of chaining
+  # up to four attempts. Paired with the per-soul `max_tool_turns` cap on the test-author/
+  # implementor souls and the tighter per-issue wall below, this bounds a pathological child to
+  # ~two attempts rather than letting it consume the whole window before the cumulative cap trips.
+  max_retries: 1
+  # Per-issue cumulative cap across the on_failure loop: tokens + dollars + wall. Wall lowered
+  # from 1h to 20m for the demo — 1h is 2x the demo window, so a stuck child could occupy the
+  # entire talk before dead-lettering; 20m (with the 12m per-sandbox wall in infra.dev.yaml)
+  # dead-letters a runaway after roughly two attempts. Still generous enough that a healthy child
+  # with one slow retry on conference wifi does not false-dead-letter.
+  budget: { tokens: 8_000_000, usd: 10, wall: 20m }
   # Per-epic cap summed across every child of the seeded feature.
   epic_budget: { usd: 50 }
   dead_letter: harness.dlq

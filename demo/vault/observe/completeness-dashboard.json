@@ -161,6 +161,53 @@
             }
           ],
           "layout": { "x": 0, "y": 18, "w": 24, "h": 9, "i": 3 }
+        },
+        {
+          "id": "panel-pipeline-log",
+          "type": "table",
+          "title": "Pipeline — log records (issue / role / event)",
+          "description": "Every trusted-side slog record as columns, newest first — no filtering, all records. issue/role COALESCE the harness's two logging conventions (lifecycle logs from the orchestrator/agent use issue/role; broker + instrumented logs use harness_issue_id/harness_issue_role) so the column is populated on every row.",
+          "config": {
+            "show_legends": false,
+            "legends_position": null,
+            "unit": null,
+            "unit_custom": null,
+            "decimals": 0
+          },
+          "queryType": "sql",
+          "queries": [
+            {
+              "query": "SELECT _timestamp, COALESCE(harness_issue_id, issue) AS issue, COALESCE(harness_issue_role, role) AS role, harness_soul AS soul, harness_attempt AS attempt, body AS event, output_tokens FROM \"default\" ORDER BY _timestamp DESC",
+              "vrlFunctionQuery": "",
+              "customQuery": true,
+              "fields": {
+                "stream": "default",
+                "stream_type": "logs",
+                "x": [
+                  { "label": "Time", "alias": "_timestamp", "column": "_timestamp", "color": null, "aggregationFunction": null, "sortBy": "DESC" },
+                  { "label": "Issue", "alias": "issue", "column": "issue", "color": null, "aggregationFunction": null },
+                  { "label": "Role", "alias": "role", "column": "role", "color": null, "aggregationFunction": null },
+                  { "label": "Soul", "alias": "soul", "column": "soul", "color": null, "aggregationFunction": null },
+                  { "label": "Attempt", "alias": "attempt", "column": "attempt", "color": null, "aggregationFunction": null },
+                  { "label": "Event", "alias": "event", "column": "event", "color": null, "aggregationFunction": null },
+                  { "label": "Out tok", "alias": "output_tokens", "column": "output_tokens", "color": null, "aggregationFunction": null }
+                ],
+                "y": [],
+                "z": [],
+                "filter": {
+                  "filterType": "group",
+                  "logicalOperator": "AND",
+                  "conditions": []
+                }
+              },
+              "config": {
+                "promql_legend": "",
+                "layer_type": "scatter",
+                "weight_fixed": 1
+              }
+            }
+          ],
+          "layout": { "x": 0, "y": 27, "w": 24, "h": 12, "i": 4 }
         }
       ]
     }

@@ -17,3 +17,10 @@ model:   "deepseek/deepseek-v4-pro"
 persona: souls/prompts/test-author.md
 tools:   [fs, shell, git]
 sandbox: vault-toolchain
+# Cap per-invocation turns below the kernel default (50). A healthy author-tests run on this
+# codebase converges in ~30 turns; 35 leaves headroom for a legitimately deep run while
+# fast-failing the pathological flail (the prior live incident burned all 50 turns on tiny
+# single-tool-call turns over ~18 min, then FAILED and retried). At 35 it gives up ~5 min
+# sooner, freeing the (now 2-wide) runner queue for the next sibling, and the gate still
+# independently verifies tests-red/compiles so correctness is unaffected by the tighter cap.
+max_tool_turns: 35

@@ -190,7 +190,9 @@ OPENOBSERVE=1 ./demo/vault/run.sh
 This spins one **OpenObserve** container (authenticated OTLP/gRPC on `5081` — all three signals
 ride that one port — and the UI/REST API on `5080`), points the demo's `otel.endpoint` at it
 with the org/stream/auth headers an authenticated backend needs, and auto-provisions a
-three-panel **completeness overview** dashboard (one panel per signal). Open
+four-panel **completeness overview** dashboard (one chart per signal, plus a **Pipeline — log
+records** table that columnates every slog record) and a **Pipeline** logs *saved view* (Logs →
+Saved Views) that opens the explorer straight into issue/role/soul/event columns. Open
 <http://127.0.0.1:5080>, log in as `admin@admin.com` / `admin` (OpenObserve logs in by
 email, so the username is the full address), and watch traces,
 logs, and metrics arrive together as the pipeline runs. The container is **ephemeral** (`--rm`,

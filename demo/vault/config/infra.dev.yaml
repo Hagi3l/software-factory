@@ -24,7 +24,22 @@ sandbox:
   #     if epics fan out wider, either lower this, give the VM more RAM, or let the planner's
   #     dependency edges serialize the siblings. The warmed GOCACHE (see Dockerfile) cuts peak
   #     gate memory too, since fewer packages compile from cold.
-  limits:  { cpu: 6, mem: 4Gi, wall: 30m }
+  # wall lowered from 30m to 12m for the live demo: 30m == the whole demo budget, so one
+  # stalled sandbox (a hung gate, a model/network stall on conference wifi) could silently eat
+  # the entire window before the watchdog fired. A warmed-cache gate and a healthy agent run
+  # both complete in a few minutes, so 12m comfortably covers the happy path while fast-failing
+  # a stuck sandbox into a retry. AckWait (the redelivery lease) defaults to this, so a dead
+  # runner also redelivers sooner. (Raise toward 15m if a legitimately cold gate ever nears it.)
+  limits:  { cpu: 6, mem: 4Gi, wall: 12m }
+  # max_concurrency: how many invocations the runner serves PER ROLE at once. The shipped default
+  # is 1 (serial), which serializes same-role siblings: in a 4-child epic the four author-tests
+  # invocations run back-to-back, the dominant wall-time cost on a live run. Setting 2 lets two
+  # siblings of a role run concurrently (~2x on the agent stages), bounded by RAM: each sandbox
+  # may use up to `mem` (4Gi), so on an ~8Gi VM keep this at 2 (2x4Gi leaves headroom for the
+  # orchestrator's separate gate sandbox); raise it only with more RAM or a lower mem. The
+  # orchestrator's verification gates stay serial (single result consumer), so this speeds the
+  # author/implement agent stages, not the gate re-runs.
+  max_concurrency: 2
   # Resolves the logical profile each soul names (soul.sandbox: vault-toolchain) to the
   # concrete image the docker backend boots. run.sh builds it locally tagged
   # `vault-toolchain` (from demo/vault/Dockerfile), so the profile maps to that bare tag.

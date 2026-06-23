@@ -16,3 +16,6 @@
 
 # Local secret (OpenRouter key) — never commit
 token.txt
+
+# Stray demo run log (redirected stdout from demo/vault/run.sh)
+/vault-demo.log

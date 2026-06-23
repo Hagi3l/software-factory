@@ -74,6 +74,15 @@ command -v dolt   >/dev/null || { echo "error: dolt not found — server-mode be
 command -v git    >/dev/null || { echo "error: git not found"; exit 1; }
 docker info >/dev/null 2>&1   || { echo "error: docker daemon not reachable"; exit 1; }
 [ -n "${OPENAI_API_KEY:-}" ] || { echo "error: OPENAI_API_KEY is not set — put your OpenRouter API key in it"; exit 1; }
+# Fail fast if the control-room port is already taken (a leftover harness from a prior run, or
+# any other local server) — otherwise the conflict only surfaces at the very last `harness run`
+# line, after the full (minutes-long) image build + scaffold. bash /dev/tcp suffices; this
+# script already relies on bashisms.
+_sa_host="${SERVE_ADDR%:*}"; _sa_port="${SERVE_ADDR##*:}"
+if (exec 3<>"/dev/tcp/${_sa_host}/${_sa_port}") 2>/dev/null; then
+  exec 3>&- 3<&-
+  echo "error: $SERVE_ADDR is already in use — free it (lsof -i :${_sa_port}) or set SERVE_ADDR=127.0.0.1:9000"; exit 1
+fi
 
 # ---- build the harness binary ----------------------------------------------------------
 say "Building harness"
@@ -196,8 +205,18 @@ git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
 if [ -n "$VAULT_REMOTE" ]; then
   say "Resetting public repo to the green seed: $VAULT_REMOTE"
   git -C "$SITE" remote add public "$VAULT_REMOTE"
-  git -C "$SITE" push --force public main                  # main → pristine seed
-  git -C "$SITE" push --force public "HEAD:refs/heads/seed" # immutable baseline ref
+  # Degrade to LOCAL-ONLY instead of aborting the whole demo if the push fails. Under
+  # `set -e` a bare `git push` to the default SSH remote would exit the script — BEFORE the
+  # control room ever binds — on a stage laptop with no deploy key / no network / no access.
+  # The README's "stays local" promise must not require remembering VAULT_REMOTE=''.
+  if git -C "$SITE" push --force public main &&
+     git -C "$SITE" push --force public "HEAD:refs/heads/seed"; then
+    :                                                      # main → pristine seed; immutable `seed` ref
+  else
+    say "WARN: push to $VAULT_REMOTE failed (no SSH key / network / access?) — continuing LOCAL-ONLY (no public push, no deploy)"
+    git -C "$SITE" remote remove public 2>/dev/null || true
+    VAULT_REMOTE=''                                        # the watcher + on-screen messaging below already no-op when empty
+  fi
 fi
 
 # Background watcher: when the orchestrator advances local main (a feature integrated), push
@@ -283,9 +302,24 @@ if [ -n "${OPENOBSERVE:-}" ]; then
   if curl -fsS -X POST "http://127.0.0.1:5080/api/$OO_ORG/dashboards?folder=default" \
        -H "Authorization: Basic $OO_TOKEN" -H 'Content-Type: application/json' \
        --data-binary @"$DEMO_DIR/observe/completeness-dashboard.json" >/dev/null 2>&1; then
-    say "Provisioned the 'completeness overview' dashboard"
+    say "Provisioned the 'completeness overview' dashboard (incl. the 'Pipeline — log records' table)"
   else
     say "Dashboard auto-provision skipped (OO API/schema may differ for $OPENOBSERVE_IMAGE) — telemetry still lands; import demo/vault/observe/completeness-dashboard.json from the UI"
+  fi
+
+  # Provision the 'Pipeline' logs Saved View: opens the Logs explorer straight into columns
+  # (issue / harness_issue_id / role / soul / attempt / body) instead of raw JSON. Same
+  # best-effort discipline as the dashboard — a saved view is an opaque OO frontend-state blob,
+  # so a bumped OPENOBSERVE_IMAGE could drift its shape; a mismatch must not abort the demo (you
+  # add the columns by hand in Logs -> Saved Views). The dashboard's table panel COALESCEs the
+  # two issue/role key conventions into one column; the raw Logs explorer can't, so the saved
+  # view carries both columns and each row populates whichever its emitter used. JSON: observe/.
+  if curl -fsS -X POST "http://127.0.0.1:5080/api/$OO_ORG/savedviews" \
+       -H "Authorization: Basic $OO_TOKEN" -H 'Content-Type: application/json' \
+       --data-binary @"$DEMO_DIR/observe/pipeline-savedview.json" >/dev/null 2>&1; then
+    say "Provisioned the 'Pipeline' logs saved view (Logs -> Saved Views -> Pipeline)"
+  else
+    say "Saved-view auto-provision skipped (OO API/schema may differ for $OPENOBSERVE_IMAGE) — add the columns by hand in Logs -> Saved Views, or import demo/vault/observe/pipeline-savedview.json"
   fi
 fi
 
