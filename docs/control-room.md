@@ -134,6 +134,9 @@ is autonomous. It's a guided conversation, not a form:
    optional note), and you resolve any combination in a single **Submit answers**. Every
    answer is folded back through the planner (not a separate client-side model), which
    reconciles the batch on its next turn — including dropping forks one answer made moot.
+   The panel never re-renders out from under you while you're filling it in — it updates
+   only when the planner re-emits the ledger (which happens after you submit, not on a
+   timer) — so you can work through several forks at your own pace and submit once.
 3. **Draft** — once intent converges, the planner drafts the spec markdown and the
    seed issues. It **maintains** the spec tree rather than only growing it: intent that
    fits a domain an existing spec owns is folded into that file in place (and the
@@ -205,8 +208,13 @@ update precisely when work moves between stages (and the board animates the move
 job is to show per-turn agent progress as it happens. The **Merge Queue** refreshes on
 the dedicated [`merge-state` event](../specs/messaging.md), since the steps it shows
 (`rebasing`/`re-gating`) are merge-queue transitions, not beads-status transitions.
-Budgets, Provenance, and the wizard refresh on the same substrate. Forensic pages (issue detail, Replay, Verification) are
-deliberately *not* live — they're
-snapshots, not feeds. Authentication is not yet implemented (an open item); session ids
+Budgets and Provenance refresh on the same substrate. The **wizard** is the one exception
+to the periodic backstop: its alignment-ledger form and draft panel refetch *only* on their
+precise tool-channel nudge (the planner's `update_ledger`/`propose_draft` calls) plus an
+SSE-reconnect recovery, with **no** `every Ns` poll — a blind periodic re-render would wipe
+the answer chips and free-text you're mid-selecting or collapse a spec diff you're reading,
+so those panels are left untouched until the planner actually re-emits (only at a turn
+boundary). Forensic pages (issue detail, Replay, Verification) are deliberately *not* live —
+they're snapshots, not feeds. Authentication is not yet implemented (an open item); session ids
 in the wizard are crypto-random but there's no login gate.
 </content>

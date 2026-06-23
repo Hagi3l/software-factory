@@ -65,6 +65,19 @@ of the build (`go generate`), not the runtime.
   dead-letter views refetch on the typed [`issue-state` event](messaging.md) (so a
   refresh fires on the actual transition), the activity feed on `agent-event` (the
   thing it *is* showing); the periodic backstop stays on all of them.
+  **Exception — interactive/stateful panels carry no periodic backstop.** A fragment
+  that holds in-progress human input or client-side disclosure state — the wizard's
+  [alignment-ledger](#the-alignment-ledger) batch form, and the draft panel's
+  expandable spec diffs — must *not* be re-fetched on an `every Ns` clock: a blind
+  periodic re-render would discard a half-filled answer (selected chips, typed
+  free-text) or snap shut a spec diff the human is mid-read. These panels refetch
+  **only** on their precise tool-channel nudge — the ledger on the planner's
+  `update_ledger` (`ledger` event), the draft on `propose_draft` (`draft` event) —
+  which by construction fires only at a planner-turn boundary, never while the human
+  owns the form; a nudge missed across an SSE drop is recovered by refetching on
+  **(re)connect** (`htmx:sseOpen`), not on a clock. The clock backstop is right for
+  read-only views that converge to server truth; it is wrong wherever the client DOM
+  carries unsubmitted state the server does not yet know.
 - **Historical/forensic:** plain server-rendered pages from the stores, with the
   structured timeline from the OTel trace backend. Supports **replay** of an
   invocation's decision trail (see [observability.md](observability.md)), including
@@ -521,6 +534,20 @@ moot ("given your answer to Q1, Q3 falls away"). The division of labour is delib
 planner stays smart** — the UI guarantees clean attribution, the planner owns all
 dependency reasoning, so there is no dependency graph to encode in the ledger.
 Dependent forks simply appear in the next batch once their prerequisites are agreed.
+
+**The form is the human's until they submit it.** The planner re-emits the whole
+ledger every turn, but only at a *turn boundary* — after the human sends answers or a
+message — never while they are mid-selection (the planner is idle then, awaiting
+them). The ledger panel relies on exactly this: it re-renders **only** on the
+planner's `update_ledger` nudge, with no periodic poll (see [Rendering](#rendering)),
+so a human resolving a batch of chips and free-text across several forks is never
+re-rendered out from under them and can take their time and submit once. This is the
+in-progress complement to the question-keyed attribution above: keying each answer to
+its question keeps a *submitted* batch correct across a re-emit; suppressing the
+periodic re-render keeps an *unsubmitted* batch from being discarded before it is
+sent. (A genuinely new ledger the planner emits in response to the human's own turn
+does replace the form — that is the planner's new truth, and the human has just
+submitted to get it.)
 
 **Each item is `open`, `agreed`, `discussing`, or `deferred`**, with a one-line
 rationale. `open` is the start state; it resolves to `agreed` (decided),

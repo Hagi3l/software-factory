@@ -39,7 +39,7 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 				<div
 					id="wizard-ledger"
 					hx-get={ "/create/ledger/" + sessionID }
-					hx-trigger="sse:ledger, sse:turn, every 8s"
+					hx-trigger="sse:ledger, htmx:sseOpen from:closest [hx-ext='sse']"
 					hx-swap="innerHTML"
 				>
 					@LedgerPanel(sessionID, nil)
@@ -47,7 +47,7 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 				<div
 					id="wizard-draft"
 					hx-get={ "/create/draft/" + sessionID }
-					hx-trigger="sse:draft, sse:turn, every 8s"
+					hx-trigger="sse:draft, htmx:sseOpen from:closest [hx-ext='sse']"
 					hx-swap="innerHTML"
 				>
 					@DraftPanel(sessionID, wizard.Draft{}, nil, true)
@@ -187,8 +187,14 @@ templ wizardBubble(m wizard.Message) {
 // answerable fork — selectable option chips, a first-class free-text box, and a "let's discuss"
 // flag. The whole panel is ONE batch form: the human resolves any combination of open forks in a
 // single submit (T4.27 "forks are surfaced and answered in batches"), funneled back through the
-// planner. It is the htmx swap target the page re-fetches on a `ledger`/`turn` SSE nudge (with a
-// slow periodic backstop). Empty, it shows a muted invitation rather than nothing, so the panel
+// planner. It is the htmx swap target the page re-fetches on the `ledger` SSE nudge (the planner's
+// `update_ledger` tool call) — and ONLY that, plus an `htmx:sseOpen` refetch to recover a nudge
+// missed across an SSE reconnect. It deliberately carries NO periodic `every Ns` backstop (T4.33):
+// the panel holds the human's in-progress, unsubmitted answers (selected chips, typed free-text),
+// and a blind periodic re-render would discard them. Safe because the planner only re-emits the
+// ledger at a turn boundary (never during the human's answer window), so the `ledger` nudge covers
+// every real change. See specs/control-room.md "Rendering" (the interactive-panel exception) and
+// "The alignment ledger". Empty, it shows a muted invitation rather than nothing, so the panel
 // reads as a deliberate surface from the first paint.
 templ LedgerPanel(session string, items []wizard.LedgerItem) {
 	if len(items) == 0 {
@@ -360,8 +366,12 @@ func ledgerStatusClass(status string) string {
 
 // DraftPanel renders the drafted spec + seed issues the planner proposes (T4.14,
 // specs/control-room.md "The wizard") and the APPROVE button — the consent boundary. It is the
-// htmx swap target the page re-fetches on a `draft`/`turn` SSE nudge (with a slow periodic
-// backstop). Empty (the planner has not drafted anything yet) it shows a muted invitation, so
+// htmx swap target the page re-fetches on the `draft` SSE nudge (the planner's `propose_draft`
+// tool call) — and ONLY that, plus an `htmx:sseOpen` refetch to recover a nudge missed across an
+// SSE reconnect. It carries NO periodic `every Ns` backstop (T4.33): the proposed spec diffs render
+// in expandable `<details>`, and a blind periodic re-render would snap shut a panel the human is
+// mid-read (and is pointless until the planner re-emits a draft, which only happens at a turn
+// boundary). Empty (the planner has not drafted anything yet) it shows a muted invitation, so
 // the surface reads as deliberate from the first paint. When canApprove is false (a standalone
 // serve with no repo to write) the draft is shown read-only with a note instead of a dead
 // button. The proposed spec content is templ-escaped as inert text — it is the trusted planner's
