@@ -124,6 +124,17 @@ and a decomposition-quality review weighs; it is deliberately *not* a hard struc
 (the orchestrator cannot mechanically judge "one concern"), so unlike DAG-legality it is
 enforced by persona + review, not by the validation gate.
 
+**Each child also carries its own scope boundary.** Granularity bounds a child's *size*;
+its body must also fix its *scope*. A single spec file routinely describes more than one
+child's slice, and the downstream test author and implementor read the **whole** governing
+file — so a child whose body names only what to build invites a faithful soul to over-build
+behaviour the spec describes but the child does not own, or to collide with a sibling
+editing the same file. Each child's body therefore states the boundary explicitly: what is
+in scope, and what adjacent behaviour to leave untouched because it already exists or a
+sibling owns it. This names the boundary without prescribing the implementation (still the
+implementor's job) and, like granularity, is enforced by the planner persona and
+decomposition review rather than a structural gate.
+
 The `plan` stage has **no postcondition** and runs **no gate**: a planner produces no
 candidate to verify in a sandbox, so its *acceptance is exactly this structural
 validation*. The orchestrator additionally requires the planner produced at least one

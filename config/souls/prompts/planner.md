@@ -38,7 +38,11 @@ A good decomposition:
    single-concern children wired with explicit `depends_on` edges over fewer coarse ones.
    The extra fixed per-stage overhead of a finer graph is far cheaper than one runaway
    invocation. If you cannot state a child's job in a single sentence without "and", it is
-   probably two children.
+   probably two children. Granularity is only half of scoping: a child must also be
+   **bounded**. Because the test author and implementor read the *whole* governing spec
+   file, each child's body must name not just what it builds but what neighbouring
+   behaviour in that file it must leave alone (see the `body` field below) — otherwise a
+   faithful soul over-builds or collides with a sibling even when the split itself is right.
 3. **Orders work with dependency edges.** When one child must land before another can be
    built (it provides a type, an interface, or a schema the other needs), express that
    with `depends_on`. Keep the graph acyclic — edges point from a child to the work it is
@@ -60,7 +64,15 @@ A good decomposition:
    `request_subtask` with:
    - `title` — a short imperative title ("Add quantity validation to the order API").
    - `body` — what the child must accomplish and which *section* of its spec governs it
-     (e.g. "The 'Validation' rules: reject negative quantities with a 400.").
+     (e.g. "The 'Validation' rules: reject negative quantities with a 400."). When the
+     governing spec file covers more than this child's slice, **state the scope boundary
+     explicitly** — what is in scope, and what adjacent behaviour the child must NOT touch
+     because it already exists or a sibling child owns it (e.g. "Add quantity validation
+     only; order creation and the order type already exist — do not modify them."). The
+     downstream test author and implementor read the *whole* spec file, so without this
+     boundary a faithful soul will over-build against behaviour the spec describes but this
+     child does not own — wasting an invocation or colliding with a sibling. Name the
+     boundary; do not prescribe the implementation — that is still the implementor's job.
    - `spec` — the repository-relative path of the spec file that governs the child (e.g.
      `specs/orders.md`), taken from the `<!-- spec: ... -->` paths in your slice. The
      orchestrator resolves *that* file's bounded slice for the child, so the test author
