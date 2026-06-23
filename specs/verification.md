@@ -167,15 +167,38 @@ base threading in [workflow.md](workflow.md)), so red→green is the natural gat
 ### Tests-red proof
 The complement to red→green, gating [`author-tests`](workflow.md). It requires the
 acceptance tests to **fail against the author-tests candidate** — the branch holding
-the freshly written tests but no implementation. This proves the test author produced
-real, executing, non-vacuous tests that genuinely fail before an `implement` attempt is
-spent making them pass, rather than an always-green suite that asserts nothing. Like
-red→green it has no command of its own: it reuses the `tests-pass` command, run **once**
-against the candidate, and passes iff that command **fails** (nonzero exit). It is the
+the freshly written tests but no implementation — so an `implement` attempt is never spent
+making an always-green suite (one that asserts nothing) pass. Like red→green it has no
+command of its own: it reuses the `tests-pass` command, run **once** against the candidate,
+and passes iff that command **fails** (nonzero exit). It is the
 [producer ≠ verifier](#producer--verifier) principle applied to the author-tests stage,
 and the natural complement to the implementor's red→green proof, which later re-confirms
 that same candidate is red as `implement`'s base before requiring the implementation to
 turn it green.
+
+**Nonzero exit is necessary but not sufficient in a compiled, statically-typed language.**
+A failing exit proves the suite did not pass — but not that it *ran*. In Go (or any
+compiled, typed language) a test that references a symbol the implementation has not defined
+yet **fails to compile**, which also exits nonzero, so `tests-red` would pass on a suite
+that never executed a single assertion. That is a *vacuous* red: it certifies nothing about
+whether the tests encode behaviour, and it lets an under-defined contract flow downstream —
+where the implementor, forced to make red→green's green compile, ends up *inventing* the API
+surface itself, quietly taking over the interface design that is the test author's job. (In
+a dynamically-typed language the same test *executes* and fails at runtime, so the red is
+genuine and this gap never arises.)
+
+**The compiled-language complement is a `compiles` companion check** — not gate
+language-awareness. A compiled-language target pairs `tests-red` with an ordinary check that
+the tree, *including the test binaries*, builds (for Go: `go build ./... && go test
+-run='^$' ./...`) and lists **both** on the `author-tests` postcondition. The conjunction
+"**compiles ∧ tests-fail**" is the genuine executing red: the suite built and an assertion
+failed. This keeps the kernel language-neutral — `compiles` is a normal exit-0-pass command
+and the target's build system, not the harness, defines what "compiles" means, so a compiled
+target opts in and a dynamic one does not. It also forces the test author to commit the
+minimal compiling **API skeleton** (signatures and types, no logic), which the implementor
+inherits via base threading as a precise, compiler-checked contract; and it strengthens
+red→green, since a provably-compiling base makes red→green's "fails on base" a failed
+*assertion* rather than a build break.
 
 ### Mutation testing
 Mutate the implementation and require the tests to **catch** the mutation; gate on
