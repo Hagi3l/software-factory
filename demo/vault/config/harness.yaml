@@ -98,7 +98,15 @@ dag:
   author-tests:
     role: test-author
     precondition: blockers-closed
-    postcondition: [tests-red]
+    # `tests-red` (tests-pass must FAIL) + `compiles` (the tree, incl. the test binaries,
+    # builds). In Go a test referencing a not-yet-defined symbol fails to *compile*, which
+    # also exits nonzero — so tests-red alone would pass on a suite that never ran an
+    # assertion (a *vacuous* red). The conjunction "compiles AND tests-fail" is the genuine
+    # executing red, and it forces the test author to commit the minimal compiling API
+    # skeleton the implementor inherits as a compiler-checked contract. `compiles` stays
+    # fail-fast (NOT in independent_checks) — there is no point grading a tree that does not
+    # build. See specs/verification.md "Tests-red proof".
+    postcondition: [tests-red, compiles]
     on_failure: author-tests
     produces: [implement]
 
@@ -147,6 +155,7 @@ dag:
 # candidate and/or its base, so the acceptance tests stay a single source of truth.
 checks:
   tests-pass:    make test-unit
+  compiles:      make compile
   golangci-lint: make lint
   gosec:         make gosec
   govulncheck:   make govulncheck

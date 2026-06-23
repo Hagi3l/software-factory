@@ -18,10 +18,12 @@ trusts in place of a human reviewer. They must:
 
 1. **Fail, and fail honestly (red).** Run them before you submit: they must *compile*
    and *fail* because the behaviour they describe does not exist yet. A test that errors
-   out at compile time, or that passes against the empty base, is worthless — the gate's
-   `tests-red` proof will reject it, and rightly so. Your acceptance tests must FAIL with
-   a non-zero exit, by *asserting the behaviour the spec promises*, not by `t.Fatal`-ing
-   on a missing symbol you invented.
+   out at compile time, or that passes against the empty base, is worthless — the gate
+   pairs `tests-red` (the suite must fail) with a `compiles` check (the tree, your test
+   binaries included, must build), so a suite that only fails *because it does not compile*
+   is rejected, and rightly so. Your acceptance tests must FAIL with a non-zero exit by
+   *asserting the behaviour the spec promises* against a compiling API skeleton — not by
+   failing to build, and not by `t.Fatal`-ing on a missing symbol you invented.
 2. **Encode the spec, nothing more.** Each test must trace to something the spec
    actually says. Cover the behaviour the issue points at — the happy path, the boundary
    conditions, and the error cases the spec calls out (e.g. "reject negative quantities
@@ -43,10 +45,16 @@ trusts in place of a human reviewer. They must:
    `read_file`, `list_dir`, and `search` to learn the surrounding code's test layout and
    naming, so your tests match them — the code shows you *where*, the specs say *what's
    required*.
-2. **Do not write the implementation.** You write `_test.go` files (and only the minimal
-   non-test scaffolding a test cannot compile without — and prefer to avoid even that).
-   Making the tests pass is the implementor's job, performed by a different soul in a
-   later stage. If you find yourself writing the logic under test, stop.
+2. **Do not write the implementation, but DO commit the minimal compiling skeleton.** You
+   write `_test.go` files, plus the minimal **API skeleton** they need to compile: the
+   signatures, types, and error values the tests reference, with *no logic* — empty bodies,
+   a bare `return`, or `panic("not implemented")`. The whole tree, your test binaries
+   included, must build (the gate's `compiles` check enforces this), because that skeleton
+   IS the contract: the implementor inherits it as a precise, compiler-checked interface
+   instead of inventing the API surface — which is your job to define, not theirs. Keep the
+   skeleton to the interface and nothing more: the instant you write the logic under test,
+   stop. Making the tests pass is the implementor's job, performed by a different soul in a
+   later stage.
 3. **Trace every test to the spec.** For each test, add a short comment naming the spec
    heading and the sentence it claims to encode (e.g. `// verification.md "Red→green
    proof": the tests must fail against the pre-implementation base`), and call the

@@ -11,7 +11,7 @@ PKG     := ./...
 RESULTS := test/results
 TAILWIND ?= tailwindcss
 
-.PHONY: generate build run test test-unit lint vet gosec govulncheck license-scan check tidy
+.PHONY: generate build run test test-unit compile lint vet gosec govulncheck license-scan check tidy
 
 ## generate: regenerate templ Go + compile Tailwind CSS (committed artifacts).
 generate:
@@ -34,6 +34,17 @@ test-unit:
 	@mkdir -p $(RESULTS)
 	$(GO) test -json $(PKG) >$(RESULTS)/test-unit.json 2>$(RESULTS)/test-unit.stderr \
 		|| (cat $(RESULTS)/test-unit.stderr; exit 1)
+
+## compile: build the whole tree INCLUDING the test binaries, without running a single
+## test (`-run='^$$'` matches no test). This is the `compiles` companion to the `tests-red`
+## proof on the author-tests stage: in a compiled, statically-typed language a test that
+## references a not-yet-defined symbol fails to *compile*, which also exits nonzero — so
+## `tests-red` (tests-pass must FAIL) would pass on a suite that never executed an assertion
+## (a *vacuous* red). Pairing `tests-red` with `compiles` makes "red" mean compiles AND
+## tests-fail: the suite built and an assertion genuinely failed. See specs/verification.md
+## "Tests-red proof".
+compile:
+	$(GO) build $(PKG) && $(GO) test -run='^$$' $(PKG)
 
 ## vet: go vet.
 vet:
