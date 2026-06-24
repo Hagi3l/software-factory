@@ -315,6 +315,21 @@ type ModelProvider struct {
 	Provider string    `yaml:"provider"`           // one of the Provider* constants
 	Endpoint string    `yaml:"endpoint,omitempty"` // base URL for openai-compat backends (Ollama/vLLM)
 	Cost     ModelCost `yaml:"cost,omitempty"`     // per-million-token price, the tokens→USD table
+	// Effort sets the reasoning-effort level the adapter sends on every call to this model
+	// (output_config.effort: low|medium|high|xhigh|max). It is the intelligence↔latency↔cost
+	// dial for reasoning-capable models — lower effort means fewer, more-consolidated tool
+	// calls and less deliberation, which is what bounds turn count (and so wall-clock) on a
+	// live run. Empty leaves the model at its provider default. Currently honored only on
+	// provider: anthropic (the native output_config field); validation rejects it elsewhere.
+	Effort string `yaml:"effort,omitempty"`
+	// PromptCaching opts this model into prompt caching on the openai-compat adapter, which
+	// marks the re-sent stable prefix (persona + Brief) cacheable so a gateway bills it at the
+	// cache-read rate. It is opt-in because that surface is mixed — some backends cache
+	// automatically and a strict one rejects an unknown marker — so it is set only for a backend
+	// that needs and accepts it (e.g. an Anthropic model served via OpenRouter). The native
+	// anthropic adapter caches unconditionally and ignores this; validation restricts the flag
+	// to provider: openai-compat. See specs/models.md "Optional capability fields".
+	PromptCaching bool `yaml:"prompt_caching,omitempty"`
 	// Family optionally declares the model's correlated-blind-spot family — the org that
 	// trained the weights (deepseek, anthropic, …) — for the N-version producer/verifier
 	// diversity warning (T2.13). It is only needed to disambiguate models whose registry

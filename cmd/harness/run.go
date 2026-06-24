@@ -482,7 +482,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		}
 		return tools, cleanup, nil
 	}
-	loop := agent.New(toolSource, agent.BudgetFromPolicy(cfg.Harness.Policy), log)
+	loop := agent.New(toolSource, agent.BudgetFromPolicy(cfg.Harness.Policy), log, agent.WithTracer(tel.Tracer()))
 
 	rnr, err := runner.New(runner.Options{
 		Roles:          agentRoles(cfg),

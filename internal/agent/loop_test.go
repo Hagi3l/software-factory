@@ -13,6 +13,9 @@ import (
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/runner"
 	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/harness/internal/telemetry"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )
 
 // The Loop must satisfy the runner's Invoker seam (signature incl. the broker endpoint).
@@ -397,4 +400,71 @@ func TestToolSourceErrorIsFatal(t *testing.T) {
 	if _, err := run(t, l, testBrief()); err == nil {
 		t.Fatal("want error when tool source fails")
 	}
+}
+
+// Every workspace/lifecycle tool the model drives is wrapped in a tool-call span parented
+// to the invocation, so the in-sandbox tools (which run unbrokered) show up in the trace
+// alongside the broker's egress spans. A tool that returns IsError is tagged, not failed.
+func TestToolCallSpansEmitted(t *testing.T) {
+	conn := &fakeConn{responses: []model.Response{
+		{Stop: model.StopToolUse, ToolCalls: []model.ToolCall{toolCall("c1", "read_file", `{}`)}},
+		{Stop: model.StopToolUse, ToolCalls: []model.ToolCall{toolCall("c2", "submit", `{}`)}},
+	}}
+	read := &fakeTool{name: "read_file", outcome: Outcome{Content: "build failed", IsError: true}}
+	done := core.Result{Status: core.StatusDone}
+	submit := &fakeTool{name: "submit", outcome: Outcome{Result: &done}}
+
+	sr := tracetest.NewSpanRecorder()
+	tracer := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(sr)).Tracer("test")
+	src := func(Invocation) ([]Tool, func(), error) { return []Tool{read, submit}, nil, nil }
+	l := New(src, Budget{}, nil, WithTracer(tracer))
+	l.readPersona = func(string) ([]byte, error) { return []byte("persona"), nil }
+	l.connect = func(sandbox.Endpoint) brokerConn { return conn }
+
+	if _, err := run(t, l, testBrief()); err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+
+	byTool := map[string]sdktrace.ReadOnlySpan{}
+	for _, s := range sr.Ended() {
+		if s.Name() != telemetry.SpanToolCall {
+			continue
+		}
+		for _, a := range s.Attributes() {
+			if string(a.Key) == telemetry.AttrToolName {
+				byTool[a.Value.AsString()] = s
+			}
+		}
+	}
+	if _, ok := byTool["read_file"]; !ok {
+		t.Fatalf("no tool-call span for read_file; got %v", spanKeys(byTool))
+	}
+	if _, ok := byTool["submit"]; !ok {
+		t.Fatalf("no tool-call span for submit; got %v", spanKeys(byTool))
+	}
+
+	// The errored read carries the IsError tag; the successful submit does not.
+	if !hasBoolAttr(byTool["read_file"], telemetry.AttrToolError, true) {
+		t.Errorf("read_file span missing %s=true", telemetry.AttrToolError)
+	}
+	if hasBoolAttr(byTool["submit"], telemetry.AttrToolError, true) {
+		t.Errorf("submit span should not be tagged as a tool error")
+	}
+}
+
+func spanKeys(m map[string]sdktrace.ReadOnlySpan) []string {
+	out := make([]string, 0, len(m))
+	for k := range m {
+		out = append(out, k)
+	}
+	return out
+}
+
+func hasBoolAttr(s sdktrace.ReadOnlySpan, key string, want bool) bool {
+	for _, a := range s.Attributes() {
+		if string(a.Key) == key {
+			return a.Value.AsBool() == want
+		}
+	}
+	return false
 }

@@ -13,8 +13,12 @@ in-process orchestrator + runner carry a seed issue through implement → gate �
 merge to `main` with a provenance trailer. Verified end-to-end against a real model
 (local Ollama via `openai-compat`) and real Docker sandboxes.
 
-**Phases 2, 3, 4, 6, 7, 8, 9, and 10 are complete; only Phase 5 has live work, and all of it
-is optional or hardware-blocked.** Phase 2 (independent verification) is complete — only
+**Phases 2, 3, 4, 6, 7, 8, 9, 10, and 11 are complete; Phase 5 carries the only open build work,
+and all of it is optional (T5.11 warm pools + HA) or hardware-blocked (T5.2 Firecracker, needs
+KVM the dev box lacks).** Phase 11 closed with T11.2 (prompt caching) landing — the Anthropic
+adapter now caches unconditionally and the openai-compat adapter caches opt-in, with cache
+read/write tokens normalized into the canonical Usage for accurate USD accounting.
+Phase 2 (independent verification) is complete — only
 the optional T2.11 decision-note remains (resolved as configuration, not a build item).
 Phase 3 (full DAG, decomposition, merge queue) is complete (T3.13 and T3.14 landed). Phase 4
 (control room + Create/Resolve wizard) is complete. Phase 6 (agent semantic LSP tooling)
@@ -588,6 +592,59 @@ this race — **fixed by T10.1**, verify on the re-run. The `vault-8wi` 50-turn 
 worsened by out-of-order dispatch (it was implemented-against a `0sp` store layer that did not yet
 exist) — **re-measure after T10.2**; only then decide the deferred test-author turn-budget backstop
 (left open by T8.5).
+
+---
+
+## Phase 11 — model-layer capability fields & tool-call observability
+
+Cost/quality dials and a traceability gap surfaced while tuning the `./demo/vault` run on
+hosted models. The spec change landed first (per CLAUDE.md): [models.md](specs/models.md)
+"*Optional capability fields*" (per-model config the adapter emits, **not** canonical-`Request`
+fields, so the agent stays provider-unaware) and the two new model-entry fields in
+[configuration.md](specs/configuration.md). None of this is TCB; all land behind unit tests.
+
+- [x] **T11.1 Reasoning-effort field** — *done.* `effort: low|medium|high|xhigh|max` on a model
+  entry; the Anthropic adapter emits `output_config.effort` (a `WithEffort` builder threaded by
+  the registry). Config validation checks the level and rejects it on non-Anthropic providers.
+  Wire-body + validation tests.
+- [x] **T11.2 Prompt caching** — *done.* The agent loop re-sends a large stable prefix every turn
+  (persona in `System` + the Brief in `messages[0]`) that grows only at the tail, so without caching
+  each turn re-pays full input price for the whole prefix — the single largest cost on the loop.
+  **Anthropic adapter caches unconditionally** (`applyCaching` in `toParams`): two ephemeral
+  `cache_control` breakpoints via the SDK — the first message's first block pins the stable
+  `tools+system+Brief` prefix (a cache read after turn one), and the last message's last block is
+  the **moving breakpoint the provider auto-advances** over the growing conversation (each turn reads
+  the previous prefix, the ~1.25× write bills only the new tail); a marker below the provider's min
+  cacheable size is silently ignored, so marking is always safe. **openai-compat adapter caches
+  opt-in** (`WithPromptCaching`, off by default): when on, the first user message (the Brief) goes on
+  the wire as a structured content array whose text part carries a `cache_control` breakpoint via the
+  SDK's `SetExtraFields` escape hatch — its prefix covers the leading system message too. Opt-in
+  because that surface is mixed (OpenAI/DeepSeek auto-cache and need no marker; a strict local server
+  rejects it), so the marker is sent only where a backend both needs *and* accepts it — an Anthropic
+  model behind a gateway (OpenRouter). **Usage:** `fromMessage` already mapped Anthropic cache tokens;
+  `fromCompletion` now also recovers the gateway's **cache-WRITE** count from the non-schema usage
+  field (`cache_creation_input_tokens` and siblings, checked on both the usage object and its
+  prompt-token details, mirroring `reasoningDelta`) into `CacheCreationTokens`, so the ~1.25× write
+  shows in USD accounting, not just `cached_tokens` (reads). **Config:** new `prompt_caching` bool on
+  the model entry; `validateModels` restricts it to `provider: openai-compat` (the native anthropic
+  caches unconditionally, native openai auto-caches — the flag would silently no-op elsewhere). The
+  registry chains `.WithPromptCaching(mp.PromptCaching)` on the compat branch. **Demo wired:** both
+  Anthropic-via-OpenRouter entries in `demo/vault/config/infra.dev.yaml` set `prompt_caching: true`
+  and gained `cache_write_per_mtok`/`cache_read_per_mtok` (≈1.25×/0.1× input) so a cached run's USD
+  figure is accurate. Tests: anthropic `TestToParamsMarksCacheBreakpoints` (breakpoints on first+last,
+  interior unmarked); openai `TestToParamsCachingMarksBrief` (array+cache_control when on, plain
+  string when off) and `TestFromCompletionMapsCacheWrite` (gateway cache-write → `CacheCreationTokens`);
+  config `TestValidatePromptCaching{RejectedOffOpenAICompat,OnOpenAICompatPasses}`. Specs were written
+  ahead (models.md "Optional capability fields", configuration.md `prompt_caching`) — no spec change;
+  docs/configuration.md gained the `prompt_caching` field doc. **Verify `cache_read_tokens` goes
+  nonzero on a live re-run** (a runtime check, not a build item — needs a hosted key). ([models.md](specs/models.md),
+  [configuration.md](specs/configuration.md))
+- [x] **T11.3 Tool-call spans for in-sandbox tools** — *done.* The agent loop opens a `tool-call`
+  span per tool invocation (parented to the invocation), closing the [observability.md](specs/observability.md)
+  `tool-call ×M` gap for the unbrokered workspace/lifecycle tools — previously only the broker's
+  egress tools (git-push, package-fetch) were traced. Caveat in code: this works while the loop is
+  co-located in the trusted runner; once the agent is its own in-sandbox binary (Phase 5) these
+  must ride the broker.
 
 ---
 

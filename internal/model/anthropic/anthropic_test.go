@@ -3,6 +3,9 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"io"
+	"net/http"
 	"os"
 	"testing"
 
@@ -11,6 +14,59 @@ import (
 
 	"github.com/Loxstomper/harness/internal/model"
 )
+
+// captureRT records the outgoing request body, then fails the round-trip — enough to
+// assert what the adapter put on the wire without standing up a full SSE responder.
+type captureRT struct{ body []byte }
+
+func (c *captureRT) RoundTrip(r *http.Request) (*http.Response, error) {
+	if r.Body != nil {
+		c.body, _ = io.ReadAll(r.Body)
+	}
+	return nil, errors.New("captured")
+}
+
+// effortBody drives one Complete through the capturing transport and returns the request
+// body the adapter sent. The Complete error is expected (the transport never replies).
+func effortBody(t *testing.T, effort string) map[string]any {
+	t.Helper()
+	rt := &captureRT{}
+	a := New("claude-opus-4-8",
+		option.WithAPIKey("x"),
+		option.WithHTTPClient(&http.Client{Transport: rt}),
+		option.WithMaxRetries(0),
+	).WithEffort(effort)
+	_, _ = a.Complete(context.Background(), model.Request{
+		MaxTokens: 16,
+		Messages:  []model.Message{{Role: model.RoleUser, Text: "hi"}},
+	}, nil)
+	if len(rt.body) == 0 {
+		t.Fatal("no request body captured")
+	}
+	var got map[string]any
+	if err := json.Unmarshal(rt.body, &got); err != nil {
+		t.Fatalf("unmarshal request body: %v", err)
+	}
+	return got
+}
+
+// A configured effort rides as output_config.effort on the request body; an unset effort
+// adds nothing, so default behavior is byte-identical.
+func TestEffortOnWire(t *testing.T) {
+	with := effortBody(t, "medium")
+	oc, ok := with["output_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("output_config missing or wrong type: %v", with["output_config"])
+	}
+	if oc["effort"] != "medium" {
+		t.Errorf("output_config.effort = %v, want medium", oc["effort"])
+	}
+
+	without := effortBody(t, "")
+	if _, present := without["output_config"]; present {
+		t.Errorf("output_config should be absent when effort unset, got %v", without["output_config"])
+	}
+}
 
 // toParams is the request-translation half of the adapter and is pure (no network),
 // so it is tested by marshaling the produced SDK params to the wire JSON and asserting
@@ -258,6 +314,66 @@ func TestCompleteIntegration(t *testing.T) {
 	if deltas == 0 {
 		t.Error("expected at least one streamed text delta")
 	}
+}
+
+// Prompt caching is on by default for the Anthropic adapter (specs/models.md): toParams must
+// place an ephemeral cache_control breakpoint on the first message's first block (pinning the
+// stable tools+system+Brief prefix re-sent every turn) and on the last message's last block
+// (the moving breakpoint the provider auto-advances over the growing conversation), and leave
+// interior blocks unmarked so the four-breakpoint budget is spent only where it pays.
+func TestToParamsMarksCacheBreakpoints(t *testing.T) {
+	a := New("claude-opus-4-7")
+	req := model.Request{
+		System: "be terse",
+		Messages: []model.Message{
+			{Role: model.RoleUser, Text: "the brief"},
+			{Role: model.RoleAssistant, Text: "calling", ToolCalls: []model.ToolCall{
+				{ID: "tu1", Name: "read", Args: json.RawMessage(`{}`)},
+			}},
+			{Role: model.RoleTool, ToolResults: []model.ToolResult{{ToolCallID: "tu1", Content: "data"}}},
+		},
+	}
+	params, err := a.toParams(req)
+	if err != nil {
+		t.Fatalf("toParams: %v", err)
+	}
+	b, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	msgs := asSlice(t, got["messages"])
+	if len(msgs) != 3 {
+		t.Fatalf("messages len = %d, want 3", len(msgs))
+	}
+
+	first := asMap(t, asSlice(t, asMap(t, msgs[0])["content"])[0])
+	if cacheType(first) != "ephemeral" {
+		t.Errorf("first block cache_control = %v, want ephemeral", first["cache_control"])
+	}
+	lastContent := asSlice(t, asMap(t, msgs[2])["content"])
+	last := asMap(t, lastContent[len(lastContent)-1])
+	if cacheType(last) != "ephemeral" {
+		t.Errorf("last block cache_control = %v, want ephemeral", last["cache_control"])
+	}
+	for i, blk := range asSlice(t, asMap(t, msgs[1])["content"]) {
+		if m := asMap(t, blk); m["cache_control"] != nil {
+			t.Errorf("interior block %d unexpectedly cached: %v", i, m["cache_control"])
+		}
+	}
+}
+
+// cacheType returns the cache_control.type of a marshaled content block, or "" if unmarked.
+func cacheType(block map[string]any) string {
+	cc, ok := block["cache_control"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	s, _ := cc["type"].(string)
+	return s
 }
 
 func asMap(t *testing.T, v any) map[string]any {

@@ -1,5 +1,5 @@
-# Vault demo infrastructure overlay (env: dev) — points the harness at a REMOTE model
-# served by OpenRouter through its OpenAI-compatible endpoint. See demo/vault/README.md.
+# Vault demo infrastructure overlay (env: dev) — points the harness at Anthropic models served
+# through OpenRouter's OpenAI-compatible endpoint. See demo/vault/README.md.
 #
 # The model call is made by the runner on the HOST (the trusted side holds the adapter +
 # the API key), NOT from inside the sandbox — the agent only emits a canonical request and
@@ -59,30 +59,36 @@ artifacts:
 otel:
   endpoint: ""        # tracing off for the demo ("stdout" to see spans, host:port for OTLP)
 models:
-  # The OpenRouter model slug, sent verbatim as the request's model field; every soul
-  # references this registry key (the requirements-planner uses the -pro entry below).
-  # run.sh substitutes this (and the endpoint) when you set MODEL= / MODEL_ENDPOINT=. The
-  # model MUST support function calling — the agent loop drives it through structured tool
-  # calls. A full-DAG run on real Go is demanding, so default to a capable model (override
-  # with MODEL= for a cheaper/other slug). cost is the per-million-token price feeding the
-  # policy.budget USD accounting — the live OpenRouter list price (verified 2026-06; prompt
-  # caching makes the effective input cost lower on repeated context, so this is an upper bound).
-  "deepseek/deepseek-v4-flash":
+  # Every soul references one of these two registry keys by its `model:` field; the key is
+  # sent verbatim as the request's model id. All roles run on Anthropic models via OpenRouter
+  # (one OPENAI_API_KEY, held host-side by the runner; the sandbox stays zero-network). Two tiers:
+  #
+  #   - anthropic/claude-opus-4.8 for the two roles that define *what correct means* and gate
+  #     everything below them: the decomposition planner (`plan`) and the test-author
+  #     (`author-tests`). A wrong split, or a misread test contract, wastes every soul under it —
+  #     so they get the most capable model.
+  #   - anthropic/claude-sonnet-4.6 for the rest — the requirements-planner (the wizard,
+  #     interactive, so latency matters), the implementor, the security/qa verifier, and the
+  #     merge-resolver. Fast, strong tool-use, cheaper. MODEL= rewrites this shared Sonnet slug
+  #     across those roles without touching the pinned Opus roles (see run.sh).
+  #
+  # Both keys are OpenRouter slugs, sent verbatim as the request's model id; the openai-compat
+  # adapter posts them to OpenRouter with OPENAI_API_KEY as the bearer token. (Native-Anthropic
+  # effort — output_config.effort — is not wired on the openai-compat path, so it's omitted here;
+  # the models run at their default effort.) `prompt_caching: true` opts both into prompt caching:
+  # the adapter marks the re-sent stable prefix (persona + Brief) cacheable so OpenRouter forwards
+  # the breakpoint to Anthropic and bills re-sent tokens at the cache-read rate — the single
+  # largest cost saving on the agent loop, whose every turn re-sends that prefix. cost is the
+  # per-million-token price feeding the policy.budget USD accounting — roughly the Anthropic list
+  # price OpenRouter passes through, now including the cache-write (~1.25x input) and cache-read
+  # (~0.1x input) rates so a cached run's USD figure is accurate rather than undercounted.
+  "anthropic/claude-opus-4.8":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
-    cost: { input_per_mtok: 0.09, output_per_mtok: 0.18 }
-  # The stronger -pro tier, used by the three roles that define *what correct means* (and so
-  # gate everything downstream): the requirements-planner (the Create-Task wizard — the single
-  # human-in-the-loop conversation and the entire correctness lever, which must reliably follow
-  # the ledger/draft tool protocol that drives the alignment ledger UI), the decomposition
-  # planner (the `plan` stage — a wrong split wastes every soul below it), and the test-author
-  # (the `author-tests` stage — its acceptance tests are the spec made executable, the contract
-  # the factory trusts in place of a human and the ceiling on what the implementor can produce).
-  # All three are jobs the cheaper flash tier does not do dependably. Pinned separately so a
-  # MODEL= override (which only rewrites the flash slug) swaps the execution souls (implementor,
-  # security, merge-resolver) without downgrading these three. cost is the live OpenRouter list
-  # price (verified 2026-06; prompt caching lowers the effective input cost on repeated context).
-  "deepseek/deepseek-v4-pro":
+    prompt_caching: true
+    cost: { input_per_mtok: 5, output_per_mtok: 25, cache_write_per_mtok: 6.25, cache_read_per_mtok: 0.5 }
+  "anthropic/claude-sonnet-4.6":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
-    cost: { input_per_mtok: 0.435, output_per_mtok: 0.87 }
+    prompt_caching: true
+    cost: { input_per_mtok: 3, output_per_mtok: 15, cache_write_per_mtok: 3.75, cache_read_per_mtok: 0.3 }

@@ -78,7 +78,10 @@ func build(name string, mp config.ModelProvider) (model.Adapter, error) {
 		if key := os.Getenv(EnvAnthropicKey); key != "" {
 			opts = append(opts, anthropicopt.WithAPIKey(key))
 		}
-		return anthropic.New(name, opts...), nil
+		// Effort (output_config.effort) is honored only on the native Anthropic adapter;
+		// config.Validate guarantees it is unset for the other providers. WithEffort("") is
+		// a no-op, so this is safe whether or not the entry sets it.
+		return anthropic.New(name, opts...).WithEffort(mp.Effort), nil
 
 	case config.ProviderOpenAI:
 		var opts []openaiopt.RequestOption
@@ -95,7 +98,10 @@ func build(name string, mp config.ModelProvider) (model.Adapter, error) {
 		if key := os.Getenv(EnvOpenAIKey); key != "" {
 			opts = append(opts, openaiopt.WithAPIKey(key))
 		}
-		return openai.New(name, opts...), nil
+		// prompt_caching is honored only on this openai-compat adapter (config.Validate
+		// restricts the flag here); WithPromptCaching(false) is a no-op, so it is safe to chain
+		// whether or not the entry opts in.
+		return openai.New(name, opts...).WithPromptCaching(mp.PromptCaching), nil
 
 	default:
 		return nil, fmt.Errorf("registry: model %q has unknown provider %q", name, mp.Provider)

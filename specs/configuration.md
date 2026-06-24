@@ -307,6 +307,17 @@ prices that dimension at $0, so a model with no `cost` contributes nothing to US
 accounting — its spend is still bounded by the token and retry caps, which never depend on
 the table. Prices are not secrets, so unlike API keys they live in config.
 
+Two optional **capability fields** tune how the adapter calls a model — pure cost/quality
+dials the agent stays unaware of (see [models.md](models.md) "Optional capability fields"):
+- `effort: low|medium|high|xhigh|max` — the reasoning-effort dial; the adapter sends it as
+  the provider's effort field (Anthropic `output_config.effort`). Validation rejects it on a
+  provider with no equivalent.
+- `prompt_caching: true` — opt the model into prompt caching on the `openai-compat` adapter
+  (marking the re-sent stable prefix cacheable). It is opt-in there because that surface is
+  mixed — some backends cache automatically and others reject the marker — so it is set only
+  for a backend that needs *and* accepts it (e.g. an Anthropic model via OpenRouter). The
+  native `anthropic` adapter caches unconditionally and needs no flag.
+
 **Per-role model tiers** are expressed here, not by any separate construct: a soul
 names its `model`, so assigning a cheaper model to one role's soul and a frontier model
 to another's *is* the tier policy. Because the model is resolved from the soul the

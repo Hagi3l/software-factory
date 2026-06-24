@@ -102,9 +102,40 @@ why autonomous self-hosting still awaits a capable runtime model (see
   agent whose visible turn is *only tool calls* is still observable as it reasons. The
   adapter normalizes both into the one canonical channel; the [broker](components/runner.md)
   labels them (`token` vs `reasoning`) for the feed.
-- **Optional capabilities** — prompt caching (a large cost saver on long agent
-  loops), extended thinking / reasoning effort — are exposed as optional request
-  fields that capable adapters honor and others ignore.
+- **Optional capability fields** — prompt caching, reasoning effort — are **per-model
+  config the adapter emits**, not canonical-`Request` fields. See the next section.
+
+---
+
+## Optional capability fields
+
+Some provider features are pure cost/quality dials with no bearing on the loop's
+logic — the agent should stay unaware of them. So they are **not** on the canonical
+`Request` (which stays `{System, Messages, Tools, MaxTokens}`); they are **config on
+the model registry entry**, threaded to the adapter by the runner and put on the wire
+only by adapters that support them. An entry that omits a field runs at the provider
+default; an adapter that does not understand one ignores it. This keeps the agent
+provider-unaware while letting a deployment tune each model.
+
+- **Reasoning effort** — `effort: low|medium|high|xhigh|max` on the model entry. The
+  intelligence↔latency↔cost dial for a reasoning model: lower effort means fewer,
+  more-consolidated tool calls and less deliberation, which is what bounds *turn
+  count*, and so wall-clock, on a long agent loop. The Anthropic adapter maps it to
+  `output_config.effort`; config validation rejects it on providers with no equivalent.
+
+- **Prompt caching** — the largest single cost saver on the agent loop, whose every
+  turn re-sends a stable prefix (persona + the Brief's ambient specs and spec) that
+  grows only at the tail; without it each turn re-pays full input price for the whole
+  prefix. The adapter marks that prefix cacheable so re-sent tokens bill at the
+  cache-read rate (~0.1×). The **Anthropic adapter caches by default** (a top-level
+  ephemeral breakpoint the provider auto-advances as the conversation grows). The
+  **OpenAI-compatible adapter caches opt-in per model** (`prompt_caching: true`),
+  because that surface is mixed: OpenAI- and DeepSeek-style backends cache
+  *automatically* (no marker needed) and a strict local server may reject an unknown
+  field, so the marker is sent only where a backend both needs and accepts it — e.g.
+  Anthropic models served through an OpenAI-compatible gateway, which forwards the
+  marker and sticky-routes to keep the cache warm. Cache read/write token counts
+  normalize into the canonical `Usage` so the runner prices them like any other tokens.
 
 ---
 

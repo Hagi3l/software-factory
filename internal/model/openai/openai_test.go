@@ -355,6 +355,97 @@ func TestCompleteStreamsReasoningAndText(t *testing.T) {
 	}
 }
 
+// With prompt caching enabled, the first user message (the Brief) must go on the wire as a
+// structured content array whose text part carries an ephemeral cache_control breakpoint — the
+// marker an OpenAI-compatible gateway forwards to an Anthropic backend, whose prefix covers the
+// leading system message too. With caching off it stays a plain string, byte-identical to the
+// default, so a strict server is never sent a field it may reject. See specs/models.md.
+func TestToParamsCachingMarksBrief(t *testing.T) {
+	req := model.Request{
+		System: "be terse",
+		Messages: []model.Message{
+			{Role: model.RoleUser, Text: "the brief"},
+			{Role: model.RoleAssistant, Text: "ok"},
+		},
+	}
+
+	on, err := New("anthropic/claude", option.WithBaseURL("https://x")).WithPromptCaching(true).toParams(req)
+	if err != nil {
+		t.Fatalf("toParams (caching on): %v", err)
+	}
+	// messages[0] is the leading system message; messages[1] is the Brief.
+	brief := asMap(t, wireMessages(t, on)[1])
+	if brief["role"] != "user" {
+		t.Fatalf("messages[1].role = %v, want user", brief["role"])
+	}
+	parts := asSlice(t, brief["content"])
+	if len(parts) != 1 {
+		t.Fatalf("Brief content parts = %d, want 1 array part", len(parts))
+	}
+	part := asMap(t, parts[0])
+	if part["type"] != "text" || part["text"] != "the brief" {
+		t.Errorf("Brief text part = %v, want text 'the brief'", part)
+	}
+	if cacheType(part) != "ephemeral" {
+		t.Errorf("Brief cache_control = %v, want ephemeral", part["cache_control"])
+	}
+
+	off, err := New("gpt-4o").toParams(req)
+	if err != nil {
+		t.Fatalf("toParams (caching off): %v", err)
+	}
+	briefOff := asMap(t, wireMessages(t, off)[1])
+	if briefOff["content"] != "the brief" {
+		t.Errorf("caching-off Brief content = %v, want plain string 'the brief'", briefOff["content"])
+	}
+}
+
+// A gateway forwarding an Anthropic model reports the cache-WRITE token count in a non-schema
+// usage field (cache_creation_input_tokens); fromCompletion must recover it into
+// CacheCreationTokens so the runner prices the ~1.25x write, alongside the cache-READ count it
+// already maps from prompt_tokens_details.cached_tokens. See specs/models.md.
+func TestFromCompletionMapsCacheWrite(t *testing.T) {
+	raw := `{
+		"id":"c1","object":"chat.completion","created":1,"model":"anthropic/claude",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"hi"},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":1000,"completion_tokens":5,"total_tokens":1005,
+			"prompt_tokens_details":{"cached_tokens":800},"cache_creation_input_tokens":200}
+	}`
+	var c sdk.ChatCompletion
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := model.Usage{InputTokens: 1000, OutputTokens: 5, CacheReadTokens: 800, CacheCreationTokens: 200}
+	if got := fromCompletion(c).Usage; got != want {
+		t.Errorf("Usage = %+v, want %+v", got, want)
+	}
+}
+
+// wireMessages marshals built params to JSON and returns the messages array — the shape the
+// server actually receives, the only faithful way to assert structured content + extra fields.
+func wireMessages(t *testing.T, params sdk.ChatCompletionNewParams) []any {
+	t.Helper()
+	b, err := json.Marshal(params)
+	if err != nil {
+		t.Fatalf("marshal params: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(b, &got); err != nil {
+		t.Fatalf("unmarshal wire json: %v", err)
+	}
+	return asSlice(t, got["messages"])
+}
+
+// cacheType returns the cache_control.type of a marshaled content part, or "" if unmarked.
+func cacheType(block map[string]any) string {
+	cc, ok := block["cache_control"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	s, _ := cc["type"].(string)
+	return s
+}
+
 func asMap(t *testing.T, v any) map[string]any {
 	t.Helper()
 	m, ok := v.(map[string]any)

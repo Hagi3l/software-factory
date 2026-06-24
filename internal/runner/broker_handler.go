@@ -267,9 +267,10 @@ func (r *relay) Complete(ctx context.Context, req model.Request) (model.Response
 // With no remote configured the bundle is applied to the local source repo (the bootstrap
 // path). Either way the token-minting and remote URL live only on the trusted runner.
 func (r *relay) GitPush(ctx context.Context, req broker.GitPushRequest) (broker.GitPushResult, error) {
-	// The git-push is the one egress tool the broker mediates, so it gets a tool-call span
-	// (workspace tools run unbrokered inside the sandbox and are invisible by design). The
-	// span opens before the branch guard so a denied push is traced too, not silently dropped.
+	// The git-push is the one egress tool the broker mediates, so the broker spans it here.
+	// The unbrokered workspace/lifecycle tools get their own tool-call spans from the agent
+	// loop (agent.Loop.invokeTool); this span is just the broker's view of the egress it
+	// guards. It opens before the branch guard so a denied push is traced too, not dropped.
 	_, span := r.tel.Tracer().Start(r.spanParent(ctx), telemetry.SpanToolCall, trace.WithAttributes(
 		attribute.String(telemetry.AttrComponent, telemetry.ComponentBroker),
 		attribute.String(telemetry.AttrToolName, telemetry.ToolGitPush),

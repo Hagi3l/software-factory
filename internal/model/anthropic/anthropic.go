@@ -27,6 +27,7 @@ const defaultMaxTokens = 4096
 type Adapter struct {
 	model  string
 	client sdk.Client
+	effort string // output_config.effort to send on every call; empty = provider default
 }
 
 // New builds an Adapter for the given Anthropic model. Request options configure the
@@ -35,6 +36,15 @@ type Adapter struct {
 // from the environment. Passing options straight through keeps the adapter thin.
 func New(modelName string, opts ...option.RequestOption) *Adapter {
 	return &Adapter{model: modelName, client: sdk.NewClient(opts...)}
+}
+
+// WithEffort sets the reasoning-effort level (output_config.effort) sent on every call.
+// A builder rather than a New parameter so existing callers (and the openai adapter's
+// shape) stay unchanged; the registry chains it from the model's config. An empty level
+// is a no-op, leaving the model at its provider default. Returns the adapter for chaining.
+func (a *Adapter) WithEffort(effort string) *Adapter {
+	a.effort = effort
+	return a
 }
 
 // Complete satisfies model.Adapter. It always uses the streaming API (streaming is
@@ -47,7 +57,16 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 		return model.Response{}, err
 	}
 
-	stream := a.client.Messages.NewStreaming(ctx, params)
+	// effort rides as output_config.effort, injected as a request-body field. It is GA on
+	// /v1/messages (no beta header), so it sets cleanly on the non-beta streaming call; the
+	// canonical Request stays provider-agnostic (the adapter layers the field on per
+	// specs/models.md). Omitted entirely when unset, so default behavior is byte-identical.
+	var reqOpts []option.RequestOption
+	if a.effort != "" {
+		reqOpts = append(reqOpts, option.WithJSONSet("output_config", map[string]any{"effort": a.effort}))
+	}
+
+	stream := a.client.Messages.NewStreaming(ctx, params, reqOpts...)
 	var acc sdk.Message
 	for stream.Next() {
 		event := stream.Current()
@@ -106,7 +125,44 @@ func (a *Adapter) toParams(req model.Request) (sdk.MessageNewParams, error) {
 		}
 		params.Tools = append(params.Tools, tp)
 	}
+	applyCaching(&params)
 	return params, nil
+}
+
+// applyCaching marks the prompt's stable prefix and growing tail cacheable. The Anthropic
+// adapter caches by default (specs/models.md "Optional capability fields"): the agent loop
+// re-sends a large stable prefix every turn — the persona in System and the Brief (ambient
+// specs + spec) in the first message — and grows only at the tail, so without caching each
+// turn re-pays full input price for the whole prefix, the single largest cost on the loop.
+// Two ephemeral breakpoints capture it:
+//   - the first message's first block pins the stable prefix (tools+system+Brief), which is
+//     byte-identical every turn and so a cache read after the first turn; and
+//   - the last message's last block is the moving breakpoint the provider auto-advances —
+//     its prefix is the whole conversation so far, so each turn reads the previous turn's
+//     prefix and the ~1.25x cache write bills only the new tail.
+//
+// A breakpoint below the provider's minimum cacheable size is silently ignored (no error),
+// so it is always safe to mark unconditionally. Cache read/write token counts come back
+// normalized in Usage via fromMessage.
+func applyCaching(params *sdk.MessageNewParams) {
+	msgs := params.Messages
+	if len(msgs) == 0 {
+		// Degenerate (no messages): pin the system prefix on its own if one is present.
+		if n := len(params.System); n > 0 {
+			params.System[n-1].CacheControl = sdk.NewCacheControlEphemeralParam()
+		}
+		return
+	}
+	if first := msgs[0].Content; len(first) > 0 {
+		if cc := first[0].GetCacheControl(); cc != nil {
+			*cc = sdk.NewCacheControlEphemeralParam()
+		}
+	}
+	if last := msgs[len(msgs)-1].Content; len(last) > 0 {
+		if cc := last[len(last)-1].GetCacheControl(); cc != nil {
+			*cc = sdk.NewCacheControlEphemeralParam()
+		}
+	}
 }
 
 // toMessageParam maps one canonical Message to one SDK message. Anthropic has no tool

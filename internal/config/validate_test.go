@@ -463,6 +463,50 @@ func TestValidateOpenAICompatNeedsEndpoint(t *testing.T) {
 	mustContain(t, problems(t, c), "has no endpoint")
 }
 
+func TestValidateEffortRejectsUnknownLevel(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["fast-opus"] = ModelProvider{Provider: "anthropic", Effort: "turbo"}
+	mustContain(t, problems(t, c), `invalid effort "turbo"`)
+}
+
+func TestValidateEffortOnlyOnAnthropic(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["compat"] = ModelProvider{Provider: "openai-compat", Endpoint: "https://x", Effort: "medium"}
+	mustContain(t, problems(t, c), "effort is only honored on provider anthropic")
+}
+
+func TestValidateEffortValidLevelOnAnthropicPasses(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["opus-medium"] = ModelProvider{Provider: "anthropic", Effort: "medium"}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate returned %v, want nil for valid anthropic+effort entry", err)
+	}
+}
+
+// prompt_caching is an openai-compat-only marker (the native anthropic adapter caches
+// unconditionally, native openai auto-caches) — setting it elsewhere is a config mistake the
+// gate must reject so it never silently no-ops.
+func TestValidatePromptCachingRejectedOffOpenAICompat(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["cached-opus"] = ModelProvider{Provider: "anthropic", PromptCaching: true}
+	mustContain(t, problems(t, c), "prompt_caching but provider")
+}
+
+func TestValidatePromptCachingOnOpenAICompatPasses(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["cached-compat"] = ModelProvider{
+		Provider: "openai-compat", Endpoint: "https://openrouter.ai/api/v1", PromptCaching: true,
+	}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate returned %v, want nil for openai-compat + prompt_caching", err)
+	}
+}
+
 // The telemetry endpoint is validated at the startup gate so a typo becomes a loud error
 // rather than silently-dropped exports — the contract telemetry.Setup relies on. The three
 // valid forms (off / stdout / host:port) must pass; anything else must fail.

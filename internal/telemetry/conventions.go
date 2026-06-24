@@ -74,7 +74,9 @@ const (
 	AttrOutputTokens     = "harness.tokens.output"
 	AttrCacheReadTokens  = "harness.tokens.cache_read"
 	AttrCacheWriteTokens = "harness.tokens.cache_write"
-	AttrToolName       = "harness.tool.name"  // the brokered tool, e.g. git-push
+	AttrToolName       = "harness.tool.name"  // tool invoked, e.g. git-push (egress) or edit_file (workspace)
+	AttrToolError      = "harness.tool.error" // tool returned an error result (e.g. a failed compile), not a loop-fatal error
+	AttrToolTurn       = "harness.tool.turn"  // 1-based agent-loop turn the tool call belongs to
 	AttrGitBranch      = "harness.git.branch"
 	AttrGitCommit      = "harness.git.commit"
 	AttrCandidateRef   = "harness.candidate.ref"

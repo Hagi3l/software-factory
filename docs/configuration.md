@@ -310,6 +310,7 @@ signing:                     # provenance-commit signing (T5.10); omit/disable t
 models:
   claude-opus-4-8:
     provider: anthropic
+    effort: medium   # output_config.effort (low|medium|high|xhigh|max); omit for the model default
     cost: { input_per_mtok: 15, output_per_mtok: 75, cache_write_per_mtok: 18.75, cache_read_per_mtok: 1.5 }
   claude-sonnet-4-6:
     provider: anthropic
@@ -324,6 +325,23 @@ models:
   diversity warning above — only needed for a bare-slug `openai-compat` model (an
   aggregator `vendor/model` slug and the direct `anthropic`/`openai` providers are
   identified automatically) or to override the inferred value.
+- **`effort`** (optional) sets the reasoning-effort level the adapter sends on every call
+  to that model — `output_config.effort` (`low`|`medium`|`high`|`xhigh`|`max`), the
+  intelligence↔latency↔cost dial. Lower effort means fewer, more-consolidated tool calls
+  and less deliberation, which bounds turn count (and so wall-clock) on a live run; omit it
+  to leave the model at its provider default. **Honored only on `provider: anthropic`** (the
+  native `output_config` field); validation rejects it on the other providers and rejects an
+  unknown level.
+- **`prompt_caching`** (optional, `true`/`false`) opts the model into prompt caching — the
+  adapter marks the re-sent stable prefix (persona + the Brief's spec/ambient context)
+  cacheable so a gateway bills it at the cache-read rate (~0.1×) instead of full price every
+  turn, the single largest cost saving on the agent loop. **Honored only on `provider:
+  openai-compat`**, where caching is opt-in because that surface is mixed: OpenAI/DeepSeek-style
+  backends cache automatically (no marker) and a strict local server may reject the marker, so
+  it is set only for a backend that needs *and* accepts it — e.g. an Anthropic model served
+  through OpenRouter. The native `anthropic` adapter caches **unconditionally** and needs no
+  flag; validation rejects `prompt_caching` on `anthropic`/`openai`. Cache read/write token
+  counts normalize into the usage accounting either way.
 - **`sandbox.backend`** selects the isolation backend and is honored at startup (not
   decorative): `docker` (the bootstrap default — weak shared-kernel isolation, dev only)
   and `gvisor` (medium-trust: the same container boot pinned to the `runsc` runtime, so

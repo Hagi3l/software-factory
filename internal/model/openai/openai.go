@@ -24,8 +24,9 @@ import (
 // Adapter calls one OpenAI-compatible model. It is bound to a single model name at
 // construction; the runner builds one per soul.Model via the registry (plan T1.10).
 type Adapter struct {
-	model  string
-	client sdk.Client
+	model   string
+	client  sdk.Client
+	caching bool // send a cache_control breakpoint on the stable prefix (opt-in; see WithPromptCaching)
 }
 
 // New builds an Adapter for the given model. Request options configure the
@@ -36,6 +37,20 @@ type Adapter struct {
 // is what lets one adapter serve OpenAI, Ollama, vLLM, etc.
 func New(modelName string, opts ...option.RequestOption) *Adapter {
 	return &Adapter{model: modelName, client: sdk.NewClient(opts...)}
+}
+
+// WithPromptCaching opts this model into prompt caching (specs/models.md "Optional
+// capability fields"). A builder rather than a New parameter so existing callers stay
+// unchanged; the registry chains it from the model's prompt_caching config. It is off by
+// default and a no-op when off, because the OpenAI-compatible surface is mixed: OpenAI- and
+// DeepSeek-style backends cache automatically (no marker needed) while a strict local server
+// may reject an unknown field — so the cache_control marker is sent only where a backend
+// both needs and accepts it (an Anthropic model behind an OpenAI-compatible gateway such as
+// OpenRouter, which forwards the marker and sticky-routes to keep the cache warm). Config
+// validation restricts the flag to provider: openai-compat. Returns the adapter for chaining.
+func (a *Adapter) WithPromptCaching(on bool) *Adapter {
+	a.caching = on
+	return a
 }
 
 // Complete satisfies model.Adapter. It always uses the streaming API (streaming is
@@ -116,7 +131,19 @@ func (a *Adapter) toParams(req model.Request) (sdk.ChatCompletionNewParams, erro
 	if req.System != "" {
 		params.Messages = append(params.Messages, sdk.SystemMessage(req.System))
 	}
+	markedBrief := false
 	for _, m := range req.Messages {
+		// The first user message carries the Brief — the persona is in System, the spec and
+		// ambient context here — the large stable prefix re-sent every turn. When caching is
+		// on, mark it cacheable: a cache_control breakpoint here covers the whole prefix
+		// before it (the leading system message included), so the gateway bills the re-sent
+		// prefix at the cache-read rate instead of full price. See specs/models.md. A user
+		// message holds only text, so the cached form is equivalent to toMessageParams' output.
+		if a.caching && !markedBrief && m.Role == model.RoleUser {
+			params.Messages = append(params.Messages, cachedUserMessage(m.Text))
+			markedBrief = true
+			continue
+		}
 		msgs, err := toMessageParams(m)
 		if err != nil {
 			return sdk.ChatCompletionNewParams{}, err
@@ -181,6 +208,24 @@ func toMessageParams(m model.Message) ([]sdk.ChatCompletionMessageParamUnion, er
 	}
 }
 
+// cachedUserMessage builds a user message whose text part carries an ephemeral
+// cache_control breakpoint. cache_control is not a native Chat Completions field, so it
+// rides via the SDK's extra-fields escape hatch (SetExtraFields) on a structured content
+// part — the wire form an OpenAI-compatible gateway forwarding an Anthropic model expects.
+// Used only when prompt caching is enabled, to mark the Brief's stable prefix cacheable.
+// See specs/models.md "Optional capability fields".
+func cachedUserMessage(text string) sdk.ChatCompletionMessageParamUnion {
+	part := sdk.ChatCompletionContentPartTextParam{Text: text}
+	part.SetExtraFields(map[string]any{"cache_control": map[string]any{"type": "ephemeral"}})
+	return sdk.ChatCompletionMessageParamUnion{
+		OfUser: &sdk.ChatCompletionUserMessageParam{
+			Content: sdk.ChatCompletionUserMessageParamContentUnion{
+				OfArrayOfContentParts: []sdk.ChatCompletionContentPartUnionParam{{OfText: &part}},
+			},
+		},
+	}
+}
+
 // toToolParam maps a canonical ToolDef to an SDK function tool. OpenAI takes the full
 // JSON Schema verbatim as the function's parameters object (a map), so — unlike the
 // Anthropic adapter, which splits properties/required out — the schema passes through
@@ -225,15 +270,42 @@ func fromCompletion(c sdk.ChatCompletion) model.Response {
 	}
 	// OpenAI's prompt_tokens already includes any cached tokens (cached is a subset),
 	// so CacheReadTokens is reported here for visibility but is not additive to
-	// InputTokens. OpenAI has no separate cache-creation billing, so CacheCreationTokens
-	// stays 0 — the divergence from Anthropic (where cache reads are billed separately
-	// and excluded from input_tokens) is normalized away by the canonical Usage shape.
+	// InputTokens. Native OpenAI has no separate cache-creation billing, so CacheCreationTokens
+	// is 0 there; a gateway forwarding an Anthropic model (where a cache write bills ~1.25x)
+	// reports the write count in a non-schema usage field, which cacheCreationTokens recovers
+	// so the runner can price it. The divergence from Anthropic (where cache reads are billed
+	// separately and excluded from input_tokens) is normalized away by the canonical Usage shape.
 	resp.Usage = model.Usage{
-		InputTokens:     int(c.Usage.PromptTokens),
-		OutputTokens:    int(c.Usage.CompletionTokens),
-		CacheReadTokens: int(c.Usage.PromptTokensDetails.CachedTokens),
+		InputTokens:         int(c.Usage.PromptTokens),
+		OutputTokens:        int(c.Usage.CompletionTokens),
+		CacheReadTokens:     int(c.Usage.PromptTokensDetails.CachedTokens),
+		CacheCreationTokens: cacheCreationTokens(c.Usage),
 	}
 	return resp
+}
+
+// cacheCreationTokens pulls the cache-WRITE token count out of a usage payload. Native
+// OpenAI has no separate cache-creation billing (cached_tokens are a subset of prompt_tokens,
+// surfaced as CacheReadTokens), but a gateway forwarding an Anthropic model — where a cache
+// write bills ~1.25x — reports the write count in a non-schema usage field. There is no agreed
+// key, so (mirroring reasoningDelta) we check the ones seen in the wild on both the usage
+// object and its prompt-token details and return the first that parses to a positive int.
+// Surfacing it lets the runner price the write in USD rather than undercounting cost as if
+// every cache miss were free. See specs/models.md.
+func cacheCreationTokens(u sdk.CompletionUsage) int {
+	for _, extra := range []map[string]respjson.Field{u.JSON.ExtraFields, u.PromptTokensDetails.JSON.ExtraFields} {
+		for _, key := range []string{"cache_creation_input_tokens", "cache_write_tokens", "cache_creation_tokens"} {
+			raw := extra[key].Raw()
+			if raw == "" || raw == "null" {
+				continue
+			}
+			var n int
+			if json.Unmarshal([]byte(raw), &n) == nil && n > 0 {
+				return n
+			}
+		}
+	}
+	return 0
 }
 
 // fromFinishReason normalizes OpenAI's finish_reason to the canonical set. The legacy

@@ -11,6 +11,10 @@ import (
 	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/harness/internal/telemetry"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
+	"go.opentelemetry.io/otel/trace/noop"
 )
 
 // DefaultMaxTurns bounds the ReAct loop when Budget.MaxTurns is unset. A turn cap is
@@ -65,19 +69,41 @@ type Loop struct {
 	// connect builds the broker connection for an invocation's endpoint. A seam so the
 	// loop is unit-tested without a real socket; the default dials the runner's broker.
 	connect func(ep sandbox.Endpoint) brokerConn
+	// tracer opens a tool-call span around every workspace/lifecycle tool the model
+	// invokes (specs/observability.md's `tool-call ×M`). These tools run unbrokered, so
+	// unlike the broker's egress spans (git-push, package-fetch) the runner can't see
+	// them — the loop, which runs co-located in the trusted runner today, spans them
+	// directly off the invocation ctx. Defaults to a no-op so a Loop built without
+	// telemetry (most tests) stays silent. Once the agent becomes its own in-sandbox
+	// binary (Phase 5, zero-network) these spans must instead ride the broker.
+	tracer trace.Tracer
+}
+
+// Option configures a Loop at construction. Added as a variadic tail on New so existing
+// three-arg callers keep compiling.
+type Option func(*Loop)
+
+// WithTracer makes the loop emit a tool-call span per tool invocation. Pass the shared
+// telemetry Provider's tracer (tel.Tracer()); omit it to leave tool calls untraced.
+func WithTracer(t trace.Tracer) Option {
+	return func(l *Loop) {
+		if t != nil {
+			l.tracer = t
+		}
+	}
 }
 
 // New builds a Loop over a ToolSource (the workspace + lifecycle tools, plan T1.14/T1.15)
 // and a Budget. A nil logger discards. MaxTurns defaults to DefaultMaxTurns so the loop
 // always terminates.
-func New(tools ToolSource, budget Budget, log *slog.Logger) *Loop {
+func New(tools ToolSource, budget Budget, log *slog.Logger, opts ...Option) *Loop {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
 	if budget.MaxTurns <= 0 {
 		budget.MaxTurns = DefaultMaxTurns
 	}
-	return &Loop{
+	l := &Loop{
 		tools:       tools,
 		budget:      budget,
 		log:         log,
@@ -85,7 +111,12 @@ func New(tools ToolSource, budget Budget, log *slog.Logger) *Loop {
 		connect: func(ep sandbox.Endpoint) brokerConn {
 			return broker.NewClient(ep.Network, ep.Address)
 		},
+		tracer: noop.NewTracerProvider().Tracer(telemetry.ScopeName),
 	}
+	for _, opt := range opts {
+		opt(l)
+	}
+	return l
 }
 
 // Invoke runs the full inner loop for one Brief and returns its Result. It satisfies
@@ -177,7 +208,7 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 				})
 				continue
 			}
-			out, err := tool.Invoke(ctx, tc.Args)
+			out, err := l.invokeTool(ctx, brief, turn, tool, tc)
 			if err != nil {
 				return core.Result{}, fmt.Errorf("agent: tool %q (turn %d): %w", tc.Name, turn, err)
 			}
@@ -207,6 +238,35 @@ func (l *Loop) bootSoul(soul core.Soul) (string, error) {
 		return "", fmt.Errorf("agent: read persona %s for soul %q: %w", soul.Persona, soul.Name, err)
 	}
 	return string(data), nil
+}
+
+// invokeTool runs one tool call inside a tool-call span parented to the invocation ctx,
+// so every workspace/lifecycle tool the model drives shows up in the invocation trace
+// (specs/observability.md's `tool-call ×M`) — not just the broker's egress tools. The
+// span's duration captures the tool's real wall-clock (a `run` that shells out a slow
+// `go build`, a `read_file`), which is the only place that timing is observable while
+// the tools run unbrokered. A tool that reports IsError (a failed compile, a bad path)
+// is normal loop flow, so it is tagged via an attribute rather than marked span-failed;
+// only a loop-fatal Go error records on the span.
+func (l *Loop) invokeTool(ctx context.Context, brief core.Brief, turn int, tool Tool, tc model.ToolCall) (Outcome, error) {
+	ctx, span := l.tracer.Start(ctx, telemetry.SpanToolCall, trace.WithAttributes(
+		attribute.String(telemetry.AttrComponent, telemetry.ComponentRunner),
+		attribute.String(telemetry.AttrToolName, tc.Name),
+		attribute.String(telemetry.AttrIssueID, brief.Issue.ID),
+		attribute.String(telemetry.AttrIssueRole, brief.Issue.Role),
+		attribute.Int(telemetry.AttrToolTurn, turn),
+	))
+	defer span.End()
+
+	out, err := tool.Invoke(ctx, tc.Args)
+	if err != nil {
+		span.RecordError(err)
+		return out, err
+	}
+	if out.IsError {
+		span.SetAttributes(attribute.Bool(telemetry.AttrToolError, true))
+	}
+	return out, nil
 }
 
 // nudge steers a model that stopped without calling a lifecycle tool back to one. The
