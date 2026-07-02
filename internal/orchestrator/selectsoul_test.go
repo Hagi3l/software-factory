@@ -3,6 +3,7 @@ package orchestrator
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -123,6 +124,66 @@ func TestScheduleReadyDispatchesSelectedSoul(t *testing.T) {
 	if brief.Soul.Name != "implementor-rust" {
 		t.Errorf("dispatched soul = %q, want implementor-rust (matched by tag lang=rust)", brief.Soul.Name)
 	}
+}
+
+// TestAttachExplorer covers the T12.2 dispatch half: when policy.explore_budget is set, the
+// Brief is pinned to the explorer soul the issue's tags select (a diverse verify-path explorer
+// beats the producer-path default) and carries the fixed sub-budget; when explore is off, or no
+// explorer soul matches, the Brief carries no explorer (explore disabled for that issue).
+func TestAttachExplorer(t *testing.T) {
+	defExplorer := core.Soul{Name: "explorer", Role: config.RoleExplorer, Model: "haiku-cheap"}
+	verifyExplorer := core.Soul{Name: "explorer-verify", Role: config.RoleExplorer, Model: "gpt-cheap", Selector: map[string]string{"verify": "1"}}
+	budget := core.ExploreBudget{Tokens: 100_000, Turns: 12}
+
+	orch := func(enabled bool, souls ...core.Soul) *Orchestrator {
+		h := &config.Harness{}
+		if enabled {
+			h.Policy.ExploreBudget = budget
+		}
+		return &Orchestrator{
+			opts: Options{Config: &config.Config{Harness: h, Souls: souls}},
+			log:  slog.New(slog.DiscardHandler),
+		}
+	}
+
+	t.Run("enabled pins the producer-path default explorer + budget", func(t *testing.T) {
+		o := orch(true, defExplorer)
+		var b core.Brief
+		o.attachExplorer(&b, core.Issue{Role: "implement"})
+		if b.Explorer == nil || b.Explorer.Name != "explorer" {
+			t.Fatalf("Explorer = %+v, want the default explorer soul", b.Explorer)
+		}
+		if b.ExploreBudget != budget {
+			t.Errorf("ExploreBudget = %+v, want %+v", b.ExploreBudget, budget)
+		}
+	})
+
+	t.Run("verify-tagged issue routes to the diverse explorer", func(t *testing.T) {
+		o := orch(true, defExplorer, verifyExplorer)
+		var b core.Brief
+		o.attachExplorer(&b, core.Issue{Role: "qa", Tags: map[string]string{"verify": "1"}})
+		if b.Explorer == nil || b.Explorer.Name != "explorer-verify" {
+			t.Fatalf("Explorer = %+v, want explorer-verify (diverse blind spots on the verify path)", b.Explorer)
+		}
+	})
+
+	t.Run("disabled leaves the Brief without an explorer", func(t *testing.T) {
+		o := orch(false, defExplorer)
+		var b core.Brief
+		o.attachExplorer(&b, core.Issue{Role: "implement"})
+		if b.Explorer != nil {
+			t.Errorf("Explorer = %+v, want nil (explore off when the budget is unset)", b.Explorer)
+		}
+	})
+
+	t.Run("enabled but no explorer soul leaves it nil", func(t *testing.T) {
+		o := orch(true) // no explorer soul
+		var b core.Brief
+		o.attachExplorer(&b, core.Issue{Role: "implement"})
+		if b.Explorer != nil {
+			t.Errorf("Explorer = %+v, want nil (no explorer soul to pin)", b.Explorer)
+		}
+	})
 }
 
 // Selection is deterministic for a specificity tie: souls are loaded Name-sorted, so the

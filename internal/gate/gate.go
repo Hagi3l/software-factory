@@ -955,7 +955,7 @@ func gateID() (string, error) {
 // depth should the allowlist ever be widened by mistake.
 type denyHandler struct{}
 
-func (denyHandler) Complete(context.Context, model.Request) (model.Response, error) {
+func (denyHandler) Complete(context.Context, broker.CompletionParams) (model.Response, error) {
 	return model.Response{}, fmt.Errorf("gate: verification sandbox has no broker egress")
 }
 
@@ -1009,7 +1009,7 @@ type fetchOnlyHandler struct {
 
 var _ broker.Handler = fetchOnlyHandler{}
 
-func (fetchOnlyHandler) Complete(context.Context, model.Request) (model.Response, error) {
+func (fetchOnlyHandler) Complete(context.Context, broker.CompletionParams) (model.Response, error) {
 	return model.Response{}, fmt.Errorf("gate: verification sandbox may only fetch packages")
 }
 

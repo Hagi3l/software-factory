@@ -90,6 +90,12 @@ func (s *bundleSandbox) Teardown(context.Context) error { return nil }
 
 func discardLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }
 
+// parentCall wraps a plain model request as a parent-sub-context completion — the shape the relay
+// receives for the invocation's own soul stream (empty SubContext, no explorer stream).
+func parentCall(req model.Request) broker.CompletionParams {
+	return broker.CompletionParams{Request: req}
+}
+
 func testRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox) *relay {
 	return newRelay(adapter, pub, sb, relayConfig{
 		eventSubject:  "harness.agent.inv-1.events",
@@ -127,7 +133,7 @@ func TestRelayCompleteStreamsDeltasAndTalliesUsage(t *testing.T) {
 	pub := &recordingPublisher{}
 	r := testRelay(adapter, pub, &bundleSandbox{})
 
-	resp, err := r.Complete(context.Background(), model.Request{})
+	resp, err := r.Complete(context.Background(), parentCall(model.Request{}))
 	if err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
@@ -152,7 +158,7 @@ func TestRelayCompleteStreamsDeltasAndTalliesUsage(t *testing.T) {
 	}
 
 	// A second completion accumulates onto the running usage tally (the budget input).
-	if _, err := r.Complete(context.Background(), model.Request{}); err != nil {
+	if _, err := r.Complete(context.Background(), parentCall(model.Request{})); err != nil {
 		t.Fatalf("second Complete: %v", err)
 	}
 	u := r.Usage()
@@ -176,7 +182,7 @@ func TestRelayCompletePublishesReasoningAndToolEvents(t *testing.T) {
 	pub := &recordingPublisher{}
 	r := testRelay(adapter, pub, &bundleSandbox{})
 
-	if _, err := r.Complete(context.Background(), model.Request{}); err != nil {
+	if _, err := r.Complete(context.Background(), parentCall(model.Request{})); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 
@@ -212,11 +218,102 @@ func TestRelayCompletePropagatesErrorAndDoesNotTally(t *testing.T) {
 	adapter := &recordingAdapter{err: errors.New("model API 503")}
 	r := testRelay(adapter, &recordingPublisher{}, &bundleSandbox{})
 
-	if _, err := r.Complete(context.Background(), model.Request{}); err == nil {
+	if _, err := r.Complete(context.Background(), parentCall(model.Request{})); err == nil {
 		t.Fatal("Complete: want error, got nil")
 	}
 	if u := r.Usage(); u != (model.Usage{}) {
 		t.Errorf("usage = %+v, want zero (a failed call tallies nothing)", u)
+	}
+}
+
+// testRelayWithExplore builds a relay pinned to a second (explorer) adapter + sub-budget, the
+// two-models-in-one-sandbox shape the runner assembles when the trusted dispatch attached an
+// explorer soul (T12.2).
+func testRelayWithExplore(parent, explore model.Adapter, budget core.ExploreBudget) *relay {
+	return newRelay(parent, &recordingPublisher{}, &bundleSandbox{}, relayConfig{
+		eventSubject:   "harness.agent.inv-1.events",
+		issueID:        "iss-1",
+		role:           "implementor",
+		repo:           "/repo",
+		allowedBranch:  "candidate/iss-1",
+		log:            discardLogger(),
+		model:          "frontier",
+		exploreAdapter: explore,
+		exploreModel:   "cheap",
+		exploreBudget:  budget,
+	})
+}
+
+// exploreCall is an explorer-tagged completion on the given per-call stream — what the sandbox's
+// explore sub-loop sends.
+func exploreCall(stream string, req model.Request) broker.CompletionParams {
+	return broker.CompletionParams{SubContext: broker.SubContextExplorer, Stream: stream, Request: req}
+}
+
+// TestRelayExploreRoutesToPinnedAdapterAndDrawsCeiling: an explorer-tagged call runs on the
+// pinned explorer adapter (never the parent's frontier model — that is the tier-escape guard),
+// and its tokens still feed Usage() so the explorer's spend draws the parent-task ceiling.
+func TestRelayExploreRoutesToPinnedAdapterAndDrawsCeiling(t *testing.T) {
+	parent := &recordingAdapter{resp: model.Response{Usage: model.Usage{InputTokens: 100, OutputTokens: 50}, Stop: model.StopEndTurn}}
+	explore := &recordingAdapter{resp: model.Response{Usage: model.Usage{InputTokens: 7, OutputTokens: 3}, Stop: model.StopEndTurn}}
+	r := testRelayWithExplore(parent, explore, core.ExploreBudget{Tokens: 1000})
+
+	if _, err := r.Complete(context.Background(), parentCall(model.Request{})); err != nil {
+		t.Fatalf("parent Complete: %v", err)
+	}
+	if _, err := r.Complete(context.Background(), exploreCall("explore-1", model.Request{})); err != nil {
+		t.Fatalf("explore Complete: %v", err)
+	}
+	if parent.calls != 1 {
+		t.Errorf("parent adapter calls = %d, want 1 (an explorer call must not touch the parent model)", parent.calls)
+	}
+	if explore.calls != 1 {
+		t.Errorf("explorer adapter calls = %d, want 1", explore.calls)
+	}
+	u := r.Usage()
+	if u.InputTokens != 107 || u.OutputTokens != 53 {
+		t.Errorf("combined usage = %+v, want input=107 output=53 (parent+explorer draw the one ceiling)", u)
+	}
+}
+
+// TestRelayExploreSubBudgetRefusesPerStream: the runner refuses further calls on a stream once it
+// reaches policy.explore_budget (typed CodeSubBudgetExhausted), but a fresh stream (a new explore
+// call) gets the full budget again — the fixed cap resets per call.
+func TestRelayExploreSubBudgetRefusesPerStream(t *testing.T) {
+	explore := &recordingAdapter{resp: model.Response{Usage: model.Usage{InputTokens: 60}, Stop: model.StopEndTurn}}
+	r := testRelayWithExplore(&recordingAdapter{}, explore, core.ExploreBudget{Tokens: 50})
+
+	if _, err := r.Complete(context.Background(), exploreCall("s1", model.Request{})); err != nil {
+		t.Fatalf("first explore Complete: %v", err)
+	}
+	_, err := r.Complete(context.Background(), exploreCall("s1", model.Request{}))
+	var be *broker.Error
+	if !errors.As(err, &be) || be.Code != broker.CodeSubBudgetExhausted {
+		t.Fatalf("second same-stream call err = %v, want *broker.Error{CodeSubBudgetExhausted}", err)
+	}
+	if explore.calls != 1 {
+		t.Errorf("explorer adapter calls = %d, want 1 (the refused call must not reach the model)", explore.calls)
+	}
+	if _, err := r.Complete(context.Background(), exploreCall("s2", model.Request{})); err != nil {
+		t.Fatalf("fresh-stream explore Complete: %v (the per-call budget must reset)", err)
+	}
+	if explore.calls != 2 {
+		t.Errorf("explorer adapter calls = %d, want 2 (a fresh stream must run)", explore.calls)
+	}
+}
+
+// TestRelayExploreDisabledFailsClosed: with no explorer adapter pinned, an explorer-tagged call
+// is refused rather than silently answered on the parent's frontier model — the agent must never
+// reach a stronger tier by tagging a call.
+func TestRelayExploreDisabledFailsClosed(t *testing.T) {
+	parent := &recordingAdapter{resp: model.Response{Stop: model.StopEndTurn}}
+	r := testRelayWithExplore(parent, nil, core.ExploreBudget{})
+
+	if _, err := r.Complete(context.Background(), exploreCall("s1", model.Request{})); err == nil {
+		t.Fatal("explorer call with no pinned explorer adapter: want error, got nil (must fail closed)")
+	}
+	if parent.calls != 0 {
+		t.Errorf("parent adapter calls = %d, want 0 (a disabled explorer must never route to the parent model)", parent.calls)
 	}
 }
 
@@ -233,11 +330,11 @@ func TestRelayCapturesPromptAndTranscript(t *testing.T) {
 	}
 
 	first := model.Request{System: "persona", Messages: []model.Message{{Role: model.RoleUser, Text: "first"}}}
-	if _, err := r.Complete(context.Background(), first); err != nil {
+	if _, err := r.Complete(context.Background(), parentCall(first)); err != nil {
 		t.Fatalf("Complete: %v", err)
 	}
 	// A second turn must not overwrite the captured prompt (the first request).
-	if _, err := r.Complete(context.Background(), model.Request{Messages: []model.Message{{Role: model.RoleUser, Text: "second"}}}); err != nil {
+	if _, err := r.Complete(context.Background(), parentCall(model.Request{Messages: []model.Message{{Role: model.RoleUser, Text: "second"}}})); err != nil {
 		t.Fatalf("second Complete: %v", err)
 	}
 

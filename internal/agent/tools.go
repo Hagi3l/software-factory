@@ -90,6 +90,17 @@ type Completer interface {
 	Complete(ctx context.Context, req model.Request) (model.Response, error)
 }
 
+// ExplorerCompleterSource mints a Completer for one explore call's nested sub-loop. Each call
+// gets a fresh per-call stream id so the runner meters that call against policy.explore_budget
+// and resets per call ("an explore call behaves the same wherever in an invocation it is made").
+// The returned Completer tags every completion to the explorer sub-context, so the runner routes
+// it to the pinned explorer model — the agent names the tool, never the model (specs/models.md
+// "Helper souls", T12.2). *broker.Client provides one (via ExploreCompleter); tests fake it. It
+// is a seam so the explore tool need not depend on the concrete broker and stays unit-testable.
+type ExplorerCompleterSource interface {
+	ExploreCompleter(stream string) Completer
+}
+
 // brokerConn is the full broker connection an invocation needs: model completion for
 // the loop plus git push / events for the lifecycle tools. The loop builds one per
 // invocation from the broker endpoint and shares it with the tools, so a single

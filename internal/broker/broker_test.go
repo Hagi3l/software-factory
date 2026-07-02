@@ -22,7 +22,7 @@ var allDestinations = []string{"llm-api", "git", "nats", "package-proxy"}
 // stands in for the runner's real relay (plan T1.12) so the protocol and the
 // deny-by-default gate can be tested without a model API, git, or NATS.
 type fakeHandler struct {
-	gotComplete  model.Request
+	gotComplete  CompletionParams
 	completeResp model.Response
 	completeErr  error
 
@@ -38,7 +38,7 @@ type fakeHandler struct {
 	fetchErr  error
 }
 
-func (f *fakeHandler) Complete(_ context.Context, req model.Request) (model.Response, error) {
+func (f *fakeHandler) Complete(_ context.Context, req CompletionParams) (model.Response, error) {
 	f.gotComplete = req
 	return f.completeResp, f.completeErr
 }
@@ -96,8 +96,51 @@ func TestCompleteRoundTrip(t *testing.T) {
 	if !reflect.DeepEqual(got, h.completeResp) {
 		t.Errorf("response = %+v, want %+v", got, h.completeResp)
 	}
-	if !reflect.DeepEqual(h.gotComplete, req) {
-		t.Errorf("handler got %+v, want %+v (request must survive the boundary unchanged)", h.gotComplete, req)
+	if !reflect.DeepEqual(h.gotComplete.Request, req) {
+		t.Errorf("handler got %+v, want %+v (request must survive the boundary unchanged)", h.gotComplete.Request, req)
+	}
+	// A plain Complete is the parent sub-context with no explorer stream.
+	if h.gotComplete.SubContext != SubContextParent || h.gotComplete.Stream != "" {
+		t.Errorf("parent completion carried sub_context=%q stream=%q, want parent/empty", h.gotComplete.SubContext, h.gotComplete.Stream)
+	}
+}
+
+// TestExploreCompleterTagsSubContext verifies the explorer completer tags every call to the
+// explorer sub-context and its per-call stream, so the runner can route + meter it — the wire
+// half of "the agent names the tool, never the model" (T12.2).
+func TestExploreCompleterTagsSubContext(t *testing.T) {
+	h := &fakeHandler{completeResp: model.Response{Text: "ok", Stop: model.StopEndTurn}}
+	c := pipeClient(NewServer(h, WithAllowlist(allDestinations)))
+
+	req := model.Request{System: "explore", Messages: []model.Message{{Role: model.RoleUser, Text: "where is X?"}}}
+	if _, err := c.ExploreCompleter("explore-7").Complete(context.Background(), req); err != nil {
+		t.Fatalf("explore Complete: %v", err)
+	}
+	if h.gotComplete.SubContext != SubContextExplorer {
+		t.Errorf("sub_context = %q, want %q", h.gotComplete.SubContext, SubContextExplorer)
+	}
+	if h.gotComplete.Stream != "explore-7" {
+		t.Errorf("stream = %q, want explore-7", h.gotComplete.Stream)
+	}
+	if !reflect.DeepEqual(h.gotComplete.Request, req) {
+		t.Errorf("request mutated across boundary: got %+v", h.gotComplete.Request)
+	}
+}
+
+// TestHandlerErrorCodePreserved verifies a typed *Error the handler returns (e.g. the explore
+// sub-budget breach) reaches the client with its code intact, so the sub-loop can map it to a
+// partial-budget answer rather than treating every failure the same (T12.2).
+func TestHandlerErrorCodePreserved(t *testing.T) {
+	h := &fakeHandler{completeErr: &Error{Code: CodeSubBudgetExhausted, Message: "over budget"}}
+	c := pipeClient(NewServer(h, WithAllowlist(allDestinations)))
+
+	_, err := c.Complete(context.Background(), model.Request{})
+	var be *Error
+	if !errors.As(err, &be) {
+		t.Fatalf("error = %v, want *Error", err)
+	}
+	if be.Code != CodeSubBudgetExhausted {
+		t.Errorf("code = %q, want %q (handler code must survive the boundary)", be.Code, CodeSubBudgetExhausted)
 	}
 }
 

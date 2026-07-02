@@ -38,11 +38,44 @@ func NewClient(network, address string) *Client {
 }
 
 // Complete relays a canonical model request and returns the canonical response. The
-// runner attaches the key and the provider adapter for the invocation's soul.
+// runner attaches the key and the provider adapter for the invocation's soul (the parent
+// sub-context). The explore tool's sub-loop uses ExploreCompleter instead so its calls are
+// routed to the pinned explorer model and metered against the explore sub-budget.
 func (c *Client) Complete(ctx context.Context, req model.Request) (model.Response, error) {
+	return c.complete(ctx, SubContextParent, "", req)
+}
+
+// complete relays one tagged completion. The tag (and, for the explorer, the per-call stream)
+// travels in CompletionParams so the runner routes to the right adapter and budget; the agent
+// itself stays provider- and tier-unaware — it never names a model, only a sub-context.
+func (c *Client) complete(ctx context.Context, sub SubContext, stream string, req model.Request) (model.Response, error) {
 	var resp model.Response
-	err := c.roundTrip(ctx, MethodCompletion, req, &resp)
+	err := c.roundTrip(ctx, MethodCompletion, CompletionParams{SubContext: sub, Stream: stream, Request: req}, &resp)
 	return resp, err
+}
+
+// ExploreCompleter returns a Completer whose every call is tagged to the explorer sub-context
+// and the given per-call stream id. The explore tool mints one per explore call (a fresh stream
+// so the runner's sub-budget resets per call) and drives its read-only sub-loop through it — so
+// those completions run on the runner-pinned explorer model, metered against policy.explore_budget,
+// with no way for the sandbox to reach a stronger tier (T12.2). The returned type satisfies the
+// agent's Completer seam structurally.
+func (c *Client) ExploreCompleter(stream string) *SubCompleter {
+	return &SubCompleter{c: c, sub: SubContextExplorer, stream: stream}
+}
+
+// SubCompleter is a Completer bound to a fixed sub-context tag (and, for the explorer, a per-call
+// stream). It exists so a helper sub-loop can drive its own model calls through the same broker
+// while the runner routes and meters them independently of the parent stream.
+type SubCompleter struct {
+	c      *Client
+	sub    SubContext
+	stream string
+}
+
+// Complete relays a completion tagged to this sub-completer's sub-context and stream.
+func (s *SubCompleter) Complete(ctx context.Context, req model.Request) (model.Response, error) {
+	return s.c.complete(ctx, s.sub, s.stream, req)
 }
 
 // GitPush asks the runner to push the candidate branch. Only the task branch is

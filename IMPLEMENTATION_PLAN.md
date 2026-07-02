@@ -15,9 +15,10 @@ merge to `main` with a provenance trailer. Verified end-to-end against a real mo
 
 **Phases 2, 3, 4, 6, 7, 8, 9, 10, and 11 are complete; open build work is Phase 5 (all optional
 — T5.11 warm pools + HA — or hardware-blocked — T5.2 Firecracker, needs KVM the dev box lacks)
-and the newly-specced Phase 12 (distilled explore tool: **T12.1 + T12.3 landed — the `explore`
-tool + nested read-only sub-loop in `internal/agent` and the `policy.explore_budget` /
-reserved-`explorer`-role config + validation, fully tested; T12.2, T12.4–T12.6 open**).** Phase 11
+and the newly-specced Phase 12 (distilled explore tool: **T12.1 + T12.2 + T12.3 landed — the `explore`
+tool + nested read-only sub-loop in `internal/agent`, the broker sub-context selector +
+runner-pinned explorer model + per-stream sub-budget metering (T12.2), and the `policy.explore_budget` /
+reserved-`explorer`-role config + validation, fully tested; T12.4–T12.6 open**).** Phase 11
 closed with T11.2 (prompt caching) landing — the Anthropic
 adapter now caches unconditionally and the openai-compat adapter caches opt-in, with cache
 read/write tokens normalized into the canonical Usage for accurate USD accounting.
@@ -63,8 +64,9 @@ autonomous implementation) — a later validation concern, never an engineering 
 - **Open tasks (`- [ ]`) keep their full detail.** **Phase 5** (production isolation) has
   open lines — the Firecracker backend T5.2 is hardware-blocked and deliberately last; the one
   remaining optional item is T5.11 warm pools + HA (T5.5 gVisor is now done) — and **Phase 12**
-  (distilled explore tool) has **T12.1 + T12.3 done** (the tool + nested sub-loop in `internal/agent`;
-  the `explore_budget`/reserved-`explorer`-role config + validation); T12.2, T12.4–T12.6 open.
+  (distilled explore tool) has **T12.1 + T12.2 + T12.3 done** (the tool + nested sub-loop in `internal/agent`;
+  the broker sub-context selector + runner-pinned explorer model + per-stream sub-budget metering;
+  the `explore_budget`/reserved-`explorer`-role config + validation); T12.4–T12.6 open.
   Everything else (Phases 0–4, 6, 7, 8, 9, 10, 11) is complete and collapsed.
 - **Phases 2–5 and Phase 12 are atomic tasks** (`T<phase>.<n>`), each a single
   self-contained, verifiable unit of work, listed in dependency order — the same granularity Phase
@@ -721,14 +723,42 @@ Build order (each a single, independently testable concern; the two TCB pieces f
   retry), `TestExploreToolDefAndEmptyQuestion`. Spec was written ahead (components/agent.md "Explore —
   distilled comprehension") — no spec change; no CLI/config/control-room surface yet, so no docs/
   update. ([components/agent.md](specs/components/agent.md))
-- [ ] **T12.2 Broker sub-context selector + runner-pinned model + fixed sub-budget metering**
-  (needs T12.1). Extend the broker protocol so a canonical model request carries a
-  **sub-context selector** distinguishing the parent stream from the explorer stream. The
-  runner resolves the explorer soul's `model` from the **trusted dispatch** and refuses any
-  agent-supplied model (an agent cannot escape its tier), routes each tag to its adapter, and
-  meters the explorer stream against the fixed `policy.explore_budget` under the parent-task
-  ceiling — a breach harvests a `partial-budget` answer, never failing the parent.
-  ([messaging.md](specs/messaging.md), [models.md](specs/models.md))
+- [x] **T12.2 Broker sub-context selector + runner-pinned model + fixed sub-budget metering** — *done.*
+  **Broker protocol:** `MethodCompletion` now carries `broker.CompletionParams{SubContext, Stream, Request}`
+  (the canonical `model.Request` stays clean — the selector is a completion-only wire concern). `SubContext`
+  is `""` (parent) or `"explorer"`; the client's `Complete` sends parent, and the new `Client.ExploreCompleter(stream)`
+  returns a `*SubCompleter` tagging every call `explorer`+stream. `Handler.Complete(ctx, CompletionParams)` (the
+  interface changed — updated the runner relay + the gate/wizard deny handlers + `fakeHandler`). New
+  `CodeSubBudgetExhausted` error code; `server.dispatch` now routes handler errors through `handlerErrorResponse`,
+  which **preserves a typed `*broker.Error` code** across the boundary (previously every handler error flattened to
+  `CodeHandlerError`) so the sub-loop can distinguish a budget breach. **Runner (the TCB piece):** the relay holds a
+  SECOND pinned adapter (`exploreAdapter`/`exploreModel`/`exploreBudget`); `Complete` routes by sub-context —
+  `completeParent` is the old path, `completeExplore` routes to the pinned explorer adapter, **fails closed** if no
+  explorer adapter is pinned (never silently answers on the parent's frontier model — the tier-escape guard), and
+  meters **per-call by stream** against `policy.explore_budget.Tokens`: a breach returns `CodeSubBudgetExhausted`
+  (→ `partial-budget`), a fresh stream resets (so multiple explore calls each get the full fixed budget — "behaves the
+  same wherever in an invocation it is made"). Explorer tokens also feed `Usage()` (combined with the parent tally) so
+  the explorer's spend **draws the parent-task ceiling** the orchestrator enforces. `runner.go` resolves the explorer
+  adapter from `brief.Explorer.Model` (non-fatal on failure — explore is additive; a bad explorer model disables the
+  helper, not the invocation). **Dispatch pins the model, not the agent:** `core.Brief` gained `Explorer *core.Soul` +
+  `ExploreBudget core.ExploreBudget`; the orchestrator's `attachExplorer` (in `buildBrief`) selects the `explorer`-role
+  soul by the **same selector algorithm** (`selectSoulForRole`, factored out of `selectSoul`) keyed on the issue's
+  tags — so a `verify=1`-tagged issue routes to a diverse verify-path explorer — and pins it + the budget onto the
+  Brief only when `policy.explore_budget` is enabled. **Single source of truth:** `ExploreBudget` moved to
+  `core` (with yaml+json tags + `Enabled()`); `config.ExploreBudget` is now a **type alias**, so the config surface and
+  the wire type are one thing. **Agent seam:** new `agent.ExplorerCompleterSource` interface (`ExploreCompleter(stream) Completer`);
+  `ExploreTool` takes it and mints a fresh per-call stream (atomic counter) so each explore call gets its own metered
+  stream; `runExplore` maps a `CodeSubBudgetExhausted` broker error → `partial-budget` (any other error stays
+  `partial-uncertain`), never failing the parent. New telemetry `AttrSubContext` labels the explorer llm-turn.
+  **Not yet wired into `cmd/harness/run.go`'s toolSource** — that (building the source adapter over `*broker.Client`
+  and offering `explore` to producer/implementor personas) is T12.5; T12.6 wires the vault demo. Tests: broker
+  `TestExploreCompleterTagsSubContext`, `TestHandlerErrorCodePreserved` (+ parent-tag assertions on the round-trip);
+  runner `TestRelayExploreRoutesToPinnedAdapterAndDrawsCeiling`, `TestRelayExploreSubBudgetRefusesPerStream`,
+  `TestRelayExploreDisabledFailsClosed`; agent `TestExploreRunnerSubBudgetDegradesToPartialBudget`; orchestrator
+  `TestAttachExplorer`. `harness validate` on both shipped configs still OK (neither enables explore). Specs were
+  written ahead (messaging.md "sub-context selector", models.md "Helper souls", agent.md "Explore" rules 3–4) — no
+  spec change; no CLI/config/control-room surface change (the wire + Brief are internal; `explore_budget` config
+  shape is unchanged), so no docs/ update. ([messaging.md](specs/messaging.md), [models.md](specs/models.md))
 - [x] **T12.3 `policy.explore_budget` config + reserved `explorer` role + validation** — *done.*
   New `config.ExploreBudget{Tokens, Turns}` (a distinct struct — the per-issue `Budget` is
   tokens/USD/wall; explore is dimensioned in tokens+turns, a sub-loop concept) on

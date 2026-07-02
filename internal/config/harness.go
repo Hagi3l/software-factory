@@ -303,21 +303,12 @@ type Budget struct {
 	Wall   Duration `yaml:"wall,omitempty"`
 }
 
-// ExploreBudget is the fixed per-call cap on the explore tool's nested read-only sub-loop
-// (specs/configuration.md `policy.explore_budget`). It is dimensioned in tokens + turns — a
-// sub-loop concept, unlike the per-issue Budget's tokens/USD/wall — and is deliberately fixed
-// (not a fraction of the parent's remaining budget) so an explore call behaves identically
-// wherever in an invocation it is made. A zero value in a dimension leaves that dimension to
-// the loop's own default; a wholly-zero ExploreBudget means the feature is off (see Enabled).
-type ExploreBudget struct {
-	Tokens int `yaml:"tokens,omitempty"`
-	Turns  int `yaml:"turns,omitempty"`
-}
-
-// Enabled reports whether explore is switched on: any positive dimension turns the helper loop
-// on, an all-zero block leaves it off. This is the single predicate the runner and validation
-// branch on so "omitting the block disables explore" is expressed in exactly one place.
-func (e ExploreBudget) Enabled() bool { return e.Tokens > 0 || e.Turns > 0 }
+// ExploreBudget is the fixed per-call cap on the explore tool's nested read-only sub-loop.
+// It is a type alias for core.ExploreBudget (which crosses the orchestrator→runner boundary on
+// the Brief): the config surface and the wire type are the same thing, not a mapped pair, so
+// there is one source of truth for the dimensions and the Enabled predicate. See
+// specs/configuration.md `policy.explore_budget`, specs/models.md "Helper souls".
+type ExploreBudget = core.ExploreBudget
 
 // LoadHarness reads and unmarshals harness.yaml. It parses strictly (unknown keys
 // are errors) but does not check DAG legality — that is harness validate's job (see

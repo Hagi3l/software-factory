@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Loxstomper/harness/internal/broker"
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/model"
 )
@@ -41,10 +42,23 @@ func answerCall(id, summary, coverage string) model.ToolCall {
 	return toolCall(id, "answer", args)
 }
 
+// fakeExploreSource hands the sub-loop the scripted conn for every explore call, ignoring the
+// per-call stream id (the runner is what meters streams; here we only exercise the agent side).
+// It records the last stream so a test can assert the tool mints a fresh one per call.
+type fakeExploreSource struct {
+	conn       *fakeConn
+	lastStream string
+}
+
+func (s *fakeExploreSource) ExploreCompleter(stream string) Completer {
+	s.lastStream = stream
+	return s.conn
+}
+
 // newExplore builds an explore tool over the fake sandbox + a no-LSP session manager, driven
 // by the scripted conn. It is the parent-facing tool the main loop would advertise.
 func newExplore(exp Explorer, conn *fakeConn) Tool {
-	return ExploreTool(exp, fakeSandbox{}, NewSessions(nil, nil), conn, "the project map", nil)
+	return ExploreTool(exp, fakeSandbox{}, NewSessions(nil, nil), &fakeExploreSource{conn: conn}, "the project map", nil)
 }
 
 func invokeExplore(t *testing.T, tool Tool, question string) Outcome {
@@ -205,6 +219,23 @@ func TestExploreModelErrorDegrades(t *testing.T) {
 	out := invokeExplore(t, tool, "q") // invokeExplore fatals if Invoke returns a Go error
 	if !strings.Contains(out.Content, "coverage: "+CoveragePartialUncertain) {
 		t.Errorf("want partial-uncertain on model error, got:\n%s", out.Content)
+	}
+}
+
+// When the RUNNER refuses an explorer call because the stream reached policy.explore_budget
+// (the trusted, authoritative meter — T12.2), the broker returns a typed CodeSubBudgetExhausted
+// error, which the sub-loop maps to a partial-BUDGET answer (distinct from partial-uncertain) so
+// the parent knows more may exist and can re-ask narrower. It never fails the parent.
+func TestExploreRunnerSubBudgetDegradesToPartialBudget(t *testing.T) {
+	conn := &fakeConn{completeErr: &broker.Error{Code: broker.CodeSubBudgetExhausted, Message: "over sub-budget"}}
+	tool := newExplore(Explorer{Persona: explorerPersona}, conn)
+
+	out := invokeExplore(t, tool, "q")
+	if out.Result != nil || out.IsError {
+		t.Errorf("a runner sub-budget breach must degrade, not fail the parent: %+v", out)
+	}
+	if !strings.Contains(out.Content, "coverage: "+CoveragePartialBudget) {
+		t.Errorf("want partial-budget on a runner sub-budget breach, got:\n%s", out.Content)
 	}
 }
 

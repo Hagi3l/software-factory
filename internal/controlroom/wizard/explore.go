@@ -150,7 +150,7 @@ func exploreID() (string, error) {
 // allowlist ever be widened by mistake (the exploration sandbox must reach nothing).
 type denyHandler struct{}
 
-func (denyHandler) Complete(context.Context, model.Request) (model.Response, error) {
+func (denyHandler) Complete(context.Context, broker.CompletionParams) (model.Response, error) {
 	return model.Response{}, fmt.Errorf("wizard: exploration sandbox has no broker egress")
 }
 

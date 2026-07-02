@@ -45,6 +45,19 @@ type relay struct {
 	model     string              // soul.Model, for AttrModel + RecordLLMTurn (model.Request omits it)
 	parentCtx context.Context     // carries the invocation span so brokered spans parent off it
 
+	// exploreAdapter/exploreModel are the SECOND pinned model in this one sandbox: the explore
+	// tool's helper soul (specs/models.md "Helper souls", T12.2). Resolved by the runner from
+	// the trusted dispatch (brief.Explorer.Model), never from anything the agent names — an
+	// explorer-tagged completion routes here, refusing the agent any path to a stronger tier.
+	// Nil when explore is disabled for this invocation; an explorer-tagged call then fails
+	// closed (the sub-loop degrades to a partial, the parent reads directly).
+	exploreAdapter model.Adapter
+	exploreModel   string
+	// exploreBudget is the FIXED per-call cap the explorer's own model stream is metered against
+	// (policy.explore_budget). Breaching a stream's token cap refuses further calls on it so the
+	// sub-loop harvests a partial-budget answer, never failing the parent.
+	exploreBudget core.ExploreBudget
+
 	eventSubject  string // harness.agent.<id>.events — where token/progress events fan out
 	issueID       string // the issue this invocation is working — stamped on every published event
 	role          string // the issue's role/stage — stamped alongside issueID (specs/messaging.md)
@@ -79,9 +92,18 @@ type relay struct {
 	pushRemote func(ctx context.Context, remote string, cred secret.GitCredential, branch string, bundle []byte) (string, error)
 
 	mu       sync.Mutex
-	usage    model.Usage            // tallied across every completion this invocation (budget input, plan T1.16)
+	usage    model.Usage            // parent-stream tokens tallied across this invocation (budget input, plan T1.16)
 	firstReq *model.Request         // the prompt: the first request this invocation ran with (provenance, plan T1.20)
 	turns    []model.TranscriptTurn // every completion this invocation made, in order (the transcript)
+
+	// exploreUsage is the explorer streams' tokens combined across every explore call. Usage()
+	// sums it into the invocation total so the explorer's spend draws the parent-task ceiling
+	// too (specs/configuration.md: "the parent's budget is still the real ceiling — every
+	// explorer stream draws against it"). streamTok is per-explore-call (keyed on the wire's
+	// Stream id), the input for the per-call sub-budget cap so multiple explore calls each get
+	// the full fixed budget. Full explore-transcript capture + per-model provenance is T12.4.
+	exploreUsage model.Usage
+	streamTok    map[string]int
 }
 
 var _ broker.Handler = (*relay)(nil)
@@ -102,6 +124,12 @@ type relayConfig struct {
 	tel           *telemetry.Provider
 	model         string
 	parentCtx     context.Context
+	// exploreAdapter/exploreModel/exploreBudget pin the explore tool's helper model for this
+	// invocation (T12.2). Zero/nil when explore is disabled — the relay then refuses any
+	// explorer-tagged completion.
+	exploreAdapter model.Adapter
+	exploreModel   string
+	exploreBudget  core.ExploreBudget
 }
 
 func newRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox, cfg relayConfig) *relay {
@@ -117,13 +145,16 @@ func newRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox, cfg rela
 		fetcher = packageproxy.NewFetcher(cfg.packageProxy, cfg.httpClient)
 	}
 	return &relay{
-		adapter:       adapter,
-		pub:           pub,
-		sb:            sb,
-		log:           cfg.log,
-		tel:           tel,
-		model:         cfg.model,
-		parentCtx:     cfg.parentCtx,
+		adapter:        adapter,
+		exploreAdapter: cfg.exploreAdapter,
+		exploreModel:   cfg.exploreModel,
+		exploreBudget:  cfg.exploreBudget,
+		pub:            pub,
+		sb:             sb,
+		log:            cfg.log,
+		tel:            tel,
+		model:          cfg.model,
+		parentCtx:      cfg.parentCtx,
 		eventSubject:  cfg.eventSubject,
 		issueID:       cfg.issueID,
 		role:          cfg.role,
@@ -184,12 +215,95 @@ func toolCallSummary(tc model.ToolCall) string {
 	return name
 }
 
-// Complete relays a canonical model request to the resolved provider adapter, streams
-// each text delta out to NATS for the live view, tallies the returned Usage against
-// this invocation's running total (the budget input), and returns the canonical
-// response. The runner attached the key and adapter; the agent never learns which
+// Complete relays a model completion to the pinned adapter for its sub-context. The parent
+// stream runs on the invocation's soul model; the explorer stream (the explore tool's nested
+// read-only sub-loop) runs on the runner-pinned explorer model and is metered against the fixed
+// explore sub-budget. The agent names only the sub-context tag — never a model — so it cannot
+// escape its tier even with two models live in one sandbox (specs/models.md "Helper souls",
+// specs/messaging.md, T12.2). Routing here, in the trusted runner, is what enforces that.
+func (r *relay) Complete(ctx context.Context, p broker.CompletionParams) (model.Response, error) {
+	if p.SubContext == broker.SubContextExplorer {
+		return r.completeExplore(ctx, p.Stream, p.Request)
+	}
+	return r.completeParent(ctx, p.Request)
+}
+
+// completeExplore relays one explorer-tagged completion to the pinned explorer adapter, metered
+// against the fixed per-call sub-budget scoped by stream. A breach refuses the call with a typed
+// CodeSubBudgetExhausted error the sub-loop maps to a partial-budget answer — it never fails the
+// parent (explore is additive, specs/components/agent.md rule 3). Explorer tokens also feed
+// Usage() so they draw the parent-task ceiling. This is the trusted, authoritative meter: the
+// in-sandbox sub-loop self-caps too, but the agent is untrusted, so this bound is the real one.
+func (r *relay) completeExplore(ctx context.Context, stream string, req model.Request) (model.Response, error) {
+	if r.exploreAdapter == nil {
+		// Explore was not pinned for this invocation (no explorer soul / adapter resolved). The
+		// tool should not have been offered, but fail closed rather than silently answering on
+		// the parent's frontier model — that would let the agent reach a stronger tier.
+		return model.Response{}, &broker.Error{Code: broker.CodeHandlerError, Message: "explore is not enabled for this invocation"}
+	}
+	if limit := r.exploreBudget.Tokens; limit > 0 {
+		if used := r.streamTokens(stream); used >= limit {
+			r.log.WarnContext(ctx, "broker: explore sub-budget exhausted; refusing further explorer calls on stream",
+				"stream", stream, "used", used, "cap", limit)
+			return model.Response{}, &broker.Error{
+				Code:    broker.CodeSubBudgetExhausted,
+				Message: fmt.Sprintf("explore sub-budget exhausted: %d tokens on stream %q (cap %d)", used, stream, limit),
+			}
+		}
+	}
+
+	onEvent := func(ev model.StreamEvent) {
+		if ev.TextDelta != "" {
+			r.publishEvent(tokenEvent{Type: "token", Delta: ev.TextDelta})
+		}
+		if ev.ReasoningDelta != "" {
+			r.publishEvent(tokenEvent{Type: "reasoning", Delta: ev.ReasoningDelta})
+		}
+	}
+
+	_, span := r.tel.Tracer().Start(r.spanParent(ctx), telemetry.SpanLLMTurn, trace.WithAttributes(
+		attribute.String(telemetry.AttrComponent, telemetry.ComponentBroker),
+		attribute.String(telemetry.AttrModel, r.exploreModel),
+		attribute.String(telemetry.AttrSubContext, "explorer"),
+	))
+	defer span.End()
+
+	start := time.Now()
+	resp, err := r.exploreAdapter.Complete(ctx, req, onEvent)
+	d := time.Since(start)
+	if err != nil {
+		span.RecordError(err)
+		r.log.ErrorContext(ctx, "broker: explore model completion failed", "err", err)
+		return model.Response{}, err
+	}
+
+	span.SetAttributes(
+		attribute.String(telemetry.AttrStopReason, string(resp.Stop)),
+		attribute.Int(telemetry.AttrToolCalls, len(resp.ToolCalls)),
+		attribute.Int(telemetry.AttrInputTokens, resp.Usage.InputTokens),
+		attribute.Int(telemetry.AttrOutputTokens, resp.Usage.OutputTokens),
+	)
+	r.tel.RecordLLMTurn(ctx, r.exploreModel,
+		resp.Usage.InputTokens, resp.Usage.OutputTokens,
+		resp.Usage.CacheReadTokens, resp.Usage.CacheCreationTokens, d)
+
+	r.addExploreUsage(stream, resp.Usage)
+	for _, tc := range resp.ToolCalls {
+		r.publishEvent(tokenEvent{Type: "tool", Delta: toolCallSummary(tc)})
+	}
+	r.log.InfoContext(ctx, "broker: explore model completion",
+		"stream", stream, "model", r.exploreModel, "stop", resp.Stop,
+		"input_tokens", resp.Usage.InputTokens, "output_tokens", resp.Usage.OutputTokens,
+		"tool_calls", len(resp.ToolCalls))
+	return resp, nil
+}
+
+// completeParent relays the invocation's own soul-model stream — the original broker completion
+// path. It streams each delta out to NATS for the live view, tallies Usage against this
+// invocation's running total (the budget input), records the transcript, and returns the
+// canonical response. The runner attached the key and adapter; the agent never learns which
 // provider answered. Every call is logged — the broker is the audited chokepoint.
-func (r *relay) Complete(ctx context.Context, req model.Request) (model.Response, error) {
+func (r *relay) completeParent(ctx context.Context, req model.Request) (model.Response, error) {
 	onEvent := func(ev model.StreamEvent) {
 		// The visible answer and the model's chain of thought stream on separate channels
 		// and are labeled distinctly for the feed; a turn may carry both, either, or — when
@@ -393,12 +507,19 @@ func (r *relay) extractBundle(ctx context.Context, branch string) ([]byte, error
 	return res.Stdout, nil
 }
 
-// Usage returns the total token usage tallied across every completion this invocation
-// made. The runner logs it and (plan T1.16) the budget enforcer reads it.
+// Usage returns the total token usage tallied across every completion this invocation made —
+// the parent stream PLUS every explorer stream, so the explorer's spend draws the parent-task
+// ceiling the orchestrator enforces (specs/configuration.md). The runner logs it and the budget
+// enforcer reads it. Per-model USD precision for the explorer stream is a T12.4 refinement.
 func (r *relay) Usage() model.Usage {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.usage
+	return model.Usage{
+		InputTokens:         r.usage.InputTokens + r.exploreUsage.InputTokens,
+		OutputTokens:        r.usage.OutputTokens + r.exploreUsage.OutputTokens,
+		CacheCreationTokens: r.usage.CacheCreationTokens + r.exploreUsage.CacheCreationTokens,
+		CacheReadTokens:     r.usage.CacheReadTokens + r.exploreUsage.CacheReadTokens,
+	}
 }
 
 func (r *relay) addUsage(u model.Usage) {
@@ -408,6 +529,30 @@ func (r *relay) addUsage(u model.Usage) {
 	r.usage.OutputTokens += u.OutputTokens
 	r.usage.CacheCreationTokens += u.CacheCreationTokens
 	r.usage.CacheReadTokens += u.CacheReadTokens
+}
+
+// streamTokens is the input+output tokens metered on one explore call's stream so far — the
+// input to the per-call sub-budget check. A never-seen stream reads 0 (a fresh call gets the
+// full fixed budget).
+func (r *relay) streamTokens(stream string) int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.streamTok[stream]
+}
+
+// addExploreUsage tallies one explorer completion: into exploreUsage (combined, so Usage() draws
+// the parent ceiling) and into the per-stream counter (so the fixed cap resets per explore call).
+func (r *relay) addExploreUsage(stream string, u model.Usage) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.exploreUsage.InputTokens += u.InputTokens
+	r.exploreUsage.OutputTokens += u.OutputTokens
+	r.exploreUsage.CacheCreationTokens += u.CacheCreationTokens
+	r.exploreUsage.CacheReadTokens += u.CacheReadTokens
+	if r.streamTok == nil {
+		r.streamTok = make(map[string]int)
+	}
+	r.streamTok[stream] += u.InputTokens + u.OutputTokens
 }
 
 // record appends one model exchange to the transcript and, on the first call, captures

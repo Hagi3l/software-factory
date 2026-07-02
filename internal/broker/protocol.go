@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+
+	"github.com/Loxstomper/harness/internal/model"
 )
 
 // Method names a brokered call. The set is closed and deny-by-default: the server
@@ -59,6 +61,41 @@ type Request struct {
 	Params json.RawMessage `json:"params,omitempty"`
 }
 
+// SubContext tags a MethodCompletion with which of an invocation's pinned model identities
+// the call belongs to, so the runner routes it to the right adapter and meters it against the
+// right budget. It is set by the trusted dispatch's tool wiring on the sandbox side, but the
+// tag→model binding is resolved and enforced entirely by the runner: an agent that renames its
+// tag cannot reach a model the dispatch did not pin (see specs/messaging.md, specs/models.md
+// "Helper souls"). The zero value (parent) keeps a plain completion backward-compatible.
+type SubContext string
+
+const (
+	// SubContextParent is the invocation's own soul model — the default an untagged
+	// completion carries.
+	SubContextParent SubContext = ""
+	// SubContextExplorer is the explore tool's nested read-only sub-loop, pinned to the
+	// configured explorer soul's (cheap) model and metered against policy.explore_budget.
+	SubContextExplorer SubContext = "explorer"
+)
+
+// CompletionParams is the payload of a MethodCompletion call: a canonical model request plus
+// the sub-context selector telling the runner which pinned model to route it to. Wrapping the
+// request (rather than putting the tag on the method-agnostic envelope) keeps the selector a
+// completion-only concern and leaves model.Request canonical — the agent stays provider- and
+// tier-unaware. Stream scopes the explorer sub-budget to one explore call (see below).
+type CompletionParams struct {
+	// SubContext selects the pinned model; empty (SubContextParent) is the invocation's soul.
+	SubContext SubContext `json:"sub_context,omitempty"`
+	// Stream identifies one explore call's sub-loop, so the runner meters that call's stream
+	// against policy.explore_budget and resets per call ("an explore call behaves the same
+	// wherever in an invocation it is made", specs/configuration.md). It is agent-supplied and
+	// need not be trusted: the parent-task ceiling is the security bound, and faking a fresh
+	// stream only grants what an honest fresh call already gets. Ignored for the parent context.
+	Stream string `json:"stream,omitempty"`
+	// Request is the canonical, provider-agnostic model input.
+	Request model.Request `json:"request"`
+}
+
 // Response is the wire envelope the runner returns. Exactly one of Result/Error is
 // meaningful: on success Result carries the method's marshaled result (empty for
 // fire-and-forget calls); on failure Error is set and Result is nil.
@@ -84,6 +121,12 @@ const (
 	CodeDenied        = "denied"         // method's destination not in the egress allowlist
 	CodeBadRequest    = "bad_request"    // unparseable envelope or params
 	CodeHandlerError  = "handler_error"  // the brokered call itself failed
+	// CodeSubBudgetExhausted is returned when an explorer-tagged completion is refused
+	// because that explore call's stream has reached policy.explore_budget. It is distinct
+	// from a generic handler error so the explore sub-loop can degrade to a partial-BUDGET
+	// answer (not partial-uncertain) and never fail the parent task (see specs/components/agent.md
+	// rule 3, T12.2). The runner sets it; the explore sub-loop matches on it.
+	CodeSubBudgetExhausted = "sub_budget_exhausted"
 )
 
 // GitPushRequest asks the runner to push the candidate branch the agent produced.

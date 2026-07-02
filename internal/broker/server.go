@@ -3,6 +3,7 @@ package broker
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -22,7 +23,13 @@ import (
 // where allowlist or method-validity decisions happen — the server makes those before
 // the Handler is ever called.
 type Handler interface {
-	Complete(ctx context.Context, req model.Request) (model.Response, error)
+	// Complete relays a model completion. CompletionParams carries the canonical request plus
+	// the sub-context selector (parent vs explorer) + per-call stream the runner routes and
+	// meters against — the handler picks the pinned adapter and budget from the tag, never from
+	// anything the agent could name (see specs/models.md "Helper souls"). A returned *Error is
+	// delivered to the agent with its own code preserved (e.g. CodeSubBudgetExhausted); any
+	// other error becomes CodeHandlerError.
+	Complete(ctx context.Context, req CompletionParams) (model.Response, error)
 	GitPush(ctx context.Context, req GitPushRequest) (GitPushResult, error)
 	PublishEvent(ctx context.Context, ev PublishRequest) error
 	FetchPackage(ctx context.Context, req FetchPackageRequest) (FetchPackageResult, error)
@@ -134,13 +141,13 @@ func (s *Server) dispatch(ctx context.Context, req Request) Response {
 
 	switch req.Method {
 	case MethodCompletion:
-		var mr model.Request
-		if err := json.Unmarshal(req.Params, &mr); err != nil {
+		var cp CompletionParams
+		if err := json.Unmarshal(req.Params, &cp); err != nil {
 			return errorResponse(CodeBadRequest, fmt.Sprintf("completion params: %v", err))
 		}
-		resp, err := s.handler.Complete(ctx, mr)
+		resp, err := s.handler.Complete(ctx, cp)
 		if err != nil {
-			return errorResponse(CodeHandlerError, err.Error())
+			return handlerErrorResponse(err)
 		}
 		return resultResponse(resp)
 
@@ -183,6 +190,18 @@ func (s *Server) dispatch(ctx context.Context, req Request) Response {
 
 func errorResponse(code, msg string) Response {
 	return Response{Error: &Error{Code: code, Message: msg}}
+}
+
+// handlerErrorResponse turns a Handler error into a Response. If the handler already returned a
+// typed *Error (e.g. CodeSubBudgetExhausted from the explore sub-budget), its code is preserved
+// so the agent can react to it specifically; any other error is the opaque CodeHandlerError. The
+// allowlist/method-validity codes are decided before the handler runs, so they never flow here.
+func handlerErrorResponse(err error) Response {
+	var be *Error
+	if errors.As(err, &be) {
+		return Response{Error: be}
+	}
+	return errorResponse(CodeHandlerError, err.Error())
 }
 
 // resultResponse marshals a method result into a Response. A marshal failure is a bug

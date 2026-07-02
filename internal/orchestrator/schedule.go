@@ -156,7 +156,7 @@ func (o *Orchestrator) buildBrief(issue core.Issue, stage config.Stage, soul cor
 	// against is recorded in the Brief and (by scheduleReady) on the issue — the anchor
 	// T3.7 diffs against to detect spec drift (see internal/spec.Hash, specs/specs-process.md).
 	// An empty slice hashes to "" (nothing to pin).
-	return core.Brief{
+	brief := core.Brief{
 		Issue:    issue,
 		Spec:     specSlice,
 		SpecHash: spec.Hash(specSlice),
@@ -169,6 +169,30 @@ func (o *Orchestrator) buildBrief(issue core.Issue, stage config.Stage, soul cor
 		// epic branch (where its colliding sibling lives), not main.
 		IntegrationBase: o.integrationBranchName(issue),
 	}
+	o.attachExplorer(&brief, issue)
+	return brief
+}
+
+// attachExplorer pins the explore tool's helper soul + fixed sub-budget onto the Brief when
+// explore is enabled (policy.explore_budget set) and an `explorer` soul matches the issue's tags.
+// This is the "model pinned by the trusted dispatch" half of T12.2: the runner resolves
+// Brief.Explorer.Model to a second adapter and refuses any tag the sandbox invents, so the agent
+// can *call* explore but never *choose what it runs on* (specs/models.md "Helper souls"). Left
+// nil (explore off for the issue) when the budget is unset or no explorer soul matches — a
+// missing explorer is not an error here (validation already enforces one exists when the budget
+// is set); a tag with no matching diverse explorer simply runs without the helper.
+func (o *Orchestrator) attachExplorer(brief *core.Brief, issue core.Issue) {
+	if o.opts.Config.Harness == nil || !o.opts.Config.Harness.Policy.ExploreBudget.Enabled() {
+		return
+	}
+	exp, ok := o.selectExplorer(issue)
+	if !ok {
+		o.log.WarnContext(context.Background(), "orchestrator: explore enabled but no explorer soul matches issue tags; dispatching without explore",
+			"issue", issue.ID, "tags", issue.Tags)
+		return
+	}
+	brief.Explorer = &exp
+	brief.ExploreBudget = o.opts.Config.Harness.Policy.ExploreBudget
 }
 
 // publishWork marshals the Brief and publishes it to the role's JetStream work subject
@@ -220,9 +244,27 @@ func (o *Orchestrator) stageForRole(role string) (config.Stage, bool) {
 // verification sandbox profile matches the producer's (producer != verifier still holds —
 // a fresh sandbox, same toolchain).
 func (o *Orchestrator) selectSoul(issue core.Issue) (core.Soul, bool) {
+	return o.selectSoulForRole(issue, issue.Role)
+}
+
+// selectExplorer picks the helper soul the explore tool runs on for this issue, by the SAME
+// selector algorithm as selectSoul but over the reserved `explorer` role instead of the issue's
+// DAG role (the explorer is invoked as a tool, never scheduled). The issue's tags route it, so a
+// verify-path issue tagged e.g. `verify=1` can select a diverse explorer soul to avoid
+// correlating its blind spots with the producer's (specs/configuration.md "Verify-path
+// diversity"; the enablement policy is T12.5). Absent an `explorer` soul it returns (zero, false)
+// and buildBrief leaves the Brief without an explorer — explore is off for that issue.
+func (o *Orchestrator) selectExplorer(issue core.Issue) (core.Soul, bool) {
+	return o.selectSoulForRole(issue, config.RoleExplorer)
+}
+
+// selectSoulForRole is the shared selection: keep the souls fulfilling role, then apply the
+// tag/selector specificity rules (see selectSoul's doc). Factored out so the DAG-role and the
+// reserved explorer-role selections cannot drift.
+func (o *Orchestrator) selectSoulForRole(issue core.Issue, role string) (core.Soul, bool) {
 	var candidates []core.Soul
 	for _, s := range o.opts.Config.Souls {
-		if s.Role == issue.Role {
+		if s.Role == role {
 			candidates = append(candidates, s)
 		}
 	}

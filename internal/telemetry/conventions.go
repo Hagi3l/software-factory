@@ -58,6 +58,11 @@ const (
 	AttrInvocationID   = "harness.invocation.id"
 	AttrSoul           = "harness.soul"
 	AttrModel          = "harness.model"
+	// AttrSubContext labels an llm-turn with the model stream it belongs to within one
+	// invocation: "parent" (the soul's model) or "explorer" (the explore tool's pinned cheap
+	// model). Bounded (two values), so it is safe as a metric dimension; it lets the budget /
+	// verification views separate frontier spend from helper-loop spend (T12.2).
+	AttrSubContext = "harness.sub_context"
 	AttrBase           = "harness.base"
 	AttrResultStatus   = "harness.result.status"
 	AttrSandboxBackend = "harness.sandbox.backend"

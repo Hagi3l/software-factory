@@ -3,10 +3,13 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 
+	"github.com/Loxstomper/harness/internal/broker"
 	"github.com/Loxstomper/harness/internal/model"
 	"github.com/Loxstomper/harness/internal/sandbox"
 )
@@ -112,16 +115,19 @@ type Explorer struct {
 //   - No recursion: the set structurally omits `explore` itself, so a sub-loop cannot fan out
 //     — the backstop that keeps budgets = termination intact.
 //
-// The remaining rules are enforced at runtime: the fixed sub-budget bounds the loop (breach →
-// a partial-budget answer, never a failed parent), and the model is pinned by the trusted
-// dispatch (the completer the runner hands in — T12.2). explore is additive and never
-// load-bearing: any failure (model error, low confidence) degrades to a partial answer that
+// The remaining rules are enforced at runtime by the trusted runner: the fixed sub-budget
+// bounds each stream (breach → a partial-budget answer, never a failed parent), and the model is
+// pinned by the trusted dispatch. Both hang off `src`: it mints, per explore call, a Completer
+// tagged to the explorer sub-context and a fresh per-call stream, so the runner routes those
+// calls to the pinned explorer model and meters that stream against policy.explore_budget (T12.2).
+// The agent names the tool, never the model. explore is additive and never load-bearing: any
+// failure (model error, sub-budget breach, low confidence) degrades to a partial answer that
 // just routes the parent back to searching itself.
 //
 // projectMap is the ambient specs (the project index + conventions) the child gets as its map
 // — deliberately NOT the parent's conversation: handing it the parent's context would defeat
 // the point; handing it only the question would starve it of the project's shape.
-func ExploreTool(exp Explorer, sb sandbox.Sandbox, sessions *Sessions, completer Completer, projectMap string, log *slog.Logger) Tool {
+func ExploreTool(exp Explorer, sb sandbox.Sandbox, sessions *Sessions, src ExplorerCompleterSource, projectMap string, log *slog.Logger) Tool {
 	if log == nil {
 		log = slog.New(slog.DiscardHandler)
 	}
@@ -129,6 +135,10 @@ func ExploreTool(exp Explorer, sb sandbox.Sandbox, sessions *Sessions, completer
 	// the (warm) sandbox + sessions. The per-call `answer` tool is appended inside Invoke
 	// because it captures that call's answer sink.
 	readTools := ReadOnlyTools(sb, sessions)
+	// calls numbers each explore call so its sub-loop gets its own broker stream — the runner
+	// meters (and resets) the fixed sub-budget per stream, so a later explore call is not starved
+	// by an earlier one. Atomic purely as defense-in-depth; the agent loop dispatches tools serially.
+	var calls atomic.Uint64
 
 	return funcTool{
 		def: model.ToolDef{
@@ -164,7 +174,11 @@ func ExploreTool(exp Explorer, sb sandbox.Sandbox, sessions *Sessions, completer
 			tools = append(tools, readTools...)
 			tools = append(tools, answerTool(&sink))
 
-			answer := runExplore(ctx, in.Question, projectMap, exp, tools, &sink, completer, log)
+			// One fresh stream per explore call so the runner meters this call's sub-budget on its
+			// own tally (specs/configuration.md "behaves the same wherever in an invocation it is
+			// made"); the completer tags every completion explorer, so it runs on the pinned model.
+			stream := fmt.Sprintf("explore-%d", calls.Add(1))
+			answer := runExplore(ctx, in.Question, projectMap, exp, tools, &sink, src.ExploreCompleter(stream), log)
 			log.InfoContext(ctx, "agent: explore call complete",
 				"coverage", answer.Coverage, "anchors", len(answer.Anchors))
 			// Non-terminal, never IsError: an explore is a pure accelerant. A degraded answer
@@ -282,6 +296,15 @@ func runExplore(ctx context.Context, question, projectMap string, exp Explorer, 
 		}
 		resp, err := completer.Complete(ctx, req)
 		if err != nil {
+			// A sub-budget breach is the runner refusing further calls on this stream — an honest,
+			// expected end, so degrade to partial-BUDGET (more may exist; the parent can re-ask
+			// narrower). Any other error is partial-uncertain. Either way the parent never fails.
+			var be *broker.Error
+			if errors.As(err, &be) && be.Code == broker.CodeSubBudgetExhausted {
+				log.WarnContext(ctx, "agent: explore sub-budget exhausted (runner), returning partial-budget", "turn", turn, "err", err)
+				return partialAnswer(CoveragePartialBudget,
+					"The explorer reached its sub-budget before answering; narrow the question or read directly.")
+			}
 			log.WarnContext(ctx, "agent: explore model call failed, returning partial", "turn", turn, "err", err)
 			return partialAnswer(CoveragePartialUncertain,
 				"The explorer could not complete (model call failed); investigate directly with the read tools.")

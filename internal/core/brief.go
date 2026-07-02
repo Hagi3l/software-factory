@@ -24,6 +24,22 @@ type Brief struct {
 	// default branch is a local ref there; an epic branch is reachable as origin/epic/<id>),
 	// exactly like the gate's candidate/<id> ref. Empty defaults to `main` at render.
 	IntegrationBase string
+
+	// Explorer is the helper soul the explore tool's nested read-only sub-loop runs on, pinned
+	// by this trusted dispatch (specs/models.md "Helper souls", specs/components/agent.md
+	// "Explore"). It is nil when explore is disabled (policy.explore_budget unset) or no
+	// `explorer`-role soul matches the issue's tags. The runner resolves Explorer.Model to a
+	// second provider adapter and routes the sandbox's explorer-tagged model calls to it — the
+	// agent names the *tool*, never the *model*, so it cannot escape its tier (T12.2). A
+	// pointer (not a value) so the zero/absent case is unambiguous on the wire and the runner
+	// can cheaply test presence.
+	Explorer *Soul `json:",omitempty"`
+	// ExploreBudget is the FIXED per-call cap the runner meters each explorer model stream
+	// against (specs/configuration.md `policy.explore_budget`). Carried on the Brief alongside
+	// Explorer so the in-sandbox sub-loop's self-cap and the runner's authoritative meter draw
+	// from one source. The zero value (explore disabled) rides along harmlessly when Explorer
+	// is nil.
+	ExploreBudget ExploreBudget `json:",omitempty"`
 }
 
 // IntegrationBaseOrMain returns the branch the candidate integrates onto, defaulting to `main`

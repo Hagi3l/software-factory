@@ -385,6 +385,23 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		return core.Result{}, fmt.Errorf("runner: resolve model %q for soul %q: %w", brief.Soul.Model, brief.Soul.Name, err)
 	}
 
+	// Resolve the SECOND pinned model when the trusted dispatch attached an explorer soul: the
+	// explore tool's cheap helper (specs/models.md "Helper souls", T12.2). Failing to resolve it
+	// is NOT fatal — explore is additive and never load-bearing, so a bad explorer model disables
+	// the helper loop (an explorer-tagged call then fails closed) rather than sinking the whole
+	// invocation. config.Validate already guarantees the model resolves; this is defense-in-depth.
+	var exploreAdapter model.Adapter
+	var exploreModel string
+	if brief.Explorer != nil {
+		if ea, eerr := r.resolver.Adapter(brief.Explorer.Model); eerr != nil {
+			ilog.WarnContext(ctx, "runner: resolve explorer model; explore disabled for this invocation",
+				"explorer_soul", brief.Explorer.Name, "model", brief.Explorer.Model, "err", eerr)
+		} else {
+			exploreAdapter = ea
+			exploreModel = brief.Explorer.Model
+		}
+	}
+
 	sockPath := filepath.Join(r.opts.SocketDir, "broker-"+invID+".sock")
 	ln, err := broker.Listen("unix", sockPath)
 	if err != nil {
@@ -436,9 +453,12 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		remote:        r.opts.GitRemote,
 		minter:        r.opts.Minter,
 		packageProxy:  r.opts.PackageProxy,
-		log:           ilog,
-		tel:           r.tel,
-		model:         brief.Soul.Model,
+		log:            ilog,
+		tel:            r.tel,
+		model:          brief.Soul.Model,
+		exploreAdapter: exploreAdapter,
+		exploreModel:   exploreModel,
+		exploreBudget:  brief.ExploreBudget,
 		// parentCtx carries the invocation span so the relay's per-turn llm-turn / tool-call
 		// spans parent off it. The broker serves the relay on a separate connection-scoped
 		// context, so without this the brokered spans would be orphan roots, not children.
