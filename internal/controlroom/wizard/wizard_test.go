@@ -584,6 +584,88 @@ func TestDraftNudgeFiresAtMostOnce(t *testing.T) {
 	}
 }
 
+// TestDraftRejectionFeedsErrorBackForRetry proves the converse loop's one-shot rejection backstop.
+// Turn 1 emits propose_draft with MALFORMED args (Python-style True — the exact live failure) and
+// no exploration call; before the backstop that output-only turn concluded immediately, the IsError
+// ack was dropped, and the draft was silently lost (WARN in the log, nothing for the model or the
+// human). Now the error ack is fed back for one corrective round-trip, the human sees the ephemeral
+// "rejected — retrying" tool strip, and turn 2's corrected call is harvested.
+func TestDraftRejectionFeedsErrorBackForRetry(t *testing.T) {
+	const badArgs = `{"summary":"Share links","specs":[{"path":"specs/share.md","content":True}]}`
+	const goodArgs = `{"summary":"Share links","specs":[{"path":"specs/share.md","content":"# Share\n"}],` +
+		`"issues":[{"title":"Add /s/ endpoint","body":"Build it.","spec":"specs/share.md"}]}`
+	srv := modeltest.NewServer(t, []modeltest.Turn{
+		{Text: "Proposing now.", ToolCalls: []modeltest.ToolCall{{ID: "d1", Name: "propose_draft", Args: badArgs}}},
+		{Text: "Here is the corrected draft.", ToolCalls: []modeltest.ToolCall{{ID: "d2", Name: "propose_draft", Args: goodArgs}}},
+	})
+	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
+	sess := p.New()
+
+	sub, cancel := sess.Hub().Subscribe()
+	defer cancel()
+
+	if !sess.Send("make the spec") {
+		t.Fatal("Send returned false")
+	}
+
+	// The retry must be visible to the human: watch for the ephemeral tool-strip notice.
+	var sawRetryNotice bool
+	deadline := time.After(5 * time.Second)
+	for !sawRetryNotice {
+		select {
+		case ev := <-sub:
+			if ev.Name == "tool" && strings.Contains(ev.Data, "rejected") {
+				sawRetryNotice = true
+			}
+		case <-deadline:
+			t.Fatal("the rejection retry was silent — no tool-strip notice broadcast")
+		}
+	}
+
+	waitFor(t, func() bool { return !sess.Busy() }, "turn did not complete")
+
+	d := sess.Draft()
+	if d.Empty() {
+		t.Fatal("draft not stored — the rejection backstop did not drive the corrected call")
+	}
+	if d.Summary != "Share links" || len(d.Specs) != 1 || len(d.Issues) != 1 {
+		t.Errorf("draft wrong after the retry: %+v", d)
+	}
+	// The recorded prose is the post-retry reply; the malformed round stays out of the transcript.
+	msgs := sess.Messages()
+	if last := msgs[len(msgs)-1]; last.Role != "assistant" || last.Text != "Here is the corrected draft." {
+		t.Errorf("final message = %+v, want the post-retry assistant reply", last)
+	}
+}
+
+// TestDraftRejectionRetriesAtMostOnce proves the rejection backstop is one-shot: if the retry is
+// ALSO malformed, the turn concludes on the prose with no draft rather than looping. The scripted
+// server has exactly two turns, so a third model call (a second retry) would over-run it and fail
+// the test — that over-run check is the termination proof. The turn-2 prose deliberately avoids the
+// announcesDraft phrases so the draft-nudge backstop cannot add a third call either.
+func TestDraftRejectionRetriesAtMostOnce(t *testing.T) {
+	const badArgs = `{"summary":"Share links","specs":[{"path":"specs/share.md","content":True}]}`
+	srv := modeltest.NewServer(t, []modeltest.Turn{
+		{Text: "Proposing now.", ToolCalls: []modeltest.ToolCall{{ID: "d1", Name: "propose_draft", Args: badArgs}}},
+		{Text: "Recording the structure.", ToolCalls: []modeltest.ToolCall{{ID: "d2", Name: "propose_draft", Args: badArgs}}},
+	})
+	p := wizard.NewPlanner(newCompatAdapter(t, srv.URL()), "persona", wizard.WithTurnTimeout(10*time.Second))
+	sess := p.New()
+
+	if !sess.Send("make the spec") {
+		t.Fatal("Send returned false")
+	}
+	waitFor(t, func() bool { return !sess.Busy() }, "turn did not complete")
+
+	if d := sess.Draft(); !d.Empty() {
+		t.Errorf("a draft was recorded though every call was malformed: %+v", d)
+	}
+	msgs := sess.Messages()
+	if last := msgs[len(msgs)-1]; last.Text != "Recording the structure." {
+		t.Errorf("final prose = %q, want the second reply (exactly one retry, two model calls)", last.Text)
+	}
+}
+
 func waitFor(t *testing.T, cond func() bool, msg string) {
 	t.Helper()
 	deadline := time.Now().Add(2 * time.Second)

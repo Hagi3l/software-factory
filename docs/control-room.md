@@ -129,6 +129,10 @@ is autonomous. It's a guided conversation, not a form:
    codebase** read-only to ground its specs — a small status strip ("🔍 read_file …")
    shows each read while it looks. The reads run in a read-only, zero-network sandbox
    over the repo, provisioned lazily on first use; the planner still writes nothing.
+   The same strip also surfaces a malformed structured output: if the planner's
+   `propose_draft`/`update_ledger` call fails to decode, the wizard feeds the parse
+   error back for **one automatic retry** and the strip shows "draft rejected
+   (malformed args) — retrying" — a rejected draft is never a silent nothing.
    If `requirements_planner.prefill` names a prepared-requirement file, the composer
    also shows an **Insert prepared requirement** button that drops that file's content
    into the message box — insert only, you still review and press Enter to send.

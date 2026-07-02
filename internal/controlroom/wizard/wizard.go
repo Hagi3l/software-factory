@@ -854,19 +854,35 @@ func announcesDraft(prose string) bool {
 	return false
 }
 
+// rejectionLabel names the rejected-and-lost output call(s) for the live tool strip, so a
+// malformed draft/ledger is visible to the human as a retry in progress, never a silent nothing.
+func rejectionLabel(draftLost, ledgerLost bool) string {
+	switch {
+	case draftLost && ledgerLost:
+		return "draft + ledger rejected (malformed args) — retrying"
+	case ledgerLost:
+		return "ledger rejected (malformed args) — retrying"
+	default:
+		return "draft rejected (malformed args) — retrying"
+	}
+}
+
 // converse runs the model to a prose conclusion for one human turn. Two kinds of tool call flow
 // back. EXPLORATION (read-only action) calls — present only when the session has a sandbox — are
 // dispatched against it and their results fed back, driving another round-trip; that is what the
 // loop iterates on. OUTPUT calls (update_ledger/propose_draft) carry the structured state and are
 // harvested latest-wins; they NEVER add a round-trip — a call rides whatever turn it arrives on,
-// so a reply that emits only prose + output calls concludes immediately (T4.29). The turn ends on
+// so a reply that emits only prose + output calls concludes immediately (T4.29). The one exception
+// is the one-shot rejection backstop: an output call whose args were REJECTED gets its error ack
+// fed back for a single corrective round-trip (see below). The turn ends on
 // the first response with no exploration call; that response's text is the prose the human reads
 // (intermediate exploration preambles are suppressed). The prose streams to the hub as it arrives
 // (coalesced `delta` events) and is pure now — no fence-stripping. Bounded by maxToolTurns (and
 // the caller's per-turn timeout).
 func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []model.ToolDef) (plannerTurn, error) {
 	var out plannerTurn
-	nudged := false // the draft backstop fires at most once per human turn (termination)
+	nudged := false        // the draft backstop fires at most once per human turn (termination)
+	rejectRetried := false // the rejection backstop, likewise one-shot per human turn
 	for turn := 1; turn <= s.maxToolTurns; turn++ {
 		// Accumulate this turn's reply and re-broadcast the cumulative (HTML-escaped) prose as it
 		// grows, coalesced by deltaFlushRunes. A fresh builder per turn so an intermediate
@@ -906,18 +922,43 @@ func (s *Session) converse(ctx context.Context, msgs []model.Message, defs []mod
 		// output calls (or none) concludes the turn — its text is the prose.
 		var actionCalls []model.ToolCall
 		var outputAcks []model.ToolResult
+		var ledgerRejected, draftRejected bool
 		for _, tc := range resp.ToolCalls {
 			switch tc.Name {
 			case toolUpdateLedger:
-				outputAcks = append(outputAcks, s.harvestLedger(&out, tc))
+				ack := s.harvestLedger(&out, tc)
+				ledgerRejected = ledgerRejected || ack.IsError
+				outputAcks = append(outputAcks, ack)
 			case toolProposeDraft:
-				outputAcks = append(outputAcks, s.harvestDraft(&out, tc))
+				ack := s.harvestDraft(&out, tc)
+				draftRejected = draftRejected || ack.IsError
+				outputAcks = append(outputAcks, ack)
 			default:
 				actionCalls = append(actionCalls, tc)
 			}
 		}
 
 		if len(actionCalls) == 0 {
+			// Rejection backstop: a rejected output call acks an IsError the model can only see on
+			// a round-trip — but an output-only reply concludes right here, so without this branch
+			// the rejection is silently swallowed: the model never learns to correct itself and the
+			// human sees neither a draft nor an error (observed live: propose_draft args carried
+			// Python-style True, the WARN logged, and the promised draft just never appeared). Feed
+			// the error acks back for one corrective round-trip and say so on the ephemeral tool
+			// strip, so the retry is never silent. Only a rejection that actually LOST state
+			// retries — a duplicate call rejected after a sibling succeeded (latest-wins) has
+			// nothing to recover. One-shot per human turn: if the retry is rejected too, we fall
+			// through and conclude on the prose (the human still sees the strip notice).
+			draftLost := draftRejected && !out.draftSet
+			ledgerLost := ledgerRejected && !out.ledgerSet
+			if !rejectRetried && (draftLost || ledgerLost) {
+				rejectRetried = true
+				s.hub.Broadcast(live.Event{Name: eventTool, Data: html.EscapeString(rejectionLabel(draftLost, ledgerLost))})
+				msgs = append(msgs,
+					model.Message{Role: model.RoleAssistant, Text: resp.Text, ToolCalls: resp.ToolCalls},
+					model.Message{Role: model.RoleTool, ToolResults: outputAcks})
+				continue
+			}
 			// Draft backstop: the model frequently *narrates* the draft as a closing action
 			// ("let me propose the draft") without emitting the propose_draft call — and since a
 			// prose-only turn concludes here, that promised draft would silently never appear, so

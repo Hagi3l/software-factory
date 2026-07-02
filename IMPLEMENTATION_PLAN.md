@@ -929,12 +929,34 @@ is TCB except where noted; all behind unit tests, `make check` green.
   assistant messages, so it survives context growth (and any future tool-result aging, T-below) and
   directly counters the observed goal-drift/over-build that burned turn budgets. `harness validate
   --config demo/vault/config` OK. **Validate the cost/pass-rate win on a live re-run.**
+- [x] **T13.4 Wizard rejection backstop — a rejected `propose_draft`/`update_ledger` is never
+  silent** — *done.* Fixes the filed "silently-swallowed `propose_draft` rejection" (observed
+  live 2026-06-24: the model emitted Python-style `True` in the draft JSON; `harvestDraft`
+  rejected it with only a WARN, and because an output-only reply concludes `converse`
+  immediately, the `IsError` ack was **dropped** — the model never learned to correct itself
+  and the human saw neither a draft nor an error). Fix in `converse`
+  (`internal/controlroom/wizard/wizard.go`): the output-call partition now tracks per-round
+  `draftRejected`/`ledgerRejected`; when an output-only turn carries a rejection that actually
+  **lost state** (`rejected && !out.draftSet` — a duplicate call rejected after a sibling
+  succeeded latest-wins has nothing to recover), the error acks are fed back for **one
+  corrective round-trip** (`rejectRetried`, one-shot per human turn like `nudged`, so it can
+  never loop) and the ephemeral tool strip broadcasts `rejectionLabel` ("draft rejected
+  (malformed args) — retrying") so the retry is visible to the human. Ordered **before** the
+  draft-nudge check (a rejected call deserves its specific parse error, not the generic
+  "you described a draft without emitting the call" nudge). A rejection riding a round that
+  also had exploration calls already fed its ack back (unchanged). Tests (modeltest, real
+  compat adapter): `TestDraftRejectionFeedsErrorBackForRetry` (malformed→corrected two-turn
+  script; asserts the tool-strip notice, the harvested draft, clean transcript),
+  `TestDraftRejectionRetriesAtMostOnce` (both turns malformed; two-turn server over-run is
+  the termination proof; turn-2 prose avoids `announcesDraft` phrases so the nudge can't add
+  a third call). docs/control-room.md wizard section documents the strip notice. Deliberately
+  NOT done here (still filed below): the `announcesDraft` phrase broadening, JSON-slip repair
+  in `parseDraftArgs`, and the `max_tokens`-truncation guard.
 
 ---
 
 ## Deferred & follow-ups (filed, not blocking)
 
-- **Wizard: silently-swallowed `propose_draft` rejection** *(from the 2026-06-24 live vault run; prompt-caching session)*. When the planner's `propose_draft` tool call has malformed JSON, `harvestDraft` (`internal/controlroom/wizard/wizard.go`) rejects it (`draftSet` stays false) and acks an error — but because `propose_draft` is an OUTPUT call (never forces a round-trip), if it is the only call that turn the turn **concludes** in `converse` without ever feeding the error ack back, so the model never learns to retry and the human sees **nothing** (no draft, no error). Observed live: `WARN wizard: propose_draft args rejected err="invalid character 'T' after object key:value pair"` (model emitted Python-style `True`/unescaped content), draft silently lost. **Fix:** treat a rejected output call like the draft-nudge backstop — feed the parse-error ack back for one auto-retry instead of concluding, and surface "draft rejected, retrying" to the UI so it is never silent. (Possibly also: tolerate/repair common model JSON slips in `parseDraftArgs`, and guard against `max_tokens` truncation of a large draft.)
 - **Wizard: `announcesDraft()` matcher too literal** *(same run)*. The draft-nudge backstop only fires when concluding prose matches a fixed phrase list (`"draft the spec"`, `"seed issues"`, …) — it missed the model's actual `"Drafting the spec and seed issue now"` (gerund `drafting` ≠ `draft the`; singular `issue` ≠ `issues`), so the nudge never fired and the promised draft never came. **Fix:** broaden to stems/keywords (`drafting`, `seed issue`, `propose_draft`, `proposing`) in `internal/controlroom/wizard/wizard.go`.
 - Live-streaming replay (reconstruct the decision trail as the invocation runs) — needs the broker to emit structured per-turn events; overlaps the activity feed *(from T4.11)*.
 - Consolidate the status bar's 2–3 per-page SSE connections (page content + status bar + alerts.js) onto one connection or h2c *(from T4.19)*.
