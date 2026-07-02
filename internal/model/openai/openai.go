@@ -167,16 +167,29 @@ func (a *Adapter) toParams(req model.Request) (sdk.ChatCompletionNewParams, erro
 		params.Messages = append(params.Messages, sdk.SystemMessage(req.System))
 	}
 	markedBrief := false
-	for _, m := range req.Messages {
-		// The first user message carries the Brief — the persona is in System, the spec and
-		// ambient context here — the large stable prefix re-sent every turn. When caching is
-		// on, mark it cacheable: a cache_control breakpoint here covers the whole prefix
-		// before it (the leading system message included), so the gateway bills the re-sent
-		// prefix at the cache-read rate instead of full price. See specs/models.md. A user
-		// message holds only text, so the cached form is equivalent to toMessageParams' output.
+	for i, m := range req.Messages {
+		// Two cache_control breakpoints capture the loop's re-sent context (specs/models.md
+		// "Prompt caching"), mirroring the Anthropic adapter's applyCaching:
+		//   - the Brief (first user message) pins the STABLE PREFIX — persona in System + the
+		//     spec/ambient context here — which is byte-identical every turn, so a cache read
+		//     from turn 2 on; and
+		//   - the LAST message pins the MOVING TAIL — its prefix is the whole conversation so
+		//     far, so each turn reads everything before the delta and pays the cache-write
+		//     premium only on the new tail. Without this second breakpoint the accumulated
+		//     tool results (which dominate a deep run's input) re-bill at full price every turn.
+		// Turn 1 the Brief is also the last message; one breakpoint suffices (nothing follows),
+		// so the Brief branch's `continue` correctly skips the tail marking that turn.
 		if a.caching && !markedBrief && m.Role == model.RoleUser {
 			params.Messages = append(params.Messages, cachedUserMessage(m.Text))
 			markedBrief = true
+			continue
+		}
+		if a.caching && i == len(req.Messages)-1 {
+			msgs, err := cachedMessageParams(m)
+			if err != nil {
+				return sdk.ChatCompletionNewParams{}, err
+			}
+			params.Messages = append(params.Messages, msgs...)
 			continue
 		}
 		msgs, err := toMessageParams(m)
@@ -243,12 +256,39 @@ func toMessageParams(m model.Message) ([]sdk.ChatCompletionMessageParamUnion, er
 	}
 }
 
+// cachedMessageParams maps the loop's LAST canonical message like toMessageParams, but marks
+// its final SDK content block with an ephemeral cache_control breakpoint — the moving tail
+// breakpoint of specs/models.md "Prompt caching". A RoleTool message expands to one SDK tool
+// message per result, so only the LAST result carries the breakpoint (it is the newest content
+// and its prefix is the whole conversation). RoleUser reuses cachedUserMessage. RoleAssistant
+// never appears last in the agent loop (an assistant turn is always followed by tool results or
+// a nudge before the next model call), so it falls back to the uncached form rather than growing
+// a cached-assistant path that would never run.
+func cachedMessageParams(m model.Message) ([]sdk.ChatCompletionMessageParamUnion, error) {
+	switch m.Role {
+	case model.RoleUser:
+		return []sdk.ChatCompletionMessageParamUnion{cachedUserMessage(m.Text)}, nil
+	case model.RoleTool:
+		out := make([]sdk.ChatCompletionMessageParamUnion, 0, len(m.ToolResults))
+		for i, tr := range m.ToolResults {
+			if i == len(m.ToolResults)-1 {
+				out = append(out, cachedToolMessage(tr.Content, tr.ToolCallID))
+			} else {
+				out = append(out, sdk.ToolMessage(tr.Content, tr.ToolCallID))
+			}
+		}
+		return out, nil
+	default:
+		return toMessageParams(m)
+	}
+}
+
 // cachedUserMessage builds a user message whose text part carries an ephemeral
 // cache_control breakpoint. cache_control is not a native Chat Completions field, so it
 // rides via the SDK's extra-fields escape hatch (SetExtraFields) on a structured content
 // part — the wire form an OpenAI-compatible gateway forwarding an Anthropic model expects.
-// Used only when prompt caching is enabled, to mark the Brief's stable prefix cacheable.
-// See specs/models.md "Optional capability fields".
+// Used to mark the Brief's stable prefix (and, when the Brief is the only message, the tail)
+// cacheable. See specs/models.md "Optional capability fields".
 func cachedUserMessage(text string) sdk.ChatCompletionMessageParamUnion {
 	part := sdk.ChatCompletionContentPartTextParam{Text: text}
 	part.SetExtraFields(map[string]any{"cache_control": map[string]any{"type": "ephemeral"}})
@@ -259,6 +299,17 @@ func cachedUserMessage(text string) sdk.ChatCompletionMessageParamUnion {
 			},
 		},
 	}
+}
+
+// cachedToolMessage builds a tool-result message whose text carries an ephemeral cache_control
+// breakpoint — the moving tail breakpoint when the loop's last message is a batch of tool
+// results. The SDK's generic ToolMessage takes a content-parts array, so the breakpoint rides
+// the same SetExtraFields escape hatch cachedUserMessage uses; the string content is otherwise
+// byte-equivalent to sdk.ToolMessage(content, id)'s.
+func cachedToolMessage(content, toolCallID string) sdk.ChatCompletionMessageParamUnion {
+	part := sdk.ChatCompletionContentPartTextParam{Text: content}
+	part.SetExtraFields(map[string]any{"cache_control": map[string]any{"type": "ephemeral"}})
+	return sdk.ToolMessage([]sdk.ChatCompletionContentPartTextParam{part}, toolCallID)
 }
 
 // toToolParam maps a canonical ToolDef to an SDK function tool. OpenAI takes the full

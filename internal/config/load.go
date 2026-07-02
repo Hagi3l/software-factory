@@ -60,7 +60,23 @@ func (c *Config) RequirementsPlannerPersonaPath() string {
 	if c.Harness == nil || c.Harness.RequirementsPlanner == nil {
 		return ""
 	}
-	p := c.Harness.RequirementsPlanner.Persona
+	return c.requirementsPlannerPath(c.Harness.RequirementsPlanner.Persona)
+}
+
+// RequirementsPlannerPrefillPath resolves the optional prepared-requirement file
+// (RequirementsPlanner.Prefill) against the config root, exactly like the persona path.
+// It returns "" when no planner or no prefill is configured, so the wizard renders its
+// composer unchanged.
+func (c *Config) RequirementsPlannerPrefillPath() string {
+	if c.Harness == nil || c.Harness.RequirementsPlanner == nil {
+		return ""
+	}
+	return c.requirementsPlannerPath(c.Harness.RequirementsPlanner.Prefill)
+}
+
+// requirementsPlannerPath joins a planner-block relative path onto the config root ("" and
+// absolute paths pass through) — the shared resolution rule for Persona and Prefill.
+func (c *Config) requirementsPlannerPath(p string) string {
 	if p == "" {
 		return ""
 	}

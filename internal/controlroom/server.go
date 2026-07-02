@@ -778,7 +778,29 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess := s.planner.New()
-	s.render(w, r, views.CreatePage(sess.ID, sess.Messages()))
+	s.render(w, r, views.CreatePage(sess.ID, s.prefillText(r.Context()), sess.Messages()))
+}
+
+// prefillText loads the optional prepared requirement (requirements_planner.prefill) the
+// composer's insert button offers. Read per page load — not cached — so the operator can
+// refine the prepared text while the harness runs and a reload picks it up. A read failure
+// degrades to no button (validate checked existence at startup; a file deleted since is an
+// operator choice, not worth breaking the wizard over) with a log line for the why. A nil
+// cfg (a server built without a declared config, as some tests do) also means no button.
+func (s *Server) prefillText(ctx context.Context) string {
+	if s.cfg == nil {
+		return ""
+	}
+	path := s.cfg.RequirementsPlannerPrefillPath()
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		s.log.WarnContext(ctx, "controlroom: prefill file read failed; omitting the insert button", "path", path, "err", err)
+		return ""
+	}
+	return string(data)
 }
 
 // handleCreateStream serves one conversation's live SSE stream — the wizard's `delta`

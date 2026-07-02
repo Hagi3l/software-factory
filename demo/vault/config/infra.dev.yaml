@@ -24,13 +24,15 @@ sandbox:
   #     if epics fan out wider, either lower this, give the VM more RAM, or let the planner's
   #     dependency edges serialize the siblings. The warmed GOCACHE (see Dockerfile) cuts peak
   #     gate memory too, since fewer packages compile from cold.
-  # wall lowered from 30m to 12m for the live demo: 30m == the whole demo budget, so one
-  # stalled sandbox (a hung gate, a model/network stall on conference wifi) could silently eat
-  # the entire window before the watchdog fired. A warmed-cache gate and a healthy agent run
-  # both complete in a few minutes, so 12m comfortably covers the happy path while fast-failing
-  # a stuck sandbox into a retry. AckWait (the redelivery lease) defaults to this, so a dead
-  # runner also redelivers sooner. (Raise toward 15m if a legitimately cold gate ever nears it.)
-  limits:  { cpu: 6, mem: 4Gi, wall: 12m }
+  # wall: 18m. Lowered from the shipped 30m for the live demo (30m == the whole demo budget, so
+  # one stalled sandbox could silently eat the window before the watchdog fired), but NOT to 12m:
+  # an observed *healthy* deep test-author run took ~19m of wall, so a 12m cap wall-killed a
+  # legitimate attempt and then handed its retry even less of the per-issue budget — a guaranteed
+  # second death that doubled token burn before dead-lettering. 18m covers the healthy deep run
+  # with headroom while still fast-failing a genuinely hung sandbox. The two-breakpoint prompt
+  # caching (specs/models.md) also cuts per-turn latency, so 18m buys more turns than 12m did.
+  # AckWait (the redelivery lease) defaults to this, so a dead runner redelivers after it.
+  limits:  { cpu: 6, mem: 4Gi, wall: 18m }
   # max_concurrency: how many invocations the runner serves PER ROLE at once. The shipped default
   # is 1 (serial), which serializes same-role siblings: in a 4-child epic the four author-tests
   # invocations run back-to-back, the dominant wall-time cost on a live run. Setting 2 lets two

@@ -19,3 +19,6 @@ token.txt
 
 # Stray demo run log (redirected stdout from demo/vault/run.sh)
 /vault-demo.log
+
+# Local Claude Code workflow worktrees (session-scoped, never committed)
+/.claude/

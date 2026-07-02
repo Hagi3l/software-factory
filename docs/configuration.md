@@ -205,6 +205,7 @@ requirements_planner:
   turn_timeout:    10m             # optional — wall-clock budget for one human turn
   sandbox_profile: go-toolchain    # optional — enables read-only codebase exploration
   base_ref:        main            # optional — branch the read-only checkout is seeded at
+  prefill:         prompts/kickoff.md  # optional — prepared requirement the composer can insert
 ```
 
 The trusted LLM behind the Create-Task wizard — the one place a human is in the loop. Its
@@ -230,6 +231,14 @@ the souls use) for precise semantic results; otherwise they degrade to text sear
 (optional) is the branch the read-only checkout is seeded at, defaulting to the repo's current
 branch. Omit `sandbox_profile` to keep the planner a pure conversation. Exploration is
 read-only; the planner still writes nothing but the consent-gated spec + seed issues.
+
+`prefill` (optional) names a text/markdown file (resolved against the config root, like
+`persona`; `harness validate` checks it exists) holding a **prepared requirement**. When set,
+the wizard's composer shows an "Insert prepared requirement" button that drops the file's
+content into the message box — a canned opening for a rehearsed or scripted kickoff (e.g. a
+live demo). Insert only: the operator still reviews and sends it, and the conversation
+proceeds normally. The file is read on each page load, so it can be refined while the harness
+runs.
 
 ## A soul
 

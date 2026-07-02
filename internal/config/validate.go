@@ -645,6 +645,13 @@ func (c *Config) validateRequirementsPlanner(add func(string, ...any)) {
 	if rp.TurnTimeout < 0 {
 		add("requirements_planner turn_timeout is %s; it must be >= 0", rp.TurnTimeout.Duration())
 	}
+	// The optional prepared-requirement file must exist: it is read per wizard page load, so a
+	// bad path would otherwise only surface as a silently missing composer button at demo time.
+	if rp.Prefill != "" {
+		if _, err := os.Stat(c.RequirementsPlannerPrefillPath()); err != nil {
+			add("requirements_planner prefill file %q does not exist", c.RequirementsPlannerPrefillPath())
+		}
+	}
 	// Read-only codebase exploration (T4.28): a configured sandbox_profile must resolve to a
 	// declared infra sandbox profile, exactly like a soul's sandbox. An unknown profile would
 	// otherwise only surface when the wizard first tries to provision its read-only sandbox.

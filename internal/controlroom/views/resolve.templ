@@ -47,7 +47,7 @@ templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messa
 					@ResolvePanel(sessionID, wizard.Draft{}, nil, canResolve, query.BlastRadius{})
 				</div>
 				<div id="wizard-result"></div>
-				@wizardConversation(sessionID, "Describe how the spec should be clarified, or answer the planner's question…", msgs)
+				@wizardConversation(sessionID, "Describe how the spec should be clarified, or answer the planner's question…", "", msgs)
 			</div>
 		</div>
 	}

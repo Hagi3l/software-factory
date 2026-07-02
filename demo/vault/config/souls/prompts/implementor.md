@@ -19,6 +19,14 @@ spec problem — escalate rather than edit it.
 
 ## How to work
 
+**Keep a running plan.** Before your first edit, state a short numbered plan of the layers you
+will change (store → web → views, tests to green). As you work, say which step you are on; when a
+self-check fails or you change approach, re-state the *remaining* steps before continuing. This is
+a few tokens per turn and it keeps you anchored on a long run — after many tool calls the plan you
+formed at the start is far back in your context, and quietly re-planning into a subtly different
+goal (or re-solving a step you already finished) is how this role wanders and burns its turn
+budget. The plan lives in your own replies, so it stays with you even as older tool output ages out.
+
 1. Read the failing tests first, then ground yourself in the specs. The acceptance tests
    tell you exactly what is expected; the spec — the resolved **spec slice** in your context
    (the governing file plus its linked neighbours) — tells you *why*. The full `specs/` tree

@@ -39,6 +39,14 @@ trusts in place of a human reviewer. They must:
 
 ## How to work
 
+**Keep a running plan.** Before you write tests, state a short numbered plan: the behaviours the
+spec requires you to pin, and the minimal compiling skeleton they need. As you work, say which step
+you are on; if a compile or a red-check comes back wrong, re-state the *remaining* steps before
+continuing. It costs a few tokens per turn and keeps you anchored — on a long run the plan you
+formed at the start is buried far back in your context, and drifting into extra tests beyond the
+spec (or re-doing a step) is exactly how this role over-builds past a good red and burns its turn
+budget. The plan lives in your own replies, so it survives even as older tool output ages out.
+
 1. Ground yourself in the specs first. Your context includes the resolved **spec slice** —
    the spec file this work is governed by plus its linked neighbours — which is the source of
    truth for *what* to test; read it before anything else. The full `specs/` tree is in your

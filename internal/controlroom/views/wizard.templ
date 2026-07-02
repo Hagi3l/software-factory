@@ -23,7 +23,10 @@ import (
 // markdown and seed issues the planner proposes; APPROVE is the consent boundary — only then is
 // the spec committed to git, the decisions sidecar written, the transcript stored, and the seed
 // issues created through the single-writer path. Everything past APPROVE is autonomous.
-templ CreatePage(sessionID string, msgs []wizard.Message) {
+// prefill is the optional prepared requirement (requirements_planner.prefill): non-empty, the
+// composer offers a button that inserts it for the operator to review and send. Empty renders
+// the composer unchanged.
+templ CreatePage(sessionID, prefill string, msgs []wizard.Message) {
 	@Layout("Harness — Create Task", "create") {
 		<script src="/static/wizard.js" defer></script>
 		<div class="mx-auto flex max-w-3xl flex-col gap-4">
@@ -53,7 +56,7 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 					@DraftPanel(sessionID, wizard.Draft{}, nil, true)
 				</div>
 				<div id="wizard-result"></div>
-				@wizardConversation(sessionID, "Describe the change you want, or answer the planner's question…", msgs)
+				@wizardConversation(sessionID, "Describe the change you want, or answer the planner's question…", prefill, msgs)
 			</div>
 		</div>
 	}
@@ -71,7 +74,15 @@ templ CreatePage(sessionID string, msgs []wizard.Message) {
 // a newline), with an sr-only submit kept for accessibility and as requestSubmit's submitter, and
 // a one-line keyboard hint. After a send the textarea is reset and refocused for the next turn.
 // placeholder differs per mode (eliciting new intent vs. clarifying a spec).
-templ wizardConversation(sessionID, placeholder string, msgs []wizard.Message) {
+//
+// prefill, when non-empty, adds one button beside the keyboard hint that inserts the prepared
+// requirement into the textarea (wizardChat().insertPrefill — it only fills the composer; the
+// operator still reviews and sends, so the send stays a deliberate human act). The text rides a
+// data attribute: templ escapes it as an inert value and the browser unescapes on read, so the
+// inserted content is byte-identical to the configured file. Create passes it through from
+// requirements_planner.prefill; Resolve passes "" (a dead-letter conversation has no canned
+// opening).
+templ wizardConversation(sessionID, placeholder, prefill string, msgs []wizard.Message) {
 	<div x-data="wizardChat()" class="flex flex-col gap-3">
 		<div
 			id="wizard-transcript"
@@ -100,10 +111,22 @@ templ wizardConversation(sessionID, placeholder string, msgs []wizard.Message) {
 				class="w-full resize-y rounded-md border border-border-strong bg-surface p-3 text-sm text-fg placeholder:text-muted focus:border-border-strong focus:outline-none"
 			></textarea>
 			<button type="submit" class="sr-only">Send</button>
-			<p class="text-right text-xs text-muted">
-				<kbd class="rounded border border-border px-1 py-0.5 font-mono">Enter</kbd> to send ·
-				<kbd class="rounded border border-border px-1 py-0.5 font-mono">Shift</kbd>+<kbd class="rounded border border-border px-1 py-0.5 font-mono">Enter</kbd> inserts a newline
-			</p>
+			<div class="flex items-center justify-between gap-2">
+				if prefill != "" {
+					<button
+						type="button"
+						data-prefill={ prefill }
+						x-on:click="insertPrefill($event)"
+						class="rounded-md border border-border-strong bg-canvas px-3 py-1.5 text-xs font-medium text-fg transition hover:bg-st-idle-bg"
+					>Insert prepared requirement</button>
+				} else {
+					<span></span>
+				}
+				<p class="text-right text-xs text-muted">
+					<kbd class="rounded border border-border px-1 py-0.5 font-mono">Enter</kbd> to send ·
+					<kbd class="rounded border border-border px-1 py-0.5 font-mono">Shift</kbd>+<kbd class="rounded border border-border px-1 py-0.5 font-mono">Enter</kbd> inserts a newline
+				</p>
+			</div>
 		</form>
 	</div>
 }

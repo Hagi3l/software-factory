@@ -158,6 +158,14 @@ func (h *Harness) CommandCheckCommands() map[string]string {
 // seed issues in the real code. Absent SandboxProfile, the planner has no tools and behaves
 // exactly as before (pure conversation). The conversation itself stays trusted and host-side;
 // only the model-chosen repo reads are sandbox-confined (see specs/control-room.md).
+//
+// Prefill optionally names a text/markdown file (resolved against the config root, like
+// Persona) holding a prepared requirement. When set, the Create-Task wizard's composer
+// offers an "Insert prepared requirement" button that drops the file's content into the
+// message box for the operator to review and send — a canned opening for a rehearsed or
+// scripted kickoff (e.g. a live demo). It only fills the composer; the operator still sends
+// it, and the conversation proceeds normally. The file is read per page load, so it can be
+// edited while the harness runs. Absent, the composer is unchanged.
 type RequirementsPlanner struct {
 	Model          string   `yaml:"model"`
 	Persona        string   `yaml:"persona"`
@@ -166,6 +174,7 @@ type RequirementsPlanner struct {
 	TurnTimeout    Duration `yaml:"turn_timeout,omitempty"`
 	SandboxProfile string   `yaml:"sandbox_profile,omitempty"`
 	BaseRef        string   `yaml:"base_ref,omitempty"`
+	Prefill        string   `yaml:"prefill,omitempty"`
 }
 
 // Stage kinds for non-agent stages. An agent stage names a Role instead; a stage is

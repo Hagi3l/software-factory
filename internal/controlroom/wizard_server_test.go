@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/controlroom/wizard"
 	"github.com/Loxstomper/harness/internal/model"
 )
@@ -102,6 +103,43 @@ func TestCreateRendersPageAndSession(t *testing.T) {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("/create missing %q\nbody: %s", want, r.body)
 		}
+	}
+}
+
+// TestCreatePrefillButton proves the composer's "insert prepared requirement" affordance
+// (requirements_planner.prefill): configured, the page carries the prepared text on the
+// button's data-prefill attribute; unconfigured (the plain wizardServer), no button renders.
+// The text is read per page load, so the test writes a real file and threads it through the
+// same Options.Config the composition root uses.
+func TestCreatePrefillButton(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "prefill.md")
+	if err := os.WriteFile(f, []byte("Build a one-time share link."), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p := wizard.NewPlanner(scriptedAdapter{text: "a reply"}, "persona", wizard.WithTurnTimeout(5*time.Second))
+	s := New(Options{
+		Planner: p,
+		Config: &config.Config{Harness: &config.Harness{
+			RequirementsPlanner: &config.RequirementsPlanner{Model: "m", Persona: "p.md", Prefill: f},
+		}},
+	})
+	ts := httptest.NewServer(s.Handler())
+	t.Cleanup(ts.Close)
+
+	r := get(t, ts, "/create")
+	if r.status != http.StatusOK {
+		t.Fatalf("/create status = %d, want 200", r.status)
+	}
+	for _, want := range []string{`data-prefill="Build a one-time share link."`, "Insert prepared requirement"} {
+		if !strings.Contains(r.body, want) {
+			t.Errorf("/create missing %q", want)
+		}
+	}
+
+	// No prefill configured → no button.
+	plain, _ := wizardServer(t, scriptedAdapter{text: "a reply"})
+	if r := get(t, plain, "/create"); strings.Contains(r.body, "Insert prepared requirement") {
+		t.Errorf("/create shows the insert button with no prefill configured")
 	}
 }
 

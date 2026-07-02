@@ -76,6 +76,13 @@ requirements_planner:
   turn_timeout:    10m
   sandbox_profile: vault-toolchain
   base_ref:        main
+  # prefill: the prepared share-link requirement the composer's "Insert prepared requirement"
+  # button drops into the message box — the live-demo kickoff without typing a spec on stage.
+  # It pre-resolves every design fork (token-derived-key re-seal, hash-only storage, atomic
+  # burn, 1h expiry, audit actions) and instructs the planner to ledger them as agreed and
+  # draft in one turn, seeding exactly one epic root. Insert-only: the operator still reviews
+  # and presses Enter. Read per page load, so it can be edited mid-run.
+  prefill:         prompts/share-link-request.md
 
 dag:
   # Human entry stage: the operator authors intent in the Create-Task wizard, which seeds
@@ -190,16 +197,19 @@ policy:
   # ~two attempts rather than letting it consume the whole window before the cumulative cap trips.
   max_retries: 1
   # Per-issue cumulative cap across the on_failure loop: tokens + dollars + wall. Wall lowered
-  # from 1h to 20m for the demo — 1h is 2x the demo window, so a stuck child could occupy the
-  # entire talk before dead-lettering; 20m (with the 12m per-sandbox wall in infra.dev.yaml)
-  # dead-letters a runaway after roughly two attempts. Still generous enough that a healthy child
-  # with one slow retry on conference wifi does not false-dead-letter.
-  budget: { tokens: 8_000_000, usd: 10, wall: 20m }
+  # from 1h to 40m for the demo — 1h is 2x the demo window, so a stuck child could occupy the
+  # entire talk before dead-lettering. 40m is ~2x the 18m per-sandbox wall (infra.dev.yaml), so a
+  # healthy attempt plus one full retry both fit under it; the earlier 20m paired with a 12m
+  # sandbox wall left a wall-killed attempt's retry only ~8m — strictly weaker than the attempt
+  # that just needed more time, a guaranteed dead-letter. 40m dead-letters a genuine runaway after
+  # roughly two attempts without false-dead-lettering a healthy child that retries once on slow wifi.
+  budget: { tokens: 8_000_000, usd: 10, wall: 40m }
   # Per-epic cap summed across every child of the seeded feature.
   epic_budget: { usd: 50 }
   # explore_budget is the FIXED per-call cap on the explore tool's nested read-only sub-loop
   # (Phase 12). Setting it turns explore ON for the souls that opt in via their `tools` allowlist
-  # — here the planner and implementor (the broad-localization beneficiaries). Fixed, not a
+  # — here the planner, test-author, and implementor (all three producers localize broadly before
+  # they act; the test-author was the demo's proven raw-navigation token hog). Fixed, not a
   # fraction of the parent budget, so an explore call behaves the same wherever it is made; the
   # runner meters each call's stream against it and, on a breach, hands back a partial-budget
   # answer rather than failing the parent (which still draws the per-issue budget above). The

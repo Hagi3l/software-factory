@@ -468,6 +468,64 @@ func TestToParamsCachingMarksBrief(t *testing.T) {
 	}
 }
 
+// With caching on, the LAST message must also carry a cache_control breakpoint — the moving tail
+// (specs/models.md "Prompt caching") that lets each turn read the whole prior conversation from
+// cache and pay full price only on the new delta. When the last message is a batch of tool
+// results, only the FINAL result carries it (it is the newest content); earlier results in the
+// same batch stay plain. The Brief keeps its stable-prefix breakpoint independently.
+func TestToParamsCachingMarksTail(t *testing.T) {
+	req := model.Request{
+		System: "be terse",
+		Messages: []model.Message{
+			{Role: model.RoleUser, Text: "the brief"},
+			{Role: model.RoleAssistant, ToolCalls: []model.ToolCall{{ID: "a", Name: "read_file"}, {ID: "b", Name: "search"}}},
+			{Role: model.RoleTool, ToolResults: []model.ToolResult{
+				{ToolCallID: "a", Content: "first result"},
+				{ToolCallID: "b", Content: "last result"},
+			}},
+		},
+	}
+
+	on, err := New("anthropic/claude", option.WithBaseURL("https://x")).WithPromptCaching(true).toParams(req)
+	if err != nil {
+		t.Fatalf("toParams (caching on): %v", err)
+	}
+	msgs := wireMessages(t, on)
+	// [0] system, [1] Brief (user), [2] assistant tool calls, [3] tool result a, [4] tool result b.
+	first := asMap(t, msgs[3])
+	if first["role"] != "tool" || cacheType(first) != "" {
+		t.Errorf("non-final tool result should be unmarked, got %v", first)
+	}
+	last := asMap(t, msgs[4])
+	if last["role"] != "tool" {
+		t.Fatalf("messages[4].role = %v, want tool", last["role"])
+	}
+	parts := asSlice(t, last["content"])
+	if len(parts) != 1 {
+		t.Fatalf("final tool result content parts = %d, want 1 array part", len(parts))
+	}
+	part := asMap(t, parts[0])
+	if part["type"] != "text" || part["text"] != "last result" {
+		t.Errorf("final tool result text part = %v, want text 'last result'", part)
+	}
+	if cacheType(part) != "ephemeral" {
+		t.Errorf("final tool result cache_control = %v, want ephemeral", part["cache_control"])
+	}
+	// The Brief still carries its own stable-prefix breakpoint.
+	if cacheType(asMap(t, asSlice(t, asMap(t, msgs[1])["content"])[0])) != "ephemeral" {
+		t.Errorf("Brief lost its stable-prefix cache_control")
+	}
+
+	// Caching off: the final tool result stays a plain string (a strict server never sees the field).
+	off, err := New("gpt-4o").toParams(req)
+	if err != nil {
+		t.Fatalf("toParams (caching off): %v", err)
+	}
+	if c := asMap(t, wireMessages(t, off)[4])["content"]; c != "last result" {
+		t.Errorf("caching-off final tool result content = %v, want plain string 'last result'", c)
+	}
+}
+
 // A gateway forwarding an Anthropic model reports the cache-WRITE token count in a non-schema
 // usage field (cache_creation_input_tokens); fromCompletion must recover it into
 // CacheCreationTokens so the runner prices the ~1.25x write, alongside the cache-READ count it

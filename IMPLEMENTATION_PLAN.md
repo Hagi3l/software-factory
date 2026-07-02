@@ -13,7 +13,7 @@ in-process orchestrator + runner carry a seed issue through implement → gate �
 merge to `main` with a provenance trailer. Verified end-to-end against a real model
 (local Ollama via `openai-compat`) and real Docker sandboxes.
 
-**Phases 2, 3, 4, 6, 7, 8, 9, 10, and 11 are complete; open build work is Phase 5 (all optional
+**Phases 2, 3, 4, 6, 7, 8, 9, 10, 11, and 13 are complete; open build work is Phase 5 (all optional
 — T5.11 warm pools + HA — or hardware-blocked — T5.2 Firecracker, needs KVM the dev box lacks)
 and the newly-specced Phase 12 (distilled explore tool: **COMPLETE — T12.1–T12.6 all landed: the
 `explore` tool + nested read-only sub-loop, the broker sub-context selector + runner-pinned explorer
@@ -24,6 +24,11 @@ verify path reads raw). Remaining is a live-run cost/context validation, not a b
 closed with T11.2 (prompt caching) landing — the Anthropic
 adapter now caches unconditionally and the openai-compat adapter caches opt-in, with cache
 read/write tokens normalized into the canonical Usage for accurate USD accounting.
+Phase 13 (live-demo hardening II) is complete: T13.1 gave the openai-compat adapter the
+second **moving-tail** cache breakpoint T11.2 had only on the first-party path (the fix for
+the slow, token-heavy deep runs), T13.2 added the wizard `requirements_planner.prefill`
+insert-a-prepared-requirement button for a scripted stage kickoff, and T13.3 tuned the vault
+demo's walls, gave the test-author `explore`, and added a running-plan persona convention.
 Phase 2 (independent verification) is complete — only
 the optional T2.11 decision-note remains (resolved as configuration, not a build item).
 Phase 3 (full DAG, decomposition, merge queue) is complete (T3.13 and T3.14 landed). Phase 4
@@ -868,6 +873,65 @@ Build order (each a single, independently testable concern; the two TCB pieces f
 
 ---
 
+## Phase 13 — Live-demo hardening II (context cost + wizard kickoff)
+
+Opened from a **2026-07-02 pass** preparing the `./demo/vault` run for a live security-meetup
+talk. The organizing complaint was the operator's own experience — "implement was slow and burned
+tokens" — traced to two shared roots: the OpenAI-compat model path under-caching the growing
+conversation, and per-invocation config caps that fought a healthy deep run. Plus one net-new
+control-room affordance so a time-boxed stage kickoff doesn't depend on live typing. None of this
+is TCB except where noted; all behind unit tests, `make check` green.
+
+- [x] **T13.1 openai-compat moving-tail cache breakpoint** — *done.* Corrects the T11.2 compat gap:
+  the openai-compat adapter marked **only** the Brief (stable prefix), so the accumulated tool
+  results — which dominate a deep run's input by an order of magnitude — re-billed at full price
+  every turn (quadratic input growth; the observed ~1.35M-input runaway). It now marks the **second,
+  moving breakpoint on the last message** too, matching the Anthropic adapter's `applyCaching`: a
+  `RoleUser` tail reuses `cachedUserMessage`; a `RoleTool` batch marks only its **final** result via
+  the SDK's generic `ToolMessage([]ContentPartText…)` + `SetExtraFields` (`cachedToolMessage`); a
+  `RoleAssistant` (never last in the loop) falls back to the plain form. Turn 1 the Brief is also
+  last, so the Brief branch's `continue` correctly leaves one breakpoint. Tests:
+  `TestToParamsCachingMarksTail` (final tool result cached, non-final unmarked, Brief keeps its own
+  breakpoint, plain string when caching off). Spec updated ahead: [models.md](specs/models.md)
+  "Prompt caching" now describes the two-breakpoint scheme for **both** adapters and the ~5-min
+  provider cache-TTL floor (a slow `run_gate`/`run_tests` between turns forfeits the cache — a
+  provider property, not an adapter bug). **Verify `cache_read_tokens` goes nonzero and per-turn
+  input stops growing on a live vault re-run** (runtime check, needs a hosted key). ([models.md](specs/models.md))
+- [x] **T13.2 Wizard `requirements_planner.prefill` — insert-a-prepared-requirement button** — *done.*
+  A new optional `prefill` field on the `requirements_planner` config block naming a text/markdown
+  file (resolved against the config root like `persona`; `harness validate` checks it exists). When
+  set, the Create-Task composer shows an **"Insert prepared requirement"** button that drops the
+  file's content into the textarea (`data-prefill` attribute → `wizardChat().insertPrefill`, an
+  insert-only move — the operator still reviews and presses Enter, so the send *and* the APPROVE
+  consent gate stay deliberate human acts). Read per page load, so the prepared text can be refined
+  while the harness runs. Resolve mode passes `""` (a dead-letter conversation has no canned
+  opening). Not TCB (control-room surface). Config: `RequirementsPlanner.Prefill` +
+  `RequirementsPlannerPrefillPath()` + a `validateRequirementsPlanner` existence check;
+  `CreatePage`/`wizardConversation` gained a `prefill` param; `Server.prefillText` reads it
+  (nil-cfg- and read-error-safe → no button). Tests: config
+  `TestValidateRequirementsPlannerPrefill{Exists,Missing}`, server `TestCreatePrefillButton`
+  (rendered with a config, absent without). Docs: `docs/configuration.md`, `docs/control-room.md`.
+  **Demo wired:** `demo/vault/config/harness.yaml` sets `prefill: prompts/share-link-request.md`, a
+  fully-specified one-time-share-link requirement that pre-resolves every design fork (token-derived
+  re-seal, hash-only storage, atomic burn, 1h expiry, audit actions) and instructs the planner to
+  ledger them `agreed` and draft in one turn, seeding exactly one epic root. ([configuration.md](specs/configuration.md),
+  [control-room.md](specs/control-room.md))
+- [x] **T13.3 Demo config + persona tuning for the time-boxed run** — *done.* Config-and-persona
+  only (no code): (a) **walls** — per-sandbox `limits.wall` 12m→**18m** (an observed *healthy* deep
+  test-author run took ~19m; 12m wall-killed a legitimate attempt) and per-issue `policy.budget.wall`
+  20m→**40m** (~2× the sandbox wall, so a healthy attempt + one full retry both fit; the old 20m/12m
+  pairing left a wall-killed attempt's retry only ~8m — a guaranteed dead-letter). (b) **test-author
+  explore** — added `explore` to `souls/test-author.yaml` `tools` (the demo's proven raw-navigation
+  token hog, ~1.3M tokens in one live run; its output is still independently gated, so a weak
+  explorer costs at worst a re-search). (c) **running-plan persona convention** — a short paragraph
+  in the implementor and test-author personas telling the soul to state a numbered plan before
+  editing and re-state remaining steps after a failed self-check; the plan lives in the soul's own
+  assistant messages, so it survives context growth (and any future tool-result aging, T-below) and
+  directly counters the observed goal-drift/over-build that burned turn budgets. `harness validate
+  --config demo/vault/config` OK. **Validate the cost/pass-rate win on a live re-run.**
+
+---
+
 ## Deferred & follow-ups (filed, not blocking)
 
 - **Wizard: silently-swallowed `propose_draft` rejection** *(from the 2026-06-24 live vault run; prompt-caching session)*. When the planner's `propose_draft` tool call has malformed JSON, `harvestDraft` (`internal/controlroom/wizard/wizard.go`) rejects it (`draftSet` stays false) and acks an error — but because `propose_draft` is an OUTPUT call (never forces a round-trip), if it is the only call that turn the turn **concludes** in `converse` without ever feeding the error ack back, so the model never learns to retry and the human sees **nothing** (no draft, no error). Observed live: `WARN wizard: propose_draft args rejected err="invalid character 'T' after object key:value pair"` (model emitted Python-style `True`/unescaped content), draft silently lost. **Fix:** treat a rejected output call like the draft-nudge backstop — feed the parse-error ack back for one auto-retry instead of concluding, and surface "draft rejected, retrying" to the UI so it is never silent. (Possibly also: tolerate/repair common model JSON slips in `parseDraftArgs`, and guard against `max_tokens` truncation of a large draft.)
@@ -876,6 +940,8 @@ Build order (each a single, independently testable concern; the two TCB pieces f
 - Consolidate the status bar's 2–3 per-page SSE connections (page content + status bar + alerts.js) onto one connection or h2c *(from T4.19)*.
 - Client-side live wall/token ticker on the invocation budget meter (mid-invocation spend isn't persisted to beads) *(from T4.21)*.
 - Decomposition-preview dry-run before APPROVE (control-room.md OPEN, "leaning defer"; seed issues stay coarse and the autonomous planner decomposes) *(from T4.14)*.
+- **Tool-result aging in the agent loop** *(from the 2026-07-02 demo-prep pass; the runtime half of Phase 9's context discipline)*. The loop (`internal/agent/loop.go`) appends every tool result forever and re-sends the whole history each turn; T13.1 makes that history cache-cheap but not *smaller* or *cleaner*. Age it: once the conversation crosses a threshold, in one batch replace `RoleTool` **content** older than the last K turns with a stub (`[read_file foo.go — elided (turn N); re-read if needed]`), never touching assistant messages (the soul's own plan/reasoning trail — see T13.3's running-plan convention, which is designed to survive exactly this). Safe *in this architecture specifically*: the worktree is durable state and every read is repeatable in-sandbox, so an elided read loses nothing recoverable — and a `read_file` from before the soul edited that file is now *actively misleading* (stale context the model can quote confidently), so aging cuts hallucination risk, not just tokens. **Design decisions already reached:** batch cadence, **not** a sliding horizon (sliding re-edits the history every turn and invalidates the T13.1 cache prefix every turn — pay one cache re-write per threshold instead); derive the aged view as a pure function when building the `Request`, keeping `messages` pristine as the harvested-transcript source of truth; exempt the Brief, the last K turns, and results under ~1KiB (the stub costs more than tiny load-bearing results like `diagnostics: clean`); **no LLM summarization** (adds a call, a failure mode, and non-determinism in the cache prefix — deterministic elision with re-read recovery is self-correcting). One OTel counter (turns elided, ~tokens saved) so the effect is visible. TCB (agent loop); land behind `modeltest` tests. Interacts with T13.3's walls — aging slightly raises turn count (occasional re-reads) while cutting per-turn cost.
+- **First-party thinking-block preservation** *(from the 2026-07-02 demo-prep pass)*. Through the openai-compat/OpenRouter path, Claude's interleaved thinking blocks are dropped between tool turns, so a deep-reasoning role (the Opus test-author) re-derives its plan from scratch each turn — a quality *and* token cost. The first-party `anthropic` adapter (already built) can preserve them across a tool loop. Strategic framing: the harness stays provider-unaware, but the frontier-Claude path should be **first-party by default** with compat as the portability fallback — this, native `effort`, and native cache-TTL control all being first-class there. A deployment/config choice plus verifying the anthropic adapter round-trips thinking blocks through the loop; no architecture change. Weigh against OpenRouter's single-key convenience for the demo.
 - **Stage-specific selector tags for a routed diverse verify-path explorer** *(from T12.6)*. specs/configuration.md + verification.md recommend routing the verify path to a *different-family* `explorer` soul via a `verify=1` selector, but an issue's `Tags` thread forward **unchanged** across all of a child's stages (`internal/orchestrator/results.go`) and there is no per-stage/role tag, so a `verify=1` selector cannot pick out *only* the qa stage of a child — tagging the child routes its producer stages too. The vault demo therefore gives the verify path **no explore** (the spec's stricter, fully-independent alternative), which is also the better fit (explore is producer-side localization; the gate re-grades raw). Wiring a *routed* diverse verify-path explorer needs a stage/role-scoped selector input (e.g. the orchestrator exposing the issue's role to the explorer selector, or per-stage tag overrides) — a small orchestrator/selector change, deferred until a deployment actually wants explore on the verify path. Until then the T12.5 static advisory correctly stays silent (no verifier opts into explore).
 
 ## Open decisions affecting the plan

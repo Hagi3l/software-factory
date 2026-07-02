@@ -127,7 +127,7 @@ func ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messag
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = wizardConversation(sessionID, "Describe how the spec should be clarified, or answer the planner's question…", msgs).Render(ctx, templ_7745c5c3_Buffer)
+			templ_7745c5c3_Err = wizardConversation(sessionID, "Describe how the spec should be clarified, or answer the planner's question…", "", msgs).Render(ctx, templ_7745c5c3_Buffer)
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

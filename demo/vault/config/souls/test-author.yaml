@@ -11,11 +11,20 @@
 # that misreads the spec makes a smart implementor faithfully build the wrong thing, so this
 # role defines correctness and must be reliable. Names the Opus slug, so a MODEL= override
 # (which only rewrites the shared Sonnet slug) swaps the execution souls without downgrading it.
+# `explore` opts this soul into the distilled-comprehension helper (Phase 12), like the planner and
+# implementor. Writing acceptance tests for a vertical slice means first localizing the seams the
+# tests must pin (the store schema, the handler signatures, where audit entries are appended) — and
+# this is the demo's proven token hog: a live run had the test-author navigating the vault raw for
+# ~1.3M tokens in its own Opus context. Delegating that search->read->refine to the cheap read-only
+# explorer sub-loop (grounded file:line anchors back) keeps it out of the Opus context, exactly the
+# beneficiary case. Its output is still independently gated (tests-red + compiles), so a weak
+# explorer costs at worst a re-search, never a bad contract. Offered only because
+# policy.explore_budget is set AND this list names `explore`.
 name:    vault-test-author
 role:    test-author
 model:   "anthropic/claude-opus-4.8"
 persona: souls/prompts/test-author.md
-tools:   [fs, shell, git]
+tools:   [fs, shell, git, explore]
 sandbox: vault-toolchain
 # Cap per-invocation turns. The kernel default is 50; a healthy author-tests run on this
 # codebase reaches a valid red in ~30 turns. An earlier cap of 35 proved too tight: a live

@@ -686,6 +686,33 @@ func TestValidateRequirementsPlannerNegativeTurnTimeout(t *testing.T) {
 	mustContain(t, problems(t, c), "turn_timeout")
 }
 
+// The optional prepared-requirement file (prefill) must exist when named: the wizard reads
+// it per page load, so a bad path would otherwise only surface as a silently absent insert
+// button at the moment the operator relies on it.
+func TestValidateRequirementsPlannerPrefillExists(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	rp := planner(t)
+	f := filepath.Join(t.TempDir(), "prefill.md")
+	if err := os.WriteFile(f, []byte("prepared requirement\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	rp.Prefill = f
+	c.Harness.RequirementsPlanner = rp
+	if err := c.Validate(); err != nil {
+		t.Fatalf("Validate: %v", err)
+	}
+}
+
+func TestValidateRequirementsPlannerPrefillMissing(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	rp := planner(t)
+	rp.Prefill = filepath.Join(t.TempDir(), "nope.md")
+	c.Harness.RequirementsPlanner = rp
+	mustContain(t, problems(t, c), "prefill")
+}
+
 // The artifact store backend is validated at the startup gate so a distributed (s3)
 // deployment with a missing bucket/endpoint fails loud at `harness validate` rather than
 // silently dropping every harvested artifact at run time. The files default needs no

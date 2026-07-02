@@ -11,6 +11,9 @@
 //     down; scrolling back to the bottom re-arms it.
 //   - Enter to send. Enter submits the composer (via requestSubmit, so the `required` textarea is
 //     still validated and htmx handles the hx-post); Shift+Enter falls through to a newline.
+//   - Insert prepared requirement. When requirements_planner.prefill is configured, the composer
+//     shows a button carrying the prepared text in data-prefill; insertPrefill drops it into the
+//     textarea for the human to review and send.
 function wizardChat() {
   return {
     stick: true,
@@ -28,6 +31,15 @@ function wizardChat() {
       if (e.shiftKey) return;
       e.preventDefault();
       e.target.form.requestSubmit();
+    },
+    // insertPrefill(e) drops the prepared requirement (the button's data-prefill, from
+    // requirements_planner.prefill) into the composer and focuses it. Insert only — the human
+    // still reviews and presses Enter, so the send stays a deliberate act.
+    insertPrefill(e) {
+      const btn = e.currentTarget;
+      const ta = btn.form.querySelector('textarea');
+      ta.value = btn.dataset.prefill;
+      ta.focus();
     },
   };
 }
