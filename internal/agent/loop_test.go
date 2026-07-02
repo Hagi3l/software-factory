@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -126,6 +127,76 @@ func run(t *testing.T, l *Loop, brief core.Brief) (core.Result, error) {
 }
 
 // --- tests -------------------------------------------------------------------
+
+// TestToolResultAgingOnTheWire proves the model receives the AGED view of the history
+// while the loop's own messages stay pristine (specs/components/agent.md "Tool-result
+// aging"). The run makes 17 big read_file rounds then submits; at 16 accumulated rounds
+// the boundary quantizes to 8, so turn 17's request must carry stubs for rounds 1-8 and
+// full content for the keep window — and turn 18's request must render the aged region
+// byte-identically (batch cadence: no per-turn re-editing, the cache-stability property).
+// Earlier captured requests (which alias the loop's backing array in fakeConn) must keep
+// their full content — the proof agedView copies rather than mutates.
+func TestToolResultAgingOnTheWire(t *testing.T) {
+	big := strings.Repeat("y", 2*elideMinBytes)
+	var responses []model.Response
+	for r := 1; r <= 17; r++ {
+		responses = append(responses, model.Response{Stop: model.StopToolUse, ToolCalls: []model.ToolCall{
+			toolCall(fmt.Sprintf("c%d", r), "read_file", `{"path":"foo.go"}`),
+		}})
+	}
+	responses = append(responses, model.Response{Stop: model.StopToolUse, ToolCalls: []model.ToolCall{
+		toolCall("s1", "submit", `{}`),
+	}})
+	conn := &fakeConn{responses: responses}
+	read := &fakeTool{name: "read_file", outcome: Outcome{Content: big}}
+	submit := &fakeTool{name: "submit", outcome: Outcome{Result: &core.Result{Status: core.StatusDone}}}
+	l := newLoop(t, Budget{}, conn, read, submit)
+
+	if _, err := run(t, l, testBrief()); err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	reqs := conn.requests()
+	if len(reqs) != 18 {
+		t.Fatalf("model calls = %d, want 18", len(reqs))
+	}
+
+	// Round r's tool message sits at index 2r (brief at 0, round r = assistant 2r-1, tool 2r).
+	toolContent := func(req model.Request, r int) string {
+		t.Helper()
+		m := req.Messages[2*r]
+		if m.Role != model.RoleTool || len(m.ToolResults) != 1 {
+			t.Fatalf("round %d: message at %d is not the tool answer: %+v", r, 2*r, m)
+		}
+		return m.ToolResults[0].Content
+	}
+
+	// Turn 16 (15 rounds): below the threshold, everything verbatim.
+	if got := toolContent(reqs[15], 1); got != big {
+		t.Errorf("turn 16 round-1 content aged too early: %q", got[:64])
+	}
+	// Turn 17 (16 rounds): boundary 8 — the first batch stubbed, the keep window intact,
+	// the Brief and assistant messages untouched.
+	if got := toolContent(reqs[16], 1); !strings.Contains(got, "elided") || !strings.Contains(got, "read_file") {
+		t.Errorf("turn 17 round-1 content = %q, want the elision stub naming the call", got)
+	}
+	if got := toolContent(reqs[16], 9); got != big {
+		t.Error("turn 17 round-9 content aged; the keep window must stay verbatim")
+	}
+	if got := toolContent(reqs[16], 16); got != big {
+		t.Error("turn 17 round-16 (first appearance) not full — the tail must always be pristine")
+	}
+	if reqs[16].Messages[0].Text != reqs[0].Messages[0].Text {
+		t.Error("the Brief changed under aging")
+	}
+	// Turn 18 (17 rounds, boundary still 8): the aged region is byte-identical to turn 17.
+	if a, b := toolContent(reqs[16], 1), toolContent(reqs[17], 1); a != b {
+		t.Errorf("aged region re-edited between turns:\n%q\n%q", a, b)
+	}
+	// The earlier captured request still holds full content: agedView copied, never mutated.
+	if got := toolContent(reqs[15], 1); got != big {
+		t.Error("an earlier request's content changed after aging — the pristine history was mutated")
+	}
+}
 
 // A submit tool terminates the loop with its Result, and the first request carries the
 // persona as System, the Brief context as the opening user turn, and the tool defs.

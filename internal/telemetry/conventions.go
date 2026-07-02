@@ -134,4 +134,10 @@ const (
 	MetricCostUSD            = "harness.cost.usd"            // counter, dollars by model (cost)
 	MetricGateRuns           = "harness.gate.runs"           // counter by passed (throughput)
 	MetricGateDuration       = "harness.gate.run.duration"   // histogram, seconds (latency)
+
+	// Context discipline (specs/components/agent.md "Tool-result aging") — what the agent
+	// loop removed from the model's view, by role (a bounded dimension). Bytes, not
+	// tokens: the loop never tokenizes, and bytes are the honest measurable proxy.
+	MetricContextElidedResults = "harness.context.elided.results" // counter: tool results aged out, by role
+	MetricContextElidedBytes   = "harness.context.elided.bytes"   // counter: content bytes saved, by role
 )

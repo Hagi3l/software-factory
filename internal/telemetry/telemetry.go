@@ -224,14 +224,16 @@ func exporters(ctx context.Context, cfg Config) (sdktrace.SpanExporter, sdkmetri
 // exposed so a test can drive recording, but production code records through the typed
 // Record* helpers below so metric attributes stay defined in one place.
 type Instruments struct {
-	Invocations        metric.Int64Counter
-	InvocationDuration metric.Float64Histogram
-	LLMTurns           metric.Int64Counter
-	LLMTurnDuration    metric.Float64Histogram
-	Tokens             metric.Int64Counter
-	CostUSD            metric.Float64Counter
-	GateRuns           metric.Int64Counter
-	GateDuration       metric.Float64Histogram
+	Invocations          metric.Int64Counter
+	InvocationDuration   metric.Float64Histogram
+	LLMTurns             metric.Int64Counter
+	LLMTurnDuration      metric.Float64Histogram
+	Tokens               metric.Int64Counter
+	CostUSD              metric.Float64Counter
+	GateRuns             metric.Int64Counter
+	GateDuration         metric.Float64Histogram
+	ContextElidedResults metric.Int64Counter
+	ContextElidedBytes   metric.Int64Counter
 }
 
 // newInstruments creates every instrument from a meter, joining any creation errors so a
@@ -254,14 +256,16 @@ func newInstruments(m metric.Meter) (*Instruments, error) {
 		return h
 	}
 	in := &Instruments{
-		Invocations:        counter(MetricInvocations, "completed agent invocations, by role and result status"),
-		InvocationDuration: hist(MetricInvocationDuration, "wall-clock duration of an agent invocation"),
-		LLMTurns:           counter(MetricLLMTurns, "model turns relayed through the broker, by model"),
-		LLMTurnDuration:    hist(MetricLLMTurnDuration, "latency of one brokered model turn"),
-		Tokens:             counter(MetricTokens, "tokens consumed, by model and token kind"),
-		CostUSD:            fcounter(MetricCostUSD, "model spend in USD, by model"),
-		GateRuns:           counter(MetricGateRuns, "gate verdicts reached, by pass/fail"),
-		GateDuration:       hist(MetricGateDuration, "wall-clock duration of a gate run"),
+		Invocations:          counter(MetricInvocations, "completed agent invocations, by role and result status"),
+		InvocationDuration:   hist(MetricInvocationDuration, "wall-clock duration of an agent invocation"),
+		LLMTurns:             counter(MetricLLMTurns, "model turns relayed through the broker, by model"),
+		LLMTurnDuration:      hist(MetricLLMTurnDuration, "latency of one brokered model turn"),
+		Tokens:               counter(MetricTokens, "tokens consumed, by model and token kind"),
+		CostUSD:              fcounter(MetricCostUSD, "model spend in USD, by model"),
+		GateRuns:             counter(MetricGateRuns, "gate verdicts reached, by pass/fail"),
+		GateDuration:         hist(MetricGateDuration, "wall-clock duration of a gate run"),
+		ContextElidedResults: counter(MetricContextElidedResults, "tool results aged out of the model's view, by role"),
+		ContextElidedBytes:   counter(MetricContextElidedBytes, "tool-result content bytes elided from the model's view, by role"),
 	}
 	return in, errors.Join(errs...)
 }
@@ -309,6 +313,21 @@ func (p *Provider) RecordCost(ctx context.Context, model string, usd float64) {
 		return
 	}
 	p.inst.CostUSD.Add(ctx, usd, metric.WithAttributes(attribute.String(AttrModel, model)))
+}
+
+// RecordContextElision records tool results aged out of the model's view by the agent
+// loop (specs/components/agent.md "Tool-result aging") — the counter pair that makes the
+// aging's effect measurable rather than assumed. The loop calls it with the DELTA each
+// time the elision boundary advances (the aged view is recomputed per request, so
+// recording totals would double-count). Role is the only dimension (bounded, per the
+// cardinality rule); a zero delta records nothing.
+func (p *Provider) RecordContextElision(ctx context.Context, role string, results, bytes int64) {
+	if results == 0 {
+		return
+	}
+	a := metric.WithAttributes(attribute.String(AttrIssueRole, role))
+	p.inst.ContextElidedResults.Add(ctx, results, a)
+	p.inst.ContextElidedBytes.Add(ctx, bytes, a)
 }
 
 // RecordGateRun records one gate verdict's throughput (by pass/fail) and duration. A

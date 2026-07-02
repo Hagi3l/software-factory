@@ -77,7 +77,10 @@ endpoint so one backend can ingest the whole picture:
   orchestrator (scheduling, gating, graph transitions), and the runner (sandbox
   lifecycle).
 - **Metrics** — token `Usage`, USD spend against [budgets](workflow.md), gate
-  pass/fail, invocations by stage, retry/dead-letter counts.
+  pass/fail, invocations by stage, retry/dead-letter counts, and context discipline
+  (tool results elided / bytes saved by
+  [tool-result aging](components/agent.md), by role — the counter that makes the
+  aging's effect measurable rather than assumed).
 - **Logs** — the trusted side's structured `slog`, exported as OTel log records and
   **trace-correlated**: every log call carries the active context, so a record lands
   with the trace/span id of the work that emitted it. The same single source feeds two

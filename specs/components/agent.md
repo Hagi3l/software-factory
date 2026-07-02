@@ -121,6 +121,51 @@ request to its runner, which holds the keys, selects the provider adapter for
 **provider-unaware** — no key, no knowledge of which provider answered. See
 [../models.md](../models.md) and [runner.md](runner.md).
 
+### Tool-result aging
+
+The loop re-sends the whole conversation every turn, and old tool results dominate
+a deep run's input. [Prompt caching](../models.md) makes that history cache-*cheap*
+but not *smaller* or *cleaner* — and a `read_file` from before the soul edited that
+file is **actively misleading** (stale context the model can quote confidently). So
+the loop ages the history: once the conversation grows past a threshold, the
+*model's view* of old tool-result content is replaced by a short deterministic stub
+(`[read_file {"path":"foo.go"} — elided (round N); re-run the tool if needed]`).
+This is safe *in this architecture specifically* because the worktree is durable
+state inside the sandbox: every read is repeatable, so an elided result loses
+nothing the model cannot recover with one call — elision cuts stale-context
+hallucination risk, not just tokens.
+
+The rules:
+
+1. **Only tool-result content ages.** The Brief (the opening turn) and every
+   assistant message — the soul's own plan and reasoning trail, which the
+   running-plan persona convention depends on — are never touched. A tool result's
+   error flag and identity survive; only its bulk content is stubbed.
+2. **Batch cadence, not a sliding horizon.** The elision boundary always keeps the
+   most recent K rounds intact and advances in batches of B rounds. A sliding
+   horizon would re-edit the history every turn and invalidate the cached prefix
+   every turn; batching keeps the view byte-stable between advances, paying one
+   cache re-write per batch instead ([prompt caching](../models.md)).
+3. **Small results are exempt.** A result under ~1 KiB keeps its content forever —
+   the stub would cost as much as the content, and tiny results
+   (`diagnostics: clean`, a lifecycle ack) are load-bearing signal.
+4. **The aged view is derived, never stored.** It is computed as a pure function of
+   the pristine message history each time a request is built; the loop's own
+   history stays complete. Deterministic elision only — **no LLM summarization**
+   (that would add a model call, a failure mode, and non-determinism in the cache
+   prefix; a stub with re-read recovery is self-correcting).
+5. **Evidence is unaffected in substance.** The transcript is recorded relay-side
+   from the wire ([runner.md](runner.md)), so it faithfully shows what the model
+   saw; every elided result's *full* content still appears at its first appearance
+   (the turn that carried it as the new tail), and the prompt artifact / Prompt-SHA
+   (the first request) never contains tool results. Replay renders each message at
+   first appearance, so the rendered trail shows the full content.
+
+The [explore](#explore--distilled-comprehension) sub-loop does **not** age — it is
+bounded at a dozen turns on a cheap model, below any threshold worth managing.
+Elision is observable: the loop counts results elided and bytes saved
+([observability.md](../observability.md)).
+
 ## Tools
 
 Tools are defined canonically (name, description, JSON-schema params); the

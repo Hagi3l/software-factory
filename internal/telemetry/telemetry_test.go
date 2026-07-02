@@ -43,6 +43,7 @@ func TestNoopProviderRecordsNothingAndDoesNotPanic(t *testing.T) {
 	p.RecordLLMTurn(ctx, "m", 1, 2, 3, 4, time.Second)
 	p.RecordCost(ctx, "m", 0.5)
 	p.RecordGateRun(ctx, true, time.Second)
+	p.RecordContextElision(ctx, "implement", 8, 40960)
 	if err := p.Shutdown(ctx); err != nil {
 		t.Fatalf("Noop Shutdown: %v", err)
 	}
@@ -215,6 +216,26 @@ func TestRecordGateRunCarriesPassedAttribute(t *testing.T) {
 	v, ok := runs.DataPoints[0].Attributes.Value(attribute.Key(AttrGatePassed))
 	if !ok || v.AsBool() != false {
 		t.Errorf("gate-run passed attribute = %v (ok=%v), want false", v.AsBool(), ok)
+	}
+}
+
+func TestRecordContextElisionByRoleSkipsZero(t *testing.T) {
+	p, _, reader := newRecording(t)
+	// A zero delta (no boundary advance this turn) must record nothing.
+	p.RecordContextElision(context.Background(), "implement", 0, 0)
+	p.RecordContextElision(context.Background(), "implement", 8, 40960)
+	rm := collect(t, reader)
+	results := findSumInt(t, rm, MetricContextElidedResults)
+	if len(results.DataPoints) != 1 || results.DataPoints[0].Value != 8 {
+		t.Fatalf("elided-results data points = %+v, want one point of 8 (zero delta skipped)", results.DataPoints)
+	}
+	v, ok := results.DataPoints[0].Attributes.Value(attribute.Key(AttrIssueRole))
+	if !ok || v.AsString() != "implement" {
+		t.Errorf("role attribute = %v (ok=%v), want implement", v, ok)
+	}
+	bytes := findSumInt(t, rm, MetricContextElidedBytes)
+	if len(bytes.DataPoints) != 1 || bytes.DataPoints[0].Value != 40960 {
+		t.Fatalf("elided-bytes data points = %+v, want one point of 40960", bytes.DataPoints)
 	}
 }
 

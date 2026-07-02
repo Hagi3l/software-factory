@@ -952,6 +952,43 @@ is TCB except where noted; all behind unit tests, `make check` green.
   a third call). docs/control-room.md wizard section documents the strip notice. Deliberately
   NOT done here (still filed below): the `announcesDraft` phrase broadening, JSON-slip repair
   in `parseDraftArgs`, and the `max_tokens`-truncation guard.
+- [x] **T13.5 Tool-result aging in the agent loop** — *done.* The runtime half of Phase 9's
+  context discipline (was the "Tool-result aging" deferred bullet; all its recorded design
+  decisions implemented as decided). **Spec landed first**: components/agent.md "Tool-result
+  aging" (the five rules: only tool-result content ages; batch cadence not sliding horizon;
+  <~1KiB exempt; pure derived view, no LLM summarization; evidence unaffected in substance) +
+  observability.md metrics bullet. **Mechanism** (`internal/agent/aging.go`): `agedView(msgs)`
+  is a pure function — the model's request carries a copy of the history in which tool-result
+  `Content` older than the elision boundary is replaced by a deterministic stub
+  (`[read_file {"path":…} — result elided (round N); the worktree is current, re-run the tool
+  if you need it]`); the loop's own `messages` stays pristine (the source future views derive
+  from). Boundary = `((rounds-K)/B)*B` with K=8 keep, B=8 batch (`elideKeepRounds`/
+  `elideBatchRounds`/`elideMinBytes=1024`, non-configurable constants for now) — first elision
+  at 16 rounds, view byte-stable between advances so the T13.1/T11.2 cached prefix survives,
+  one cache re-write per batch. Brief + assistant messages (the running-plan trail, T13.3)
+  never touched; `ToolCallID`/`IsError` survive elision; tool name+args for the stub are
+  correlated from the paired assistant message (ToolResult carries only the ID). **Evidence
+  verified by recon before building:** the transcript is recorded relay-side from the wire, so
+  it faithfully shows what the model saw; every elided result's full content still appears at
+  its first appearance (new results always ride the un-aged tail), replay renders first
+  appearances, and PromptSHA covers only the first request (no tool results) — nothing lost
+  forensically. **Explore sub-loop deliberately un-aged** (12-turn cap on a cheap model, below
+  any threshold worth managing; noted in the spec). **Observability:** new counters
+  `harness.context.elided.results`/`…bytes` (by role — bounded; bytes not tokens, the loop
+  never tokenizes) via `Provider.RecordContextElision`, recorded as a DELTA on boundary
+  advance (the view is recomputed per request; totals would double-count); loop wired through
+  new `agent.WithMetrics(tel)` (defaults `telemetry.Noop()`, mirroring `WithTracer`) in
+  `cmd/harness/run.go`. TCB (agent loop) — human-reviewed, landed behind tests. Tests:
+  `aging_test.go` (`TestAgedViewBelowThresholdUntouched`, `…BoundaryQuantized` (8→hold→16),
+  `…PurityAndStability` (no mutation; stubs byte-identical across views/advances),
+  `…SmallResultsExemptAndIdentityKept`, `TestElideStubShape` (UTF-8-safe truncation));
+  `TestToolResultAgingOnTheWire` (18-turn scripted run: turn-16 request unelided, turn-17
+  stubs rounds 1-8 keeps 9-16 + Brief + first-appearance tail, turn-18 aged region
+  byte-identical, earlier captured requests unmutated); telemetry
+  `TestRecordContextElisionByRoleSkipsZero` + Noop-safety. **Validate the token/pass-rate
+  effect on a live vault re-run** (the counters make it measurable); interacts with T13.3's
+  walls — aging slightly raises turn count (occasional re-reads) while cutting per-turn cost.
+  ([components/agent.md](specs/components/agent.md), [observability.md](specs/observability.md))
 
 ---
 
@@ -962,7 +999,6 @@ is TCB except where noted; all behind unit tests, `make check` green.
 - Consolidate the status bar's 2–3 per-page SSE connections (page content + status bar + alerts.js) onto one connection or h2c *(from T4.19)*.
 - Client-side live wall/token ticker on the invocation budget meter (mid-invocation spend isn't persisted to beads) *(from T4.21)*.
 - Decomposition-preview dry-run before APPROVE (control-room.md OPEN, "leaning defer"; seed issues stay coarse and the autonomous planner decomposes) *(from T4.14)*.
-- **Tool-result aging in the agent loop** *(from the 2026-07-02 demo-prep pass; the runtime half of Phase 9's context discipline)*. The loop (`internal/agent/loop.go`) appends every tool result forever and re-sends the whole history each turn; T13.1 makes that history cache-cheap but not *smaller* or *cleaner*. Age it: once the conversation crosses a threshold, in one batch replace `RoleTool` **content** older than the last K turns with a stub (`[read_file foo.go — elided (turn N); re-read if needed]`), never touching assistant messages (the soul's own plan/reasoning trail — see T13.3's running-plan convention, which is designed to survive exactly this). Safe *in this architecture specifically*: the worktree is durable state and every read is repeatable in-sandbox, so an elided read loses nothing recoverable — and a `read_file` from before the soul edited that file is now *actively misleading* (stale context the model can quote confidently), so aging cuts hallucination risk, not just tokens. **Design decisions already reached:** batch cadence, **not** a sliding horizon (sliding re-edits the history every turn and invalidates the T13.1 cache prefix every turn — pay one cache re-write per threshold instead); derive the aged view as a pure function when building the `Request`, keeping `messages` pristine as the harvested-transcript source of truth; exempt the Brief, the last K turns, and results under ~1KiB (the stub costs more than tiny load-bearing results like `diagnostics: clean`); **no LLM summarization** (adds a call, a failure mode, and non-determinism in the cache prefix — deterministic elision with re-read recovery is self-correcting). One OTel counter (turns elided, ~tokens saved) so the effect is visible. TCB (agent loop); land behind `modeltest` tests. Interacts with T13.3's walls — aging slightly raises turn count (occasional re-reads) while cutting per-turn cost.
 - **First-party thinking-block preservation** *(from the 2026-07-02 demo-prep pass)*. Through the openai-compat/OpenRouter path, Claude's interleaved thinking blocks are dropped between tool turns, so a deep-reasoning role (the Opus test-author) re-derives its plan from scratch each turn — a quality *and* token cost. The first-party `anthropic` adapter (already built) can preserve them across a tool loop. Strategic framing: the harness stays provider-unaware, but the frontier-Claude path should be **first-party by default** with compat as the portability fallback — this, native `effort`, and native cache-TTL control all being first-class there. A deployment/config choice plus verifying the anthropic adapter round-trips thinking blocks through the loop; no architecture change. Weigh against OpenRouter's single-key convenience for the demo.
 - **Stage-specific selector tags for a routed diverse verify-path explorer** *(from T12.6)*. specs/configuration.md + verification.md recommend routing the verify path to a *different-family* `explorer` soul via a `verify=1` selector, but an issue's `Tags` thread forward **unchanged** across all of a child's stages (`internal/orchestrator/results.go`) and there is no per-stage/role tag, so a `verify=1` selector cannot pick out *only* the qa stage of a child — tagging the child routes its producer stages too. The vault demo therefore gives the verify path **no explore** (the spec's stricter, fully-independent alternative), which is also the better fit (explore is producer-side localization; the gate re-grades raw). Wiring a *routed* diverse verify-path explorer needs a stage/role-scoped selector input (e.g. the orchestrator exposing the issue's role to the explorer selector, or per-stage tag overrides) — a small orchestrator/selector change, deferred until a deployment actually wants explore on the verify path. Until then the T12.5 static advisory correctly stays silent (no verifier opts into explore).
 

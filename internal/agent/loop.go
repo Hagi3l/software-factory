@@ -77,6 +77,9 @@ type Loop struct {
 	// telemetry (most tests) stays silent. Once the agent becomes its own in-sandbox
 	// binary (Phase 5, zero-network) these spans must instead ride the broker.
 	tracer trace.Tracer
+	// metrics records the context-discipline counters (tool-result aging). Never nil —
+	// defaults to telemetry.Noop() so recording is unconditional, matching the tracer.
+	metrics *telemetry.Provider
 }
 
 // Option configures a Loop at construction. Added as a variadic tail on New so existing
@@ -89,6 +92,16 @@ func WithTracer(t trace.Tracer) Option {
 	return func(l *Loop) {
 		if t != nil {
 			l.tracer = t
+		}
+	}
+}
+
+// WithMetrics makes the loop record the context-discipline counters (tool-result
+// aging) through the shared telemetry Provider. Omit it and recording is a no-op.
+func WithMetrics(p *telemetry.Provider) Option {
+	return func(l *Loop) {
+		if p != nil {
+			l.metrics = p
 		}
 	}
 }
@@ -111,7 +124,8 @@ func New(tools ToolSource, budget Budget, log *slog.Logger, opts ...Option) *Loo
 		connect: func(ep sandbox.Endpoint) brokerConn {
 			return broker.NewClient(ep.Network, ep.Address)
 		},
-		tracer: noop.NewTracerProvider().Tracer(telemetry.ScopeName),
+		tracer:  noop.NewTracerProvider().Tracer(telemetry.ScopeName),
+		metrics: telemetry.Noop(),
 	}
 	for _, opt := range opts {
 		opt(l)
@@ -148,6 +162,9 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 
 	messages := []model.Message{{Role: model.RoleUser, Text: buildContext(brief)}}
 	var total model.Usage
+	// Cumulative elision totals last recorded, so each boundary advance records only its
+	// delta (agedView recomputes totals per request; recording them raw would double-count).
+	var recorded elisionStats
 
 	// The per-soul turn cap (if set) overrides the loop's default for this invocation only —
 	// the Loop is shared across every soul, so this stays a local rather than mutating
@@ -158,9 +175,22 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 	}
 
 	for turn := 1; turn <= maxTurns; turn++ {
+		// The model sees the AGED view of the history (old bulk tool results stubbed,
+		// specs/components/agent.md "Tool-result aging"); messages itself stays pristine —
+		// the durable source future views are derived from. Batch cadence keeps the view
+		// byte-stable between boundary advances so the cached prefix survives.
+		view, elided := agedView(messages)
+		if elided.results > recorded.results {
+			l.metrics.RecordContextElision(ctx, brief.Issue.Role,
+				int64(elided.results-recorded.results), int64(elided.bytes-recorded.bytes))
+			l.log.InfoContext(ctx, "agent: aged tool results out of the model view",
+				"issue", brief.Issue.ID, "turn", turn,
+				"results", elided.results-recorded.results, "bytes", elided.bytes-recorded.bytes)
+			recorded = elided
+		}
 		req := model.Request{
 			System:    persona,
-			Messages:  messages,
+			Messages:  view,
 			Tools:     defs,
 			MaxTokens: l.budget.MaxOutputTokens,
 		}
