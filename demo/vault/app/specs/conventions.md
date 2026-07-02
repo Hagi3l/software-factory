@@ -41,8 +41,10 @@ specs/                the specs (this directory)
   encryption key is held in the session in memory; the store stays encryption-agnostic.
 - **Randomness & comparisons.** Use `crypto/rand` for all tokens/nonces/salts (never
   `math/rand`) and `subtle.ConstantTimeCompare` for secret comparisons.
-- **Sessions are hardened.** Cookies are `HttpOnly` + `SameSite=Strict`; protected routes
-  go through the `auth` middleware.
+- **Sessions are hardened.** Cookies are `HttpOnly`; protected routes go through the `auth`
+  middleware. `SameSite` defaults to `None; Secure` so the app is authenticatable inside the
+  deck's cross-site iframe, with `VAULT_STRICT_COOKIE` to harden it back to `Strict` — see
+  `specs/auth.md` for the rationale.
 - **htmx fragments.** Partial updates (search results, reveal, row delete) return a templ
   fragment, not a full page. Wire interactions with `hx-get` / `hx-post` / `hx-target`
   attributes, **not** an `onclick` handler: a Go expression interpolated into an `onclick`

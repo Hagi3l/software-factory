@@ -26,11 +26,28 @@ type Server struct {
 	st   *store.Store
 	sess *sessions
 	mux  *http.ServeMux
+	// strictCookie hardens the session cookie to SameSite=Strict. It defaults to false
+	// because this app is a *demo artifact* whose primary job is to be shown live inside
+	// the presentation deck's cross-site iframe — and SameSite=Strict cookies are dropped
+	// on cross-site frame loads, which would leave the framed app permanently logged out.
+	// So the shipped default is the iframe-friendly SameSite=None; Secure. Set this (via
+	// VAULT_STRICT_COOKIE) to restore the hardened posture for a non-embedded deployment.
+	strictCookie bool
 }
 
+// Option configures a Server.
+type Option func(*Server)
+
+// WithStrictCookie hardens the session cookie to SameSite=Strict instead of the default
+// embeddable SameSite=None; Secure. Use it for a standalone (non-iframe) deployment.
+func WithStrictCookie(v bool) Option { return func(s *Server) { s.strictCookie = v } }
+
 // New returns a Server backed by st with its routes registered.
-func New(st *store.Store) *Server {
+func New(st *store.Store, opts ...Option) *Server {
 	s := &Server{st: st, sess: newSessions(sessionTTL), mux: http.NewServeMux()}
+	for _, opt := range opts {
+		opt(s)
+	}
 	s.routes()
 	return s
 }
@@ -70,7 +87,7 @@ func (s *Server) auth(next func(http.ResponseWriter, *http.Request, session)) ht
 		}
 		sess, ok := s.sess.get(c.Value)
 		if !ok {
-			clearCookie(w)
+			s.clearCookie(w)
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
@@ -155,7 +172,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	if c, err := r.Cookie(sessionCookie); err == nil {
 		s.sess.destroy(c.Value)
 	}
-	clearCookie(w)
+	s.clearCookie(w)
 	http.Redirect(w, r, "/login", http.StatusSeeOther)
 }
 
@@ -166,7 +183,7 @@ func (s *Server) startSession(w http.ResponseWriter, r *http.Request, username s
 		return
 	}
 	_ = s.st.AppendAudit(r.Context(), auditAction, "")
-	setCookie(w, id, sessionTTL)
+	s.setCookie(w, id, sessionTTL)
 	http.Redirect(w, r, "/vault", http.StatusSeeOther)
 }
 

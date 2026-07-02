@@ -64,26 +64,41 @@ func (s *sessions) destroy(id string) {
 	delete(s.byID, id)
 }
 
+// cookieSameSite reports the SameSite mode (and matching Secure flag) for session cookies.
+// The shipped default is None (which mandates Secure) so the cookie survives the deck's
+// cross-site iframe; WithStrictCookie restores the hardened Strict posture for a standalone
+// deployment. See the Server.strictCookie doc for why the embeddable mode is the default.
+func (s *Server) cookieSameSite() (http.SameSite, bool) {
+	if s.strictCookie {
+		return http.SameSiteStrictMode, false
+	}
+	return http.SameSiteNoneMode, true // Secure is mandatory for SameSite=None
+}
+
 // setCookie writes the session cookie with hardened attributes.
-func setCookie(w http.ResponseWriter, id string, ttl time.Duration) {
+func (s *Server) setCookie(w http.ResponseWriter, id string, ttl time.Duration) {
+	sameSite, secure := s.cookieSameSite()
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    id,
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: sameSite,
+		Secure:   secure,
 		Expires:  time.Now().Add(ttl),
 	})
 }
 
 // clearCookie expires the session cookie.
-func clearCookie(w http.ResponseWriter) {
+func (s *Server) clearCookie(w http.ResponseWriter) {
+	sameSite, secure := s.cookieSameSite()
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookie,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: sameSite,
+		Secure:   secure,
 		MaxAge:   -1,
 	})
 }

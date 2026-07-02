@@ -24,7 +24,9 @@ func newTestServer(t *testing.T) (*httptest.Server, *http.Client) {
 	}
 	t.Cleanup(func() { _ = st.Close() })
 
-	ts := httptest.NewServer(New(st))
+	// httptest serves plain HTTP, where the default embeddable cookie's Secure flag would
+	// stop the jar from returning it — pin the hardened Strict cookie for the test flows.
+	ts := httptest.NewServer(New(st, WithStrictCookie(true)))
 	t.Cleanup(ts.Close)
 
 	jar, _ := cookiejar.New(nil)

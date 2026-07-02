@@ -58,7 +58,9 @@ This app is security-sensitive by construction — which is the point of the dem
 independent **gosec** + **govulncheck** gate re-audits the agents' crypto and auth code on
 every change. Binding rules (see [`specs/`](specs/)): parameterized SQL only; `crypto/rand`
 for all tokens/nonces/salts; `subtle.ConstantTimeCompare` for secret comparisons;
-`HttpOnly` + `SameSite=Strict` session cookies behind auth middleware.
+`HttpOnly` session cookies behind auth middleware (`SameSite=None; Secure` by default so the
+app runs inside the deck's cross-site iframe — `VAULT_STRICT_COOKIE` hardens it to `Strict`;
+see `specs/auth.md`).
 
 ## Layout
 

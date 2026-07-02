@@ -24,9 +24,16 @@ derived key is used, and [architecture in the index](README.md#architecture--con
 
 ## Sessions
 
-- A session is an opaque random id (`crypto.RandomToken`) stored in an `HttpOnly`,
-  `SameSite=Strict` cookie. Server-side it holds the username and the in-memory encryption
-  key; the key is never persisted, so a process restart forces re-login.
+- A session is an opaque random id (`crypto.RandomToken`) stored in an `HttpOnly` cookie.
+  Server-side it holds the username and the in-memory encryption key; the key is never
+  persisted, so a process restart forces re-login.
+- **Cookie `SameSite`.** This app is a demo artifact shown live inside the presentation
+  deck's *cross-site* iframe, and `SameSite=Strict`/`Lax` cookies are dropped on cross-site
+  frame loads — so the shipped default is `SameSite=None; Secure` (Secure is mandatory for
+  `None`; the deployment terminates TLS, so this holds). Setting `VAULT_STRICT_COOKIE`
+  restores the hardened `SameSite=Strict` for a standalone, non-embedded deployment. (Note:
+  `None` only makes the cookie *eligible* cross-site — Safari still blocks third-party iframe
+  cookies outright, so demo in Chrome/Firefox.)
 - Sessions expire after 30 minutes. Protected routes redirect to `/login` when the cookie is
   missing or expired.
 - Sign-out destroys the server-side session and clears the cookie.

@@ -96,6 +96,10 @@ User=vault
 Group=vault
 Environment=VAULT_ADDR=127.0.0.1:8000
 Environment=VAULT_DB=/var/lib/vault/vault.db
+# The session cookie ships embeddable (SameSite=None; Secure) by default so the deck's
+# cross-site iframe can authenticate — it relies on HTTPS, which Caddy terminates below.
+# Add `Environment=VAULT_STRICT_COOKIE=1` to harden it to SameSite=Strict for a standalone
+# (non-embedded) deployment. See app specs/auth.md for the rationale.
 WorkingDirectory=/var/lib/vault
 ExecStart=/usr/local/bin/vault
 Restart=on-failure
