@@ -15,10 +15,11 @@ merge to `main` with a provenance trailer. Verified end-to-end against a real mo
 
 **Phases 2, 3, 4, 6, 7, 8, 9, 10, and 11 are complete; open build work is Phase 5 (all optional
 — T5.11 warm pools + HA — or hardware-blocked — T5.2 Firecracker, needs KVM the dev box lacks)
-and the newly-specced Phase 12 (distilled explore tool: **T12.1 + T12.2 + T12.3 landed — the `explore`
-tool + nested read-only sub-loop in `internal/agent`, the broker sub-context selector +
-runner-pinned explorer model + per-stream sub-budget metering (T12.2), and the `policy.explore_budget` /
-reserved-`explorer`-role config + validation, fully tested; T12.4–T12.6 open**).** Phase 11
+and the newly-specced Phase 12 (distilled explore tool: **T12.1–T12.5 landed — the `explore`
+tool + nested read-only sub-loop, the broker sub-context selector + runner-pinned explorer model +
+per-stream sub-budget metering, the `policy.explore_budget` / reserved-`explorer`-role config +
+validation, explore evidence/provenance/observability nesting (T12.4), and per-role enablement +
+verify-path diversity advisory (T12.5), all fully tested; only T12.6 (wire the vault demo) open**).** Phase 11
 closed with T11.2 (prompt caching) landing — the Anthropic
 adapter now caches unconditionally and the openai-compat adapter caches opt-in, with cache
 read/write tokens normalized into the canonical Usage for accurate USD accounting.
@@ -64,9 +65,10 @@ autonomous implementation) — a later validation concern, never an engineering 
 - **Open tasks (`- [ ]`) keep their full detail.** **Phase 5** (production isolation) has
   open lines — the Firecracker backend T5.2 is hardware-blocked and deliberately last; the one
   remaining optional item is T5.11 warm pools + HA (T5.5 gVisor is now done) — and **Phase 12**
-  (distilled explore tool) has **T12.1 + T12.2 + T12.3 done** (the tool + nested sub-loop in `internal/agent`;
-  the broker sub-context selector + runner-pinned explorer model + per-stream sub-budget metering;
-  the `explore_budget`/reserved-`explorer`-role config + validation); T12.4–T12.6 open.
+  (distilled explore tool) has **T12.1–T12.5 done** (the tool + nested sub-loop; the broker sub-context
+  selector + runner-pinned explorer model + per-stream sub-budget metering; the
+  `explore_budget`/reserved-`explorer`-role config + validation; explore evidence/provenance/observability
+  nesting; per-role enablement + verify-path diversity advisory); only T12.6 (wire the vault demo) open.
   Everything else (Phases 0–4, 6, 7, 8, 9, 10, 11) is complete and collapsed.
 - **Phases 2–5 and Phase 12 are atomic tasks** (`T<phase>.<n>`), each a single
   self-contained, verifiable unit of work, listed in dependency order — the same granularity Phase
@@ -784,18 +786,56 @@ Build order (each a single, independently testable concern; the two TCB pieces f
   reserved-role/explorer-soul shape) — no spec change; **docs/configuration.md** updated (the
   `explore_budget` policy field + the reserved `explorer` role subsection) per the doc-tracking rule.
   ([configuration.md](specs/configuration.md))
-- [ ] **T12.4 Explore evidence + provenance + observability nesting** (needs T12.1, T12.2).
-  Hash the explore transcript to the [artifact store](specs/components/artifact-store.md)
-  alongside the main transcript, recording the pinned explorer model in the provenance trailer
-  (auditable, not a side-channel). Stream the sub-loop's reasoning/tokens under the parent in
-  the live view (the broker already sees its calls). ([components/agent.md](specs/components/agent.md),
-  [observability.md](specs/observability.md))
-- [ ] **T12.5 Per-role explore enablement + verify-path diversity advisory** (needs T12.3).
-  `explore` is per-role tool enablement (resolves the agent.md OPEN): enable it on the
-  planner/implementor personas. Extend the producer/verifier model-family
-  [advisory](specs/verification.md) (T2.13) to cover a verify-path explorer sharing the
-  producer's family — recommend a diverse explorer soul (or none) for qa/security.
-  ([verification.md](specs/verification.md), [configuration.md](specs/configuration.md))
+- [x] **T12.4 Explore evidence + provenance + observability nesting** — *done.* The explore
+  sub-loop is now first-class, auditable evidence. **Separate transcript capture:** the relay
+  (`internal/runner/broker_handler.go`) gained `exploreTurns []model.TranscriptTurn`; `completeExplore`
+  calls a new `recordExplore(req,resp)` that appends to it and **never** touches `firstReq`/`turns` —
+  the explorer's question is not the invocation's prompt, so it must not contaminate the Prompt-SHA /
+  parent transcript. New `ExploreTranscript() ([]byte,bool)` (mirrors `Transcript`) and `ExploreModel()
+  (string,bool)` (returns the pinned model only when the sub-loop actually ran — the "explore happened"
+  gate). **Harvest:** `runner.go`'s `harvest` stores the explore transcript as its own
+  `core.ArtifactKindExploreTranscript` artifact alongside the main transcript (a store failure degrades
+  provenance, never fails the candidate — same discipline as the main transcript); `invoke` stamps
+  `res.ExploreModel` from `rel.ExploreModel()` (authoritative, from the trusted relay). **Provenance:**
+  `core.Result` gained `ExploreModel`; `core.Provenance` gained `ExploreModel`+`ExploreTranscript`, and
+  the trailer renders an **optional third line** `Explorer-Model: … | Explore-Transcript: …` only when
+  set — pre-explore commits stay byte-for-byte identical and round-trip exactly (parse recognizes the
+  two new keys). `orchestrator/provenance.go` populates both. **Observability nesting:** `tokenEvent`
+  gained `SubContext string omitempty`; explorer token/reasoning/tool events are tagged
+  `broker.SubContextExplorer` (parent events stay unlabelled → byte-identical), threaded through
+  `controlroom/live` `wireEvent`/`Entry` (coalesce now requires matching SubContext, so explorer
+  reasoning never folds into a parent turn) and the activity/invocation templ views (indented, `explorer`
+  badge). docs/control-room.md updated. Tests: `TestRelayExploreCapturedSeparatelyFromParentTranscript`,
+  `TestRelayExploreEventsCarrySubContext`, `TestHarvestStampsExploreEvidence`, provenance round-trip +
+  `TestTrailerExploreLineOptional`, `TestActivity_ExplorerSubContextNestsSeparately`. No spec change
+  (written ahead). Built in an isolated worktree (parallel with T12.5), `make check` green, reviewed on
+  merge. ([components/agent.md](specs/components/agent.md), [observability.md](specs/observability.md))
+- [x] **T12.5 Per-role explore enablement + verify-path diversity advisory** — *done.* Wires the
+  explore tool into the production toolset, gated per-role, and extends the T2.13 advisory.
+  **Enablement gate** (`cmd/harness/config.go` `exploreToolFor`, called from `run.go`'s `toolSource`):
+  `explore` is offered only when **both** — the parent soul opted in via its `tools` allowlist
+  (`soulEnablesTool`; the per-role surface that resolves the agent.md OPEN — planner/implementor opt
+  in, verify path only via a diverse explorer) **and** the trusted dispatch pinned an explorer for the
+  issue (`inv.Brief.Explorer != nil`, set by the orchestrator's `attachExplorer` from T12.2).
+  `buildExploreTool` reads the explorer persona off the host (absolute by dispatch time, like `bootSoul`),
+  maps `Brief.ExploreBudget{Turns,Tokens}`→`agent.Budget{MaxTurns,MaxTokens}`, reuses the invocation's
+  **warm LSP sessions**, and hands the explorer `inv.Brief.Spec` (the ambient prefix + slice) as its
+  project map — deliberately not the parent's conversation. `exploreCompleterSource` adapts
+  `*broker.Client` (via `ExploreCompleter(stream)`) to `agent.ExplorerCompleterSource` (broker can't
+  import agent) at the composition root; a guarded assertion + build-failure path **degrade to no explore**
+  (additive, never load-bearing). **Advisory** (`internal/config/warnings.go` `warnExploreDiversity`,
+  wired into `Warnings()`): extends the T2.13 producer/verifier model-family overlap advisory to explore —
+  when explore is on and a producer path and its downstream verifier gate both enable `explore` and the
+  whole `explorer` pool resolves to a single model family (so the verify path can't be routed to a
+  diverse explorer), it emits the same **non-fatal** advisory recommending a diverse verify-path explorer
+  (or none); reuses `roleFamilies`/`isProducerStage`/`downstreamStages`/`isGateStage`. docs/configuration.md
+  documents the per-role opt-in + the advisory. Neither shipped config enables explore, so both still
+  `harness validate` clean (that's T12.6). Tests: `cmd/harness/explore_test.go` (offered when soul opts in
+  + explorer pinned; absent when soul omits it or Explorer nil; degrades on a non-broker completer);
+  `internal/config/explore_diversity_test.go` (fires same-family; silent when diverse / disabled / verifier
+  opts out; never fails Validate). No spec change (written ahead). Built in an isolated worktree (parallel
+  with T12.4), `make check` green, reviewed on merge. ([verification.md](specs/verification.md),
+  [configuration.md](specs/configuration.md))
 - [ ] **T12.6 Wire the vault demo (the exercising use case)** (needs T12.1–T12.5). Add an
   `explorer` soul + `prompts/explorer.md` persona on a cheap model (e.g. an Anthropic Haiku
   slug via OpenRouter added to `infra.dev.yaml`), set `policy.explore_budget` in the vault
