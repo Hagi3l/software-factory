@@ -101,9 +101,14 @@ type relay struct {
 	// too (specs/configuration.md: "the parent's budget is still the real ceiling — every
 	// explorer stream draws against it"). streamTok is per-explore-call (keyed on the wire's
 	// Stream id), the input for the per-call sub-budget cap so multiple explore calls each get
-	// the full fixed budget. Full explore-transcript capture + per-model provenance is T12.4.
+	// the full fixed budget.
 	exploreUsage model.Usage
 	streamTok    map[string]int
+	// exploreTurns is every explorer completion in order — the explore transcript, captured
+	// SEPARATELY from the parent's turns (never appended to r.turns, never overwriting r.firstReq)
+	// so the cheap-tier comprehension is first-class evidence harvested on its own content hash,
+	// not folded into the parent prompt/transcript (specs/components/agent.md rule 5, T12.4).
+	exploreTurns []model.TranscriptTurn
 }
 
 var _ broker.Handler = (*relay)(nil)
@@ -184,9 +189,16 @@ func (r *relay) spanParent(ctx context.Context) context.Context {
 // in real time (see specs/observability.md); losing one is harmless. Type discriminates
 // the channel — "token" (assistant text delta), "reasoning" (chain-of-thought delta), or
 // "tool" (a tool call the turn requested) — and Delta carries the text the feed shows.
+//
+// SubContext labels which of the invocation's pinned models produced the datum: empty for
+// the parent soul (the default), "explorer" for the explore tool's nested sub-loop. It lets
+// the control room NEST the explorer's reasoning/tokens under the parent invocation rather
+// than mistaking them for parent turns (specs/messaging.md, specs/observability.md). Emitted
+// only when non-empty (omitempty), so a parent event stays byte-identical to before T12.4.
 type tokenEvent struct {
-	Type  string `json:"type"`
-	Delta string `json:"delta"`
+	Type       string `json:"type"`
+	Delta      string `json:"delta"`
+	SubContext string `json:"subContext,omitempty"`
 }
 
 // toolCallSummary renders a tool call as a compact one-line feed label: the tool name
@@ -252,19 +264,23 @@ func (r *relay) completeExplore(ctx context.Context, stream string, req model.Re
 		}
 	}
 
+	// Every live datum from this stream is tagged with the explorer sub-context so the control
+	// room nests it under the parent invocation instead of showing it as a parent turn — the
+	// wire counterpart of the AttrSubContext span attribute below (specs/observability.md).
+	const sub = string(broker.SubContextExplorer)
 	onEvent := func(ev model.StreamEvent) {
 		if ev.TextDelta != "" {
-			r.publishEvent(tokenEvent{Type: "token", Delta: ev.TextDelta})
+			r.publishEvent(tokenEvent{Type: "token", Delta: ev.TextDelta, SubContext: sub})
 		}
 		if ev.ReasoningDelta != "" {
-			r.publishEvent(tokenEvent{Type: "reasoning", Delta: ev.ReasoningDelta})
+			r.publishEvent(tokenEvent{Type: "reasoning", Delta: ev.ReasoningDelta, SubContext: sub})
 		}
 	}
 
 	_, span := r.tel.Tracer().Start(r.spanParent(ctx), telemetry.SpanLLMTurn, trace.WithAttributes(
 		attribute.String(telemetry.AttrComponent, telemetry.ComponentBroker),
 		attribute.String(telemetry.AttrModel, r.exploreModel),
-		attribute.String(telemetry.AttrSubContext, "explorer"),
+		attribute.String(telemetry.AttrSubContext, sub),
 	))
 	defer span.End()
 
@@ -288,8 +304,11 @@ func (r *relay) completeExplore(ctx context.Context, stream string, req model.Re
 		resp.Usage.CacheReadTokens, resp.Usage.CacheCreationTokens, d)
 
 	r.addExploreUsage(stream, resp.Usage)
+	// Capture the exchange into the SEPARATE explore transcript (never the parent's) so the
+	// exploration is harvestable, auditable evidence rather than a hidden side-channel (T12.4).
+	r.recordExplore(req, resp)
 	for _, tc := range resp.ToolCalls {
-		r.publishEvent(tokenEvent{Type: "tool", Delta: toolCallSummary(tc)})
+		r.publishEvent(tokenEvent{Type: "tool", Delta: toolCallSummary(tc), SubContext: sub})
 	}
 	r.log.InfoContext(ctx, "broker: explore model completion",
 		"stream", stream, "model", r.exploreModel, "stop", resp.Stop,
@@ -600,6 +619,46 @@ func (r *relay) Transcript() ([]byte, bool) {
 		return nil, false
 	}
 	return data, true
+}
+
+// recordExplore appends one explorer exchange to the SEPARATE explore transcript. It
+// deliberately does NOT touch firstReq or turns: the parent prompt/transcript must stay the
+// parent's (the explorer's question is not the invocation's prompt), so the exploration is
+// harvested as its own artifact rather than contaminating the Prompt-SHA/Transcript evidence.
+func (r *relay) recordExplore(req model.Request, resp model.Response) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.exploreTurns = append(r.exploreTurns, model.TranscriptTurn{Request: req, Response: resp})
+}
+
+// ExploreTranscript returns the JSON-encoded ordered transcript of every explorer exchange
+// this invocation made, and false when explore never ran — in which case there is no explore
+// transcript to harvest (most invocations). It mirrors Transcript for the explorer stream.
+func (r *relay) ExploreTranscript() ([]byte, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.exploreTurns) == 0 {
+		return nil, false
+	}
+	data, err := json.Marshal(r.exploreTurns)
+	if err != nil {
+		return nil, false
+	}
+	return data, true
+}
+
+// ExploreModel returns the pinned explorer model and true WHEN the explore sub-loop actually
+// ran at least one completion, else ("", false). This is the authoritative "explore happened"
+// signal the runner stamps onto the Result so the provenance trailer records the tier the
+// exploration ran under — independent of whether the explore transcript itself persisted, so a
+// store hiccup degrades the transcript hash but never erases the recorded model (T12.4).
+func (r *relay) ExploreModel() (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if len(r.exploreTurns) == 0 {
+		return "", false
+	}
+	return r.exploreModel, true
 }
 
 // publishEvent emits one live-feed event best-effort; a failure is logged at debug and

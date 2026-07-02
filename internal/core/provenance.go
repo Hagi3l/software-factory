@@ -34,6 +34,16 @@ type Provenance struct {
 	Traceability string   // artifact-store hash of the author-tests test↔spec traceability map
 	Transcript   string   // artifact-store hash of the full agent conversation (the replayable decision trail)
 
+	// ExploreModel and ExploreTranscript record the explore tool's nested read-only sub-loop:
+	// the second model that ran in the same sandbox and the artifact-store hash of its own
+	// (separately harvested) conversation. Recording BOTH the parent and the pinned explorer
+	// model makes the tier the exploration ran under auditable rather than a hidden side-channel
+	// (specs/models.md "Helper souls", specs/components/agent.md rule 5). They render as an extra
+	// trailer line ONLY when explore actually ran, so a change that used no explore keeps the
+	// exact two-line trailer it always had (the read side treats the line as optional).
+	ExploreModel      string
+	ExploreTranscript string
+
 	// Subject is the human-readable commit subject line (the issue's title), purely
 	// cosmetic so a merge reads like ordinary project history ("Add single-use share
 	// link") rather than "Integrate <id>". It is NOT part of the audited trailer: it is
@@ -51,9 +61,16 @@ type Provenance struct {
 // invocation whose transcript could not be harvested) stays self-describing instead of
 // looking truncated.
 func (p Provenance) Trailer() string {
-	return fmt.Sprintf("Soul: %s | Model: %s | Tests-Soul: %s\nIssue: %s | Prompt-SHA: %s | Verified: %s | Traceability: %s | Transcript: %s",
+	trailer := fmt.Sprintf("Soul: %s | Model: %s | Tests-Soul: %s\nIssue: %s | Prompt-SHA: %s | Verified: %s | Traceability: %s | Transcript: %s",
 		orNone(p.Soul), orNone(p.Model), orNone(p.TestsSoul), orNone(p.Issue), orNone(p.PromptSHA),
 		orNone(strings.Join(p.Verified, ",")), orNone(p.Traceability), orNone(p.Transcript))
+	// Append the explore line only when a nested read-only sub-loop actually ran (either field
+	// set), so a change that used no explore stays byte-for-byte identical to the historical
+	// two-line trailer — backward compatibility for every pre-explore commit and its round trip.
+	if p.ExploreModel != "" || p.ExploreTranscript != "" {
+		trailer += fmt.Sprintf("\nExplorer-Model: %s | Explore-Transcript: %s", orNone(p.ExploreModel), orNone(p.ExploreTranscript))
+	}
+	return trailer
 }
 
 // CommitMessage is the full message for the integration commit: a one-line subject plus
@@ -105,6 +122,10 @@ func ParseCommitMessage(msg string) (Provenance, bool) {
 				prov.Traceability = v
 			case "Transcript":
 				prov.Transcript = v
+			case "Explorer-Model":
+				prov.ExploreModel = v
+			case "Explore-Transcript":
+				prov.ExploreTranscript = v
 			case "Verified":
 				prov.Verified = splitVerified(v)
 			}
@@ -135,7 +156,7 @@ func parseTrailerLine(line string) (map[string]string, bool) {
 		val = noneToEmpty(strings.TrimSpace(val))
 		fields[key] = val
 		switch key {
-		case "Soul", "Tests-Soul", "Model", "Issue", "Prompt-SHA", "Verified", "Traceability", "Transcript":
+		case "Soul", "Tests-Soul", "Model", "Issue", "Prompt-SHA", "Verified", "Traceability", "Transcript", "Explorer-Model", "Explore-Transcript":
 			recognized = true
 		}
 	}

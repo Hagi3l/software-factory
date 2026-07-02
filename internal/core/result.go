@@ -82,6 +82,16 @@ type Result struct {
 	// feedback loop, that bounds a single attempt (see specs/workflow.md). Zero on a Result the
 	// runner could not time (a failed/discarded invocation carries no envelope).
 	Elapsed time.Duration
+
+	// ExploreModel is the pinned model the explore tool's nested read-only sub-loop actually
+	// ran on this invocation (the second model in one sandbox — specs/models.md "Helper
+	// souls"). The runner stamps it from the relay's authoritative record of what it relayed,
+	// and ONLY when the sub-loop made at least one completion — so it is the "explore happened"
+	// signal that survives an artifact-store hiccup, letting the provenance trailer record the
+	// tier the exploration ran under even if the explore transcript itself failed to persist.
+	// Empty when the invocation ran no explore (most invocations), which keeps the merge
+	// trailer byte-for-byte backward-compatible (see specs/components/agent.md rule 5).
+	ExploreModel string
 }
 
 // Usage is normalized token accounting for one invocation. It mirrors model.Usage but
@@ -212,6 +222,11 @@ const (
 	ArtifactKindPrompt = "prompt"
 	// ArtifactKindTranscript is the full agent conversation — the replayable decision trail.
 	ArtifactKindTranscript = "transcript"
+	// ArtifactKindExploreTranscript is the explore tool's nested read-only sub-loop conversation,
+	// harvested SEPARATELY from the main transcript so the cheap-tier comprehension is auditable
+	// evidence in its own right, not folded into (or mistaken for) the parent's turns (cited as
+	// Explore-Transcript, see specs/components/agent.md rule 5, specs/models.md "Helper souls").
+	ArtifactKindExploreTranscript = "explore-transcript"
 	// ArtifactKindTraceabilityMap is a harvested test↔spec traceability map (see Result.Trace).
 	ArtifactKindTraceabilityMap = "traceability-map"
 	// ArtifactKindGateEvidence is a gate check's captured stdout/stderr, cited as name@<hash>.

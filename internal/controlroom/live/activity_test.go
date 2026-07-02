@@ -21,6 +21,10 @@ func toolEvent(label string) []byte {
 	return []byte(fmt.Sprintf(`{"type":"tool","delta":%q}`, label))
 }
 
+func explorerReasoning(delta string) []byte {
+	return []byte(fmt.Sprintf(`{"type":"reasoning","delta":%q,"subContext":"explorer"}`, delta))
+}
+
 func TestActivity_CarriesIssueBinding(t *testing.T) {
 	a := live.NewActivity(16)
 	// The pump tags each event with the invocation id (from the subject) and the issue id +
@@ -117,6 +121,28 @@ func TestActivity_TokenAndReasoningDoNotMerge(t *testing.T) {
 	}
 	if got[0].Kind != "token" || got[1].Kind != "reasoning" {
 		t.Fatalf("kinds = [%q,%q], want [token,reasoning]", got[0].Kind, got[1].Kind)
+	}
+}
+
+// TestActivity_ExplorerSubContextNestsSeparately proves an explorer-tagged reasoning run
+// carries the sub-context label and does NOT coalesce into the parent's reasoning line — so the
+// view can nest the explorer's comprehension under the parent invocation rather than folding it
+// into the parent's turns (specs/observability.md live nesting, T12.4).
+func TestActivity_ExplorerSubContextNestsSeparately(t *testing.T) {
+	a := live.NewActivity(16)
+	a.Record("inv-1", "harness-7", "implementor", reasoning("parent thinking"))
+	a.Record("inv-1", "harness-7", "implementor", explorerReasoning("explorer thinking"))
+
+	got := a.Recent()
+	if len(got) != 2 {
+		t.Fatalf("entries = %d, want 2 (parent and explorer reasoning must not merge)", len(got))
+	}
+	// Recent is newest-first: the explorer row leads.
+	if got[0].SubContext != "explorer" {
+		t.Errorf("newest row sub-context = %q, want explorer", got[0].SubContext)
+	}
+	if got[1].SubContext != "" {
+		t.Errorf("parent row sub-context = %q, want empty", got[1].SubContext)
 	}
 }
 

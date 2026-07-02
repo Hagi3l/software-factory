@@ -74,11 +74,14 @@ templ ActivityList(entries []live.Entry) {
 // glance even when both are shown.
 templ activityRow(e live.Entry) {
 	<li
-		class={ "flex items-start gap-3 rounded-md border px-3 py-2", activityRowAccent(e.Source) }
+		class={ "flex items-start gap-3 rounded-md border px-3 py-2", activityRowAccent(e.Source), subContextNest(e.SubContext) }
 		x-show={ "filter === 'all' || filter === '" + e.Source + "'" }
 	>
 		<span class="shrink-0 font-mono text-xs tabular-nums text-muted">{ activityTime(e.At) }</span>
 		@activityBadge(e.Kind)
+		if e.SubContext != "" {
+			@subContextBadge(e.SubContext)
+		}
 		if e.IssueID != "" {
 			// An agent row drills into the live invocation view scoped to this issue (T4.21,
 			// control-room.md "drill from … an activity-feed row"). The issue id rides on the
@@ -98,6 +101,26 @@ func activityRowAccent(source string) string {
 		return "border-border-strong bg-canvas"
 	}
 	return "border-border bg-surface"
+}
+
+// subContextNest indents and left-borders a row emitted by a sub-context (the explore tool's
+// nested read-only sub-loop) so the explorer's reasoning/tokens read as nested UNDER the
+// parent invocation rather than as separate parent turns (specs/observability.md live
+// nesting). Empty for a parent-soul row, which then renders exactly as before. The literals
+// are inline in a Go helper (like activityRowAccent) so the Tailwind scanner, which globs
+// *_templ.go, sees the classes.
+func subContextNest(subContext string) string {
+	if subContext == "" {
+		return ""
+	}
+	return "ml-6 border-l-2 border-st-progress"
+}
+
+// subContextBadge marks which pinned model produced a nested row (e.g. "explorer"), so the
+// nesting is carried by text too, not color alone. Kept as a templ switch-free span with an
+// inline class literal for the same Tailwind-scanner reason as activityBadge.
+templ subContextBadge(subContext string) {
+	<span class="shrink-0 rounded-full bg-st-progress-bg px-2 py-0.5 text-xs text-st-progress">{ subContext }</span>
 }
 
 // activityBadge tints an event kind so the feed reads at a glance: agent channels

@@ -2,6 +2,7 @@ package core
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -33,6 +34,22 @@ func TestProvenanceRoundTrip(t *testing.T) {
 			Model:    "claude-opus-4-7",
 			Issue:    "harness-2",
 			Verified: []string{"build"},
+		},
+		"with explore sub-loop (both explorer fields recorded)": {
+			Soul:              "implementor-go",
+			Model:             "claude-opus-4-7",
+			Issue:             "harness-4",
+			Verified:          []string{"build"},
+			ExploreModel:      "claude-haiku",
+			ExploreTranscript: "sha256:ee",
+		},
+		"explore ran but its transcript failed to persist (model still recorded)": {
+			Soul:         "implementor-go",
+			Model:        "claude-opus-4-7",
+			Issue:        "harness-5",
+			ExploreModel: "claude-haiku",
+			// ExploreTranscript empty → renders Explore-Transcript: (none) but the line is
+			// still emitted because the model is set — the degrade-loudly path.
 		},
 		"empty": {},
 	}
@@ -82,6 +99,28 @@ func TestCommitMessageSubject(t *testing.T) {
 	// trailer regardless of the subject above it.
 	if got, ok := ParseCommitMessage(withTitle.CommitMessage()); !ok || got.Issue != "vault-12" {
 		t.Errorf("ParseCommitMessage with a subject = (%+v, %v), want the trailer to parse with Issue vault-12", got, ok)
+	}
+}
+
+// TestTrailerExploreLineOptional pins the backward-compatibility guarantee: a change that ran
+// no explore renders the historical two-line trailer unchanged (no Explorer-Model line), while
+// one that did ran gets exactly one extra line recording both the pinned model and the
+// transcript hash — so the cheap-tier comprehension is auditable without disturbing every
+// pre-explore commit (specs/models.md "Helper souls", specs/components/agent.md rule 5).
+func TestTrailerExploreLineOptional(t *testing.T) {
+	noExplore := Provenance{Soul: "impl", Model: "m", Issue: "i"}
+	if strings.Contains(noExplore.Trailer(), "Explorer-Model") {
+		t.Errorf("no-explore trailer must not carry an Explorer-Model line:\n%s", noExplore.Trailer())
+	}
+	if got := strings.Count(noExplore.Trailer(), "\n"); got != 1 {
+		t.Errorf("no-explore trailer line count: %d newlines, want 1 (two lines)", got)
+	}
+
+	withExplore := Provenance{Soul: "impl", Model: "m", Issue: "i", ExploreModel: "cheap", ExploreTranscript: "sha256:ab"}
+	want := "Explorer-Model: cheap | Explore-Transcript: sha256:ab"
+	trailer := withExplore.Trailer()
+	if !strings.HasSuffix(trailer, "\n"+want) {
+		t.Errorf("explore trailer last line = %q, want it to end with %q", trailer, want)
 	}
 }
 

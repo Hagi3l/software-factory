@@ -513,6 +513,13 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 		// threads it onto the issue's cumulative SpentWall and enforces the cumulative wall
 		// budget across the on_failure loop (see specs/workflow.md).
 		res.Elapsed = elapsed
+		// Stamp the pinned explorer model when the explore sub-loop actually ran, so the merge
+		// provenance trailer records the tier the exploration ran under (specs/models.md "Helper
+		// souls"). Taken from the relay — the trusted chokepoint that pinned it — not the agent.
+		// Unset otherwise, keeping the trailer backward-compatible for the no-explore common case.
+		if em, ok := rel.ExploreModel(); ok {
+			res.ExploreModel = em
+		}
 		r.harvest(ctx, ilog, rel, &res)
 	}
 	return res, invErr
@@ -542,6 +549,19 @@ func (r *Runner) harvest(ctx context.Context, log *slog.Logger, rel *relay, res 
 		ref, err := r.store.Put(ctx, core.ArtifactKindTranscript, bytes.NewReader(transcript))
 		if err != nil {
 			log.ErrorContext(ctx, "runner: harvest transcript", "err", err)
+		} else {
+			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
+		}
+	}
+	// The explore sub-loop's conversation is harvested as its OWN content-addressed artifact,
+	// alongside — never merged into — the main transcript, so the exploration is auditable
+	// evidence in its own right (specs/components/agent.md rule 5). Absent on the common
+	// no-explore invocation; a store failure degrades provenance (no Explore-Transcript hash)
+	// but never fails the candidate, exactly like the main transcript above.
+	if exploreTranscript, ok := rel.ExploreTranscript(); ok {
+		ref, err := r.store.Put(ctx, core.ArtifactKindExploreTranscript, bytes.NewReader(exploreTranscript))
+		if err != nil {
+			log.ErrorContext(ctx, "runner: harvest explore transcript", "err", err)
 		} else {
 			res.Evidence.Artifacts = append(res.Evidence.Artifacts, ref)
 		}

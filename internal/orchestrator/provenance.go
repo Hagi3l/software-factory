@@ -38,6 +38,12 @@ func (o *Orchestrator) provenanceFor(issue core.Issue, res core.Result, report g
 		Verified:     verifiedChecks(report),
 		Traceability: issue.TraceMap,
 		Transcript:   transcriptHash(res),
+		// The explore sub-loop's audit trail: the pinned explorer model the runner stamped when
+		// the sub-loop actually ran, and its own harvested transcript hash. Both empty on the
+		// common no-explore invocation, so the trailer stays two lines; recorded together they
+		// make the cheap-tier comprehension auditable (specs/models.md "Helper souls", T12.4).
+		ExploreModel:      res.ExploreModel,
+		ExploreTranscript: exploreTranscriptHash(res),
 		// The independent test author, threaded onto this issue from the author-tests stage
 		// (like TraceMap). Soul below is the implementor (this issue's own producing soul);
 		// recording both makes producer ≠ verifier auditable from the trailer (T4.22,
@@ -75,6 +81,21 @@ func traceMapHash(res core.Result) string {
 func transcriptHash(res core.Result) string {
 	for _, a := range res.Evidence.Artifacts {
 		if a.Kind == core.ArtifactKindTranscript {
+			return a.Hash
+		}
+	}
+	return ""
+}
+
+// exploreTranscriptHash returns the artifact-store hash of a Result's harvested explore
+// transcript — the explore tool's nested read-only sub-loop conversation the runner stores
+// under core.ArtifactKindExploreTranscript, separately from the main transcript — or "" if the
+// invocation ran no explore (most invocations) or the runner could not persist it. Threaded
+// into the merge trailer beside the parent Transcript so the cheap-tier comprehension is
+// reachable from the read stores, the same way transcriptHash surfaces the parent's (T12.4).
+func exploreTranscriptHash(res core.Result) string {
+	for _, a := range res.Evidence.Artifacts {
+		if a.Kind == core.ArtifactKindExploreTranscript {
 			return a.Hash
 		}
 	}

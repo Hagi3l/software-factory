@@ -342,6 +342,94 @@ func containsStr(s []string, v string) bool {
 	return false
 }
 
+// exploringInvoker dials the broker and makes BOTH a parent completion and an explorer-tagged
+// completion (via the explore sub-completer), so the relay records a parent transcript AND a
+// separate explore transcript for the runner to harvest — exercising the T12.4 evidence path.
+type exploringInvoker struct {
+	called chan struct{}
+	result core.Result
+}
+
+func (i *exploringInvoker) Invoke(ctx context.Context, _ sandbox.Sandbox, _ core.Brief, ep sandbox.Endpoint) (core.Result, error) {
+	c := broker.NewClient(ep.Network, ep.Address)
+	if _, err := c.Complete(ctx, model.Request{Messages: []model.Message{{Role: model.RoleUser, Text: "parent"}}}); err != nil {
+		return core.Result{}, err
+	}
+	if _, err := c.ExploreCompleter("s1").Complete(ctx, model.Request{Messages: []model.Message{{Role: model.RoleUser, Text: "explore"}}}); err != nil {
+		return core.Result{}, err
+	}
+	if i.called != nil {
+		i.called <- struct{}{}
+	}
+	return i.result, nil
+}
+
+// TestHarvestStampsExploreEvidence: when the explore sub-loop ran, the runner harvests the
+// explore transcript as its OWN artifact (kind explore-transcript, distinct from the main
+// transcript) and stamps the pinned explorer model onto the Result — the provenance signal the
+// merge trailer records (specs/components/agent.md rule 5, specs/models.md "Helper souls").
+func TestHarvestStampsExploreEvidence(t *testing.T) {
+	b := &fakeBackend{}
+	inv := &exploringInvoker{
+		called: make(chan struct{}, 2),
+		result: core.Result{Status: core.StatusDone, Branch: core.Branch{Ref: "candidate/iss-1"}},
+	}
+	r, nc := newRunner(t, b, inv)
+
+	resultSub, err := nc.SubscribeSync(messaging.ResultSubject("implement"))
+	if err != nil {
+		t.Fatalf("subscribe results: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan error, 1)
+	go func() { done <- r.Run(ctx) }()
+
+	// A brief with an explorer soul pinned makes the runner build the second (explorer) adapter,
+	// so an explorer-tagged completion is relayed and metered rather than failing closed.
+	brief := testBrief()
+	brief.Explorer = &core.Soul{Name: "explorer-cheap", Role: config.RoleExplorer, Model: "cheap-model", Sandbox: "go-toolchain"}
+	brief.ExploreBudget = core.ExploreBudget{Tokens: 10000}
+	publishWork(t, nc, brief)
+
+	select {
+	case <-inv.called:
+	case <-time.After(5 * time.Second):
+		t.Fatal("invoker was never called")
+	}
+
+	msg, err := resultSub.NextMsg(5 * time.Second)
+	if err != nil {
+		t.Fatalf("waiting for published result: %v", err)
+	}
+	var got core.Result
+	if err := json.Unmarshal(msg.Data, &got); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+
+	// The pinned explorer model is stamped from the relay's authoritative record.
+	if got.ExploreModel != "cheap-model" {
+		t.Errorf("Result.ExploreModel = %q, want cheap-model", got.ExploreModel)
+	}
+	// Both transcripts are harvested as SEPARATE artifacts.
+	var kinds []string
+	for _, a := range got.Evidence.Artifacts {
+		kinds = append(kinds, a.Kind)
+		if has, _ := r.store.Has(ctx, a.Hash); !has {
+			t.Errorf("artifact %s (%s) not present in the store", a.Kind, a.Hash)
+		}
+	}
+	if !containsStr(kinds, core.ArtifactKindTranscript) || !containsStr(kinds, core.ArtifactKindExploreTranscript) {
+		t.Errorf("harvested artifact kinds = %v, want both transcript + explore-transcript", kinds)
+	}
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Errorf("Run returned error: %v", err)
+	}
+}
+
 // A Result carrying a test↔spec traceability map (the author-tests stage produces one) is
 // harvested to the artifact store under the traceability-map kind, and the structured form
 // is cleared from the envelope so the bulky map travels by hash, not inline (see

@@ -30,6 +30,12 @@ type Entry struct {
 	Kind    string
 	Detail  string
 	At      time.Time
+	// SubContext labels which of an invocation's pinned models produced an agent row: empty
+	// for the parent soul, "explorer" for the explore tool's nested read-only sub-loop. The
+	// view nests a sub-context row under the parent invocation so the explorer's reasoning/
+	// tokens read as nested comprehension, not as separate parent turns (specs/messaging.md,
+	// specs/observability.md). Empty on system rows and on pre-T12.4 parent events.
+	SubContext string
 }
 
 const (
@@ -74,9 +80,10 @@ func NewActivity(max int) *Activity {
 // wireEvent is the shape the runner and agents publish on the agent-events subject:
 // a type discriminator plus either a streamed token delta or an opaque payload.
 type wireEvent struct {
-	Type    string          `json:"type"`
-	Delta   string          `json:"delta"`
-	Payload json.RawMessage `json:"payload"`
+	Type       string          `json:"type"`
+	Delta      string          `json:"delta"`
+	SubContext string          `json:"subContext,omitempty"`
+	Payload    json.RawMessage `json:"payload"`
 }
 
 // Record ingests one agent-event for agentID (the invocation id), tagged with the issue id +
@@ -100,10 +107,11 @@ func (a *Activity) Record(agentID, issueID, role string, payload []byte) {
 	// Coalesce a run of token/reasoning deltas from the same agent into the newest entry,
 	// so a single model turn reads as one continuously-updating line rather than thousands.
 	// Token and reasoning never merge into each other (the kinds must match), so "thinking"
-	// and "saying" stay as separate rows.
+	// and "saying" stay as separate rows. The sub-context must match too, so an explorer's
+	// reasoning is never folded into the parent's reasoning line (they nest separately).
 	if (kind == "token" || kind == "reasoning") && len(a.entries) > 0 {
 		last := &a.entries[len(a.entries)-1]
-		if last.Kind == kind && last.AgentID == agentID && last.Source == SourceAgent {
+		if last.Kind == kind && last.AgentID == agentID && last.Source == SourceAgent && last.SubContext == ev.SubContext {
 			last.Detail = tailRunes(last.Detail+ev.Delta, activityRollingMax)
 			last.At = now
 			a.seq++
@@ -112,7 +120,7 @@ func (a *Activity) Record(agentID, issueID, role string, payload []byte) {
 		}
 	}
 
-	e := Entry{Source: SourceAgent, AgentID: agentID, IssueID: issueID, Role: role, Kind: kind, At: now}
+	e := Entry{Source: SourceAgent, AgentID: agentID, IssueID: issueID, Role: role, Kind: kind, SubContext: ev.SubContext, At: now}
 	switch kind {
 	case "token", "reasoning":
 		e.Detail = tailRunes(ev.Delta, activityRollingMax)

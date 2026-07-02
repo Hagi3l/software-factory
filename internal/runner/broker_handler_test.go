@@ -366,6 +366,142 @@ func TestRelayCapturesPromptAndTranscript(t *testing.T) {
 	}
 }
 
+// TestRelayExploreCapturedSeparatelyFromParentTranscript proves the T12.4 invariant: an
+// explorer completion lands in the SEPARATE explore transcript (harvested on its own hash),
+// never in the parent transcript, and never overwriting the parent's captured prompt. The
+// pinned explorer model becomes available only once the sub-loop actually ran.
+func TestRelayExploreCapturedSeparatelyFromParentTranscript(t *testing.T) {
+	parent := &recordingAdapter{resp: model.Response{Text: "parent", Stop: model.StopEndTurn}}
+	explore := &recordingAdapter{resp: model.Response{Text: "explored", Stop: model.StopEndTurn}}
+	r := testRelayWithExplore(parent, explore, core.ExploreBudget{Tokens: 1000})
+
+	// Before any explore call there is nothing to harvest and no pinned model to record.
+	if _, ok := r.ExploreTranscript(); ok {
+		t.Error("ExploreTranscript available before any explorer completion")
+	}
+	if m, ok := r.ExploreModel(); ok {
+		t.Errorf("ExploreModel = %q available before any explorer completion; want ok=false", m)
+	}
+
+	parentReq := model.Request{Messages: []model.Message{{Role: model.RoleUser, Text: "parent-prompt"}}}
+	if _, err := r.Complete(context.Background(), parentCall(parentReq)); err != nil {
+		t.Fatalf("parent Complete: %v", err)
+	}
+	exploreReq := model.Request{Messages: []model.Message{{Role: model.RoleUser, Text: "explore-question"}}}
+	if _, err := r.Complete(context.Background(), exploreCall("explore-1", exploreReq)); err != nil {
+		t.Fatalf("explore Complete: %v", err)
+	}
+
+	// The parent transcript holds ONLY the parent turn — the explorer exchange must not leak in.
+	parentData, ok := r.Transcript()
+	if !ok {
+		t.Fatal("parent Transcript not captured")
+	}
+	var parentTurns []model.TranscriptTurn
+	if err := json.Unmarshal(parentData, &parentTurns); err != nil {
+		t.Fatalf("unmarshal parent transcript: %v", err)
+	}
+	if len(parentTurns) != 1 || parentTurns[0].Request.Messages[0].Text != "parent-prompt" {
+		t.Fatalf("parent transcript = %+v, want exactly the one parent turn", parentTurns)
+	}
+
+	// The captured prompt is the parent's, not the explorer's question.
+	promptData, ok := r.Prompt()
+	if !ok {
+		t.Fatal("Prompt not captured")
+	}
+	var gotPrompt model.Request
+	if err := json.Unmarshal(promptData, &gotPrompt); err != nil {
+		t.Fatalf("unmarshal prompt: %v", err)
+	}
+	if gotPrompt.Messages[0].Text != "parent-prompt" {
+		t.Errorf("captured prompt = %+v, want the parent request (explorer must not overwrite it)", gotPrompt)
+	}
+
+	// The explore transcript holds ONLY the explorer turn.
+	exploreData, ok := r.ExploreTranscript()
+	if !ok {
+		t.Fatal("ExploreTranscript not captured after an explorer completion")
+	}
+	var exploreTurns []model.TranscriptTurn
+	if err := json.Unmarshal(exploreData, &exploreTurns); err != nil {
+		t.Fatalf("unmarshal explore transcript: %v", err)
+	}
+	if len(exploreTurns) != 1 || exploreTurns[0].Request.Messages[0].Text != "explore-question" {
+		t.Fatalf("explore transcript = %+v, want exactly the one explorer turn", exploreTurns)
+	}
+
+	// The pinned explorer model is now recordable — the "explore happened" provenance signal.
+	m, ok := r.ExploreModel()
+	if !ok || m != "cheap" {
+		t.Errorf("ExploreModel = (%q, %v), want (cheap, true)", m, ok)
+	}
+}
+
+// TestRelayExploreEventsCarrySubContext proves explorer live events are labeled with the
+// explorer sub-context (so the control room nests them), while the parent's own events stay
+// unlabeled — the wire half of the observability nesting.
+func TestRelayExploreEventsCarrySubContext(t *testing.T) {
+	parent := &recordingAdapter{deltas: []string{"p"}, resp: model.Response{Stop: model.StopEndTurn}}
+	explore := &recordingAdapter{
+		deltas:    []string{"e"},
+		reasoning: []string{"think"},
+		resp:      model.Response{Stop: model.StopEndTurn, ToolCalls: []model.ToolCall{{Name: "read_file"}}},
+	}
+	pub := &recordingPublisher{}
+	r := newRelay(parent, pub, &bundleSandbox{}, relayConfig{
+		eventSubject:   "harness.agent.inv-1.events",
+		issueID:        "iss-1",
+		role:           "implementor",
+		repo:           "/repo",
+		allowedBranch:  "candidate/iss-1",
+		log:            discardLogger(),
+		model:          "frontier",
+		exploreAdapter: explore,
+		exploreModel:   "cheap",
+		exploreBudget:  core.ExploreBudget{Tokens: 1000},
+	})
+
+	if _, err := r.Complete(context.Background(), parentCall(model.Request{})); err != nil {
+		t.Fatalf("parent Complete: %v", err)
+	}
+	if _, err := r.Complete(context.Background(), exploreCall("explore-1", model.Request{})); err != nil {
+		t.Fatalf("explore Complete: %v", err)
+	}
+
+	type ev struct {
+		Type       string `json:"type"`
+		SubContext string `json:"subContext"`
+	}
+	var parentEvents, explorerEvents int
+	pub.mu.Lock()
+	data := append([][]byte(nil), pub.data...)
+	pub.mu.Unlock()
+	for _, d := range data {
+		_, payload := decodeEvent(t, d)
+		var e ev
+		if err := json.Unmarshal(payload, &e); err != nil {
+			t.Fatalf("unmarshal inner event: %v", err)
+		}
+		switch e.SubContext {
+		case "":
+			parentEvents++
+		case string(broker.SubContextExplorer):
+			explorerEvents++
+		default:
+			t.Errorf("unexpected sub-context %q on event %+v", e.SubContext, e)
+		}
+	}
+	// Parent published one token event; explorer published token + reasoning + tool = 3, all
+	// tagged explorer.
+	if parentEvents != 1 {
+		t.Errorf("parent-tagged events = %d, want 1", parentEvents)
+	}
+	if explorerEvents != 3 {
+		t.Errorf("explorer-tagged events = %d, want 3 (token+reasoning+tool)", explorerEvents)
+	}
+}
+
 // --- GitPush -----------------------------------------------------------------
 
 func TestRelayGitPushRefusesNonTaskBranch(t *testing.T) {
