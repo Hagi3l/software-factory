@@ -1,12 +1,18 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log/slog"
+	"os"
 	"path/filepath"
 	"sort"
 
+	"github.com/Loxstomper/harness/internal/agent"
+	"github.com/Loxstomper/harness/internal/broker"
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/controlroom/query"
+	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/secret"
 )
 
@@ -175,6 +181,89 @@ func pushMinter(cfg *config.Config) secret.Minter {
 		Repository:     app.Repository,
 		KeyPath:        app.PrivateKey,
 	})
+}
+
+// soulEnablesTool reports whether a soul's `tools` allowlist names tool — the per-role tool
+// enablement surface (specs/components/agent.md "Per-role tool enablement"). Today only `explore`
+// is gated this way (the workspace/lifecycle tools are still offered to every soul), so an empty
+// allowlist enables nothing extra rather than disabling the base tools; wiring the full allowlist
+// through is a later config-policy task. It is the parent-soul opt-in half of the explore gate:
+// planner/implementor opt in, and the verify path only through a diverse explorer (T12.5).
+func soulEnablesTool(s core.Soul, tool string) bool {
+	for _, t := range s.Tools {
+		if t == tool {
+			return true
+		}
+	}
+	return false
+}
+
+// exploreToolFor decides whether an invocation offers the `explore` tool and, if so, builds it.
+// It is the per-role enablement gate (T12.5): explore is offered only when the soul opted in via
+// its `tools` allowlist (planner/implementor are the obvious beneficiaries; the verify path only
+// via a diverse explorer) AND the trusted dispatch pinned an explorer for the issue
+// (inv.Brief.Explorer != nil — set by the orchestrator when policy.explore_budget is on and an
+// `explorer` soul matches the issue's tags). It returns (tool, true) when offered, (nil, false)
+// otherwise. A build failure for an enabled invocation (an unreadable explorer persona, a
+// non-broker completer under test) logs and returns (nil, false): explore is additive, never
+// load-bearing, so it degrades to no explore rather than failing the invocation
+// (specs/components/agent.md "Per-role tool enablement", specs/configuration.md).
+func exploreToolFor(inv agent.Invocation, sessions *agent.Sessions, log *slog.Logger) (agent.Tool, bool) {
+	if inv.Brief.Explorer == nil || !soulEnablesTool(inv.Brief.Soul, "explore") {
+		return nil, false
+	}
+	tool, err := buildExploreTool(inv, sessions, log)
+	if err != nil {
+		log.WarnContext(context.Background(), "run: explore enabled but tool build failed; dispatching without explore",
+			"issue", inv.Brief.Issue.ID, "err", err)
+		return nil, false
+	}
+	return tool, true
+}
+
+// exploreCompleterSource adapts a *broker.Client to agent.ExplorerCompleterSource. The broker
+// package cannot import agent (agent imports broker), so Client.ExploreCompleter returns the
+// concrete *broker.SubCompleter; this thin wrapper widens it to the agent.Completer interface the
+// explore tool's seam expects. It lives in the composition root — the one layer that sees both
+// packages — exactly like the other broker↔agent wiring here.
+type exploreCompleterSource struct{ c *broker.Client }
+
+func (s exploreCompleterSource) ExploreCompleter(stream string) agent.Completer {
+	return s.c.ExploreCompleter(stream)
+}
+
+// buildExploreTool constructs the `explore` tool for an invocation whose soul opted in and whose
+// Brief carries a pinned explorer (both guaranteed by the caller). It reads the explorer soul's
+// persona off the host — the path is absolute by dispatch time (resolvePersonas), exactly as the
+// loop's bootSoul reads the parent soul's — maps the Brief's fixed ExploreBudget onto the sub-loop's
+// Budget (Turns→MaxTurns, Tokens→MaxTokens), and hands the explorer the parent's already-resolved
+// spec slice as its project map: the ambient specs + bounded slice are the "question + worktree +
+// ambient specs" the explorer needs as its map, deliberately NOT the parent's conversation
+// (specs/components/agent.md "Explore"). It reuses the invocation's warm LSP sessions so the
+// sub-loop's read tools hit the same servers the parent's do (no reseed, no cold start).
+//
+// The completer source is the invocation's real broker client (inv.Completer and inv.Broker are the
+// same brokerConn the loop builds — see internal/agent/loop.go), the one seam that can mint an
+// explorer-tagged, per-stream completer the runner routes to the pinned explorer model and meters
+// against policy.explore_budget (T12.2). The type assertion is guarded so a non-broker completer (a
+// unit-test fake) degrades to no explore rather than panicking — explore is additive, never load-bearing.
+func buildExploreTool(inv agent.Invocation, sessions *agent.Sessions, log *slog.Logger) (agent.Tool, error) {
+	client, ok := inv.Completer.(*broker.Client)
+	if !ok {
+		return nil, fmt.Errorf("explore: invocation completer is %T, not *broker.Client", inv.Completer)
+	}
+	persona, err := os.ReadFile(inv.Brief.Explorer.Persona)
+	if err != nil {
+		return nil, fmt.Errorf("explore: read explorer persona %s: %w", inv.Brief.Explorer.Persona, err)
+	}
+	exp := agent.Explorer{
+		Persona: string(persona),
+		Budget: agent.Budget{
+			MaxTurns:  inv.Brief.ExploreBudget.Turns,
+			MaxTokens: inv.Brief.ExploreBudget.Tokens,
+		},
+	}
+	return agent.ExploreTool(exp, inv.Sandbox, sessions, exploreCompleterSource{client}, inv.Brief.Spec, log), nil
 }
 
 // roleIsAgentStage reports whether role is fulfilled by an agent stage in the DAG.

@@ -476,6 +476,12 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			agent.RunGateTool(inv.Sandbox, selfCheckChecks, testEvidence),
 		)
 		tools = append(tools, agent.LifecycleTools(inv.Brief, inv.Broker, ledger)...)
+		// Explore (T12.1/T12.5) is per-role: offered only when the soul opted in AND the dispatch
+		// pinned an explorer for the issue (see exploreToolFor). It reuses the same warm LSP
+		// sessions the workspace tools do, so the sub-loop's read tools hit hot servers.
+		if tool, ok := exploreToolFor(inv, sessions, log); ok {
+			tools = append(tools, tool)
+		}
 		cleanup := func() {
 			harvestTestEvidence(context.Background(), store, testEvidence, log)
 			sessions.Close()

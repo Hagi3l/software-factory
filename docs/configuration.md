@@ -270,6 +270,25 @@ sandboxed-soul analog of the wizard's `requirements_planner.max_tool_turns`.
 > `explorer` soul must exist. A second explorer on a different model family (routed by a
 > `selector` tag) is the recommended way to keep the verify path's blind spots from correlating
 > with the producer's.
+>
+> **Per-role enablement.** `explore` is not offered to every soul — a soul opts in by listing
+> `explore` in its own `tools` allowlist (the per-role tool-enablement surface; see
+> [components/agent.md](../specs/components/agent.md#open-questions)). Planner and implementor are
+> the obvious beneficiaries (broad localization before editing); the verify path (qa/security) is a
+> deliberate call, gated by the advisory below. The tool is actually built for an invocation only
+> when the soul opts in **and** the dispatch pinned an explorer for the issue (feature on + a
+> matching `explorer` soul); otherwise the soul runs without it at no cost — explore is additive,
+> never load-bearing.
+>
+> **Verify-path explorer diversity (advisory).** A distiller frames how its caller thinks, so if the
+> *same* explorer serves both the producer and the qa/security path, a systematic explorer blind
+> spot becomes a **correlated** one — quietly eroding `producer ≠ verifier`. `harness validate`
+> emits a non-fatal **warning** (the same family-overlap advisory as model diversity) when explore
+> is enabled, a producer and its downstream verifier gate both enable `explore`, and every
+> `explorer` soul resolves to a single model family (so the verify path cannot be routed to a
+> diverse explorer). The recommended fix is a second `explorer` soul on a different model family
+> routed to the verify path by a `selector` tag (e.g. `verify=1`), or giving the verify path no
+> explore at all. Like model diversity it is recommended, not forced.
 
 > **Model diversity** (`producer ≠ verifier` strengthened): the harness *enables and
 > recommends* running the verifier on a different model family than the producer, but
