@@ -326,7 +326,7 @@ candidate downstream, not a bad merge — it opens no new trust hole.
 - Per-role tool *enablement* defaults (which souls get `run`, network access, etc.)
   — config detail, see [../configuration.md](../configuration.md). `explore` is part of
   this surface: planner and implementor are the obvious beneficiaries (broad
-  localization); whether the **verify path** (qa/security) gets it, and on a
-  *diverse* explorer soul to avoid correlating its blind spots with the producer's, is a
-  config-policy call — see [../verification.md](../verification.md) and
-  [../configuration.md](../configuration.md).
+  localization). Whether the **verify path** (qa/security) gets it is a per-deployment
+  config call, and a *shared, same-family* explorer there is acceptable — explore is
+  additive and never load-bearing, so the decision is recorded in
+  [../verification.md](../verification.md); reading raw remains the stricter option.

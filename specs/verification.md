@@ -110,15 +110,24 @@ split that happens to share one gateway. The warning's natural home is `harness
 validate` (so yaml-only users see it); a control-room tooltip is a complementary
 surface once a souls/config view exists.
 
-The same reasoning extends to the [`explore` tool](components/agent.md#explore--distilled-comprehension)
-when the verify path is allowed to use it. A distiller frames how its caller thinks, so a
-verifier sharing the *same* explorer soul as the producer can inherit the producer's
-navigation blind spots — a correlated error through a shared upstream, exactly what soul and
-model independence exist to prevent. So the recommendation is a **diverse explorer on the
-verify path** (a second `explorer` soul on a different family, routed by tag — see
-[configuration.md](configuration.md)), or no explore for verifiers at all. Like model
-diversity it is recommended, not forced: explore is read-only and additive, and the qa
-candidate is re-graded regardless, so this tunes independence rather than gating it.
+The reasoning extends only *weakly* to the
+[`explore` tool](components/agent.md#explore--distilled-comprehension) on the verify path,
+and the decision (2026-07-02) is that a **shared, same-family explorer is acceptable
+there**. The theoretical risk is correlated attention-steering: a distiller frames how its
+caller thinks, so a verifier sharing the producer's explorer could inherit its navigation
+blind spots. But explore is additive and never load-bearing by contract
+([components/agent.md](components/agent.md)): the verdict comes from the gate's
+deterministic checks, which have no attention to steer; the verifier keeps every raw
+comprehension tool and the candidate is re-graded in a fresh sandbox regardless; a weak or
+blinkered explore answer costs a wasted search, never a false pass. Mandating family
+diversity for the *helper* would buy a second-order independence gain at the price of a
+second cheap-model entry plus stage-scoped selector routing the harness has no other use
+for. Deployments wanting a stricter posture have two config-only options: a second
+`explorer` soul on a different family with a distinguishing selector, or **no explore on
+the verify path at all** (the verifier reads raw — fully independent). `harness validate`
+does **not** advise on explorer family overlap — the family-overlap advisory covers the
+producer/verifier *main* models, where the model *is* the grader's judgment, not a
+recoverable helper.
 
 ### Producer self-checks are feedback, not grades
 

@@ -24,7 +24,6 @@ func (c *Config) Warnings() []string {
 	}
 
 	c.warnModelDiversity(warn)
-	c.warnExploreDiversity(warn)
 	c.warnPackageProxy(warn)
 	c.warnGitPush(warn)
 	c.warnEffortNoOp(warn)
@@ -155,71 +154,12 @@ func (c *Config) warnModelDiversity(warn func(string, ...any)) {
 	}
 }
 
-// warnExploreDiversity extends the producer/verifier family advisory to the explore tool
-// (T12.5, specs/verification.md, specs/configuration.md "Verify-path diversity"). A distiller
-// frames how its caller thinks, so when the SAME explorer serves both a producer and its
-// verifier, a systematic explorer blind spot becomes a CORRELATED one — quietly eroding
-// producer≠verifier the same way a same-family producer/verifier pair does. The recommended
-// policy is a second explorer soul on a different model family routed to the verify path by a
-// tag (or no explore for verifiers at all); like model diversity it is recommended, not forced.
-//
-// The explorer is chosen per-issue by the same selector algorithm over the ONE reserved
-// `explorer` role — it is not bound to a DAG role — so the family diversity of the whole explorer
-// pool is what decides whether a verify-path issue can be routed to a distinct explorer. A pool
-// spanning >=2 families gives the operator a diverse verify-path explorer to route to (validation
-// forbids two explorers sharing a selector, so a second explorer necessarily differs by tag), so
-// nothing is advised; a single-family pool cannot, so any verify-path explorer inevitably shares
-// the producer's family. The advisory fires only where the risk is real: explore is switched on
-// (policy.explore_budget), and BOTH a producer path and its downstream verifier gate actually
-// enable `explore` in their souls' allowlists (T12.5's per-role enablement) — an explorer that
-// serves neither, or only one, of the two paths carries no shared upstream to correlate.
-func (c *Config) warnExploreDiversity(warn func(string, ...any)) {
-	if c.Harness == nil || c.Infra == nil || !c.Harness.Policy.ExploreBudget.Enabled() {
-		return
-	}
-	// An empty pool is already a Validate error (explore enabled needs an explorer soul); only a
-	// single-family pool is the correlated case a diverse verify-path explorer would fix.
-	explorerFams := c.roleFamilies(RoleExplorer)
-	if len(explorerFams) != 1 {
-		return
-	}
-	fam := sortedSet(explorerFams)[0]
-	dag := c.Harness.DAG
-	for _, pname := range sortedKeys(dag) {
-		pst := dag[pname]
-		// A producer path with no explore enabled has no producer explorer for a verifier to inherit.
-		if !c.isProducerStage(pst) || !c.roleEnablesTool(pst.Role, "explore") {
-			continue
-		}
-		for _, vname := range sortedSet(c.downstreamStages(pname)) {
-			vst := dag[vname]
-			if !c.isGateStage(vst) || vst.Role == pst.Role || !c.roleEnablesTool(vst.Role, "explore") {
-				continue
-			}
-			warn("producer role %q and verify-path role %q both enable `explore`, and every %q soul resolves to model family %q; one explorer serving both paths turns a systematic blind spot into a correlated one, eroding the producer≠verifier independence specs/verification.md recommends — add a second `explorer` soul on a different model family routed to the verify path by a selector tag, or give the verify path no explore",
-				pst.Role, vst.Role, RoleExplorer, fam)
-		}
-	}
-}
-
-// roleEnablesTool reports whether any soul fulfilling role opts tool into its `tools` allowlist —
-// the per-role tool enablement surface (T12.5, specs/components/agent.md "Per-role tool
-// enablement"). It scopes the verify-path explorer advisory to the paths that actually invoke
-// explore, so a config that enables the feature but leaves a verifier without `explore` is not
-// falsely flagged.
-func (c *Config) roleEnablesTool(role, tool string) bool {
-	for _, s := range c.Souls {
-		if s.Role != role {
-			continue
-		}
-		for _, t := range s.Tools {
-			if t == tool {
-				return true
-			}
-		}
-	}
-	return false
-}
+// NOTE: there is deliberately no explore-family advisory. The family-overlap advisory
+// above covers the producer/verifier MAIN models, where the model is the grader's
+// judgment; a shared same-family explorer on the verify path is an accepted
+// configuration — explore is additive and never load-bearing, so a correlated explorer
+// blind spot degrades a verifier's search, never its grade (decision recorded in
+// specs/verification.md; the T12.5 advisory was removed with it).
 
 // isProducerStage reports whether a stage is a producer in the N-version sense: an agent
 // stage gated by the red→green proof, i.e. the implementor that must turn the

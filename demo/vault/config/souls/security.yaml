@@ -11,9 +11,15 @@
 # N-version note: the demo registers a single model, so producer and verifier share a model
 # family — `harness validate` emits a non-fatal advisory. Point this soul at a different
 # provider/family (a config edit, never code) to harden once a second model is wired.
+#
+# explore: enabled, on the same shared vault-explorer the producers use — a deliberate,
+# spec-recorded choice (specs/verification.md): explore is additive and never load-bearing,
+# so a shared explorer can degrade this soul's *search*, never the gate's *grade* (the
+# scanners and re-run postconditions are deterministic). Drop `explore` from tools to
+# read raw instead — the stricter posture.
 name:    vault-security
 role:    security
 model:   "anthropic/claude-sonnet-5"
 persona: souls/prompts/security.md
-tools:   [fs, shell, git]
+tools:   [fs, shell, git, explore]
 sandbox: vault-toolchain

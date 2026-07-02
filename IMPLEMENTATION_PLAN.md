@@ -989,6 +989,28 @@ is TCB except where noted; all behind unit tests, `make check` green.
   effect on a live vault re-run** (the counters make it measurable); interacts with T13.3's
   walls — aging slightly raises turn count (occasional re-reads) while cutting per-turn cost.
   ([components/agent.md](specs/components/agent.md), [observability.md](specs/observability.md))
+- [x] **T13.6 Decision: same-family verify-path explorer accepted — advisory removed, demo qa
+  gets explore** — *done.* Operator decision (2026-07-02): a shared, same-family explorer on the
+  verify path is acceptable — explore is **additive and never load-bearing** (agent.md contract),
+  so a correlated explorer blind spot can degrade a verifier's *search*, never its *grade* (the
+  gate's checks are deterministic and the candidate is re-graded in a fresh sandbox regardless);
+  mandating helper diversity bought a second-order independence gain at the cost of a second
+  cheap-model entry + stage-scoped selector routing with no other use. **Spec updated first**:
+  verification.md (the explore paragraph now records the decision + reasoning; strict options —
+  diverse second explorer, or no explore on verify — remain as pure config), configuration.md
+  ("Verify-path explore is a policy choice"; the family advisory explicitly does NOT extend to
+  explorers), agent.md OPEN-questions bullet trimmed to the still-open enablement-defaults part.
+  **Code**: removed the T12.5 `warnExploreDiversity` advisory + its `roleEnablesTool` helper
+  (`internal/config/warnings.go`, only they used each other) + `explore_diversity_test.go`; a
+  NOTE in warnings.go records why there is deliberately no explore-family advisory (the T2.13
+  main-model advisory stays — there the model IS the grader's judgment). docs/configuration.md
+  explore section rewritten to match. **Demo**: `vault-security` now enables `explore` on the
+  shared `vault-explorer` (the thing T12.6 could not wire honestly under the old
+  recommendation — this decision supersedes T12.6's deviation note and obsoletes the
+  stage-specific-selector-tags follow-up, dropped above); README differences row updated.
+  `harness validate --config demo/vault/config` = OK, 6 souls, 3 models; only the T2.13
+  main-model family advisory fires (as designed). ([verification.md](specs/verification.md),
+  [configuration.md](specs/configuration.md))
 
 ---
 
@@ -1000,7 +1022,10 @@ is TCB except where noted; all behind unit tests, `make check` green.
 - Client-side live wall/token ticker on the invocation budget meter (mid-invocation spend isn't persisted to beads) *(from T4.21)*.
 - Decomposition-preview dry-run before APPROVE (control-room.md OPEN, "leaning defer"; seed issues stay coarse and the autonomous planner decomposes) *(from T4.14)*.
 - **First-party thinking-block preservation** *(from the 2026-07-02 demo-prep pass)*. Through the openai-compat/OpenRouter path, Claude's interleaved thinking blocks are dropped between tool turns, so a deep-reasoning role (the Opus test-author) re-derives its plan from scratch each turn — a quality *and* token cost. The first-party `anthropic` adapter (already built) can preserve them across a tool loop. Strategic framing: the harness stays provider-unaware, but the frontier-Claude path should be **first-party by default** with compat as the portability fallback — this, native `effort`, and native cache-TTL control all being first-class there. A deployment/config choice plus verifying the anthropic adapter round-trips thinking blocks through the loop; no architecture change. Weigh against OpenRouter's single-key convenience for the demo.
-- **Stage-specific selector tags for a routed diverse verify-path explorer** *(from T12.6)*. specs/configuration.md + verification.md recommend routing the verify path to a *different-family* `explorer` soul via a `verify=1` selector, but an issue's `Tags` thread forward **unchanged** across all of a child's stages (`internal/orchestrator/results.go`) and there is no per-stage/role tag, so a `verify=1` selector cannot pick out *only* the qa stage of a child — tagging the child routes its producer stages too. The vault demo therefore gives the verify path **no explore** (the spec's stricter, fully-independent alternative), which is also the better fit (explore is producer-side localization; the gate re-grades raw). Wiring a *routed* diverse verify-path explorer needs a stage/role-scoped selector input (e.g. the orchestrator exposing the issue's role to the explorer selector, or per-stage tag overrides) — a small orchestrator/selector change, deferred until a deployment actually wants explore on the verify path. Until then the T12.5 static advisory correctly stays silent (no verifier opts into explore).
+- ~~Stage-specific selector tags for a routed diverse verify-path explorer~~ **Dropped by the
+  T13.6 decision** (same-family verify-path explorer accepted): routed explorer diversity was this
+  item's only motivation, so the stage/role-scoped selector input is no longer needed by anything.
+  If a future feature wants per-stage soul routing for its own reasons, design it fresh then.
 
 ## Open decisions affecting the plan
 

@@ -249,11 +249,12 @@ func (o *Orchestrator) selectSoul(issue core.Issue) (core.Soul, bool) {
 
 // selectExplorer picks the helper soul the explore tool runs on for this issue, by the SAME
 // selector algorithm as selectSoul but over the reserved `explorer` role instead of the issue's
-// DAG role (the explorer is invoked as a tool, never scheduled). The issue's tags route it, so a
-// verify-path issue tagged e.g. `verify=1` can select a diverse explorer soul to avoid
-// correlating its blind spots with the producer's (specs/configuration.md "Verify-path
-// diversity"; the enablement policy is T12.5). Absent an `explorer` soul it returns (zero, false)
-// and buildBrief leaves the Brief without an explorer — explore is off for that issue.
+// DAG role (the explorer is invoked as a tool, never scheduled). The issue's tags route it, so
+// a deployment that configures a second explorer soul can still steer tagged issues to it —
+// though a single shared explorer serving every path (incl. verify) is an accepted
+// configuration (specs/verification.md; the enablement policy is T12.5). Absent an `explorer`
+// soul it returns (zero, false) and buildBrief leaves the Brief without an explorer — explore
+// is off for that issue.
 func (o *Orchestrator) selectExplorer(issue core.Issue) (core.Soul, bool) {
 	return o.selectSoulForRole(issue, config.RoleExplorer)
 }

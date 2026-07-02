@@ -265,7 +265,7 @@ as a tool, not scheduled as a stage), so it is exempt from the "every soul's rol
 stage" rule below. Otherwise it is an ordinary soul: a cheap `model`, an explore `persona`, a
 read-only `tools` allowlist (the comprehension subset; **never** `explore` itself — no
 recursion), and a `selector`. It is selected per issue by the **same selector algorithm** as
-any role, so the issue's threaded tags can route to a diverse explorer:
+any role, so a deployment with more than one explorer can route tagged issues between them:
 
 ```yaml
 name:     explorer                     # the producer-path default
@@ -277,15 +277,16 @@ tools:    [find_symbol, references, definition, implementation, hover, diagnosti
 selector: {}                           # catch-all default
 ```
 
-**Verify-path diversity (recommended).** A distiller's summary frames how its caller thinks,
-so if the *same* explorer serves both the producer and the qa/security path, a systematic
-explorer blind spot becomes a **correlated** one — quietly eroding producer≠verifier
-([verification.md](verification.md)). The recommended policy is a **second explorer soul on a
-different [model family](#infraenvyaml--environment)**, routed to the verify path by a tag
-(e.g. a `verify=1` selector), so their blind spots don't correlate. Giving the verify path
-*no* explore (it reads raw, fully independent) is the stricter alternative. This is
-config-policy the harness recommends but does not force — the same stance as model diversity
-generally (the family-overlap [advisory](#advisories--non-fatal-warnings) extends to it).
+**Verify-path explore is a policy choice — a shared, same-family explorer is fine.** One
+explorer serving both the producer and the qa/security path is acceptable: explore is
+additive and never load-bearing, so a correlated explorer blind spot can degrade a
+verifier's *search*, never its *grade* — [verification.md](verification.md) records the
+decision and the reasoning. Stricter postures stay available as pure config: a second
+explorer soul on a different [model family](#infraenvyaml--environment) with a
+distinguishing selector, or giving the verify path *no* `explore` at all (it reads raw,
+fully independent). The family-overlap [advisory](#advisories--non-fatal-warnings) does
+**not** extend to explorers — it covers the producer/verifier *main* models, where family
+overlap weakens the grade itself.
 
 ---
 
