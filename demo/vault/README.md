@@ -79,7 +79,8 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
     strong tool-protocol following keeps the alignment ledger reliable), the **implementor**,
     and the **merge-resolver**. This tier runs at `effort: medium` (sent as OpenRouter
     `verbosity`, the field Claude 4.6+/5 map to `output_config.effort`) to trim deliberation
-    and cost; the Opus roles stay at their default. `MODEL=` swaps this shared Sonnet slug
+    and cost; the Opus roles pin `effort: high` — full deliberation on the tier that defines
+    correctness, by declaration rather than provider default. `MODEL=` swaps this shared Sonnet slug
     across those roles (an OpenRouter slug) without touching the pinned Opus roles or the
     DeepSeek verifier. The wizard's model is `requirements_planner.model` in
     `config/harness.yaml`.

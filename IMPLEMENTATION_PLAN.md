@@ -1028,7 +1028,11 @@ is TCB except where noted; all behind unit tests, `make check` green.
   needed AND accepted"); `cache_read_per_mtok: 0.0036` keeps USD accounting accurate.
   `run.sh`'s `MODEL=` Sonnet-tier rewrite no longer touches security (comment updated);
   README intro + model-tier section updated. Config-only — no Go change, no spec change
-  (verification.md already records "diversity is configured, not mandated").
+  (verification.md already records "diversity is configured, not mandated"). **Follow-on
+  tweak (same session):** the Opus entry now PINS `effort: high` + `effort_param: verbosity`
+  (planner + test-author run at full deliberation by declaration, not provider default); the
+  implementor's medium was already set on the shared Sonnet entry. Note `effort` is a
+  model-entry field, so it applies per registry key, not per soul.
   ([configuration.md](specs/configuration.md), [verification.md](specs/verification.md))
 
 ---

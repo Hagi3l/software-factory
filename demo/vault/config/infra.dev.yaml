@@ -77,13 +77,14 @@ models:
   #   - deepseek/deepseek-v4-pro for the security/qa verifier — a different model FAMILY than
   #     every producer (real N-version diversity, see its entry below) at a fraction of the cost.
   #
-  # Both keys are OpenRouter slugs, sent verbatim as the request's model id; the openai-compat
-  # adapter posts them to OpenRouter with OPENAI_API_KEY as the bearer token. The Sonnet-5 entry
-  # sets `effort: medium` with `effort_param: verbosity` — on the openai-compat path the effort
-  # level rides as OpenRouter's top-level `verbosity` field, which is what Claude 4.6+/5 map to
-  # output_config.effort (their `reasoning.effort` is a silent no-op, so effort_param picks the
-  # field that actually lands). Opus omits effort and runs at its default (high) — we don't dial
-  # down the correctness-defining tier. `prompt_caching: true` opts both into prompt caching:
+  # The keys are OpenRouter slugs, sent verbatim as the request's model id; the openai-compat
+  # adapter posts them to OpenRouter with OPENAI_API_KEY as the bearer token. Effort rides as
+  # OpenRouter's top-level `verbosity` field (`effort_param: verbosity`), which is what Claude
+  # 4.6+/5 map to output_config.effort (their `reasoning.effort` is a silent no-op, so
+  # effort_param picks the field that actually lands). The Opus entry PINS `effort: high` —
+  # the correctness-defining tier runs at full deliberation by declaration, not by trusting the
+  # provider default — and the Sonnet-5 entry sets `effort: medium` to trim deliberation and
+  # cost on the execution tier. `prompt_caching: true` opts the Anthropic entries into caching:
   # the adapter marks the re-sent stable prefix (persona + Brief) cacheable so OpenRouter forwards
   # the breakpoint to Anthropic and bills re-sent tokens at the cache-read rate — the single
   # largest cost saving on the agent loop, whose every turn re-sends that prefix. cost is the
@@ -94,6 +95,8 @@ models:
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
     prompt_caching: true
+    effort: high
+    effort_param: verbosity
     cost: { input_per_mtok: 5, output_per_mtok: 25, cache_write_per_mtok: 6.25, cache_read_per_mtok: 0.5 }
   "anthropic/claude-sonnet-5":
     provider: openai-compat
