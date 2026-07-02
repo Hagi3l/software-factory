@@ -105,8 +105,9 @@ advances the transition — see [verification.md](../specs/verification.md)).
 ```yaml
 policy:
   max_retries: 3
-  budget:      { tokens: 2_000_000, usd: 20, wall: 2h }   # per issue, across the retry loop
-  epic_budget: { usd: 200 }                               # aggregate across an epic
+  budget:        { tokens: 2_000_000, usd: 20, wall: 2h } # per issue, across the retry loop
+  epic_budget:   { usd: 200 }                             # aggregate across an epic
+  explore_budget: { tokens: 100_000, turns: 12 }          # per explore call; omit to disable explore
   dead_letter: harness.dlq
   profile:     trusted-dev                                # or: autonomous
   tcb_paths:                                              # the Trusted Computing Base boundary
@@ -128,6 +129,12 @@ policy:
   [the pipeline](pipeline.md#the-approval-gate-trusted-dev).
 - **`tcb_paths`** — the operational definition of "which modules are the TCB" (the
   trust-enforcing core). A candidate diff touching any glob always needs human review.
+- **`explore_budget`** — the fixed per-call cap (tokens and/or turns) on the
+  [`explore` tool](../specs/components/agent.md#explore--distilled-comprehension)'s nested
+  read-only comprehension sub-loop. It is the feature switch: **omitting it disables `explore`**
+  (no cap = no helper loop). When set, at least one soul on the reserved `explorer` role must
+  exist (see below), and the runner meters each explore call against this cap, harvesting a
+  `partial-budget` answer on a breach rather than failing the parent task.
 
 ### `spec_depth` — the context horizon
 
@@ -250,6 +257,19 @@ turns with tiny tool calls without ever submitting — so a doomed attempt fails
 (or dead-letters) instead of burning the full default budget; the gate still independently
 verifies the result, so a tight cap trades only a stuck attempt's wasted time. It is the
 sandboxed-soul analog of the wizard's `requirements_planner.max_tool_turns`.
+
+> **The reserved `explorer` role.** A soul on role `explorer` fulfills the
+> [`explore` tool](../specs/components/agent.md#explore--distilled-comprehension), not a DAG
+> stage — the explorer is invoked as a tool by the runner, never scheduled — so it is exempt
+> from the "every soul's role backs a stage" check. It is otherwise an ordinary soul (a cheap
+> `model`, an explore `persona`, a `selector`), but its `tools` must be a subset of the
+> read-only comprehension tools (`find_symbol`, `references`, `definition`, `implementation`,
+> `hover`, `diagnostics`, `read_file`, `list_dir`, `search`) and must **never** include
+> `explore` (no recursion) — `harness validate` rejects a writer or `explore` in an explorer's
+> allowlist. Enable the feature with `policy.explore_budget`; when it is set, at least one
+> `explorer` soul must exist. A second explorer on a different model family (routed by a
+> `selector` tag) is the recommended way to keep the verify path's blind spots from correlating
+> with the producer's.
 
 > **Model diversity** (`producer ≠ verifier` strengthened): the harness *enables and
 > recommends* running the verifier on a different model family than the producer, but

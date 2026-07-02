@@ -91,6 +91,7 @@ func (c *Config) Validate() error {
 		c.validatePolicy(add)
 		c.validateIntegration(add)
 		c.validateAmbientSpecs(add)
+		c.validateExplore(add)
 	}
 	c.validateSouls(add)
 	c.validateRequirementsPlanner(add)
@@ -478,7 +479,10 @@ func (c *Config) validateSouls(add func(string, ...any)) {
 			add("soul %q has an empty role", s.Name)
 		} else {
 			soulsByRole[s.Role]++
-			if _, used := rolesUsed[s.Role]; !used && c.Harness != nil {
+			// The reserved explorer role is exempt: the explorer is invoked as a tool, never
+			// scheduled as a DAG stage, so no stage references it by design (its own contract is
+			// checked in validateExplore). Every other role must back a stage.
+			if _, used := rolesUsed[s.Role]; !used && s.Role != RoleExplorer && c.Harness != nil {
 				add("soul %q declares role %q which no dag stage uses", s.Name, s.Role)
 			}
 			sel := canonicalSelector(s.Selector)
@@ -511,6 +515,65 @@ func (c *Config) validateSouls(add func(string, ...any)) {
 		if soulsByRole[role] == 0 {
 			add("dag role %q (stage(s) %s) resolves to no soul", role, strings.Join(rolesUsed[role], ", "))
 		}
+	}
+}
+
+// ReadOnlyToolNames is the canonical comprehension-tool subset an explorer soul's `tools`
+// allowlist must be drawn from — the read tools the explore sub-loop actually runs
+// (agent.ReadOnlyTools). It lives here because internal/config cannot import internal/agent
+// (agent imports config, so the reverse would cycle); an agent-side guard test
+// (TestReadOnlyToolsMatchConfigNames) fails loudly if the runtime set and this list ever drift.
+var ReadOnlyToolNames = []string{
+	"find_symbol", "references", "definition", "implementation", "hover", "diagnostics",
+	"read_file", "list_dir", "search",
+}
+
+func isReadOnlyToolName(name string) bool {
+	for _, n := range ReadOnlyToolNames {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// validateExplore enforces the reserved explorer role's contract (specs/configuration.md
+// "Validation is a safety feature", specs/components/agent.md "Explore — distilled
+// comprehension"). policy.explore_budget is the feature switch: setting it turns explore on,
+// and then it must be usable — at least one explorer soul must exist. Every explorer soul must
+// be genuinely read-only: its declared tools must be a subset of the comprehension tools and
+// must never include `explore` itself (the structural no-recursion rule, checked in config so a
+// misconfiguration is a loud startup fault, not a silent inert soul). Budget dimensions must be
+// non-negative. An unset explore_budget with no explorer souls is the default (feature off).
+func (c *Config) validateExplore(add func(string, ...any)) {
+	eb := c.Harness.Policy.ExploreBudget
+	if eb.Tokens < 0 {
+		add("policy.explore_budget.tokens is %d; it must be >= 0", eb.Tokens)
+	}
+	if eb.Turns < 0 {
+		add("policy.explore_budget.turns is %d; it must be >= 0", eb.Turns)
+	}
+
+	explorers := 0
+	for _, s := range c.Souls {
+		if s.Role != RoleExplorer {
+			continue
+		}
+		explorers++
+		for _, t := range s.Tools {
+			if t == "explore" {
+				add("explorer soul %q lists tool \"explore\"; the explorer must not call explore (no recursion)", s.Name)
+				continue
+			}
+			if !isReadOnlyToolName(t) {
+				add("explorer soul %q lists tool %q, which is not a read-only comprehension tool; explorer tools must be a subset of [%s]",
+					s.Name, t, strings.Join(ReadOnlyToolNames, " "))
+			}
+		}
+	}
+
+	if eb.Enabled() && explorers == 0 {
+		add("policy.explore_budget is set but no soul declares the reserved %q role; explore has no soul to run", RoleExplorer)
 	}
 }
 

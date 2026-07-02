@@ -15,9 +15,10 @@ merge to `main` with a provenance trailer. Verified end-to-end against a real mo
 
 **Phases 2, 3, 4, 6, 7, 8, 9, 10, and 11 are complete; open build work is Phase 5 (all optional
 — T5.11 warm pools + HA — or hardware-blocked — T5.2 Firecracker, needs KVM the dev box lacks)
-and the newly-specced Phase 12 (distilled explore tool: **T12.1 landed — the `explore` tool +
-nested read-only sub-loop in `internal/agent`, fully tested; T12.2–T12.6 open**).** Phase 11 closed
-with T11.2 (prompt caching) landing — the Anthropic
+and the newly-specced Phase 12 (distilled explore tool: **T12.1 + T12.3 landed — the `explore`
+tool + nested read-only sub-loop in `internal/agent` and the `policy.explore_budget` /
+reserved-`explorer`-role config + validation, fully tested; T12.2, T12.4–T12.6 open**).** Phase 11
+closed with T11.2 (prompt caching) landing — the Anthropic
 adapter now caches unconditionally and the openai-compat adapter caches opt-in, with cache
 read/write tokens normalized into the canonical Usage for accurate USD accounting.
 Phase 2 (independent verification) is complete — only
@@ -62,7 +63,8 @@ autonomous implementation) — a later validation concern, never an engineering 
 - **Open tasks (`- [ ]`) keep their full detail.** **Phase 5** (production isolation) has
   open lines — the Firecracker backend T5.2 is hardware-blocked and deliberately last; the one
   remaining optional item is T5.11 warm pools + HA (T5.5 gVisor is now done) — and **Phase 12**
-  (distilled explore tool) has **T12.1 done** (the tool + nested sub-loop in `internal/agent`); T12.2–T12.6 open.
+  (distilled explore tool) has **T12.1 + T12.3 done** (the tool + nested sub-loop in `internal/agent`;
+  the `explore_budget`/reserved-`explorer`-role config + validation); T12.2, T12.4–T12.6 open.
   Everything else (Phases 0–4, 6, 7, 8, 9, 10, 11) is complete and collapsed.
 - **Phases 2–5 and Phase 12 are atomic tasks** (`T<phase>.<n>`), each a single
   self-contained, verifiable unit of work, listed in dependency order — the same granularity Phase
@@ -727,12 +729,31 @@ Build order (each a single, independently testable concern; the two TCB pieces f
   meters the explorer stream against the fixed `policy.explore_budget` under the parent-task
   ceiling — a breach harvests a `partial-budget` answer, never failing the parent.
   ([messaging.md](specs/messaging.md), [models.md](specs/models.md))
-- [ ] **T12.3 `policy.explore_budget` config + reserved `explorer` role + validation**
-  (needs T12.1). Add `ExploreBudget` to `config.Policy`. Recognize the reserved `explorer`
-  role — exempt from the "every soul's role is a DAG stage" check — and validate: if
-  `explore_budget` is set, ≥1 `explorer` soul exists; an `explorer` soul's `tools` are the
-  read-only comprehension subset and never include `explore`. Omitting `explore_budget`
-  disables the feature (no helper loop). ([configuration.md](specs/configuration.md))
+- [x] **T12.3 `policy.explore_budget` config + reserved `explorer` role + validation** — *done.*
+  New `config.ExploreBudget{Tokens, Turns}` (a distinct struct — the per-issue `Budget` is
+  tokens/USD/wall; explore is dimensioned in tokens+turns, a sub-loop concept) on
+  `config.Policy.ExploreBudget yaml:"explore_budget"`, with an `Enabled()` predicate (any positive
+  dimension = on) so **"omitting the block disables explore" lives in exactly one place**. Reserved
+  `RoleExplorer = "explorer"` constant. **Validation:** `validateSouls` now exempts the explorer
+  role from the "role which no dag stage uses" check (it is invoked as a tool, never scheduled);
+  new `validateExplore` enforces the rest — budget dimensions ≥0; if `explore_budget` is set, ≥1
+  `explorer` soul must exist; every explorer soul's declared `tools` must be a subset of the
+  read-only comprehension names and must **never** include `explore` (structural no-recursion,
+  caught at startup, not as a silent inert soul). The existing selector-duplicate rule already
+  covers two catch-all explorers (a verify-path explorer must differ by selector, e.g. `verify=1`).
+  **Single-source-of-truth for the tool names:** `config.ReadOnlyToolNames` is the canonical
+  comprehension subset the validation checks against; `config` cannot import `agent` (agent imports
+  config), so the anti-drift guard is an agent-side test `TestReadOnlyToolsMatchConfigNames`
+  asserting `agent.ReadOnlyTools(...)`'s names equal that list. Tests
+  (`internal/config/validate_test.go`): `TestValidateExplorerRoleExemptFromDAGCheck` (explorer soul
+  + explore disabled → clean), `TestValidateExploreHappyPath` (enabled + valid explorer → clean),
+  `TestValidateExploreBudgetRequiresExplorerSoul`, `TestValidateExplorerToolsMustBeReadOnly`,
+  `TestValidateExplorerNoRecursion`, `TestValidateExploreBudgetNegative`,
+  `TestValidateExplorerDuplicateSelector`. Both shipped configs still `harness validate` OK (neither
+  enables explore). Specs written ahead (configuration.md "Validation is a safety feature" + the
+  reserved-role/explorer-soul shape) — no spec change; **docs/configuration.md** updated (the
+  `explore_budget` policy field + the reserved `explorer` role subsection) per the doc-tracking rule.
+  ([configuration.md](specs/configuration.md))
 - [ ] **T12.4 Explore evidence + provenance + observability nesting** (needs T12.1, T12.2).
   Hash the explore transcript to the [artifact store](specs/components/artifact-store.md)
   alongside the main transcript, recording the pinned explorer model in the provenance trailer

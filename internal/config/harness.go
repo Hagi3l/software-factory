@@ -227,6 +227,13 @@ const (
 	ProfileAutonomous = "autonomous"
 )
 
+// RoleExplorer is the reserved helper-soul role fulfilled by the explore tool's cheap,
+// read-only explorer (specs/components/agent.md, specs/configuration.md). Unlike every other
+// role it is NOT a DAG stage — the explorer is invoked as a tool by the runner, never
+// scheduled by the orchestrator — so it is exempt from the "every soul's role is a DAG stage"
+// validation. It is a reserved word: a normal soul may not declare it unless explore is enabled.
+const RoleExplorer = "explorer"
+
 // Policy is the termination guarantee: a retry cap and budgets bound the feedback
 // loop, so a spec the factory cannot satisfy dead-letters instead of looping
 // forever (see specs/workflow.md). It is not merely cost control. It also carries the
@@ -250,6 +257,13 @@ type Policy struct {
 	// operational definition of the TCB boundary (see specs/bootstrap.md, specs/configuration.md).
 	// `**` matches across path separators; `*`/`?` match within a single segment.
 	TCBPaths []string `yaml:"tcb_paths,omitempty"`
+
+	// ExploreBudget is the FIXED per-call cap on the explore tool's nested read-only sub-loop
+	// (specs/components/agent.md "Explore", specs/models.md "Helper souls"). It is the feature
+	// switch: an unset (zero) block DISABLES explore entirely — no cap means no helper loop —
+	// so a deployment opts in by setting it. See ExploreBudget.Enabled and validateSouls'
+	// explorer checks.
+	ExploreBudget ExploreBudget `yaml:"explore_budget,omitempty"`
 }
 
 // ApprovalRequired reports whether a candidate whose diff changed changedFiles needs a
@@ -288,6 +302,22 @@ type Budget struct {
 	USD    float64  `yaml:"usd,omitempty"`
 	Wall   Duration `yaml:"wall,omitempty"`
 }
+
+// ExploreBudget is the fixed per-call cap on the explore tool's nested read-only sub-loop
+// (specs/configuration.md `policy.explore_budget`). It is dimensioned in tokens + turns — a
+// sub-loop concept, unlike the per-issue Budget's tokens/USD/wall — and is deliberately fixed
+// (not a fraction of the parent's remaining budget) so an explore call behaves identically
+// wherever in an invocation it is made. A zero value in a dimension leaves that dimension to
+// the loop's own default; a wholly-zero ExploreBudget means the feature is off (see Enabled).
+type ExploreBudget struct {
+	Tokens int `yaml:"tokens,omitempty"`
+	Turns  int `yaml:"turns,omitempty"`
+}
+
+// Enabled reports whether explore is switched on: any positive dimension turns the helper loop
+// on, an all-zero block leaves it off. This is the single predicate the runner and validation
+// branch on so "omitting the block disables explore" is expressed in exactly one place.
+func (e ExploreBudget) Enabled() bool { return e.Tokens > 0 || e.Turns > 0 }
 
 // LoadHarness reads and unmarshals harness.yaml. It parses strictly (unknown keys
 // are errors) but does not check DAG legality — that is harness validate's job (see

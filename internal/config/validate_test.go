@@ -1033,3 +1033,86 @@ func TestValidateUnknownSandboxBackend(t *testing.T) {
 	c.Infra.Sandbox.Backend = "qemu"
 	mustContain(t, problems(t, c), `sandbox.backend "qemu" is unknown`)
 }
+
+// explorerSoul builds a soul on the reserved explorer role with a real persona file and the
+// given tools/selector, for the explore-validation tests.
+func explorerSoul(t *testing.T, name string, tools []string, selector map[string]string) core.Soul {
+	t.Helper()
+	s := soul(t, name, RoleExplorer)
+	s.Tools = tools
+	s.Selector = selector
+	return s
+}
+
+// readOnlySubset is a valid explorer allowlist (the comprehension subset).
+func readOnlySubset() []string { return append([]string(nil), ReadOnlyToolNames...) }
+
+// The reserved explorer role is exempt from the "role which no dag stage uses" check even when
+// explore is disabled: an explorer soul is a helper invoked as a tool, never a DAG stage. So a
+// config with an explorer soul and no explore_budget still validates clean.
+func TestValidateExplorerRoleExemptFromDAGCheck(t *testing.T) {
+	c := validConfig()
+	c.Souls = append(fullSouls(t), explorerSoul(t, "explorer", readOnlySubset(), nil))
+	if err := c.Validate(); err != nil {
+		t.Fatalf("explorer soul with explore disabled should validate clean, got: %v", err)
+	}
+}
+
+// explore_budget set + a valid explorer soul is the enabled happy path.
+func TestValidateExploreHappyPath(t *testing.T) {
+	c := validConfig()
+	c.Souls = append(fullSouls(t), explorerSoul(t, "explorer", readOnlySubset(), nil))
+	c.Harness.Policy.ExploreBudget = ExploreBudget{Tokens: 100_000, Turns: 12}
+	if err := c.Validate(); err != nil {
+		t.Fatalf("enabled explore with a valid explorer soul should validate clean, got: %v", err)
+	}
+}
+
+// Turning explore on (explore_budget set) with no explorer soul is a config fault: the feature
+// has no soul to run.
+func TestValidateExploreBudgetRequiresExplorerSoul(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Harness.Policy.ExploreBudget = ExploreBudget{Tokens: 100_000}
+	mustContain(t, problems(t, c), `no soul declares the reserved "explorer" role`)
+}
+
+// An explorer soul that lists a non-read-only tool (a writer) breaks the read-only invariant
+// and must fail — even the declared allowlist may not name a writer.
+func TestValidateExplorerToolsMustBeReadOnly(t *testing.T) {
+	c := validConfig()
+	c.Souls = append(fullSouls(t), explorerSoul(t, "explorer", []string{"read_file", "write_file"}, nil))
+	c.Harness.Policy.ExploreBudget = ExploreBudget{Turns: 8}
+	mustContain(t, problems(t, c), `not a read-only comprehension tool`)
+}
+
+// An explorer that lists `explore` would recurse; the allowlist must structurally omit it.
+func TestValidateExplorerNoRecursion(t *testing.T) {
+	c := validConfig()
+	c.Souls = append(fullSouls(t), explorerSoul(t, "explorer", []string{"read_file", "explore"}, nil))
+	c.Harness.Policy.ExploreBudget = ExploreBudget{Turns: 8}
+	mustContain(t, problems(t, c), `must not call explore (no recursion)`)
+}
+
+// Negative budget dimensions are nonsense caps and fail closed.
+func TestValidateExploreBudgetNegative(t *testing.T) {
+	c := validConfig()
+	c.Souls = append(fullSouls(t), explorerSoul(t, "explorer", readOnlySubset(), nil))
+	c.Harness.Policy.ExploreBudget = ExploreBudget{Tokens: -1, Turns: -2}
+	probs := problems(t, c)
+	mustContain(t, probs, "policy.explore_budget.tokens is -1")
+	mustContain(t, probs, "policy.explore_budget.turns is -2")
+}
+
+// Two explorer souls sharing the same (catch-all) selector can never both be selected — the
+// existing selector-duplicate rule applies to the explorer role too. A verify-path explorer
+// must be distinguished by a selector (e.g. verify=1).
+func TestValidateExplorerDuplicateSelector(t *testing.T) {
+	c := validConfig()
+	c.Souls = append(fullSouls(t),
+		explorerSoul(t, "explorer-a", readOnlySubset(), nil),
+		explorerSoul(t, "explorer-b", readOnlySubset(), nil),
+	)
+	c.Harness.Policy.ExploreBudget = ExploreBudget{Turns: 8}
+	mustContain(t, problems(t, c), `both fulfill role "explorer" with the same selector`)
+}

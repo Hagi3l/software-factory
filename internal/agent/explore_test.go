@@ -5,11 +5,31 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"testing"
 
+	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/model"
 )
+
+// TestReadOnlyToolsMatchConfigNames is the anti-drift guard between the runtime read-only tool
+// set (agent.ReadOnlyTools) and the list config validation uses to check an explorer soul's
+// allowlist (config.ReadOnlyToolNames). config cannot import agent, so the two are separate
+// lists; if a read tool is added/renamed on one side without the other, this fails — which is
+// what keeps the explorer-soul validation honest about what the sub-loop can actually run.
+func TestReadOnlyToolsMatchConfigNames(t *testing.T) {
+	var runtime []string
+	for _, tl := range ReadOnlyTools(fakeSandbox{}, NewSessions(nil, nil)) {
+		runtime = append(runtime, tl.Def().Name)
+	}
+	want := append([]string(nil), config.ReadOnlyToolNames...)
+	sort.Strings(runtime)
+	sort.Strings(want)
+	if strings.Join(runtime, ",") != strings.Join(want, ",") {
+		t.Errorf("ReadOnlyTools names %v != config.ReadOnlyToolNames %v (they must not drift)", runtime, want)
+	}
+}
 
 // explorerPersona is the fake system prompt the sub-loop should carry as Request.System.
 const explorerPersona = "you are a fast read-only explorer"
