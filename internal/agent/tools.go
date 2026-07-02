@@ -53,6 +53,12 @@ type Invocation struct {
 	// Broker is the agent side of the broker for this invocation: lifecycle tools push
 	// the candidate branch and publish events through it. It holds no credentials.
 	Broker BrokerClient
+	// Completer is the model-call seam for tools that run their own nested model loop —
+	// today only `explore`, whose helper soul drives a read-only sub-loop (specs/components/
+	// agent.md "Explore"). It is the same brokered connection the main loop relays through,
+	// so a tool's model calls stay provider-unaware and keyless exactly like the loop's. May
+	// be nil for a loop built without model-driven tools (most tests).
+	Completer Completer
 	// Brief is the task envelope — the agent's entire knowledge of the world.
 	Brief core.Brief
 }

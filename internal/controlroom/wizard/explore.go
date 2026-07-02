@@ -68,44 +68,12 @@ type explorer struct {
 // be invoked.
 func readOnlyToolDefs() []model.ToolDef {
 	// A nil sandbox is never executed against — we only read Def(), which is static data.
-	tools := readOnlyToolsOver(nil, agent.NewSessions(nil, nil))
+	tools := agent.ReadOnlyTools(nil, agent.NewSessions(nil, nil))
 	defs := make([]model.ToolDef, 0, len(tools))
 	for _, t := range tools {
 		defs = append(defs, t.Def())
 	}
 	return defs
-}
-
-// readOnlyToolsOver builds the read-only tool set over sb and its LSP sessions: the agent's text
-// read tools (read_file/list_dir/search) with write_file/edit_file/run filtered out, plus the
-// LSP comprehension tools (find_symbol/references/…). sessions is passed in (not created here)
-// so the caller can Close() it on teardown. It doubles as the workspace tools' edit notifier —
-// no edit ever fires here, but the wiring matches the agent's so the constructors are reused
-// verbatim. Passing a nil sandbox is valid ONLY for reading Def() (see readOnlyToolDefs).
-func readOnlyToolsOver(sb sandbox.Sandbox, sessions *agent.Sessions) []agent.Tool {
-	read := filterTools(agent.WorkspaceTools(sb, sessions), "read_file", "list_dir", "search")
-	tools := make([]agent.Tool, 0, len(read)+6)
-	tools = append(tools, read...)
-	tools = append(tools, agent.SemanticReadTools(sessions)...)
-	return tools
-}
-
-// filterTools keeps only the tools whose advertised name is in keep, preserving order. The
-// concrete read-tool constructors are unexported in internal/agent, so selecting by name off
-// the full WorkspaceTools set is the clean way to expose the read subset without duplicating
-// them (and it fails closed: a renamed tool simply drops out rather than leaking a writer).
-func filterTools(tools []agent.Tool, keep ...string) []agent.Tool {
-	want := make(map[string]bool, len(keep))
-	for _, k := range keep {
-		want[k] = true
-	}
-	out := make([]agent.Tool, 0, len(keep))
-	for _, t := range tools {
-		if want[t.Def().Name] {
-			out = append(out, t)
-		}
-	}
-	return out
 }
 
 // buildExplorer provisions one read-only, zero-network sandbox seeded at cfg.baseRef and builds
@@ -145,7 +113,7 @@ func buildExplorer(ctx context.Context, cfg sandboxConfig) (*explorer, error) {
 	}()
 
 	sessions := agent.NewSessions(sb, cfg.log)
-	tools := readOnlyToolsOver(sb, sessions)
+	tools := agent.ReadOnlyTools(sb, sessions)
 
 	byName := make(map[string]agent.Tool, len(tools))
 	defs := make([]model.ToolDef, 0, len(tools))

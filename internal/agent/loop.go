@@ -131,7 +131,7 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 	}
 
 	conn := l.connect(brokerEndpoint)
-	tools, cleanup, err := l.tools(Invocation{Sandbox: sb, Broker: conn, Brief: brief})
+	tools, cleanup, err := l.tools(Invocation{Sandbox: sb, Broker: conn, Completer: conn, Brief: brief})
 	if err != nil {
 		return core.Result{}, fmt.Errorf("agent: build tools: %w", err)
 	}

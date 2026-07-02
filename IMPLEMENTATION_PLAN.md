@@ -13,9 +13,11 @@ in-process orchestrator + runner carry a seed issue through implement → gate �
 merge to `main` with a provenance trailer. Verified end-to-end against a real model
 (local Ollama via `openai-compat`) and real Docker sandboxes.
 
-**Phases 2, 3, 4, 6, 7, 8, 9, 10, and 11 are complete; Phase 5 carries the only open build work,
-and all of it is optional (T5.11 warm pools + HA) or hardware-blocked (T5.2 Firecracker, needs
-KVM the dev box lacks).** Phase 11 closed with T11.2 (prompt caching) landing — the Anthropic
+**Phases 2, 3, 4, 6, 7, 8, 9, 10, and 11 are complete; open build work is Phase 5 (all optional
+— T5.11 warm pools + HA — or hardware-blocked — T5.2 Firecracker, needs KVM the dev box lacks)
+and the newly-specced Phase 12 (distilled explore tool: **T12.1 landed — the `explore` tool +
+nested read-only sub-loop in `internal/agent`, fully tested; T12.2–T12.6 open**).** Phase 11 closed
+with T11.2 (prompt caching) landing — the Anthropic
 adapter now caches unconditionally and the openai-compat adapter caches opt-in, with cache
 read/write tokens normalized into the canonical Usage for accurate USD accounting.
 Phase 2 (independent verification) is complete — only
@@ -57,12 +59,13 @@ autonomous implementation) — a later validation concern, never an engineering 
   0–1, 2, 3, 4, 6, 7, 8, 9, and 10 are done; the verbose per-task findings were pruned once
   complete — that history lives in git, the code, and the specs they informed (each task updated
   its `(spec)` as it landed).
-- **Open tasks (`- [ ]`) keep their full detail.** Only **Phase 5** (production
-  isolation) has open lines — the Firecracker backend T5.2 is hardware-blocked and deliberately
-  last; the one remaining optional item is T5.11 warm pools + HA (T5.5 gVisor is now done).
-  Everything else (Phases 0–4, 6, 7, 8, 9, 10) is complete and collapsed.
-- **Phases 2–5 are atomic tasks** (`T<phase>.<n>`), each a single self-contained,
-  verifiable unit of work, listed in dependency order — the same granularity Phase
+- **Open tasks (`- [ ]`) keep their full detail.** **Phase 5** (production isolation) has
+  open lines — the Firecracker backend T5.2 is hardware-blocked and deliberately last; the one
+  remaining optional item is T5.11 warm pools + HA (T5.5 gVisor is now done) — and **Phase 12**
+  (distilled explore tool) has **T12.1 done** (the tool + nested sub-loop in `internal/agent`); T12.2–T12.6 open.
+  Everything else (Phases 0–4, 6, 7, 8, 9, 10, 11) is complete and collapsed.
+- **Phases 2–5 and Phase 12 are atomic tasks** (`T<phase>.<n>`), each a single
+  self-contained, verifiable unit of work, listed in dependency order — the same granularity Phase
   0–1 used and the natural unit for one Claude Code session. Cross-task deps are
   noted `(needs Tx.y)` where they aren't the obvious linear predecessor.
 - `(spec)` links point at the authoritative contract for each task. If a task needs
@@ -645,6 +648,112 @@ fields, so the agent stays provider-unaware) and the two new model-entry fields 
   egress tools (git-push, package-fetch) were traced. Caveat in code: this works while the loop is
   co-located in the trusted runner; once the agent is its own in-sandbox binary (Phase 5) these
   must ride the broker.
+
+---
+
+## Phase 12 — Distilled explore tool (helper souls)
+
+Adds `explore`: a read-only comprehension tool that answers a **broad, multi-step** question
+by running a nested agent loop on a **cheap** model — the iterative search→read→refine — and
+returning a distilled `{summary, anchors, coverage, leads}` instead of the raw reading, so the
+intermediate reading never bloats the parent's window or burns its (frontier) tokens. It is
+the first **helper soul**: a soul invoked *as a tool* by the runner (reusing the `Soul` struct
+and the one agent loop), **off the DAG**, running in-process in the parent's sandbox so it
+reuses the warm LSP session. Motivation is context + cost — the same signal-density goal as
+Phase 9, one level up (collapse an iterative multi-turn search into one cheap sub-loop).
+Additive and never load-bearing: the parent keeps every raw comprehension tool, and it does
+**not** fight prompt caching (T11.2) the way in-loop compaction would — an explore call is one
+tool-call/result appended at the tail, leaving the cacheable prefix intact.
+
+**Spec landed first** (per CLAUDE.md, this session): [components/agent.md](specs/components/agent.md)
+"Explore — distilled comprehension" (the tool, the five rules, the free-form-in/structured-out
+contract), [models.md](specs/models.md) "Helper souls — two models in one sandbox" (sub-context
+selector + trusted-pinned model resolution + fixed sub-budget), [configuration.md](specs/configuration.md)
+(`policy.explore_budget`, the reserved `explorer` role, the explorer soul shape, verify-path
+diversity), [messaging.md](specs/messaging.md) (broker sub-context selector),
+[verification.md](specs/verification.md) (explore's correlated-blind-spot risk on the verify
+path), [glossary.md](specs/glossary.md) (Explore, Helper soul).
+
+**TCB note:** T12.1/T12.2 touch the agent loop + runner/broker (TCB) — stay human-reviewed;
+land behind tests. **Deterministically testable** (per [models.md](specs/models.md)): the
+explorer's cheap model is just a soul resolved from config, so `modeltest` scripts the whole
+machinery — read-only enforcement, the `answer` contract, no-recursion, sub-budget
+harvest-on-breach, and the runner refusing an agent-chosen model — with no key and no Docker.
+
+Build order (each a single, independently testable concern; the two TCB pieces first):
+
+- [x] **T12.1 Canonical `explore` tool + in-process nested read-only sub-loop** — *done.* New
+  `internal/agent/explore.go`: the canonical `explore(question)` tool + the explorer's one lifecycle
+  tool `answer(summary, anchors, coverage, leads)` (with `ExploreAnswer`/`ExploreAnchor` + the three
+  `Coverage*` constants), and `runExplore` — the nested read-only ReAct sub-loop. It mirrors the main
+  loop's request→complete→dispatch→append shape but **terminates on a value** (the `ExploreAnswer`
+  captured by the `answer` tool into an `exploreSink`) instead of a `core.Result`, and — the
+  load-bearing difference — **never surfaces an error to the parent**: a model-call error → a
+  `partial-uncertain` answer, a turn/token-budget breach → `partial-budget`, so explore stays
+  additive/never-load-bearing (an explore failure just routes the parent back to searching itself).
+  **Read-only + no-recursion are structural, not runtime guards:** the sub-loop's toolset is exactly
+  `ReadOnlyTools(sb, sessions)` + `answer`, so no `edit/write/run/submit/escalate/request_subtask`
+  and no `explore` is ever *built* (a forbidden call hits the loop's unknown-tool path). Reuses the
+  parent's warm sandbox + LSP `Sessions` (no reseed); the child's opening turn is the **question +
+  ambient specs (project map), NOT the parent conversation** (per spec). **Consolidation (single
+  source of truth):** promoted the read-only comprehension subset into exported
+  `agent.ReadOnlyTools` (+ `keepTools`) and refactored `internal/controlroom/wizard/explore.go` to
+  call it, deleting the wizard's duplicate `readOnlyToolsOver`/`filterTools` so the two can't drift
+  into leaking a writer. **Model-call seam:** added `Completer` to `agent.Invocation` (loop.go now
+  passes the same brokered `conn`), so a tool can drive its own nested model loop keyless/provider-
+  unaware exactly like the main loop. **T12.1/T12.2 boundary (important for the next loop):** the
+  sub-loop is model-agnostic — it calls whatever `Completer` it is handed. In the co-located world
+  today that is the parent's `conn`, so the child currently runs on the *parent's* model; **T12.2**
+  is what pins the cheap explorer model + separate sub-budget metering by wrapping the completer with
+  a sub-context selector the runner honors. **Not yet wired into `cmd/harness/run.go`'s toolSource**
+  — that needs the explorer soul config (`policy.explore_budget`, the reserved `explorer` role) from
+  T12.3 and per-role enablement from T12.5; T12.1 lands the fully-tested component. `agent.Budget`
+  reused for the fixed sub-budget; `DefaultExploreMaxTurns = 12` (matches the configuration.md
+  `explore_budget` example). Tests (`internal/agent/explore_test.go`):
+  `TestExploreReturnsDistilledAnswer` (persona as System, question+project-map opening turn, non-
+  terminal rendered answer), `TestExploreReadOnlyToolset` (exact read subset, no writers/lifecycle/
+  explore), `TestExploreRejectsForbiddenTools` (write_file + explore → unknown-tool at dispatch),
+  `TestExploreTurn/TokenBudgetExhausted` (→ partial-budget, capped call count),
+  `TestExploreModelErrorDegrades` (→ partial-uncertain, never fatal),
+  `TestExploreInvalidAnswerRetries` (empty summary / bad coverage / complete-without-anchors → IsError
+  retry), `TestExploreToolDefAndEmptyQuestion`. Spec was written ahead (components/agent.md "Explore —
+  distilled comprehension") — no spec change; no CLI/config/control-room surface yet, so no docs/
+  update. ([components/agent.md](specs/components/agent.md))
+- [ ] **T12.2 Broker sub-context selector + runner-pinned model + fixed sub-budget metering**
+  (needs T12.1). Extend the broker protocol so a canonical model request carries a
+  **sub-context selector** distinguishing the parent stream from the explorer stream. The
+  runner resolves the explorer soul's `model` from the **trusted dispatch** and refuses any
+  agent-supplied model (an agent cannot escape its tier), routes each tag to its adapter, and
+  meters the explorer stream against the fixed `policy.explore_budget` under the parent-task
+  ceiling — a breach harvests a `partial-budget` answer, never failing the parent.
+  ([messaging.md](specs/messaging.md), [models.md](specs/models.md))
+- [ ] **T12.3 `policy.explore_budget` config + reserved `explorer` role + validation**
+  (needs T12.1). Add `ExploreBudget` to `config.Policy`. Recognize the reserved `explorer`
+  role — exempt from the "every soul's role is a DAG stage" check — and validate: if
+  `explore_budget` is set, ≥1 `explorer` soul exists; an `explorer` soul's `tools` are the
+  read-only comprehension subset and never include `explore`. Omitting `explore_budget`
+  disables the feature (no helper loop). ([configuration.md](specs/configuration.md))
+- [ ] **T12.4 Explore evidence + provenance + observability nesting** (needs T12.1, T12.2).
+  Hash the explore transcript to the [artifact store](specs/components/artifact-store.md)
+  alongside the main transcript, recording the pinned explorer model in the provenance trailer
+  (auditable, not a side-channel). Stream the sub-loop's reasoning/tokens under the parent in
+  the live view (the broker already sees its calls). ([components/agent.md](specs/components/agent.md),
+  [observability.md](specs/observability.md))
+- [ ] **T12.5 Per-role explore enablement + verify-path diversity advisory** (needs T12.3).
+  `explore` is per-role tool enablement (resolves the agent.md OPEN): enable it on the
+  planner/implementor personas. Extend the producer/verifier model-family
+  [advisory](specs/verification.md) (T2.13) to cover a verify-path explorer sharing the
+  producer's family — recommend a diverse explorer soul (or none) for qa/security.
+  ([verification.md](specs/verification.md), [configuration.md](specs/configuration.md))
+- [ ] **T12.6 Wire the vault demo (the exercising use case)** (needs T12.1–T12.5). Add an
+  `explorer` soul + `prompts/explorer.md` persona on a cheap model (e.g. an Anthropic Haiku
+  slug via OpenRouter added to `infra.dev.yaml`), set `policy.explore_budget` in the vault
+  `harness.yaml`, enable `explore` on the vault planner/implementor souls, and add a
+  diverse-family verify-path explorer for `security`. Keep `harness validate --config
+  demo/vault/config` green (strict decode — this all requires T12.1–T12.3 landed first).
+  Update `demo/vault/README.md` (a differences row) and `docs/`. **Validate the context/cost
+  win on a live vault re-run** (a runtime check, not a build item — the same exercising loop
+  Phase 9 targets: broad localization on the established Go app). ([configuration.md](specs/configuration.md))
 
 ---
 
