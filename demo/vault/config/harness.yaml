@@ -197,6 +197,17 @@ policy:
   budget: { tokens: 8_000_000, usd: 10, wall: 20m }
   # Per-epic cap summed across every child of the seeded feature.
   epic_budget: { usd: 50 }
+  # explore_budget is the FIXED per-call cap on the explore tool's nested read-only sub-loop
+  # (Phase 12). Setting it turns explore ON for the souls that opt in via their `tools` allowlist
+  # — here the planner and implementor (the broad-localization beneficiaries). Fixed, not a
+  # fraction of the parent budget, so an explore call behaves the same wherever it is made; the
+  # runner meters each call's stream against it and, on a breach, hands back a partial-budget
+  # answer rather than failing the parent (which still draws the per-issue budget above). The
+  # verify path (qa, role `security`) deliberately enables NO explore: it re-grades independently
+  # and reads raw, so its blind spots never correlate with the producer's — the stricter, fully
+  # independent option in specs/verification.md "verify-path diversity" (and explore's own benefit
+  # is producer-side localization, not gate re-grading). See specs/configuration.md.
+  explore_budget: { tokens: 100_000, turns: 12 }
   dead_letter: harness.dlq
   # Autonomous: integrate merges hands-free (no human-approved gate, no TCB globs) since the
   # candidate is ordinary app code in a throwaway repo.

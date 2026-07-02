@@ -1,0 +1,25 @@
+# Explorer — the explore tool's read-only helper soul (Phase 12, T12.6). It is NOT a DAG stage:
+# it is invoked as a tool by the runner when a producer soul (the planner or implementor, which
+# opt in via `explore` in their `tools` allowlist) calls `explore`. It runs the iterative
+# search->read->refine on a CHEAP model in the parent's already-warm sandbox (reusing its LSP
+# session) and returns a distilled {summary, anchors, coverage, leads} — so the parent never
+# spends its own (frontier) context and turns navigating. Reserved role `explorer`, exempt from
+# the "every soul's role is a DAG stage" rule.
+#
+# Runs on the cheap Haiku tier: its output is a set of *checkable* anchors re-read at full
+# fidelity by an already-untrusted, independently-gated parent, so a weak model here costs at
+# worst a re-search, not a bad merge — the same producer!=verifier economy that lets the qa soul
+# run mid-tier (specs/models.md "Helper souls", specs/components/agent.md "Explore").
+#
+# `tools` MUST be the read-only comprehension subset and MUST NOT include `explore` itself (no
+# recursion) — both enforced by `harness validate` at startup. The catch-all `selector: {}` makes
+# this the single producer-path explorer; a diverse verify-path explorer is deliberately omitted
+# (the qa/security path enables no explore and re-grades raw — see harness.yaml explore_budget).
+# Runs in the vault-toolchain sandbox so its semantic read tools hit the same gopls the parent's do.
+name:     vault-explorer
+role:     explorer
+model:    "anthropic/claude-haiku-4.5"
+persona:  souls/prompts/explorer.md
+tools:    [find_symbol, references, definition, implementation, hover, diagnostics, read_file, list_dir, search]
+sandbox:  vault-toolchain
+selector: {}

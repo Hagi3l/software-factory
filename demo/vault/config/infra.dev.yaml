@@ -98,3 +98,15 @@ models:
     effort: medium
     effort_param: verbosity
     cost: { input_per_mtok: 3, output_per_mtok: 15, cache_write_per_mtok: 3.75, cache_read_per_mtok: 0.3 }
+  # anthropic/claude-haiku-4.5 is the CHEAP tier the explore tool's read-only helper soul runs on
+  # (Phase 12, T12.6). explore delegates broad search->read->refine localization to a nested
+  # sub-loop on this model so the frontier producer never spends its own context navigating; the
+  # sub-loop returns *checkable* anchors an already-untrusted, independently-gated parent re-reads,
+  # so a weak model there costs at worst a re-search, never a bad merge (specs/models.md "Helper
+  # souls"). Same OpenRouter openai-compat path + prompt caching as the others; cost feeds the
+  # policy.budget / explore_budget USD accounting at roughly Haiku list price.
+  "anthropic/claude-haiku-4.5":
+    provider: openai-compat
+    endpoint: https://openrouter.ai/api/v1
+    prompt_caching: true
+    cost: { input_per_mtok: 1, output_per_mtok: 5, cache_write_per_mtok: 1.25, cache_read_per_mtok: 0.1 }

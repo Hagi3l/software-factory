@@ -15,11 +15,12 @@ merge to `main` with a provenance trailer. Verified end-to-end against a real mo
 
 **Phases 2, 3, 4, 6, 7, 8, 9, 10, and 11 are complete; open build work is Phase 5 (all optional
 — T5.11 warm pools + HA — or hardware-blocked — T5.2 Firecracker, needs KVM the dev box lacks)
-and the newly-specced Phase 12 (distilled explore tool: **T12.1–T12.5 landed — the `explore`
-tool + nested read-only sub-loop, the broker sub-context selector + runner-pinned explorer model +
-per-stream sub-budget metering, the `policy.explore_budget` / reserved-`explorer`-role config +
-validation, explore evidence/provenance/observability nesting (T12.4), and per-role enablement +
-verify-path diversity advisory (T12.5), all fully tested; only T12.6 (wire the vault demo) open**).** Phase 11
+and the newly-specced Phase 12 (distilled explore tool: **COMPLETE — T12.1–T12.6 all landed: the
+`explore` tool + nested read-only sub-loop, the broker sub-context selector + runner-pinned explorer
+model + per-stream sub-budget metering, the `policy.explore_budget` / reserved-`explorer`-role config +
+validation, explore evidence/provenance/observability nesting, per-role enablement + verify-path
+diversity advisory, and the vault demo wired (planner/implementor explore on a cheap Haiku explorer;
+verify path reads raw). Remaining is a live-run cost/context validation, not a build item**).** Phase 11
 closed with T11.2 (prompt caching) landing — the Anthropic
 adapter now caches unconditionally and the openai-compat adapter caches opt-in, with cache
 read/write tokens normalized into the canonical Usage for accurate USD accounting.
@@ -65,10 +66,11 @@ autonomous implementation) — a later validation concern, never an engineering 
 - **Open tasks (`- [ ]`) keep their full detail.** **Phase 5** (production isolation) has
   open lines — the Firecracker backend T5.2 is hardware-blocked and deliberately last; the one
   remaining optional item is T5.11 warm pools + HA (T5.5 gVisor is now done) — and **Phase 12**
-  (distilled explore tool) has **T12.1–T12.5 done** (the tool + nested sub-loop; the broker sub-context
-  selector + runner-pinned explorer model + per-stream sub-budget metering; the
+  (distilled explore tool) is **COMPLETE (T12.1–T12.6)**: the tool + nested sub-loop; the broker
+  sub-context selector + runner-pinned explorer model + per-stream sub-budget metering; the
   `explore_budget`/reserved-`explorer`-role config + validation; explore evidence/provenance/observability
-  nesting; per-role enablement + verify-path diversity advisory); only T12.6 (wire the vault demo) open.
+  nesting; per-role enablement + verify-path diversity advisory; and the vault demo wired. The only
+  open item is a live-run cost/context validation (not a build item).
   Everything else (Phases 0–4, 6, 7, 8, 9, 10, 11) is complete and collapsed.
 - **Phases 2–5 and Phase 12 are atomic tasks** (`T<phase>.<n>`), each a single
   self-contained, verifiable unit of work, listed in dependency order — the same granularity Phase
@@ -836,15 +838,33 @@ Build order (each a single, independently testable concern; the two TCB pieces f
   opts out; never fails Validate). No spec change (written ahead). Built in an isolated worktree (parallel
   with T12.4), `make check` green, reviewed on merge. ([verification.md](specs/verification.md),
   [configuration.md](specs/configuration.md))
-- [ ] **T12.6 Wire the vault demo (the exercising use case)** (needs T12.1–T12.5). Add an
-  `explorer` soul + `prompts/explorer.md` persona on a cheap model (e.g. an Anthropic Haiku
-  slug via OpenRouter added to `infra.dev.yaml`), set `policy.explore_budget` in the vault
-  `harness.yaml`, enable `explore` on the vault planner/implementor souls, and add a
-  diverse-family verify-path explorer for `security`. Keep `harness validate --config
-  demo/vault/config` green (strict decode — this all requires T12.1–T12.3 landed first).
-  Update `demo/vault/README.md` (a differences row) and `docs/`. **Validate the context/cost
-  win on a live vault re-run** (a runtime check, not a build item — the same exercising loop
-  Phase 9 targets: broad localization on the established Go app). ([configuration.md](specs/configuration.md))
+- [x] **T12.6 Wire the vault demo (the exercising use case)** — *done.* Added the cheap
+  `anthropic/claude-haiku-4.5` entry to `demo/vault/config/infra.dev.yaml` (OpenRouter openai-compat
+  + prompt caching + cost, like the others); added the `vault-explorer` soul
+  (`souls/explorer.yaml`, role `explorer`, that model, the read-only comprehension `tools` subset,
+  catch-all selector, `vault-toolchain` sandbox) reusing the already-drafted `prompts/explorer.md`
+  (removed its "not yet wired" banner); set `policy.explore_budget: { tokens: 100_000, turns: 12 }`
+  in `harness.yaml`; and enabled `explore` on the **planner + implementor** souls (added `explore`
+  to their `tools` allowlist — the T12.5 per-role opt-in). Differences row added to
+  `demo/vault/README.md`; `docs/configuration.md` already covers the surface (T12.5). `harness
+  validate --config demo/vault/config` = **OK (6 souls, 3 models)**; the only advisory is the
+  pre-existing T2.13 producer/verifier same-family one, and — as designed — the T12.5
+  explore-diversity advisory does **not** fire.
+  **Deliberate deviation from the task's literal "diverse-family verify-path explorer for
+  security" (with rationale):** the verify path (`qa`, role `security`) enables **no** explore.
+  Two reasons. (1) On the merits, `explore` is a producer-side *broad-localization* accelerant
+  (planner finds decomposition seams; implementor finds where layers hook up); the qa gate
+  re-grades independently and should read raw for full producer≠verifier independence — the
+  spec's explicitly-endorsed stricter alternative (verification.md "verify-path diversity").
+  (2) **Machinery gap found this session:** an issue's `Tags` thread forward *unchanged* across
+  all of a child's stages (`internal/orchestrator/results.go` — author-tests/implement/qa share
+  one tag set) and there is no per-stage/role tag, so a `verify=1`-selectored explorer soul
+  cannot be routed to *only* the qa stage of a child — tagging the child `verify=1` would route
+  its producer stages to the "verify" explorer too. So a *routed* diverse verify-path explorer is
+  not honestly wireable today; a two-family explorer pool would silence the static advisory
+  without actually diversifying at runtime. Filed as a follow-up below. **Validate the
+  context/cost win on a live vault re-run** (a runtime check, not a build item — broad
+  localization on the established Go app, the same loop Phase 9 targets). ([configuration.md](specs/configuration.md))
 
 ---
 
@@ -856,6 +876,7 @@ Build order (each a single, independently testable concern; the two TCB pieces f
 - Consolidate the status bar's 2–3 per-page SSE connections (page content + status bar + alerts.js) onto one connection or h2c *(from T4.19)*.
 - Client-side live wall/token ticker on the invocation budget meter (mid-invocation spend isn't persisted to beads) *(from T4.21)*.
 - Decomposition-preview dry-run before APPROVE (control-room.md OPEN, "leaning defer"; seed issues stay coarse and the autonomous planner decomposes) *(from T4.14)*.
+- **Stage-specific selector tags for a routed diverse verify-path explorer** *(from T12.6)*. specs/configuration.md + verification.md recommend routing the verify path to a *different-family* `explorer` soul via a `verify=1` selector, but an issue's `Tags` thread forward **unchanged** across all of a child's stages (`internal/orchestrator/results.go`) and there is no per-stage/role tag, so a `verify=1` selector cannot pick out *only* the qa stage of a child — tagging the child routes its producer stages too. The vault demo therefore gives the verify path **no explore** (the spec's stricter, fully-independent alternative), which is also the better fit (explore is producer-side localization; the gate re-grades raw). Wiring a *routed* diverse verify-path explorer needs a stage/role-scoped selector input (e.g. the orchestrator exposing the issue's role to the explorer selector, or per-stage tag overrides) — a small orchestrator/selector change, deferred until a deployment actually wants explore on the verify path. Until then the T12.5 static advisory correctly stays silent (no verifier opts into explore).
 
 ## Open decisions affecting the plan
 

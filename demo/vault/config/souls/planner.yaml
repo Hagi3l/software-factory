@@ -11,9 +11,14 @@
 # demands holding the whole spec + surrounding code in head at once. Because it names the Opus
 # slug, a MODEL= override (which only rewrites the shared Sonnet slug) swaps the execution souls
 # without downgrading the planner.
+# `explore` opts this soul into the distilled-comprehension helper (Phase 12): decomposition
+# reads broadly across the vault codebase to find the natural seams, so localizing via a cheap
+# read-only sub-loop (and getting back grounded anchors) instead of spending its own Opus context
+# navigating is exactly its beneficiary case (specs/components/agent.md "Explore"). The tool is
+# offered only because policy.explore_budget is set AND this list names `explore`.
 name:    vault-planner
 role:    planner
 model:   "anthropic/claude-opus-4.8"
 persona: souls/prompts/planner.md
-tools:   [fs, shell, git]
+tools:   [fs, shell, git, explore]
 sandbox: vault-toolchain

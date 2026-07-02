@@ -3,11 +3,16 @@
 # following the app's conventions (see specs/README.md). A different soul than the
 # test-author (producer != verifier). Runs in the vault-toolchain sandbox. Model resolves
 # via infra.dev.yaml; key from the environment.
+# `explore` opts this soul into the distilled-comprehension helper (Phase 12): implementing a
+# vertical slice means first localizing where the store/web/view layers hook together, so a cheap
+# read-only sub-loop that hands back grounded file:line anchors keeps that navigation out of the
+# implementor's own context (specs/components/agent.md "Explore"). Offered only because
+# policy.explore_budget is set AND this list names `explore`.
 name:    vault-implementor
 role:    implementor
 model:   "anthropic/claude-sonnet-5"
 persona: souls/prompts/implementor.md
-tools:   [fs, shell, git]
+tools:   [fs, shell, git, explore]
 sandbox: vault-toolchain
 # Cap per-invocation turns at the kernel default (50), matching the test-author. Implementing a
 # 4-layer vertical slice (store+web+views) and getting it green through the qa gate is as turn-
