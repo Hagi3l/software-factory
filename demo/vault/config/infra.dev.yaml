@@ -69,11 +69,13 @@ models:
   #     everything below them: the decomposition planner (`plan`) and the test-author
   #     (`author-tests`). A wrong split, or a misread test contract, wastes every soul under it —
   #     so they get the most capable model.
-  #   - anthropic/claude-sonnet-5 for the rest — the requirements-planner (the wizard,
-  #     interactive, so latency matters), the implementor, the security/qa verifier, and the
+  #   - anthropic/claude-sonnet-5 for the rest of the producer path — the requirements-planner
+  #     (the wizard, interactive, so latency matters), the implementor, and the
   #     merge-resolver. Near-Opus quality on coding/agentic work at Sonnet cost — a good fit now
   #     that the implementor also designs the store/view layers. MODEL= rewrites this shared
   #     Sonnet slug across those roles without touching the pinned Opus roles (see run.sh).
+  #   - deepseek/deepseek-v4-pro for the security/qa verifier — a different model FAMILY than
+  #     every producer (real N-version diversity, see its entry below) at a fraction of the cost.
   #
   # Both keys are OpenRouter slugs, sent verbatim as the request's model id; the openai-compat
   # adapter posts them to OpenRouter with OPENAI_API_KEY as the bearer token. The Sonnet-5 entry
@@ -100,6 +102,21 @@ models:
     effort: medium
     effort_param: verbosity
     cost: { input_per_mtok: 3, output_per_mtok: 15, cache_write_per_mtok: 3.75, cache_read_per_mtok: 0.3 }
+  # deepseek/deepseek-v4-pro is the DIVERSE verifier tier: the security/qa soul runs on a
+  # different model FAMILY than the Anthropic producers, so the N-version producer!=verifier
+  # independence verification.md recommends is real rather than advisory — a bug now has to slip
+  # past two independently-trained judgments (and the T2.13 family-overlap advisory is silenced by
+  # FIXING it, not muting it). It is also a cheap tier where cheap is safe: the qa soul's value-add
+  # is scanner-driven remediation whose output is re-gated deterministically, and at ~$0.44/$0.87
+  # per Mtok it is ~7-17x cheaper than the Sonnet slot it replaces. Same host-side OpenRouter path
+  # and key as the others. NO `prompt_caching`: DeepSeek auto-caches server-side without
+  # cache_control markers (a marker is sent only where a backend both needs AND accepts it —
+  # specs/models.md); its cached reads still arrive in usage and are priced by cache_read below
+  # (~0.008x input; auto-caching has no write premium, so no cache_write rate).
+  "deepseek/deepseek-v4-pro":
+    provider: openai-compat
+    endpoint: https://openrouter.ai/api/v1
+    cost: { input_per_mtok: 0.435, output_per_mtok: 0.87, cache_read_per_mtok: 0.0036 }
   # anthropic/claude-haiku-4.5 is the CHEAP tier the explore tool's read-only helper soul runs on
   # (Phase 12, T12.6). explore delegates broad search->read->refine localization to a nested
   # sub-loop on this model so the frontier producer never spends its own context navigating; the

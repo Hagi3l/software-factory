@@ -3,9 +3,10 @@
 This demo shows the harness doing its real job on a **non-trivial, already-built
 codebase**: a human authors a *new feature requirement* in the control-room wizard, and
 sandboxed, independently-verified agents plan it, write failing tests, implement it, pass
-an independent security re-gate, and merge it to `main` — driven by **Anthropic models via
-OpenRouter** (Opus for the roles that define correctness, Sonnet for the rest), so all you need
-is an OpenRouter API key.
+an independent security re-gate, and merge it to `main` — driven by **Anthropic + DeepSeek
+models via OpenRouter** (Opus for the roles that define correctness, Sonnet for the rest of
+the producer path, and a **different-family DeepSeek verifier** so producer≠verifier holds
+at the model level too), so all you need is one OpenRouter API key.
 
 The target repo is an **established secrets vault**: a Go + templ + htmx + Tailwind +
 SQLite app with master-password auth (Argon2id), secrets encrypted at rest (AES-256-GCM),
@@ -73,14 +74,23 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
     are the spec made executable, the contract the factory trusts in place of a human and the
     ceiling on what the implementor can build). Set in `config/souls/planner.yaml` and
     `config/souls/test-author.yaml`.
-  - **`anthropic/claude-sonnet-5`** for the rest — the **requirements-planner** (the
-    Create-Task wizard; interactive, so latency matters, and strong tool-protocol following
-    keeps the alignment ledger reliable), the **implementor**, the **security/qa** verifier, and
-    the **merge-resolver**. This tier runs at `effort: medium` (sent as OpenRouter `verbosity`,
-    the field Claude 4.6+/5 map to `output_config.effort`) to trim deliberation and cost; the
-    Opus roles stay at their default. `MODEL=` swaps this shared Sonnet slug across those roles
-    (an OpenRouter slug) without touching the pinned Opus roles. The wizard's model is
-    `requirements_planner.model` in `config/harness.yaml`.
+  - **`anthropic/claude-sonnet-5`** for the rest of the producer path — the
+    **requirements-planner** (the Create-Task wizard; interactive, so latency matters, and
+    strong tool-protocol following keeps the alignment ledger reliable), the **implementor**,
+    and the **merge-resolver**. This tier runs at `effort: medium` (sent as OpenRouter
+    `verbosity`, the field Claude 4.6+/5 map to `output_config.effort`) to trim deliberation
+    and cost; the Opus roles stay at their default. `MODEL=` swaps this shared Sonnet slug
+    across those roles (an OpenRouter slug) without touching the pinned Opus roles or the
+    DeepSeek verifier. The wizard's model is `requirements_planner.model` in
+    `config/harness.yaml`.
+  - **`deepseek/deepseek-v4-pro`** for the **security/qa** verifier — a different model
+    **family** than every producer, so the `producer ≠ verifier` invariant holds at the model
+    level too (real N-version diversity: a bug must slip past two independently-trained
+    judgments, and `harness validate`'s family-overlap advisory is silenced by *fixing* it).
+    It is also the cheap slot by design: the qa soul's value-add is scanner-driven remediation
+    whose output is re-gated deterministically, so at ~$0.44/$0.87 per Mtok (~7–17× under
+    Sonnet) a cheaper model degrades polish, never the gate's floor. Set in
+    `config/souls/security.yaml`.
   - *(If you switch to first-party Anthropic — `provider: anthropic`, an `ANTHROPIC_API_KEY` —
     each model entry can take an optional `effort:` (`low`|`medium`|`high`|`xhigh`|`max`), the
     `output_config.effort` intelligence↔latency↔cost dial. It's not wired on the openai-compat

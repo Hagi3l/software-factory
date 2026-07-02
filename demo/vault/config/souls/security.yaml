@@ -8,9 +8,12 @@
 # the scanners re-audit the crypto/auth code. Runs in the vault-toolchain sandbox. Model
 # resolves via infra.dev.yaml; key from the environment.
 #
-# N-version note: the demo registers a single model, so producer and verifier share a model
-# family — `harness validate` emits a non-fatal advisory. Point this soul at a different
-# provider/family (a config edit, never code) to harden once a second model is wired.
+# N-version note: this soul runs on deepseek-v4-pro — a different model FAMILY than every
+# Anthropic producer — so the producer≠verifier independence verification.md recommends is
+# real: a bug must slip past two independently-trained judgments. This was the config edit
+# the old advisory asked for; `harness validate` is now family-clean. Also the cheap slot:
+# the soul's value-add is scanner-driven remediation whose output is re-gated
+# deterministically, so a cheaper model degrades polish, never the gate's floor.
 #
 # explore: enabled, on the same shared vault-explorer the producers use — a deliberate,
 # spec-recorded choice (specs/verification.md): explore is additive and never load-bearing,
@@ -19,7 +22,7 @@
 # read raw instead — the stricter posture.
 name:    vault-security
 role:    security
-model:   "anthropic/claude-sonnet-5"
+model:   "deepseek/deepseek-v4-pro"
 persona: souls/prompts/security.md
 tools:   [fs, shell, git, explore]
 sandbox: vault-toolchain

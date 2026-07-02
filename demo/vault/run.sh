@@ -31,10 +31,11 @@
 set -euo pipefail
 
 # ---- knobs (override via env) ----------------------------------------------------------
-# The Sonnet slug, shared by the wizard + the execution souls (implementor/security/merge-
+# The Sonnet slug, shared by the wizard + the producer execution souls (implementor/merge-
 # resolver). MODEL= rewrites it (and its registry entry) across all of them, so an override is
-# a Sonnet-tier swap; the Opus-pinned correctness roles — the decomposition planner and the
-# test-author — name the Opus slug and are never touched. Set an OpenRouter model slug.
+# a Sonnet-tier swap; the Opus-pinned correctness roles (decomposition planner, test-author)
+# and the DeepSeek-pinned security verifier (a deliberately different model family — see
+# infra.dev.yaml) name their own slugs and are never touched. Set an OpenRouter model slug.
 DEFAULT_MODEL='anthropic/claude-sonnet-5'
 DEFAULT_ENDPOINT='https://openrouter.ai/api/v1'
 MODEL="${MODEL:-$DEFAULT_MODEL}"

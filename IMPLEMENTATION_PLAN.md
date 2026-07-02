@@ -1011,6 +1011,25 @@ is TCB except where noted; all behind unit tests, `make check` green.
   `harness validate --config demo/vault/config` = OK, 6 souls, 3 models; only the T2.13
   main-model family advisory fires (as designed). ([verification.md](specs/verification.md),
   [configuration.md](specs/configuration.md))
+- [x] **T13.7 Demo: DeepSeek verifier — real N-version diversity + cheap qa tier** — *done.*
+  Operator decision (2026-07-02, follow-on from T13.6's discussion): mix model families for
+  diversity + cost. The **security/qa soul now runs `deepseek/deepseek-v4-pro`** (new
+  `infra.dev.yaml` entry; slug + pricing verified live against OpenRouter's `/api/v1/models`:
+  $0.435/$0.87 per Mtok, 1M ctx, tools supported, cache-read ~0.008x input) — a different
+  model **family** than every Anthropic producer, so producer≠verifier now holds at the model
+  level and the **T2.13 family-overlap advisory is silenced by fixing it** (`harness validate`
+  = OK, 4 models, zero advisories). Rationale recorded in the config comments: the qa soul's
+  value-add is scanner-driven remediation whose output is re-gated deterministically, so the
+  cheap slot is safe there (~7-17x under the Sonnet it replaces); the *highest-leverage*
+  diversity spot (test-author — its tests are the judgment that gates the implementor) was
+  deliberately left on Opus for the imminent live demo (T13.3's walls/personas were tuned
+  around it) — swap it after the talk if desired. **No `prompt_caching`** on the DeepSeek
+  entry: it auto-caches server-side without cache_control markers (T11.2's "send only where
+  needed AND accepted"); `cache_read_per_mtok: 0.0036` keeps USD accounting accurate.
+  `run.sh`'s `MODEL=` Sonnet-tier rewrite no longer touches security (comment updated);
+  README intro + model-tier section updated. Config-only — no Go change, no spec change
+  (verification.md already records "diversity is configured, not mandated").
+  ([configuration.md](specs/configuration.md), [verification.md](specs/verification.md))
 
 ---
 
