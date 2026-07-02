@@ -131,7 +131,9 @@ format. They split along the trust boundary:
   - *Comprehension (read):* `find_symbol` (locate a symbol project-wide by name, no
     path), `references`, `definition`, `implementation` (impls of an interface, and
     the reverse), `hover` (type/signature), `diagnostics` (structured compile/type
-    errors), plus the text floor `read_file`, `list_dir`, `search` (text/regex).
+    errors), plus the text floor `read_file`, `list_dir`, `search` (text/regex). Each
+    answers *one* question; for a broad, multi-step one there is `explore` — a distilled
+    comprehension sub-loop (see [Explore](#explore--distilled-comprehension) below).
   - *Transformation (write):* `rename` (semantic, project-wide), `code_action` (apply
     the server's own fix — organise imports, add import, quickfix, extract), plus the
     text floor `edit_file`, `write_file`, `run` (build/test/lint/fmt).
@@ -189,6 +191,76 @@ because it never picks the mechanism.
   floor is stamped into the Result's evidence — provenance the gate and traceability
   map can weigh (a text-fallback rename warrants more suspicion than a semantic one).
 
+### Explore — distilled comprehension
+
+The comprehension tools above each answer *one* question. `explore` answers a **broad,
+multi-step** one: the agent states a free-form question — *"where and how is per-soul
+model selection resolved, and what touches provenance?"* — and gets back a compact
+distilled answer instead of running the iterative search→read→refine itself. Its purpose
+is context and cost. The intermediate reading — which would bloat the agent's window and
+burn its (frontier) tokens — happens in a **nested loop on a cheap model**, and only the
+residue returns. It is the intent-first move one level up: *provider adapter : model ::
+language server : semantic tool :: explore loop : comprehension question* — the agent says
+what it wants to understand, the trusted layer decides how to find out.
+
+- **A tool, not a DAG citizen.** The implementation is a bounded child agent loop run
+  **in-process inside the agent binary**: its read tools hit the parent's already-warm
+  [LSP session](#semantic-tools-lsp-backed) in the same sandbox (no reseed, no cold
+  server), its model calls broker out over the same channel, and it returns its answer up
+  to the parent as the tool result — never leaving the sandbox. Reads never cross the trust
+  boundary; only model calls do, exactly as always.
+- **Free-form question in, structured answer out.** `explore` returns
+  `{summary, anchors:[{path,line,why}], coverage: complete|partial-budget|partial-uncertain,
+  leads:[…]}`. **Anchors are always required** — every claim is grounded in a `file:line`
+  the parent can re-read, so the distiller is a *pointer generator*, not a source of truth.
+  This neutralizes hallucination on the action path: **distill for navigation, precise-read
+  for action** — the parent re-reads the anchor at full fidelity before editing against it
+  (anchors are pointers only; snippets are not auto-inlined, which would re-inflate the
+  context the tool exists to save). `coverage` tells the parent how far to trust a partial
+  answer; `leads` lets it re-ask narrower rather than re-explore blind. The child terminates
+  by calling its one lifecycle tool, `answer(...)`, or on its budget — the same two-rail
+  termination the main loop has.
+- **Reuses a [Soul](#soul-vs-agent), off the DAG.** The explorer is configured like any
+  soul (a cheap `model`, an explore `persona`, the read-only allowlist) and runs the same
+  loop — but it is **invoked as a tool by the runner** in response to the parent's call,
+  synchronously, *not* scheduled by the orchestrator as a DAG node ("helper soul"; the
+  reserved `explorer` role, see [../configuration.md](../configuration.md)). Its mini-Brief
+  is the *question* + the worktree + the [ambient specs](../configuration.md) — and **not**
+  the parent's conversation. Handing it the parent's context would defeat the point; handing
+  it only the question would starve it of the project map.
+
+Five rules keep a nested loop from reintroducing the problems a sandbox exists to contain:
+
+1. **Read-only toolset, no exceptions** — only the comprehension subset above; no
+   `edit`/`write`/`run`/`submit`/`escalate`/`request_subtask`. This single rule preserves
+   single-writer (it can't touch beads), producer≠verifier (it can't produce a candidate),
+   and stateless souls (it writes nothing, dies with the parent) at once.
+2. **No recursion** — the explorer's allowlist omits `explore` itself, structurally (not a
+   runtime guard). This is the fan-out backstop that keeps *budgets = termination* intact.
+3. **Fixed sub-budget, under the parent-task ceiling** — the runner meters the explorer's
+   own model stream against a fixed cap (`policy.explore_budget`,
+   [../configuration.md](../configuration.md)); a breach ends the explore with a
+   `partial-budget` answer, never the parent task.
+4. **Model pinned by the trusted dispatch, not the agent** — the parent may *call* explore
+   but cannot *choose what it runs on*; the runner enforces the configured explorer soul
+   regardless of what the sandbox asks for (see [../models.md](../models.md),
+   [../messaging.md](../messaging.md)). Otherwise an untrusted agent could tag a request to
+   escape its tier.
+5. **The explore transcript is first-class evidence** — hashed to the
+   [artifact store](artifact-store.md) alongside the main transcript, the pinned model
+   recorded, so *provenance by construction* holds: the exploration is auditable, not a
+   hidden side-channel.
+
+**Additive, never load-bearing.** The parent keeps every raw comprehension tool; `explore`
+is a pure accelerant. A `partial-uncertain` answer, or an explorer error, just routes the
+parent back to searching itself — a soul can even run with `explore` disabled at no cost to
+correctness. And unlike compaction it does **not** fight [prompt caching](../models.md): the
+parent's cacheable prefix is untouched — an explore call is one tool-call/result appended at
+the tail. Its blast radius if the cheap model is itself hostile is nil beyond quality: the
+explorer is read-only and its output is a set of *checkable* anchors handed to an
+already-untrusted, independently-gated parent, so a lying explorer costs a rejected
+candidate downstream, not a bad merge — it opens no new trust hole.
+
 ---
 
 ## Rules an agent must obey
@@ -207,4 +279,9 @@ because it never picks the mechanism.
 ## OPEN questions
 
 - Per-role tool *enablement* defaults (which souls get `run`, network access, etc.)
-  — config detail, see [../configuration.md](../configuration.md).
+  — config detail, see [../configuration.md](../configuration.md). `explore` is part of
+  this surface: planner and implementor are the obvious beneficiaries (broad
+  localization); whether the **verify path** (qa/security) gets it, and on a
+  *diverse* explorer soul to avoid correlating its blind spots with the producer's, is a
+  config-policy call — see [../verification.md](../verification.md) and
+  [../configuration.md](../configuration.md).

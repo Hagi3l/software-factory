@@ -110,6 +110,16 @@ split that happens to share one gateway. The warning's natural home is `harness
 validate` (so yaml-only users see it); a control-room tooltip is a complementary
 surface once a souls/config view exists.
 
+The same reasoning extends to the [`explore` tool](components/agent.md#explore--distilled-comprehension)
+when the verify path is allowed to use it. A distiller frames how its caller thinks, so a
+verifier sharing the *same* explorer soul as the producer can inherit the producer's
+navigation blind spots — a correlated error through a shared upstream, exactly what soul and
+model independence exist to prevent. So the recommendation is a **diverse explorer on the
+verify path** (a second `explorer` soul on a different family, routed by tag — see
+[configuration.md](configuration.md)), or no explore for verifiers at all. Like model
+diversity it is recommended, not forced: explore is read-only and additive, and the qa
+candidate is re-graded regardless, so this tunes independence rather than gating it.
+
 ### Producer self-checks are feedback, not grades
 
 Nothing stops — and the [implementor persona](components/agent.md) is expected to

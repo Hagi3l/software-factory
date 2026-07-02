@@ -56,6 +56,14 @@ for [`epic_budget`](#budget) aggregation and — under
 [`integration.mode: epic`](integration.md) — atomic feature landing. See
 [workflow.md](workflow.md), [integration.md](integration.md).
 
+### Explore
+A read-only comprehension tool that answers a broad, multi-step question by running a
+nested [agent](#agent) loop on a **cheap** model — the iterative search→read→refine — and
+returning a distilled `{summary, anchors, coverage, leads}` instead of the raw reading. Its
+implementation runs in-process in the parent's sandbox (reusing its warm LSP session); it is
+a [helper soul](#helper-soul), not a DAG stage. Additive and never load-bearing. See
+[components/agent.md](components/agent.md#explore--distilled-comprehension).
+
 ### Finding
 A single structured result parsed from a [check](#gate)'s tool output — `{file, line,
 severity, rule, message}` plus a typed detail that keeps the tool-specific essential (a
@@ -80,6 +88,14 @@ threshold, scanner exits — harvested to the [artifact store](#artifact-store) 
 `gate-verdict`) for every run, pass or fail, so the [verification view](control-room.md)
 can render the trust argument after the fact. Distinct from the per-check *evidence* it
 indexes. See [verification.md](verification.md).
+
+### Helper soul
+A [Soul](#soul) invoked **as a tool** by the runner, synchronously, rather than scheduled by
+the orchestrator as a DAG stage — the [explorer](#explore) is the first (reserved role
+`explorer`). It reuses the Soul struct and the one agent loop but sits **off the DAG**; its
+model is pinned by the trusted dispatch and metered against a fixed sub-budget. See
+[components/agent.md](components/agent.md#explore--distilled-comprehension),
+[models.md](models.md).
 
 ### Integrated
 The durable state of a child work item whose verified candidate has **landed on the

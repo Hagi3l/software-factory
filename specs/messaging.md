@@ -120,6 +120,13 @@ package mirror, git). So:
 - Model calls travel this channel too, as provider-agnostic
   [canonical requests](models.md); the runner attaches the key and the right
   provider adapter.
+- A model call carries a **sub-context selector** so one sandbox can drive more than one
+  model — the parent invocation and the [`explore` tool](components/agent.md#explore--distilled-comprehension)'s
+  nested read-only sub-loop each tag their calls. The runner routes each tag to its adapter
+  and meters the explorer's tag against the fixed `policy.explore_budget`. The tag→soul→model
+  binding is **pinned by the trusted dispatch and enforced by the runner**, never chosen by
+  the sandbox — an agent that renamed its tag to a stronger tier is refused. See
+  [models.md](models.md).
 
 This keeps the [single-writer](security.md) and [zero-egress](security.md)
 properties intact: the only NATS citizens are trusted (orchestrator, runners).

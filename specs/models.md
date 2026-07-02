@@ -167,6 +167,31 @@ mistake costs a rejected candidate, not a bad merge. Which model serves which ro
 config policy, tunable per deployment; the bootstrap commits frontier for
 planner/test-author/implementor and mid-tier for security.
 
+## Helper souls — two models in one sandbox
+
+Most invocations resolve exactly one model: the soul's. The [`explore`
+tool](components/agent.md#explore--distilled-comprehension) is the exception — it runs a
+nested read-only sub-loop on a **cheap** model while the parent runs on its (frontier) one,
+so a single sandbox drives **two** trusted-pinned model identities at once. This stays
+inside the existing seam with two small additions:
+
+- The canonical model request the sandbox emits carries a **sub-context selector**, so the
+  runner knows which of the invocation's models a given call belongs to and routes it to the
+  right adapter (the parent's, or the explorer's). See [messaging.md](messaging.md).
+- The selector is **pinned by the trusted dispatch and enforced by the runner** — the agent
+  names the *tool*, never the *model*. The runner resolves the explorer soul's `model` from
+  config exactly as it resolves the parent's, and refuses any other. This keeps *the model is
+  resolved by the trusted layer* intact even with two models in one sandbox; both are
+  recorded in the provenance trailer.
+
+The runner meters the explorer's stream against its own **fixed sub-budget**
+(`policy.explore_budget`, see [configuration.md](configuration.md)) under the parent task's
+ceiling — the same choke point where it already enforces [budgets](workflow.md) and emits
+[spans](observability.md), so no new accounting path. The explorer is the archetypal cheap
+tier: read-only and independently discardable, its output never trusted verbatim (it ships
+*checkable* anchors), so a weak model there costs at worst a re-search — the same
+producer≠verifier-style economy that lets the qa soul run mid-tier.
+
 ## OPEN questions
 
 *(none — the registry config shape and per-role tiers above are realized.)*

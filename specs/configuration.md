@@ -59,6 +59,7 @@ policy:
   max_retries: 3
   budget:      { tokens: 2_000_000, usd: 20, wall: 2h }   # per issue
   epic_budget: { usd: 200 }
+  explore_budget: { tokens: 100_000, turns: 12 }          # per explore call (see below)
   dead_letter: harness.dlq
 ```
 
@@ -178,6 +179,14 @@ policy:
   lands. On **reject** it routes a fix attempt through the normal `on_failure`/retry machinery
   (→ back to spec when no route or budget remains). It is the gate that realizes the
   trusted-dev transition and the permanent TCB-review boundary (`policy` below, [bootstrap.md](bootstrap.md)).
+- `policy.explore_budget` is the **fixed** per-call cap on the
+  [`explore` tool](components/agent.md#explore--distilled-comprehension)'s nested read-only
+  sub-loop (tokens and/or turns). It is deliberately fixed, not a fraction of the parent's
+  remaining budget, so an explore call behaves the same wherever in an invocation it is made;
+  the runner meters it against this cap and, on a breach, harvests a `partial-budget` answer
+  rather than failing the parent — the parent's `budget` above is still the real ceiling
+  (every explorer stream draws against it). Omitting the block disables `explore` (no cap =
+  no helper loop). See [models.md](models.md).
 - `policy` is the **termination guarantee** (budgets + retry caps — see
   [workflow.md](workflow.md)) and the **autonomy profile**. `policy.profile` is
   `trusted-dev` or `autonomous`: **trusted-dev** requires a `human-approved` postcondition on
@@ -248,6 +257,35 @@ more souls.
 
 **Personas are markdown**, not inline YAML — consistent with specs, and prompts
 are long and want diffing/review.
+
+**The explorer is a helper soul on a reserved role.** The
+[`explore` tool](components/agent.md#explore--distilled-comprehension) resolves to a soul
+declaring the reserved role `explorer` — a role the **DAG never references** (it is invoked
+as a tool, not scheduled as a stage), so it is exempt from the "every soul's role is a DAG
+stage" rule below. Otherwise it is an ordinary soul: a cheap `model`, an explore `persona`, a
+read-only `tools` allowlist (the comprehension subset; **never** `explore` itself — no
+recursion), and a `selector`. It is selected per issue by the **same selector algorithm** as
+any role, so the issue's threaded tags can route to a diverse explorer:
+
+```yaml
+name:     explorer                     # the producer-path default
+role:     explorer                     # reserved helper role — not in the DAG
+model:    haiku-cheap
+persona:  souls/prompts/explorer.md
+tools:    [find_symbol, references, definition, implementation, hover, diagnostics,
+           read_file, list_dir, search]
+selector: {}                           # catch-all default
+```
+
+**Verify-path diversity (recommended).** A distiller's summary frames how its caller thinks,
+so if the *same* explorer serves both the producer and the qa/security path, a systematic
+explorer blind spot becomes a **correlated** one — quietly eroding producer≠verifier
+([verification.md](verification.md)). The recommended policy is a **second explorer soul on a
+different [model family](#infraenvyaml--environment)**, routed to the verify path by a tag
+(e.g. a `verify=1` selector), so their blind spots don't correlate. Giving the verify path
+*no* explore (it reads raw, fully independent) is the stricter alternative. This is
+config-policy the harness recommends but does not force — the same stance as model diversity
+generally (the family-overlap [advisory](#advisories--non-fatal-warnings) extends to it).
 
 ---
 
@@ -350,7 +388,11 @@ the workflow or souls.
 In an autonomous pipeline a config typo fails silently and badly. A `harness
 validate` step must run before anything executes and check:
 
-- every DAG `role` resolves to ≥1 soul, and every soul's `role` exists;
+- every DAG `role` resolves to ≥1 soul, and every soul's `role` exists — **except** the
+  reserved `explorer` role, which the DAG never references (it is invoked as a tool, not a
+  stage); if `policy.explore_budget` is set, at least one `explorer` soul must exist, and an
+  `explorer` soul's `tools` must be the read-only comprehension subset and must not include
+  `explore` (no recursion);
 - every soul's `sandbox` profile resolves to a `sandbox.profiles` entry that carries
   the field the active `sandbox.backend` needs (`image` for docker/gvisor, `rootfs`
   for firecracker) — an unresolvable profile is the same silent config fault as a
