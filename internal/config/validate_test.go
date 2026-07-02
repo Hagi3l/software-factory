@@ -470,11 +470,52 @@ func TestValidateEffortRejectsUnknownLevel(t *testing.T) {
 	mustContain(t, problems(t, c), `invalid effort "turbo"`)
 }
 
-func TestValidateEffortOnlyOnAnthropic(t *testing.T) {
+// effort on openai-compat is now allowed, but the heterogeneous surface means the operator
+// must declare the wire form (effort_param) explicitly — a missing one is a hard error, not a
+// silent no-op at run time.
+func TestValidateEffortOnOpenAICompatRequiresParam(t *testing.T) {
 	c := validConfig()
 	c.Souls = fullSouls(t)
 	c.Infra.Models["compat"] = ModelProvider{Provider: "openai-compat", Endpoint: "https://x", Effort: "medium"}
-	mustContain(t, problems(t, c), "effort is only honored on provider anthropic")
+	mustContain(t, problems(t, c), "sets effort on provider openai-compat but no effort_param")
+}
+
+func TestValidateEffortParamVerbosityOnOpenAICompatPasses(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["compat"] = ModelProvider{Provider: "openai-compat", Endpoint: "https://x", Effort: "medium", EffortParam: "verbosity"}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate returned %v, want nil for openai-compat effort+effort_param entry", err)
+	}
+}
+
+func TestValidateEffortParamRejectsUnknown(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["compat"] = ModelProvider{Provider: "openai-compat", Endpoint: "https://x", Effort: "medium", EffortParam: "loud"}
+	mustContain(t, problems(t, c), `invalid effort_param "loud"`)
+}
+
+// effort_param is meaningless on native anthropic (one wire form) — rejected so config stays honest.
+func TestValidateEffortParamRejectedOnAnthropic(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["opus"] = ModelProvider{Provider: "anthropic", Effort: "medium", EffortParam: "verbosity"}
+	mustContain(t, problems(t, c), "effort_param but provider is anthropic")
+}
+
+func TestValidateEffortRejectedOnNativeOpenAI(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["gpt"] = ModelProvider{Provider: "openai", Effort: "medium"}
+	mustContain(t, problems(t, c), "native openai is not yet wired")
+}
+
+func TestValidateEffortParamWithoutEffort(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["compat"] = ModelProvider{Provider: "openai-compat", Endpoint: "https://x", EffortParam: "verbosity"}
+	mustContain(t, problems(t, c), "sets effort_param but no effort")
 }
 
 func TestValidateEffortValidLevelOnAnthropicPasses(t *testing.T) {

@@ -5,7 +5,7 @@
 # Go/templ/htmx/SQLite codebase), then runs the harness with the control room up. You then
 # author a NEW feature requirement live in the Create-Task wizard and watch the full
 # pipeline (plan -> author-tests -> implement -> qa -> integrate) take it to a merge on
-# `main` — driven by a REMOTE model served by OpenRouter. See demo/vault/README.md.
+# `main` — driven by Anthropic models served through OpenRouter. See demo/vault/README.md.
 #
 # The scratch repo is wired to a PUBLIC GitHub repo (VAULT_REMOTE): it is reset to the green
 # seed at startup, and each landed feature's machine-authored merge commit is pushed there —
@@ -15,12 +15,12 @@
 # Unlike demo/run.sh this does NOT seed an issue: the requirement is drafted on stage via
 # the wizard at /create. The repo ships green, so the agents extend a clean tree.
 #
-# Requires OPENAI_API_KEY to hold your OpenRouter API key (the openai-compat adapter and
-# the requirements-planner both send it as the bearer token).
+# Requires OPENAI_API_KEY to hold your OpenRouter API key (the openai-compat adapter sends it
+# as the bearer token for every role).
 #
 # Usage:
 #   OPENAI_API_KEY='sk-or-...' ./demo/vault/run.sh
-#   MODEL='anthropic/claude-opus-4.8' ./demo/vault/run.sh   # override the model (OpenRouter slug)
+#   MODEL='anthropic/claude-opus-4.8' ./demo/vault/run.sh   # run the Sonnet-tier roles on Opus too (an OpenRouter slug)
 #   MODEL_ENDPOINT='https://openrouter.ai/api/v1' ./demo/vault/run.sh
 #   SERVE_ADDR='127.0.0.1:9000' ./demo/vault/run.sh
 #   BD=/path/to/bd ./demo/vault/run.sh                      # override the beads CLI
@@ -31,7 +31,11 @@
 set -euo pipefail
 
 # ---- knobs (override via env) ----------------------------------------------------------
-DEFAULT_MODEL='deepseek/deepseek-v4-flash'
+# The Sonnet slug, shared by the wizard + the execution souls (implementor/security/merge-
+# resolver). MODEL= rewrites it (and its registry entry) across all of them, so an override is
+# a Sonnet-tier swap; the Opus-pinned correctness roles — the decomposition planner and the
+# test-author — name the Opus slug and are never touched. Set an OpenRouter model slug.
+DEFAULT_MODEL='anthropic/claude-sonnet-5'
 DEFAULT_ENDPOINT='https://openrouter.ai/api/v1'
 MODEL="${MODEL:-$DEFAULT_MODEL}"
 MODEL_ENDPOINT="${MODEL_ENDPOINT:-$DEFAULT_ENDPOINT}"
@@ -115,18 +119,17 @@ if [ -n "$MODEL_OVERRIDDEN" ] || [ -n "${JAEGER:-}" ] || [ -n "${OPENOBSERVE:-}"
   cp -r "$DEMO_DIR/config" "$CONFIG_DIR"
 fi
 if [ -n "$MODEL_OVERRIDDEN" ]; then
-  # The flash slug is the flash registry key in infra.dev.yaml AND the `model:` field in the
-  # execution souls (implementor, security, merge-resolver); substitute both so they stay
-  # consistent (validation cross-checks them). The three -pro-pinned souls — the
-  # requirements_planner (harness.yaml), the decomposition planner (souls/planner.yaml), and
-  # the test-author (souls/test-author.yaml) — name the separate -pro slug, so this flash-slug
-  # sed leaves them untouched: a MODEL= override swaps the execution souls without downgrading
-  # the spec/decomposition/test-contract roles that define what correct means.
+  # The Sonnet slug is its registry key in infra.dev.yaml AND the `model:` field on the wizard
+  # (harness.yaml) + the execution souls (implementor, security, merge-resolver); substitute the
+  # slug and the endpoint so they stay consistent (validation cross-checks them). The Opus-pinned
+  # souls — the decomposition planner (souls/planner.yaml) and the test-author
+  # (souls/test-author.yaml) — name the Opus slug, so this sed leaves them untouched: a MODEL=
+  # override is a Sonnet-tier swap that never downgrades the decomposition/test-contract roles.
   for f in "$CONFIG_DIR/infra.dev.yaml" "$CONFIG_DIR/harness.yaml" "$CONFIG_DIR/souls/"*.yaml; do
     sed -i.bak -e "s|$DEFAULT_MODEL|$MODEL|g" -e "s|$DEFAULT_ENDPOINT|$MODEL_ENDPOINT|g" "$f"
     rm -f "$f.bak"
   done
-  say "Using model '$MODEL' at $MODEL_ENDPOINT (config materialized in $CONFIG_DIR)"
+  say "Using model '$MODEL' at $MODEL_ENDPOINT for the Sonnet-tier roles (config materialized in $CONFIG_DIR)"
 fi
 if [ -n "${JAEGER:-}" ]; then
   # Repoint otel.endpoint from "" (off) to the Jaeger container's OTLP/gRPC port on the host.
@@ -327,8 +330,8 @@ fi
 say "Validating demo config"
 "$HARNESS" validate --config "$CONFIG_DIR"
 
-# The openai-compat adapter (and the requirements-planner) send OPENAI_API_KEY as the
-# bearer token to OpenRouter.
+# The openai-compat adapter sends OPENAI_API_KEY as the bearer token to OpenRouter for every
+# model call (held only by the trusted runner, never in config; the sandbox stays zero-network).
 export OPENAI_API_KEY
 
 # Start the post-merge push watcher (no-op when VAULT_REMOTE is empty).

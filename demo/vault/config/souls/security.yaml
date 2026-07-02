@@ -13,7 +13,7 @@
 # provider/family (a config edit, never code) to harden once a second model is wired.
 name:    vault-security
 role:    security
-model:   "deepseek/deepseek-v4-flash"
+model:   "anthropic/claude-sonnet-5"
 persona: souls/prompts/security.md
 tools:   [fs, shell, git]
 sandbox: vault-toolchain

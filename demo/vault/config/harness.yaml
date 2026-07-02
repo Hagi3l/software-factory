@@ -58,12 +58,15 @@ ambient_specs: [specs/README.md, specs/conventions.md]
 # conversation. Exploration is read-only; the planner still writes nothing but the consent-gated
 # spec + issues.
 requirements_planner:
-  model:           "deepseek/deepseek-v4-pro"
+  model:           "anthropic/claude-sonnet-5"
   persona:         souls/prompts/requirements-planner.md
-  # Pinned to the stronger -pro tier: the wizard is the single human-in-the-loop conversation and
-  # the entire correctness lever, and it must reliably follow the ledger/draft tool protocol that
-  # drives the alignment ledger UI. Both deepseek tiers have a 1M-token context window, so the
-  # planner can read deeply and hold a long conversation. max_tokens is the per-reply *output*
+  # Runs on anthropic/claude-sonnet-5: the wizard is the single human-in-the-loop conversation and the
+  # entire correctness lever, and it must reliably follow the ledger/draft tool protocol that
+  # drives the alignment ledger UI — Sonnet's strong tool-use carries that, and being interactive
+  # it benefits from Sonnet's lower latency over Opus. It inherits the registry entry's
+  # effort: medium (sent as OpenRouter `verbosity`), which trims deliberation without dulling the
+  # tool-following the ledger protocol needs. Its 1M-token context window lets the
+  # planner read deeply and hold a long conversation. max_tokens is the per-reply *output*
   # ceiling (not the context window): 16k leaves
   # ample room for prose + the full ledger + a complete draft (with inline spec markdown) without
   # truncating mid-block. max_tool_turns lets it explore the vault codebase across many reads;

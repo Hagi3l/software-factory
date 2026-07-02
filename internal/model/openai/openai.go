@@ -24,9 +24,11 @@ import (
 // Adapter calls one OpenAI-compatible model. It is bound to a single model name at
 // construction; the runner builds one per soul.Model via the registry (plan T1.10).
 type Adapter struct {
-	model   string
-	client  sdk.Client
-	caching bool // send a cache_control breakpoint on the stable prefix (opt-in; see WithPromptCaching)
+	model       string
+	client      sdk.Client
+	caching     bool   // send a cache_control breakpoint on the stable prefix (opt-in; see WithPromptCaching)
+	effort      string // reasoning-effort level to send on every call; empty = provider default (see WithEffort)
+	effortParam string // wire form for effort: "reasoning" (reasoning:{effort}) or "verbosity" (top-level)
 }
 
 // New builds an Adapter for the given model. Request options configure the
@@ -53,6 +55,39 @@ func (a *Adapter) WithPromptCaching(on bool) *Adapter {
 	return a
 }
 
+// WithEffort configures the reasoning-effort control this adapter sends to an openai-compat
+// backend that accepts one (specs/models.md "Optional capability fields"). effort is the
+// level (low|medium|high|xhigh|max); param selects the wire field — "reasoning" for
+// OpenRouter's unified reasoning:{effort} (OpenAI o-series, DeepSeek, Gemini-thinking, Claude
+// pre-4.6), "verbosity" for the top-level field Claude 4.6+/5 map to output_config.effort
+// (their reasoning.effort is a no-op). A builder like WithPromptCaching so existing callers
+// stay unchanged; the registry chains it from the model's effort/effort_param config. Empty
+// effort is a no-op (provider default). Returns the adapter for chaining.
+func (a *Adapter) WithEffort(effort, param string) *Adapter {
+	a.effort, a.effortParam = effort, param
+	return a
+}
+
+// effortOpts returns the per-request options that carry the reasoning-effort control to an
+// openai-compat backend, or nil when effort is unset. The effort level rides as a non-schema
+// body field (Chat Completions has no native one), the field chosen by effort_param:
+// "reasoning" → OpenRouter's unified reasoning:{effort}; "verbosity" → the top-level verbosity
+// field Claude 4.6+/5 map to output_config.effort (their reasoning.effort is a silent no-op).
+// Config validation guarantees effort_param is set and valid whenever effort is, so an unknown
+// param never reaches here. See specs/models.md "Optional capability fields".
+func (a *Adapter) effortOpts() []option.RequestOption {
+	if a.effort == "" {
+		return nil
+	}
+	switch a.effortParam {
+	case "verbosity":
+		return []option.RequestOption{option.WithJSONSet("verbosity", a.effort)}
+	case "reasoning":
+		return []option.RequestOption{option.WithJSONSet("reasoning", map[string]any{"effort": a.effort})}
+	}
+	return nil
+}
+
 // Complete satisfies model.Adapter. It always uses the streaming API (streaming is
 // first-class — see specs/models.md), accumulates the streamed chunks into the final
 // completion, forwards text deltas to onEvent for the live view, and returns the
@@ -63,7 +98,7 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 		return model.Response{}, err
 	}
 
-	stream := a.client.Chat.Completions.NewStreaming(ctx, params)
+	stream := a.client.Chat.Completions.NewStreaming(ctx, params, a.effortOpts()...)
 	var acc sdk.ChatCompletionAccumulator
 	for stream.Next() {
 		chunk := stream.Current()

@@ -307,6 +307,74 @@ func TestCompleteIntegration(t *testing.T) {
 	}
 }
 
+// TestCompleteEmitsEffortWireField proves the adapter puts the configured effort level on the
+// wire in the form effort_param selects: the top-level `verbosity` field (Claude 4.6+/5) or the
+// unified `reasoning: {effort}` object (everything else), and neither when effort is unset. It
+// captures the outgoing request body against a scripted SSE server — deterministic, no network.
+func TestCompleteEmitsEffortWireField(t *testing.T) {
+	cases := []struct {
+		name          string
+		effort, param string
+		check         func(t *testing.T, body map[string]any)
+	}{
+		{"verbosity", "medium", "verbosity", func(t *testing.T, b map[string]any) {
+			if b["verbosity"] != "medium" {
+				t.Errorf("verbosity = %v, want \"medium\"", b["verbosity"])
+			}
+			if _, ok := b["reasoning"]; ok {
+				t.Errorf("reasoning present with verbosity transport: %v", b["reasoning"])
+			}
+		}},
+		{"reasoning", "high", "reasoning", func(t *testing.T, b map[string]any) {
+			r, ok := b["reasoning"].(map[string]any)
+			if !ok {
+				t.Fatalf("reasoning = %v, want an object", b["reasoning"])
+			}
+			if r["effort"] != "high" {
+				t.Errorf("reasoning.effort = %v, want \"high\"", r["effort"])
+			}
+			if _, ok := b["verbosity"]; ok {
+				t.Errorf("verbosity present with reasoning transport: %v", b["verbosity"])
+			}
+		}},
+		{"unset", "", "", func(t *testing.T, b map[string]any) {
+			if _, ok := b["verbosity"]; ok {
+				t.Errorf("verbosity present with no effort: %v", b["verbosity"])
+			}
+			if _, ok := b["reasoning"]; ok {
+				t.Errorf("reasoning present with no effort: %v", b["reasoning"])
+			}
+		}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			bodyCh := make(chan map[string]any, 1)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var m map[string]any
+				_ = json.NewDecoder(r.Body).Decode(&m)
+				bodyCh <- m
+				w.Header().Set("Content-Type", "text/event-stream")
+				flusher, _ := w.(http.Flusher)
+				fmt.Fprintf(w, "data: %s\n\n", `{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1}}`)
+				if flusher != nil {
+					flusher.Flush()
+				}
+				fmt.Fprint(w, "data: [DONE]\n\n")
+			}))
+			defer srv.Close()
+
+			a := New("test-model", option.WithBaseURL(srv.URL)).WithEffort(tc.effort, tc.param)
+			if _, err := a.Complete(context.Background(), model.Request{
+				MaxTokens: 8,
+				Messages:  []model.Message{{Role: model.RoleUser, Text: "hi"}},
+			}, nil); err != nil {
+				t.Fatalf("Complete: %v", err)
+			}
+			tc.check(t, <-bodyCh)
+		})
+	}
+}
+
 // TestCompleteStreamsReasoningAndText drives the adapter against a scripted SSE server
 // that emits the non-standard `reasoning` delta a "thinking" model (e.g. Ollama's qwen)
 // streams alongside `content`. It proves the adapter routes each to the right channel —

@@ -9,7 +9,7 @@
 # infra.dev.yaml; key from the environment.
 name:    vault-merge-resolver
 role:    merge-resolver
-model:   "deepseek/deepseek-v4-flash"
+model:   "anthropic/claude-sonnet-5"
 persona: souls/prompts/merge-resolver.md
 tools:   [fs, shell, git]
 sandbox: vault-toolchain

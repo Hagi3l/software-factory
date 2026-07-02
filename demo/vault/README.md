@@ -3,8 +3,9 @@
 This demo shows the harness doing its real job on a **non-trivial, already-built
 codebase**: a human authors a *new feature requirement* in the control-room wizard, and
 sandboxed, independently-verified agents plan it, write failing tests, implement it, pass
-an independent security re-gate, and merge it to `main` — driven by a **hosted model** via
-OpenRouter, so all you need is an API key.
+an independent security re-gate, and merge it to `main` — driven by **Anthropic models via
+OpenRouter** (Opus for the roles that define correctness, Sonnet for the rest), so all you need
+is an OpenRouter API key.
 
 The target repo is an **established secrets vault**: a Go + templ + htmx + Tailwind +
 SQLite app with master-password auth (Argon2id), secrets encrypted at rest (AES-256-GCM),
@@ -47,7 +48,7 @@ demo/vault/
   Dockerfile              # vault-toolchain sandbox image (FROM go-toolchain: + templ + Tailwind + vault module cache)
   config/
     harness.yaml          # FULL DAG (requirements→plan→author-tests→implement→qa→integrate + resolve), Go/security gate
-    infra.dev.yaml        # hosted model via OpenRouter; vault-toolchain sandbox profile
+    infra.dev.yaml        # Anthropic models (Opus + Sonnet) via OpenRouter; vault-toolchain sandbox profile
     souls/                # planner, test-author, implementor, security, merge-resolver (+ prompts/)
   app/                    # the ESTABLISHED vault app — its own Go module; copied into the scratch repo
     cmd/ internal/ specs/ Makefile .golangci.yml ...
@@ -62,21 +63,28 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
 ## Prerequisites
 
 - **Docker** running (the sandbox backend).
-- An **OpenRouter API key** in `OPENAI_API_KEY` (the openai-compat adapter and the
-  requirements-planner send it as the bearer token). The execution souls (implementor,
-  security, merge-resolver) default to `deepseek/deepseek-v4-flash`; override with `MODEL=`
-  (must support function calling — the agent loop drives the model through structured tool
-  calls). A full-DAG run on real Go is demanding, so prefer a capable model. The three roles
-  that define *what correct means* are pinned separately to the stronger
-  `deepseek/deepseek-v4-pro` and are *not* affected by `MODEL=`: the **requirements-planner**
-  (the Create-Task wizard — the one human-in-the-loop conversation, which must reliably follow
-  the ledger/draft tool protocol that drives the alignment ledger UI), the **decomposition
-  planner** (the `plan` stage — a wrong split wastes every soul below it), and the
-  **test-author** (the `author-tests` stage — its tests are the spec made executable, the
-  contract the factory trusts in place of a human and the ceiling on what the implementor can
-  build). The cheaper flash tier does none of these dependably. To change the wizard, edit
-  `requirements_planner.model` in `config/harness.yaml`; to change the planner or test-author,
-  edit `model:` in `config/souls/planner.yaml` or `config/souls/test-author.yaml`.
+- An **OpenRouter API key** in `OPENAI_API_KEY` (the openai-compat adapter sends it as the
+  bearer token; the runner holds it host-side, never in config, and the sandbox stays
+  zero-network). Every role runs on an Anthropic model **via OpenRouter** in two tiers, set in
+  `config/infra.dev.yaml`:
+  - **`anthropic/claude-opus-4.8`** for the two roles that define *what correct means* and gate
+    everything below them — the **decomposition planner** (the `plan` stage; a wrong split
+    wastes every soul below it) and the **test-author** (the `author-tests` stage; its tests
+    are the spec made executable, the contract the factory trusts in place of a human and the
+    ceiling on what the implementor can build). Set in `config/souls/planner.yaml` and
+    `config/souls/test-author.yaml`.
+  - **`anthropic/claude-sonnet-5`** for the rest — the **requirements-planner** (the
+    Create-Task wizard; interactive, so latency matters, and strong tool-protocol following
+    keeps the alignment ledger reliable), the **implementor**, the **security/qa** verifier, and
+    the **merge-resolver**. This tier runs at `effort: medium` (sent as OpenRouter `verbosity`,
+    the field Claude 4.6+/5 map to `output_config.effort`) to trim deliberation and cost; the
+    Opus roles stay at their default. `MODEL=` swaps this shared Sonnet slug across those roles
+    (an OpenRouter slug) without touching the pinned Opus roles. The wizard's model is
+    `requirements_planner.model` in `config/harness.yaml`.
+  - *(If you switch to first-party Anthropic — `provider: anthropic`, an `ANTHROPIC_API_KEY` —
+    each model entry can take an optional `effort:` (`low`|`medium`|`high`|`xhigh`|`max`), the
+    `output_config.effort` intelligence↔latency↔cost dial. It's not wired on the openai-compat
+    /OpenRouter path, so the demo as shipped runs at the models' default effort.)*
 - **beads** (`bd`) on your `PATH` (or pass `BD=/path/to/bd`), and **dolt** on your `PATH`
   (`brew install dolt`). The demo runs beads in **server mode**: `run.sh` has `bd init`
   auto-start a persistent per-run `dolt sql-server` (data under the scratch repo's

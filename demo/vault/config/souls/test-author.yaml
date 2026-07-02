@@ -4,16 +4,16 @@
 # sees the implementation, and a separate soul makes its tests pass. Runs in the
 # vault-toolchain sandbox. Model resolves via infra.dev.yaml; key from the environment.
 #
-# Pinned to the stronger -pro tier (like the wizard and the decomposition planner), not the
-# flash default the execution souls use: the acceptance tests are the spec made executable —
+# Runs on anthropic/claude-opus-4.8 (with the decomposition planner), the most capable tier — not the
+# Sonnet the wizard and execution souls use: the acceptance tests are the spec made executable —
 # the contract the whole factory trusts in place of a human reviewer, and the ceiling on what
 # the implementor can produce (it must satisfy these tests and may never weaken them). A test
 # that misreads the spec makes a smart implementor faithfully build the wrong thing, so this
-# role defines correctness and must be reliable. Names the -pro slug, so a MODEL= override
-# (which only rewrites the flash slug) swaps the execution souls without downgrading it.
+# role defines correctness and must be reliable. Names the Opus slug, so a MODEL= override
+# (which only rewrites the shared Sonnet slug) swaps the execution souls without downgrading it.
 name:    vault-test-author
 role:    test-author
-model:   "deepseek/deepseek-v4-pro"
+model:   "anthropic/claude-opus-4.8"
 persona: souls/prompts/test-author.md
 tools:   [fs, shell, git]
 sandbox: vault-toolchain

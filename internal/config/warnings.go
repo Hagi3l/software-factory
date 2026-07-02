@@ -26,6 +26,7 @@ func (c *Config) Warnings() []string {
 	c.warnModelDiversity(warn)
 	c.warnPackageProxy(warn)
 	c.warnGitPush(warn)
+	c.warnEffortNoOp(warn)
 
 	if len(warnings) == 0 {
 		return nil
@@ -71,6 +72,30 @@ func (c *Config) warnGitPush(warn func(string, ...any)) {
 	if c.Infra.Git.Remote != "" && !c.Infra.Broker.GitPushAllowed() {
 		warn("git.remote is set to %q but %q is not in broker.allowlist, so the candidate-branch push is denied (deny-by-default); add %q to the allowlist to enable pushing, or drop git.remote",
 			c.Infra.Git.Remote, DestGitPush, DestGitPush)
+	}
+}
+
+// warnEffortNoOp advises when an openai-compat model in the Anthropic family carries
+// effort via effort_param: reasoning. It is a valid config (Validate passes), but on Claude
+// 4.6+/5 over OpenRouter reasoning.effort is a silent no-op — the level only lands via the
+// top-level verbosity field — so a "reasoning" transport there quietly does nothing. This is
+// the one gap the explicit-effort_param rule can't close (a wrong explicit value, not a
+// missing one), so it is surfaced as an advisory. The family is inferred from the slug the
+// same way as the diversity check (ModelFamily); the heuristic drives only this warning,
+// never the routing, so an over-eager flag on a genuine pre-4.6 Claude model is harmless to
+// ignore. See specs/models.md "Optional capability fields".
+func (c *Config) warnEffortNoOp(warn func(string, ...any)) {
+	if c.Infra == nil {
+		return
+	}
+	for name, mp := range c.Infra.Models {
+		if mp.Effort == "" || mp.EffortParam != EffortParamReasoning {
+			continue
+		}
+		if mp.ModelFamily(name) == ProviderAnthropic {
+			warn("model %q sets effort_param: %s but is an Anthropic model; Claude 4.6+/5 ignore reasoning.effort (a silent no-op) and take the effort level via the top-level verbosity field — set effort_param: %s (harmless to ignore if this is a pre-4.6 Claude model)",
+				name, EffortParamReasoning, EffortParamVerbosity)
+		}
 	}
 }
 

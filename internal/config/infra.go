@@ -308,6 +308,14 @@ type SigningConfig struct {
 // writes the same unsigned commit as before (so a deployment with no key is unchanged).
 func (s SigningConfig) Active() bool { return s.Enabled && s.Key != "" }
 
+// Effort-param transports select how the Effort level reaches an openai-compat backend
+// (see ModelProvider.EffortParam). They are the two OpenRouter wire forms for a level-based
+// effort control. See specs/models.md "Optional capability fields".
+const (
+	EffortParamReasoning = "reasoning" // OpenRouter unified reasoning:{effort} — OpenAI/DeepSeek/Gemini/…, Claude pre-4.6
+	EffortParamVerbosity = "verbosity" // top-level verbosity field — Claude 4.6+/5 (maps to output_config.effort)
+)
+
 // ModelProvider maps a model name (declared by core.Soul.Model) to its provider
 // adapter and, for OpenAI-compatible backends, an endpoint. API keys are NEVER in
 // config — the runner injects them from the environment (see specs/models.md).
@@ -316,12 +324,21 @@ type ModelProvider struct {
 	Endpoint string    `yaml:"endpoint,omitempty"` // base URL for openai-compat backends (Ollama/vLLM)
 	Cost     ModelCost `yaml:"cost,omitempty"`     // per-million-token price, the tokens→USD table
 	// Effort sets the reasoning-effort level the adapter sends on every call to this model
-	// (output_config.effort: low|medium|high|xhigh|max). It is the intelligence↔latency↔cost
-	// dial for reasoning-capable models — lower effort means fewer, more-consolidated tool
-	// calls and less deliberation, which is what bounds turn count (and so wall-clock) on a
-	// live run. Empty leaves the model at its provider default. Currently honored only on
-	// provider: anthropic (the native output_config field); validation rejects it elsewhere.
+	// (low|medium|high|xhigh|max). It is the intelligence↔latency↔cost dial for reasoning-
+	// capable models — lower effort means fewer, more-consolidated tool calls and less
+	// deliberation, which is what bounds turn count (and so wall-clock) on a long agent loop.
+	// Empty leaves the model at its provider default. Honored on provider: anthropic (mapped
+	// to the native output_config.effort) and provider: openai-compat (see EffortParam, which
+	// selects the wire form); validation rejects it on provider: openai (not yet wired).
 	Effort string `yaml:"effort,omitempty"`
+	// EffortParam selects HOW Effort reaches an openai-compat backend, because that surface is
+	// heterogeneous — OpenRouter carries a level-based effort control two ways depending on the
+	// model family. EffortParamReasoning sends the unified reasoning:{effort} object (OpenAI
+	// o-series, DeepSeek, Gemini-thinking, Claude pre-4.6); EffortParamVerbosity sends the
+	// top-level verbosity field, which is what maps to Anthropic's output_config.effort on
+	// Claude 4.6+/5 (there reasoning.effort is a silent no-op). Required whenever Effort is set
+	// on provider: openai-compat, and rejected on the other providers. See specs/models.md.
+	EffortParam string `yaml:"effort_param,omitempty"`
 	// PromptCaching opts this model into prompt caching on the openai-compat adapter, which
 	// marks the re-sent stable prefix (persona + Brief) cacheable so a gateway bills it at the
 	// cache-read rate. It is opt-in because that surface is mixed — some backends cache

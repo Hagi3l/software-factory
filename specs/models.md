@@ -121,7 +121,16 @@ provider-unaware while letting a deployment tune each model.
   intelligence↔latency↔cost dial for a reasoning model: lower effort means fewer,
   more-consolidated tool calls and less deliberation, which is what bounds *turn
   count*, and so wall-clock, on a long agent loop. The Anthropic adapter maps it to
-  `output_config.effort`; config validation rejects it on providers with no equivalent.
+  `output_config.effort`. The OpenAI-compatible adapter also carries it, but that surface
+  is heterogeneous — a gateway like OpenRouter takes a level-based effort control two
+  different ways depending on the model — so a companion **`effort_param`** on the entry
+  selects the wire form: `reasoning` sends the unified `reasoning: {effort}` object (OpenAI
+  o-series, DeepSeek, Gemini-thinking, Claude pre-4.6); `verbosity` sends the top-level
+  `verbosity` field, which is what Claude 4.6+/5 map to `output_config.effort` (there
+  `reasoning.effort` is a silent no-op). `effort_param` is **required** whenever `effort` is
+  set on `openai-compat` and rejected elsewhere; config validation rejects `effort` on
+  providers with no equivalent (native `openai` is not yet wired), and a non-fatal advisory
+  flags an Anthropic-family slug that picks `reasoning` (the no-op case).
 
 - **Prompt caching** — the largest single cost saver on the agent loop, whose every
   turn re-sends a stable prefix (persona + the Brief's ambient specs and spec) that

@@ -67,15 +67,19 @@ models:
   #     everything below them: the decomposition planner (`plan`) and the test-author
   #     (`author-tests`). A wrong split, or a misread test contract, wastes every soul under it —
   #     so they get the most capable model.
-  #   - anthropic/claude-sonnet-4.6 for the rest — the requirements-planner (the wizard,
+  #   - anthropic/claude-sonnet-5 for the rest — the requirements-planner (the wizard,
   #     interactive, so latency matters), the implementor, the security/qa verifier, and the
-  #     merge-resolver. Fast, strong tool-use, cheaper. MODEL= rewrites this shared Sonnet slug
-  #     across those roles without touching the pinned Opus roles (see run.sh).
+  #     merge-resolver. Near-Opus quality on coding/agentic work at Sonnet cost — a good fit now
+  #     that the implementor also designs the store/view layers. MODEL= rewrites this shared
+  #     Sonnet slug across those roles without touching the pinned Opus roles (see run.sh).
   #
   # Both keys are OpenRouter slugs, sent verbatim as the request's model id; the openai-compat
-  # adapter posts them to OpenRouter with OPENAI_API_KEY as the bearer token. (Native-Anthropic
-  # effort — output_config.effort — is not wired on the openai-compat path, so it's omitted here;
-  # the models run at their default effort.) `prompt_caching: true` opts both into prompt caching:
+  # adapter posts them to OpenRouter with OPENAI_API_KEY as the bearer token. The Sonnet-5 entry
+  # sets `effort: medium` with `effort_param: verbosity` — on the openai-compat path the effort
+  # level rides as OpenRouter's top-level `verbosity` field, which is what Claude 4.6+/5 map to
+  # output_config.effort (their `reasoning.effort` is a silent no-op, so effort_param picks the
+  # field that actually lands). Opus omits effort and runs at its default (high) — we don't dial
+  # down the correctness-defining tier. `prompt_caching: true` opts both into prompt caching:
   # the adapter marks the re-sent stable prefix (persona + Brief) cacheable so OpenRouter forwards
   # the breakpoint to Anthropic and bills re-sent tokens at the cache-read rate — the single
   # largest cost saving on the agent loop, whose every turn re-sends that prefix. cost is the
@@ -87,8 +91,10 @@ models:
     endpoint: https://openrouter.ai/api/v1
     prompt_caching: true
     cost: { input_per_mtok: 5, output_per_mtok: 25, cache_write_per_mtok: 6.25, cache_read_per_mtok: 0.5 }
-  "anthropic/claude-sonnet-4.6":
+  "anthropic/claude-sonnet-5":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
     prompt_caching: true
+    effort: medium
+    effort_param: verbosity
     cost: { input_per_mtok: 3, output_per_mtok: 15, cache_write_per_mtok: 3.75, cache_read_per_mtok: 0.3 }

@@ -326,12 +326,21 @@ models:
   aggregator `vendor/model` slug and the direct `anthropic`/`openai` providers are
   identified automatically) or to override the inferred value.
 - **`effort`** (optional) sets the reasoning-effort level the adapter sends on every call
-  to that model — `output_config.effort` (`low`|`medium`|`high`|`xhigh`|`max`), the
-  intelligence↔latency↔cost dial. Lower effort means fewer, more-consolidated tool calls
-  and less deliberation, which bounds turn count (and so wall-clock) on a live run; omit it
-  to leave the model at its provider default. **Honored only on `provider: anthropic`** (the
-  native `output_config` field); validation rejects it on the other providers and rejects an
-  unknown level.
+  to that model — `low`|`medium`|`high`|`xhigh`|`max`, the intelligence↔latency↔cost dial.
+  Lower effort means fewer, more-consolidated tool calls and less deliberation, which bounds
+  turn count (and so wall-clock) on a live run; omit it to leave the model at its provider
+  default. **Honored on `provider: anthropic`** (mapped to the native `output_config.effort`)
+  **and `provider: openai-compat`** (see `effort_param`); validation rejects it on `provider:
+  openai` (not yet wired) and rejects an unknown level.
+- **`effort_param`** (required alongside `effort` on `provider: openai-compat`) selects the
+  wire form the effort level rides on, because that surface is heterogeneous — OpenRouter
+  carries a level-based effort control two ways. `reasoning` sends the unified
+  `reasoning: {effort}` object (OpenAI o-series, DeepSeek, Gemini-thinking, Claude pre-4.6);
+  `verbosity` sends the top-level `verbosity` field, which is what Claude 4.6+/5 map to
+  `output_config.effort` (their `reasoning.effort` is a silent no-op). Rejected on the other
+  providers (native `anthropic` has one wire form; native `openai` is not yet wired). If an
+  Anthropic-family slug sets `effort_param: reasoning`, `harness validate` warns that it will
+  silently do nothing — use `verbosity`.
 - **`prompt_caching`** (optional, `true`/`false`) opts the model into prompt caching — the
   adapter marks the re-sent stable prefix (persona + the Brief's spec/ambient context)
   cacheable so a gateway bills it at the cache-read rate (~0.1×) instead of full price every

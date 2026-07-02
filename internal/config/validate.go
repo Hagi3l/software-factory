@@ -598,6 +598,11 @@ func (c *Config) validateRequirementsPlanner(add func(string, ...any)) {
 // output_config.effort). Kept here as the single source the config gate validates against.
 var validEffort = map[string]bool{"low": true, "medium": true, "high": true, "xhigh": true, "max": true}
 
+// validEffortParam is the set of wire transports effort_param selects on an openai-compat
+// backend: reasoning (OpenRouter's unified reasoning:{effort}) or verbosity (the top-level
+// field Claude 4.6+/5 map to output_config.effort). See specs/models.md.
+var validEffortParam = map[string]bool{EffortParamReasoning: true, EffortParamVerbosity: true}
+
 // validateModels checks every soul's declared model resolves in the infra registry
 // and that each registry entry is well-formed. The runner resolves soul.Model to a
 // provider adapter at call time (see specs/models.md); an unregistered model would
@@ -621,10 +626,30 @@ func (c *Config) validateModels(add func(string, ...any)) {
 			if !validEffort[mp.Effort] {
 				add("model %q has invalid effort %q (want one of low, medium, high, xhigh, max)", name, mp.Effort)
 			}
-			if mp.Provider != ProviderAnthropic {
-				add("model %q sets effort but provider is %q; effort is only honored on provider %s",
-					name, mp.Provider, ProviderAnthropic)
+			switch mp.Provider {
+			case ProviderAnthropic:
+				// Native maps effort → output_config.effort: one wire form, so effort_param is meaningless here.
+				if mp.EffortParam != "" {
+					add("model %q sets effort_param but provider is %s; effort_param selects the openai-compat wire form and is not used on native anthropic (effort maps to output_config.effort)",
+						name, ProviderAnthropic)
+				}
+			case ProviderOpenAICompat:
+				// Heterogeneous surface: the operator must declare which wire field carries the effort level.
+				switch {
+				case mp.EffortParam == "":
+					add("model %q sets effort on provider %s but no effort_param; set effort_param: reasoning (OpenAI/DeepSeek/Gemini/…, Claude pre-4.6) or verbosity (Claude 4.6+/5)",
+						name, ProviderOpenAICompat)
+				case !validEffortParam[mp.EffortParam]:
+					add("model %q has invalid effort_param %q (want reasoning or verbosity)", name, mp.EffortParam)
+				}
+			default:
+				add("model %q sets effort but provider is %q; effort is supported on %s and %s (native %s is not yet wired)",
+					name, mp.Provider, ProviderAnthropic, ProviderOpenAICompat, ProviderOpenAI)
 			}
+		}
+		// effort_param without effort is meaningless — it only selects how the effort level is sent.
+		if mp.EffortParam != "" && mp.Effort == "" {
+			add("model %q sets effort_param but no effort; effort_param only selects how the effort level is sent", name)
 		}
 		// prompt_caching is an openai-compat-only marker: the native anthropic adapter caches
 		// unconditionally (the flag would be redundant) and native openai auto-caches without a

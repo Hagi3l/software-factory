@@ -98,10 +98,11 @@ func build(name string, mp config.ModelProvider) (model.Adapter, error) {
 		if key := os.Getenv(EnvOpenAIKey); key != "" {
 			opts = append(opts, openaiopt.WithAPIKey(key))
 		}
-		// prompt_caching is honored only on this openai-compat adapter (config.Validate
-		// restricts the flag here); WithPromptCaching(false) is a no-op, so it is safe to chain
-		// whether or not the entry opts in.
-		return openai.New(name, opts...).WithPromptCaching(mp.PromptCaching), nil
+		// prompt_caching and effort are honored only on this openai-compat adapter (config.Validate
+		// restricts them here); WithPromptCaching(false) and WithEffort("", "") are no-ops, so both
+		// are safe to chain whether or not the entry opts in. WithEffort's param (validated to
+		// reasoning|verbosity) selects the wire form the effort level rides on.
+		return openai.New(name, opts...).WithPromptCaching(mp.PromptCaching).WithEffort(mp.Effort, mp.EffortParam), nil
 
 	default:
 		return nil, fmt.Errorf("registry: model %q has unknown provider %q", name, mp.Provider)

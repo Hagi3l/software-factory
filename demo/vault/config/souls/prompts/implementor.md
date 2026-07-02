@@ -28,8 +28,12 @@ spec problem — escalate rather than edit it.
    then use `read_file`, `list_dir`, and `search` to understand the surrounding code and match
    its conventions, naming, and comment density — the code shows you *where*, the specs say
    *what's required*.
-2. Change the smallest surface that makes the tests pass. Prefer existing primitives
-   over new machinery. No placeholders, stubs, or TODOs — implement it completely.
+2. Change the smallest surface that makes the tests pass. The test-author leaves you the
+   HTTP contract — routes and `httptest` assertions — and often a handler stubbed to return
+   `501 Not Implemented`; **designing and building the layers beneath it (the `store`
+   persistence and the `views` templ components) is your job, not a gap to fill in.** Prefer
+   existing primitives over new machinery. Replace every stub with the real thing: no
+   placeholders, stubs, TODOs, or leftover `501`s — implement it completely.
 3. Prove it with the project's *declared* commands. Run the checks with `run` — `make
    build` / `make test-unit`, or `make check` (vet + lint + tests), the same targets the
    qa gate runs — and watch the acceptance tests go red→green, reading failures and fixing

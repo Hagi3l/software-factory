@@ -181,6 +181,29 @@ func TestWarnSameVendorBehindOneGateway(t *testing.T) {
 	mustWarn(t, c.Warnings(), `family "deepseek"`)
 }
 
+// warnEffortNoOp: an Anthropic-family openai-compat model that carries effort via
+// effort_param: reasoning is valid config (Validate passes) but a silent no-op on Claude 4.6+/5
+// — reasoning.effort is ignored there — so the advisory flags it and points at verbosity. The
+// entry is unreferenced by any soul, so only the effort advisory can fire.
+func TestWarnEffortReasoningNoOpOnAnthropicSlug(t *testing.T) {
+	c := validConfig()
+	c.Infra.Models["anthropic/claude-sonnet-5"] = ModelProvider{
+		Provider: ProviderOpenAICompat, Endpoint: "https://openrouter.ai/api/v1",
+		Effort: "medium", EffortParam: EffortParamReasoning,
+	}
+	mustWarn(t, c.Warnings(), "silent no-op")
+}
+
+// The correct transport (verbosity) for the same Anthropic slug draws no advisory.
+func TestNoWarnEffortVerbosityOnAnthropicSlug(t *testing.T) {
+	c := validConfig()
+	c.Infra.Models["anthropic/claude-sonnet-5"] = ModelProvider{
+		Provider: ProviderOpenAICompat, Endpoint: "https://openrouter.ai/api/v1",
+		Effort: "medium", EffortParam: EffortParamVerbosity,
+	}
+	mustNotWarn(t, c.Warnings())
+}
+
 // An explicit `family:` is the operator's declared truth and wins over the slug/provider
 // inference — here it collapses two different-vendor slugs into one declared family, so the
 // check warns; the inverse (declaring two bare-slug models distinct) is what clears the
