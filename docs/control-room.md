@@ -58,9 +58,11 @@ Drill-through pages (not in the nav):
   (whenever a transcript is reachable — including a dead-lettered run) or issue detail of
   the same invocation. Reached by drilling from a board card or an activity-feed row.
 - **Replay** (`/replay/{id}`) — the reconstructed decision trail of an invocation, turn
-  by turn: exactly what the model saw (inbound messages), what it said, its tool calls,
-  stop reason, and per-turn token usage (input, output, and cache read/write, with a
-  cached total in the trail header). Reconstructed from the broker-captured
+  by turn: exactly what the model saw (inbound messages), its recorded **thinking
+  stream** (shown as emitted — evidence of what the model produced, not a
+  guaranteed-faithful rationale; see [security.md](../specs/security.md)), what it said,
+  its tool calls, stop reason, and per-turn token usage (input, output, and cache
+  read/write, with a cached total in the trail header). Reconstructed from the broker-captured
   transcript, resolved from the merge trailer for landed work or from the hash the
   orchestrator stamps on the issue for **every** disposition — so a **dead-lettered or
   in-flight** invocation replays too, not only merged work (the failed run is where the

@@ -1307,11 +1307,15 @@ type ReplayMessage struct {
 }
 
 // ReplayTurn is one llm-turn of the decision trail: what the model newly saw (Inbound),
-// what it produced (Text + ToolCalls), why it stopped, and the tokens the turn cost. It
-// maps one-to-one to the llm-turn span in the invocation trace (specs/observability.md).
+// what it produced (Reasoning + Text + ToolCalls), why it stopped, and the tokens the
+// turn cost. It maps one-to-one to the llm-turn span in the invocation trace
+// (specs/observability.md). Reasoning is the model's recorded thinking stream — shown
+// as emitted, evidence not guaranteed-faithful rationale (specs/security.md); empty for
+// non-reasoning models and pre-T14.3 transcripts.
 type ReplayTurn struct {
 	Index        int
 	Inbound      []ReplayMessage
+	Reasoning    string
 	Text         string
 	ToolCalls    []ReplayToolCall
 	Stop         string
@@ -1426,6 +1430,7 @@ func buildReplay(turns []model.TranscriptTurn) (system string, out []ReplayTurn,
 		}
 		rt := ReplayTurn{
 			Index:        i,
+			Reasoning:    t.Response.Reasoning,
 			Text:         t.Response.Text,
 			Stop:         string(t.Response.Stop),
 			InputTokens:  t.Response.Usage.InputTokens,

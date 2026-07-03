@@ -202,6 +202,8 @@ func TestFromMessage(t *testing.T) {
 	raw := `{
 		"id": "msg_1", "type": "message", "role": "assistant", "model": "claude",
 		"content": [
+			{"type": "thinking", "thinking": "the file is ", "signature": "sig1"},
+			{"type": "thinking", "thinking": "the place to look", "signature": "sig2"},
 			{"type": "text", "text": "hello "},
 			{"type": "text", "text": "world"},
 			{"type": "tool_use", "id": "tu_1", "name": "read_file", "input": {"path": "main.go"}}
@@ -217,6 +219,11 @@ func TestFromMessage(t *testing.T) {
 	resp := fromMessage(&msg)
 	if resp.Text != "hello world" {
 		t.Errorf("Text = %q, want %q (text blocks concatenate)", resp.Text, "hello world")
+	}
+	// Thinking blocks land on the canonical Reasoning (recorded as emitted — the
+	// transcript's decision trail, T14.3) and never leak into Text.
+	if resp.Reasoning != "the file is the place to look" {
+		t.Errorf("Reasoning = %q, want the concatenated thinking blocks", resp.Reasoning)
 	}
 	if resp.Stop != model.StopToolUse {
 		t.Errorf("Stop = %q, want %q", resp.Stop, model.StopToolUse)

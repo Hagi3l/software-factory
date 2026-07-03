@@ -13,16 +13,16 @@ in-process orchestrator + runner carry a seed issue through implement → gate �
 merge to `main` with a provenance trailer. Verified end-to-end against a real model
 (local Ollama via `openai-compat`) and real Docker sandboxes.
 
-**Phases 2, 3, 4, 6, 7, 8, 9, 10, 11, and 13 are complete; open build work is Phase 5 (all optional
-— T5.11 warm pools + HA — or hardware-blocked — T5.2 Firecracker, needs KVM the dev box lacks),
-Phase 14 (trusted-layer hardening from the 2026-07-03 review: least-privilege container boot,
-model-relay retry, reasoning-in-transcript — T14.1–T14.3, specs updated ahead),
-and the newly-specced Phase 12 (distilled explore tool: **COMPLETE — T12.1–T12.6 all landed: the
-`explore` tool + nested read-only sub-loop, the broker sub-context selector + runner-pinned explorer
-model + per-stream sub-budget metering, the `policy.explore_budget` / reserved-`explorer`-role config +
-validation, explore evidence/provenance/observability nesting, per-role enablement + verify-path
-diversity advisory, and the vault demo wired (planner/implementor explore on a cheap Haiku explorer;
-verify path reads raw). Remaining is a live-run cost/context validation, not a build item**).** Phase 11
+**Phases 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, and 14 are complete; the only open build work is
+Phase 5 (all optional — T5.11 warm pools + HA — or hardware-blocked — T5.2 Firecracker, needs
+KVM the dev box lacks).** Phase 14 (trusted-layer hardening from the 2026-07-03 review) closed
+with T14.1 least-privilege container boot, T14.2 bounded transient-fault retry at the model
+relay, and T14.3 reasoning-in-the-recorded-transcript. Phase 12 (distilled explore tool,
+T12.1–T12.6) landed the `explore` tool + nested read-only sub-loop, the broker sub-context
+selector + runner-pinned explorer model + per-stream sub-budget metering, the
+`policy.explore_budget` / reserved-`explorer`-role config + validation, explore
+evidence/provenance/observability nesting, per-role enablement, and the vault demo wiring
+(remaining is a live-run cost/context validation, not a build item). Phase 11
 closed with T11.2 (prompt caching) landing — the Anthropic
 adapter now caches unconditionally and the openai-compat adapter caches opt-in, with cache
 read/write tokens normalized into the canonical Usage for accurate USD accounting.
@@ -1103,16 +1103,33 @@ bootstrap-phase risk; revisit if one bites or when Phase-5 production posture de
   explore stream meter), cancelled-ctx stops the loop surfacing the provider fault. `make check`
   fully green (1246 pass/0 fail). Spec was written ahead (models.md) — no spec change; no
   CLI/config surface, so no docs/ update. ([models.md](specs/models.md))
-- [ ] **T14.3 Reasoning in the recorded transcript** — reasoning deltas stream to NATS for
-  the live view but never land in the canonical `Response`, so the harvested transcript
-  (`internal/runner/broker_handler.go:583-591` `record()`) is thinner than security.md's
-  "replayable decision trail" claim — the audited artifact drops the model's thinking.
-  Capture the reasoning stream into the canonical response/turn and persist it through
-  `record()`; recorded **as emitted** (evidence of what the model emitted, not a
-  guaranteed-faithful rationale). Also the prerequisite for **first-party thinking-block
-  preservation** (Deferred list) keeping the transcript equal to wire-truth once thinking
-  blocks ride subsequent requests. **Spec updated ahead:** [security.md](specs/security.md)
-  provenance-trailer section.
+- [x] **T14.3 Reasoning in the recorded transcript** — *done.* `model.Response` gained
+  `Reasoning string` (tagged `json:",omitempty"` so non-reasoning turns and pre-existing
+  transcripts stay byte-unchanged), assembled by each adapter from its provider's channel:
+  **anthropic** `fromMessage` concatenates the accumulated `ThinkingBlock`s (redacted
+  thinking blocks skipped — encrypted, nothing legible to record); **openai** accumulates
+  the non-schema reasoning deltas (`reasoning`/`reasoning_content` extra fields) in the
+  stream loop alongside the SDK accumulator, which cannot carry them. Persistence through
+  `record()`/`recordExplore()` is automatic — `TranscriptTurn` embeds `Response` — so the
+  harvested transcript AND the explore transcript now carry the thinking as emitted
+  (evidence of what the model produced, not guaranteed-faithful rationale — security.md's
+  framing). **Read side completed too:** `query.ReplayTurn.Reasoning` + `buildReplay`, and
+  the Replay view renders a muted italic "thinking" block before the assistant text
+  (`replay.templ`, regenerated from the repo root with the pinned templ; Tailwind CSS
+  rebuilt — first use of `italic`); docs/control-room.md Replay bullet updated per the
+  doc-tracking rule. This is also the prerequisite for **first-party thinking-block
+  preservation** (still in Deferred): the transcript now has where wire-truth thinking
+  lands. Tests: anthropic `TestFromMessage` (thinking blocks → Reasoning, never Text),
+  openai `TestCompleteStreamsReasoningAndText` (deltas land on the canonical Response, not
+  just the live feed), runner `TestRelayCapturesPromptAndTranscript` (reasoning survives
+  the recorded-turn JSON round-trip), query `TestReplayReconstructsTrail` (surfaces on the
+  trail; a reasoning-less turn renders empty — pre-T14.3 transcripts still replay).
+  `make check` fully green (1246 pass/0 fail). Spec was written ahead (security.md) — no
+  spec change. ([security.md](specs/security.md))
+
+**Phase 14 is complete (T14.1–T14.3).** The declined-for-now findings from the 2026-07-03
+review stay declined (see the phase intro); the four filed ones remain under "Deferred &
+follow-ups".
 
 ---
 

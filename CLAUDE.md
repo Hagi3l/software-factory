@@ -28,11 +28,10 @@ verification), Phase 3 (full DAG, decomposition, merge queue), and Phase 4 (cont
 room + Create-Task wizard, incl. **T4.15 Resolve mode**) are complete; Phase 2 is now
 fully complete (T2.12 run-all-independent-scanners landed; N-version diversity, T2.11,
 is resolved as configuration, with the non-fatal `harness validate` family-overlap
-advisory T2.13 done). **Phase
+advisory T2.13 done). Phase 14 (trusted-layer hardening) is complete. **Phase
 5** (production isolation & distribution — Firecracker, distributed NATS, scoped
-secrets, signing) and **Phase 14** (trusted-layer hardening: least-privilege
-container boot, model-relay retry, reasoning-in-transcript) are the remaining
-engineering. `cmd/harness` exposes
+secrets, signing) is the only remaining engineering (all optional or
+hardware-blocked). `cmd/harness` exposes
 `validate`/`seed`/`run`/`approve`/`reject`/`serve`; bootstrap config lives in
 `config/` (`harness validate --config config`). The autonomous self-hosting loop is
 buildable/testable offline but has **not been switched on** (no hosted capable

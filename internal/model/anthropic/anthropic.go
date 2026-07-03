@@ -281,15 +281,19 @@ func toInputSchema(raw model.JSONSchema) (sdk.ToolInputSchemaParam, error) {
 }
 
 // fromMessage assembles a canonical Response from a completed SDK message: text blocks
-// concatenate into Text, tool_use blocks become ToolCalls, and usage/stop reason are
-// normalized.
+// concatenate into Text, thinking blocks into Reasoning (the decision-trail evidence,
+// recorded as emitted — specs/security.md), tool_use blocks become ToolCalls, and
+// usage/stop reason are normalized. Redacted thinking blocks are skipped: the provider
+// encrypted them, so there is nothing legible to record.
 func fromMessage(msg *sdk.Message) model.Response {
 	var resp model.Response
-	var text strings.Builder
+	var text, reasoning strings.Builder
 	for _, block := range msg.Content {
 		switch b := block.AsAny().(type) {
 		case sdk.TextBlock:
 			text.WriteString(b.Text)
+		case sdk.ThinkingBlock:
+			reasoning.WriteString(b.Thinking)
 		case sdk.ToolUseBlock:
 			resp.ToolCalls = append(resp.ToolCalls, model.ToolCall{
 				ID:   b.ID,
@@ -299,6 +303,7 @@ func fromMessage(msg *sdk.Message) model.Response {
 		}
 	}
 	resp.Text = text.String()
+	resp.Reasoning = reasoning.String()
 	resp.Stop = fromStopReason(msg.StopReason)
 	resp.Usage = model.Usage{
 		InputTokens:         int(msg.Usage.InputTokens),

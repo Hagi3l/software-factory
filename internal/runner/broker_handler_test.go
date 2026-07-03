@@ -468,7 +468,7 @@ func TestRelayExploreDisabledFailsClosed(t *testing.T) {
 }
 
 func TestRelayCapturesPromptAndTranscript(t *testing.T) {
-	adapter := &recordingAdapter{resp: model.Response{Text: "ok", Stop: model.StopEndTurn}}
+	adapter := &recordingAdapter{resp: model.Response{Text: "ok", Reasoning: "thinking it through", Stop: model.StopEndTurn}}
 	r := testRelay(adapter, &recordingPublisher{}, &bundleSandbox{})
 
 	// No model call yet: there is nothing to harvest.
@@ -513,6 +513,11 @@ func TestRelayCapturesPromptAndTranscript(t *testing.T) {
 	}
 	if turns[0].Request.Messages[0].Text != "first" || turns[1].Request.Messages[0].Text != "second" {
 		t.Errorf("transcript did not record both turns in order: %+v", turns)
+	}
+	// The model's reasoning stream is part of the recorded turn (T14.3): the audited
+	// transcript carries the decision trail, not just the final text and tool calls.
+	if turns[0].Response.Reasoning != "thinking it through" {
+		t.Errorf("transcript turn reasoning = %q, want the emitted thinking recorded", turns[0].Response.Reasoning)
 	}
 }
 

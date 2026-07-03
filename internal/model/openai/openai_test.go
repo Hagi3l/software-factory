@@ -421,6 +421,11 @@ func TestCompleteStreamsReasoningAndText(t *testing.T) {
 	if resp.Text != "Hi" {
 		t.Errorf("resp.Text = %q, want Hi", resp.Text)
 	}
+	// The reasoning stream also lands on the canonical Response, not just the live
+	// feed, so the recorded transcript carries the decision trail (T14.3).
+	if resp.Reasoning != "Let me think" {
+		t.Errorf("resp.Reasoning = %q, want %q", resp.Reasoning, "Let me think")
+	}
 }
 
 // With prompt caching enabled, the first user message (the Brief) must go on the wire as a

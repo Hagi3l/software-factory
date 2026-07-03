@@ -33,4 +33,13 @@ type Response struct {
 	ToolCalls []ToolCall
 	Usage     Usage
 	Stop      StopReason
+	// Reasoning is the model's thinking stream, assembled by the adapter from
+	// whatever channel its provider emits it on (Anthropic thinking blocks; the
+	// compat surface's reasoning deltas). It rides the canonical turn so the
+	// recorded transcript carries the full decision trail (specs/security.md) —
+	// recorded AS EMITTED: evidence of what the model produced, not a
+	// guaranteed-faithful account of why it acted (chain-of-thought can be
+	// incomplete or provider-redacted). Omitted from the wire when empty so
+	// non-reasoning turns and pre-existing transcripts are byte-unchanged.
+	Reasoning string `json:",omitempty"`
 }

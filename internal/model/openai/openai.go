@@ -14,6 +14,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -101,14 +102,19 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 
 	stream := a.client.Chat.Completions.NewStreaming(ctx, params, a.effortOpts()...)
 	var acc sdk.ChatCompletionAccumulator
+	// The SDK accumulator only folds schema fields, so the reasoning stream — a
+	// non-schema delta field — is assembled here alongside it; it lands on the
+	// canonical Response so the recorded transcript carries the full decision trail
+	// (specs/security.md), not just what the live feed happened to show.
+	var reasoning strings.Builder
 	for stream.Next() {
 		chunk := stream.Current()
 		acc.AddChunk(chunk)
-		if onEvent == nil || len(chunk.Choices) == 0 {
+		if len(chunk.Choices) == 0 {
 			continue
 		}
 		delta := chunk.Choices[0].Delta
-		if delta.Content != "" {
+		if onEvent != nil && delta.Content != "" {
 			onEvent(model.StreamEvent{TextDelta: delta.Content})
 		}
 		// "Thinking" models stream their chain of thought on a non-standard delta field
@@ -116,7 +122,10 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 		// most local servers use `reasoning`, DeepSeek/vLLM use `reasoning_content`. Either
 		// is surfaced on the reasoning channel so an all-tool-call turn is still observable.
 		if r := reasoningDelta(delta.JSON.ExtraFields); r != "" {
-			onEvent(model.StreamEvent{ReasoningDelta: r})
+			reasoning.WriteString(r)
+			if onEvent != nil {
+				onEvent(model.StreamEvent{ReasoningDelta: r})
+			}
 		}
 	}
 	if err := stream.Err(); err != nil {
@@ -130,7 +139,9 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 			Usage:     fromCompletion(acc.ChatCompletion).Usage,
 		}
 	}
-	return fromCompletion(acc.ChatCompletion), nil
+	resp := fromCompletion(acc.ChatCompletion)
+	resp.Reasoning = reasoning.String()
+	return resp, nil
 }
 
 // transient classifies a completion error for the model.Fault contract. A typed API

@@ -36,6 +36,7 @@ func twoTurnTranscript(t *testing.T) string {
 		{
 			Request: model.Request{System: "you are an implementor", Messages: []model.Message{user}},
 			Response: model.Response{
+				Reasoning: "the widget wants a writer",
 				Text:      "I will write it",
 				ToolCalls: []model.ToolCall{{ID: "c1", Name: "write_file", Args: json.RawMessage(`{"path":"w.go"}`)}},
 				Stop:      model.StopToolUse,
@@ -89,6 +90,14 @@ func TestReplayReconstructsTrail(t *testing.T) {
 	}
 	if t0.Text != "I will write it" || t0.Stop != "tool_use" {
 		t.Errorf("turn 0 response = %q stop=%q", t0.Text, t0.Stop)
+	}
+	// The recorded thinking stream surfaces on the trail (T14.3); a turn without one
+	// (turn 1, like any pre-T14.3 transcript) renders nothing rather than a gap.
+	if t0.Reasoning != "the widget wants a writer" {
+		t.Errorf("turn 0 reasoning = %q, want the recorded thinking", t0.Reasoning)
+	}
+	if rep.Turns[1].Reasoning != "" {
+		t.Errorf("turn 1 reasoning = %q, want empty", rep.Turns[1].Reasoning)
 	}
 	if len(t0.ToolCalls) != 1 || t0.ToolCalls[0].Name != "write_file" || !strings.Contains(t0.ToolCalls[0].Args, "\"path\": \"w.go\"") {
 		t.Errorf("turn 0 tool calls = %+v (args should be indented JSON)", t0.ToolCalls)

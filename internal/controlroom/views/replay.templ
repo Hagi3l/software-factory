@@ -87,7 +87,9 @@ templ replayNotice(rep query.Replay) {
 }
 
 // replayTurn renders one llm-turn: its inbound context (what the model newly saw), the
-// model's response, the tools it asked to call, and the turn's stop reason and token cost.
+// model's recorded thinking stream (as emitted — evidence, not guaranteed-faithful
+// rationale; see specs/security.md), its response, the tools it asked to call, and the
+// turn's stop reason and token cost.
 templ replayTurn(t query.ReplayTurn) {
 	<article class="rounded-lg border border-border bg-surface">
 		<header class="flex flex-wrap items-center justify-between gap-2 border-b border-border px-4 py-2">
@@ -106,6 +108,12 @@ templ replayTurn(t query.ReplayTurn) {
 		<div class="space-y-3 p-4">
 			for _, m := range t.Inbound {
 				@replayInbound(m)
+			}
+			if t.Reasoning != "" {
+				<div class="space-y-1">
+					<div class="text-xs font-medium uppercase tracking-wide text-faint">thinking</div>
+					<pre class="whitespace-pre-wrap break-words rounded-md border border-border bg-canvas p-3 text-xs italic text-muted">{ t.Reasoning }</pre>
+				</div>
 			}
 			if t.Text != "" {
 				<div class="space-y-1">
