@@ -91,6 +91,11 @@ type relay struct {
 	// pushBundle, a seam for the same reason; the default is pushBundleToRemote.
 	pushRemote func(ctx context.Context, remote string, cred secret.GitCredential, branch string, bundle []byte) (string, error)
 
+	// sleep waits out one retry backoff, or returns early with ctx's error if the
+	// invocation is going away. A seam (default sleepCtx) so the transient-fault
+	// retry loop is unit-testable without real waits, like pushBundle above.
+	sleep func(ctx context.Context, d time.Duration) error
+
 	mu       sync.Mutex
 	usage    model.Usage            // parent-stream tokens tallied across this invocation (budget input, plan T1.16)
 	firstReq *model.Request         // the prompt: the first request this invocation ran with (provenance, plan T1.20)
@@ -151,6 +156,7 @@ func newRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox, cfg rela
 	}
 	return &relay{
 		adapter:        adapter,
+		sleep:          sleepCtx,
 		exploreAdapter: cfg.exploreAdapter,
 		exploreModel:   cfg.exploreModel,
 		exploreBudget:  cfg.exploreBudget,
@@ -233,6 +239,73 @@ func toolCallSummary(tc model.ToolCall) string {
 // explore sub-budget. The agent names only the sub-context tag — never a model — so it cannot
 // escape its tier even with two models live in one sandbox (specs/models.md "Helper souls",
 // specs/messaging.md, T12.2). Routing here, in the trusted runner, is what enforces that.
+// Transient-fault retry at the relay (specs/models.md "Transient provider faults are
+// absorbed at the relay"): a rate limit, a provider 5xx, or a mid-stream reset would
+// otherwise surface as a fatal invocation error — the runner Naks, the whole invocation
+// re-runs, and the sandbox plus every token already spent is discarded over a fault a
+// one-second retry would have absorbed. The relay retries a *transient* completion
+// fault (classified by the adapter into model.Fault — the relay itself stays
+// provider-unaware) a bounded number of times with exponential backoff, re-issuing a
+// fresh request each time, never resuming a stream. The attempt bound is the halting
+// guarantee here — the invocation ctx carries no deadline — and the sandbox wall clock
+// keeps running throughout, so a real provider outage still exhausts the budget and
+// dead-letters rather than looping. The provider SDKs additionally retry the *initial*
+// connect internally (their default policy); that layering is deliberate — stripping
+// it would regress the trusted wizard path, which holds an adapter directly and gets
+// no relay retry.
+const (
+	// completionMaxAttempts bounds one logical completion: the first attempt plus up
+	// to N-1 retries of a transient fault.
+	completionMaxAttempts = 4
+	// completionBackoffBase is the first retry's delay, doubling per attempt
+	// (1s, 2s, 4s) — long enough to ride out a rate-limit window, short enough not
+	// to forfeit the provider's ~5-min prompt-cache TTL (specs/models.md).
+	completionBackoffBase = time.Second
+)
+
+// sleepCtx waits d or until ctx is done, whichever comes first. The default for the
+// relay's sleep seam.
+func sleepCtx(ctx context.Context, d time.Duration) error {
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-t.C:
+		return nil
+	}
+}
+
+// completeWithRetry runs one logical completion against the given adapter, absorbing
+// transient provider faults with bounded backoff (see the constants above). tallyFailed
+// books a FAILED attempt's billed usage (a mid-stream fault lands after tokens were
+// counted) into the caller's meter — the parent tally or the explore stream meter — so
+// every attempt draws the budget and termination holds across retries. A retried
+// attempt re-invokes onEvent from the top, so the live feed may show a partial turn's
+// deltas twice; the transcript is unaffected (only the successful response is recorded).
+func (r *relay) completeWithRetry(ctx context.Context, adapter model.Adapter, req model.Request, onEvent model.StreamHandler, tallyFailed func(model.Usage)) (model.Response, error) {
+	for attempt := 1; ; attempt++ {
+		resp, err := adapter.Complete(ctx, req, onEvent)
+		if err == nil {
+			return resp, nil
+		}
+		if u, ok := model.FaultUsage(err); ok && u != (model.Usage{}) {
+			tallyFailed(u)
+		}
+		if !model.Transient(err) || attempt >= completionMaxAttempts {
+			return model.Response{}, err
+		}
+		delay := completionBackoffBase << (attempt - 1)
+		r.log.WarnContext(ctx, "broker: transient model fault, retrying",
+			"attempt", attempt, "max_attempts", completionMaxAttempts, "delay", delay.String(), "err", err)
+		if serr := r.sleep(ctx, delay); serr != nil {
+			// The invocation is going away (shutdown); surface the provider fault —
+			// it is what the caller can act on — not the interrupted sleep.
+			return model.Response{}, err
+		}
+	}
+}
+
 func (r *relay) Complete(ctx context.Context, p broker.CompletionParams) (model.Response, error) {
 	if p.SubContext == broker.SubContextExplorer {
 		return r.completeExplore(ctx, p.Stream, p.Request)
@@ -285,7 +358,7 @@ func (r *relay) completeExplore(ctx context.Context, stream string, req model.Re
 	defer span.End()
 
 	start := time.Now()
-	resp, err := r.exploreAdapter.Complete(ctx, req, onEvent)
+	resp, err := r.completeWithRetry(ctx, r.exploreAdapter, req, onEvent, func(u model.Usage) { r.addExploreUsage(stream, u) })
 	d := time.Since(start)
 	if err != nil {
 		span.RecordError(err)
@@ -345,7 +418,7 @@ func (r *relay) completeParent(ctx context.Context, req model.Request) (model.Re
 	defer span.End()
 
 	start := time.Now()
-	resp, err := r.adapter.Complete(ctx, req, onEvent)
+	resp, err := r.completeWithRetry(ctx, r.adapter, req, onEvent, r.addUsage)
 	d := time.Since(start)
 	if err != nil {
 		span.RecordError(err)

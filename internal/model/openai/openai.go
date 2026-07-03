@@ -12,6 +12,7 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 
 	sdk "github.com/openai/openai-go/v3"
@@ -119,9 +120,30 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return model.Response{}, fmt.Errorf("openai: stream: %w", err)
+		// Classified so the trusted relay can absorb transient faults with a bounded
+		// retry (specs/models.md); the partial accumulator's usage rides along so a
+		// failed attempt's billed tokens still draw the budget. Note the usage chunk
+		// is typically the stream's last, so a mid-stream cut usually reports zero.
+		return model.Response{}, &model.Fault{
+			Err:       fmt.Errorf("openai: stream: %w", err),
+			Transient: transient(err),
+			Usage:     fromCompletion(acc.ChatCompletion).Usage,
+		}
 	}
 	return fromCompletion(acc.ChatCompletion), nil
+}
+
+// transient classifies a completion error for the model.Fault contract. A typed API
+// error means the provider answered with a status — classify by the shared status
+// policy (429/5xx/timeout retryable; the 4xx family terminal). Anything untyped is
+// the wire itself failing — a connection reset, an aborted SSE stream (the SDK's
+// StreamError carries no status) — transient unless the caller's own ctx is done.
+func transient(err error) bool {
+	var apiErr *sdk.Error
+	if errors.As(err, &apiErr) {
+		return model.TransientStatus(apiErr.StatusCode)
+	}
+	return model.TransientWire(err)
 }
 
 // reasoningDelta pulls a streamed reasoning fragment out of a chunk delta's extra

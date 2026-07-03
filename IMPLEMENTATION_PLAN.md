@@ -1070,17 +1070,39 @@ bootstrap-phase risk; revisit if one bites or when Phase-5 production posture de
   hardened boot on this dev box. `make check` fully green (1228 pass/0 fail). Spec was
   written ahead (sandbox.md "Least-privilege boot on container backends") — no spec change;
   no CLI/config surface change, so no docs/ update. ([components/sandbox.md](specs/components/sandbox.md))
-- [ ] **T14.2 Bounded transient-fault retry at the model relay** — today any provider error
-  (429, 5xx, mid-stream reset) returns verbatim from the adapter
-  (`internal/model/openai/openai.go:121-123`, `internal/model/anthropic/anthropic.go:95-97`),
-  the loop treats it as fatal (`internal/agent/loop.go:197-200`), and the runner Naks the
-  message (`internal/runner/runner.go:314`) — a full invocation re-run that discards the
-  sandbox and every token already spent, on a fault that a one-second retry would have
-  absorbed. Add bounded retry with backoff in the runner's relay (where the provider is
-  known), classifying retryable (rate-limit, 5xx, stream reset) vs terminal (auth, malformed
-  request, context overflow); every attempt's billed usage counts toward the budget so
-  termination holds. **Spec updated ahead:** [models.md](specs/models.md) "Transient provider
-  faults are absorbed at the relay".
+- [x] **T14.2 Bounded transient-fault retry at the model relay** — *done.* **Canonical
+  classification** (`internal/model/fault.go`): new `model.Fault{Err, Transient, Usage}` error
+  type the adapters construct — they are the only layer that can read their SDK's error shape —
+  plus the `Transient(err)`/`FaultUsage(err)` predicates (errors.As through wrapping) and the
+  shared policies `TransientStatus` (408/429/5xx retryable, 4xx terminal) and `TransientWire`
+  (status-less error = the wire failing = transient, unless the caller's ctx is dead). A bare
+  unclassified error stays terminal — retry is opted into by the adapter, never guessed. **Both
+  adapters classify at `stream.Err()`**: openai by typed `sdk.Error` status else wire;
+  anthropic additionally handles its mid-stream shape — an in-band `event: error` SSE frame
+  decodes to a typed error stamped with the *original* 200, so there the error `Type()` carries
+  the class (overloaded/rate-limit/timeout/api_error retryable). The Fault carries the partial
+  accumulator's `Usage` (anthropic's `message_start` bills input tokens before a mid-stream
+  fault) so a failed attempt's billed tokens still draw the budget. **Relay retry**
+  (`internal/runner/broker_handler.go` `completeWithRetry`, wired into BOTH `completeParent`
+  and `completeExplore`): bounded attempts (`completionMaxAttempts=4`) with doubling backoff
+  (1s/2s/4s — under the ~5-min provider cache TTL), fresh request per attempt (never resumes a
+  stream), ctx-aware `sleep` seam (default `sleepCtx`, mirrors the `pushBundle` seam pattern);
+  failed-attempt usage is tallied via the caller's meter — parent tally or explore stream meter,
+  so the explore sub-budget stays honest too. The attempt bound is the halting piece (the
+  invocation ctx carries no deadline); the sandbox wall clock runs throughout. SDK-internal
+  *connect* retries deliberately left at defaults — stripping them would regress the trusted
+  wizard path, which holds an adapter directly and (deliberately, per spec scope) gets no relay
+  retry: it is interactive, a human sees and can resend. Retried attempts re-invoke `onEvent`,
+  so the live feed may repeat a partial turn's deltas (cosmetic); the transcript records only
+  the success. Tests: `model` fault predicates/status/wire tables; **wire-level adapter tests**
+  (`fault_test.go` in both adapters, real httptest responses with `WithMaxRetries(0)`): 429/500
+  transient, 400 terminal, openai mid-stream cut (aborted SSE) transient, anthropic mid-stream
+  `overloaded_error` transient **with `FaultUsage` recovering the 42 billed input tokens**,
+  mid-stream `invalid_request_error` terminal; **relay tests**: retry-then-succeed (calls=3,
+  backoff 1s→2s), terminal-no-retry, bounded exhaustion, failed-attempt usage drawn (parent +
+  explore stream meter), cancelled-ctx stops the loop surfacing the provider fault. `make check`
+  fully green (1246 pass/0 fail). Spec was written ahead (models.md) — no spec change; no
+  CLI/config surface, so no docs/ update. ([models.md](specs/models.md))
 - [ ] **T14.3 Reasoning in the recorded transcript** — reasoning deltas stream to NATS for
   the live view but never land in the canonical `Response`, so the harvested transcript
   (`internal/runner/broker_handler.go:583-591` `record()`) is thinner than security.md's

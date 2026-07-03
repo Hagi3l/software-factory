@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Loxstomper/harness/internal/broker"
 	"github.com/Loxstomper/harness/internal/core"
@@ -24,17 +25,27 @@ import (
 
 // recordingAdapter streams the configured deltas, returns the configured response (or
 // error), and counts calls so usage-tally accumulation across calls is observable.
+// errs is a per-call error script consumed first (nil entry = that call succeeds),
+// so retry tests express "fail twice, then succeed"; the plain err field keeps the
+// original always-errors shape.
 type recordingAdapter struct {
 	deltas    []string
 	reasoning []string
 	resp      model.Response
 	err       error
+	errs      []error
 	calls     int
 }
 
 func (a *recordingAdapter) Complete(_ context.Context, _ model.Request, onEvent model.StreamHandler) (model.Response, error) {
 	a.calls++
-	if a.err != nil {
+	if len(a.errs) > 0 {
+		e := a.errs[0]
+		a.errs = a.errs[1:]
+		if e != nil {
+			return model.Response{}, e
+		}
+	} else if a.err != nil {
 		return model.Response{}, a.err
 	}
 	for _, d := range a.deltas {
@@ -223,6 +234,145 @@ func TestRelayCompletePropagatesErrorAndDoesNotTally(t *testing.T) {
 	}
 	if u := r.Usage(); u != (model.Usage{}) {
 		t.Errorf("usage = %+v, want zero (a failed call tallies nothing)", u)
+	}
+	// A bare (unclassified) error is terminal by contract — one attempt, no retry loop.
+	if adapter.calls != 1 {
+		t.Errorf("calls = %d, want 1 (an unclassified error must not be retried)", adapter.calls)
+	}
+}
+
+// --- transient-fault retry (T14.2) --------------------------------------------
+
+// transientFault builds a model.Fault the way an adapter would for a rate limit /
+// 5xx / stream reset, optionally carrying the failed attempt's billed usage.
+func transientFault(msg string, u model.Usage) error {
+	return &model.Fault{Err: errors.New(msg), Transient: true, Usage: u}
+}
+
+// A transient fault is absorbed at the relay: the completion is re-issued with
+// doubling backoff until it succeeds, and the caller sees only the final response.
+func TestRelayCompleteRetriesTransientFaultThenSucceeds(t *testing.T) {
+	adapter := &recordingAdapter{
+		errs: []error{transientFault("429", model.Usage{}), transientFault("stream reset", model.Usage{})},
+		resp: model.Response{Usage: model.Usage{InputTokens: 10, OutputTokens: 5}, Stop: model.StopEndTurn},
+	}
+	r := testRelay(adapter, &recordingPublisher{}, &bundleSandbox{})
+	var slept []time.Duration
+	r.sleep = func(_ context.Context, d time.Duration) error { slept = append(slept, d); return nil }
+
+	resp, err := r.Complete(context.Background(), parentCall(model.Request{}))
+	if err != nil {
+		t.Fatalf("Complete after transient faults: %v", err)
+	}
+	if resp.Stop != model.StopEndTurn {
+		t.Errorf("stop = %q, want end_turn", resp.Stop)
+	}
+	if adapter.calls != 3 {
+		t.Errorf("calls = %d, want 3 (two transient faults + the success)", adapter.calls)
+	}
+	if want := []time.Duration{time.Second, 2 * time.Second}; len(slept) != 2 || slept[0] != want[0] || slept[1] != want[1] {
+		t.Errorf("backoff = %v, want %v (doubling per attempt)", slept, want)
+	}
+	if u := r.Usage(); u != (model.Usage{InputTokens: 10, OutputTokens: 5}) {
+		t.Errorf("usage = %+v, want the successful attempt only (faults carried no usage)", u)
+	}
+}
+
+// A terminal fault — auth, malformed request, context overflow — is never retried.
+func TestRelayCompleteTerminalFaultDoesNotRetry(t *testing.T) {
+	adapter := &recordingAdapter{errs: []error{&model.Fault{Err: errors.New("401 unauthorized"), Transient: false}}}
+	r := testRelay(adapter, &recordingPublisher{}, &bundleSandbox{})
+	var slept int
+	r.sleep = func(context.Context, time.Duration) error { slept++; return nil }
+
+	if _, err := r.Complete(context.Background(), parentCall(model.Request{})); err == nil {
+		t.Fatal("Complete: want error, got nil")
+	}
+	if adapter.calls != 1 || slept != 0 {
+		t.Errorf("calls = %d slept = %d, want 1 and 0 (terminal faults fail immediately)", adapter.calls, slept)
+	}
+}
+
+// A persistent transient fault exhausts the attempt bound and surfaces — bounded
+// attempts are the halting guarantee (the invocation ctx carries no deadline).
+func TestRelayCompleteRetryIsBounded(t *testing.T) {
+	adapter := &recordingAdapter{err: transientFault("provider outage", model.Usage{})}
+	r := testRelay(adapter, &recordingPublisher{}, &bundleSandbox{})
+	var slept int
+	r.sleep = func(context.Context, time.Duration) error { slept++; return nil }
+
+	if _, err := r.Complete(context.Background(), parentCall(model.Request{})); err == nil {
+		t.Fatal("Complete: want error after exhausting retries, got nil")
+	}
+	if adapter.calls != completionMaxAttempts {
+		t.Errorf("calls = %d, want %d (the attempt bound)", adapter.calls, completionMaxAttempts)
+	}
+	if slept != completionMaxAttempts-1 {
+		t.Errorf("slept %d times, want %d (no sleep after the final attempt)", slept, completionMaxAttempts-1)
+	}
+}
+
+// A failed attempt's billed usage (a mid-stream fault lands after tokens were counted)
+// still draws the invocation budget, so retries stay inside the termination guarantee.
+func TestRelayCompleteFailedAttemptUsageDrawsBudget(t *testing.T) {
+	adapter := &recordingAdapter{
+		errs: []error{transientFault("mid-stream reset", model.Usage{InputTokens: 100, OutputTokens: 2})},
+		resp: model.Response{Usage: model.Usage{InputTokens: 10, OutputTokens: 5}, Stop: model.StopEndTurn},
+	}
+	r := testRelay(adapter, &recordingPublisher{}, &bundleSandbox{})
+	r.sleep = func(context.Context, time.Duration) error { return nil }
+
+	if _, err := r.Complete(context.Background(), parentCall(model.Request{})); err != nil {
+		t.Fatalf("Complete: %v", err)
+	}
+	if u := r.Usage(); u != (model.Usage{InputTokens: 110, OutputTokens: 7}) {
+		t.Errorf("usage = %+v, want failed + successful attempts combined {110 7}", u)
+	}
+}
+
+// The explore path retries too, and a failed explorer attempt's usage draws BOTH the
+// combined ceiling and the per-call stream meter (the sub-budget stays honest).
+func TestRelayExploreRetryDrawsSubBudget(t *testing.T) {
+	parent := &recordingAdapter{}
+	explore := &recordingAdapter{
+		errs: []error{transientFault("overloaded", model.Usage{InputTokens: 60})},
+		resp: model.Response{Usage: model.Usage{InputTokens: 30, OutputTokens: 5}, Stop: model.StopEndTurn},
+	}
+	r := testRelayWithExplore(parent, explore, core.ExploreBudget{Tokens: 1000})
+	r.sleep = func(context.Context, time.Duration) error { return nil }
+
+	if _, err := r.Complete(context.Background(), exploreCall("s1", model.Request{})); err != nil {
+		t.Fatalf("explore Complete: %v", err)
+	}
+	if explore.calls != 2 {
+		t.Errorf("explorer calls = %d, want 2 (one transient fault + the success)", explore.calls)
+	}
+	if got := r.streamTokens("s1"); got != 95 {
+		t.Errorf("stream meter = %d, want 95 (60 failed + 35 successful)", got)
+	}
+	if u := r.Usage(); u != (model.Usage{InputTokens: 90, OutputTokens: 5}) {
+		t.Errorf("combined usage = %+v, want {90 5}", u)
+	}
+}
+
+// When the invocation's ctx is already gone, the backoff sleep returns immediately and
+// the provider fault surfaces after the in-flight attempt — no retry loop outlives the
+// invocation. Uses the real sleepCtx default to prove the ctx race, not a stub.
+func TestRelayCompleteRetryStopsOnCancelledContext(t *testing.T) {
+	adapter := &recordingAdapter{err: transientFault("429", model.Usage{})}
+	r := testRelay(adapter, &recordingPublisher{}, &bundleSandbox{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := r.Complete(ctx, parentCall(model.Request{}))
+	if err == nil {
+		t.Fatal("Complete: want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "429") {
+		t.Errorf("err = %v, want the provider fault (what the caller can act on), not the sleep interruption", err)
+	}
+	if adapter.calls != 1 {
+		t.Errorf("calls = %d, want 1 (no retry once the ctx is gone)", adapter.calls)
 	}
 }
 

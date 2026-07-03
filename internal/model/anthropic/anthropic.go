@@ -7,11 +7,13 @@ package anthropic
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
 	sdk "github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
+	"github.com/anthropics/anthropic-sdk-go/shared"
 
 	"github.com/Loxstomper/harness/internal/model"
 )
@@ -93,9 +95,42 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 		}
 	}
 	if err := stream.Err(); err != nil {
-		return model.Response{}, fmt.Errorf("anthropic: stream: %w", err)
+		// Classified so the trusted relay can absorb transient faults with a bounded
+		// retry (specs/models.md); the partial accumulator's usage rides along so a
+		// failed attempt's billed tokens (input tokens land in message_start, well
+		// before a mid-stream fault) still draw the budget.
+		return model.Response{}, &model.Fault{
+			Err:       fmt.Errorf("anthropic: stream: %w", err),
+			Transient: transient(err),
+			Usage:     fromMessage(&acc).Usage,
+		}
 	}
 	return fromMessage(&acc), nil
+}
+
+// transient classifies a completion error for the model.Fault contract. Two typed
+// shapes: a pre-stream API error carries the real HTTP status, classified by the
+// shared status policy; a mid-stream `event: error` frame is decoded by the SDK into
+// the same typed error but stamped with the *original* response's status (the stream
+// had already opened — usually 200), so there the error *type* carries the class —
+// overloaded/rate-limit/timeout/api_error are the provider-side retryable family,
+// everything else (invalid request, auth, billing…) is terminal. An untyped error is
+// a raw dropped connection: the wire failing, transient unless the caller's ctx is done.
+func transient(err error) bool {
+	var apiErr *sdk.Error
+	if errors.As(err, &apiErr) {
+		if apiErr.StatusCode >= 400 {
+			return model.TransientStatus(apiErr.StatusCode)
+		}
+		switch apiErr.Type() {
+		case shared.ErrorTypeRateLimitError, shared.ErrorTypeOverloadedError,
+			shared.ErrorTypeTimeoutError, shared.ErrorTypeAPIError:
+			return true
+		default:
+			return false
+		}
+	}
+	return model.TransientWire(err)
 }
 
 // toParams translates a canonical Request into SDK request params.
