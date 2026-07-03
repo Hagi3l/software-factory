@@ -111,12 +111,18 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
   for the deploy. Run with `VAULT_REMOTE=''` to stay purely local — the full pipeline still
   runs and merges, it just doesn't push or deploy.
 
-On every run the `go-toolchain` base image and then the `vault-toolchain` image are
-(re)built automatically. Docker's layer cache makes an unchanged rebuild near-instant, so
-building unconditionally costs almost nothing while guaranteeing a stale image (one built
-before its Dockerfile gained the gate tools) is refreshed rather than silently reused. Only
-the first base build is slow — it downloads the Go image + the offline vuln DB; the vault
-layer on top is quick.
+On every run the `go-toolchain-base` / `go-toolchain` images and then the `vault-toolchain`
+image are (re)built automatically. Docker's layer cache makes an unchanged rebuild
+near-instant, so building unconditionally costs almost nothing while guaranteeing a stale
+image (one built before its Dockerfile gained the gate tools) is refreshed rather than
+silently reused. Only the first base build is slow — it downloads the Go image + the
+offline vuln DB; the vault layer on top is quick. The base/`-base` split is what keeps a
+*harness source change* cheap too: the vault image bases on the binary-free stable stage
+and copies the harness shim binary in as its last layers, so a new harness commit rebuilds
+seconds of COPY instead of re-downloading toolchains and module caches. One deliberate
+consequence: the baked offline **vuln DB never refreshes on its own** (its layer stays
+cached) — bump it explicitly with `VULNDB_SNAPSHOT=$(date +%F) ./demo/vault/run.sh` when
+you want govulncheck grading against a current snapshot.
 
 ## Run it
 

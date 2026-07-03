@@ -3,7 +3,18 @@
 # Build from the repo root so the module cache matches the harness's go.mod/go.sum and
 # the language-server manifest is COPYd from the tree:
 #
+#   docker build -f deploy/go-toolchain.Dockerfile --target base -t go-toolchain-base .
 #   docker build -f deploy/go-toolchain.Dockerfile -t go-toolchain .
+#
+# Two tags, one file — a LAYER-CACHE split (run.sh does both; the second build reuses
+# every cached layer of the first). `base` holds everything that changes rarely: the
+# toolchain, gate tools, the vuln DB, the module cache. The final stage adds the one
+# thing that changes on every harness commit — the shim binary — as the LAST layers,
+# so a source change rebuilds seconds of COPY, not the module warm. Downstream profile
+# images (demo/vault/Dockerfile) build FROM go-toolchain-base and copy the binary out
+# of go-toolchain as *their* last layers, so a harness commit no longer cascades into
+# re-downloading their tools and module caches either (a child's layer cache is keyed
+# on its parent image ID — basing on the stable `base` is what breaks the cascade).
 #
 # Why each piece exists:
 #   - Go 1.26 + git + make: the toolchain the implementor agent and the gate need to
@@ -31,9 +42,10 @@
 #   - govulncheck PLUS an offline copy of the Go vulnerability database under
 #     /opt/harness/vulndb: govulncheck otherwise fetches the DB from vuln.go.dev, which
 #     the zero-network sandbox forbids. GOVULNDB points the `make govulncheck` target
-#     (which passes `-db $GOVULNDB`) at the baked file:// copy. Refreshing the DB means
-#     rebuilding the image — and the image digest pinned in provenance therefore also
-#     pins the exact vuln-DB snapshot a gate verdict was graded against.
+#     (which passes `-db $GOVULNDB`) at the baked file:// copy. The mirror layer is
+#     keyed on VULNDB_SNAPSHOT (below), so refreshing the DB is a deliberate act —
+#     and the image digest pinned in provenance therefore also pins the exact vuln-DB
+#     snapshot a gate verdict was graded against.
 #
 # Language server (T5.3 → Phase 6) — the per-language server the agent's LSP-backed
 # semantic tools resolve lives in the image alongside the toolchain it serves:
@@ -45,15 +57,19 @@
 # Builder stage: compile the harness binary so the in-sandbox GOPROXY shim
 # (`harness sandbox-goproxy`, T5.6) is available inside the image. Only cmd + internal +
 # the module files are copied (not .git/docs/specs), so the build is lean and deterministic.
+# The module/build caches are BuildKit cache mounts — they persist across builds on the
+# build host (an incremental recompile, no re-download) and never land in the image
+# (only /out/harness is copied out).
 FROM golang:1.26 AS harness-build
 WORKDIR /src
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd ./cmd
 COPY internal ./internal
-RUN CGO_ENABLED=0 go build -trimpath -o /out/harness ./cmd/harness
+RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 go build -trimpath -o /out/harness ./cmd/harness
 
-FROM golang:1.26
+FROM golang:1.26 AS base
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends make git ca-certificates jq curl \
@@ -74,15 +90,22 @@ RUN go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0 \
 
 # Offline Go vulnerability database (v1 layout: index/*.json + ID/<id>.json). Mirrored
 # at build time so `govulncheck -db file:///opt/harness/vulndb` runs under zero-network.
-# Parallelized; the per-ID set is the full snapshot so any module in the cache resolves.
+# The layer is keyed on VULNDB_SNAPSHOT: Docker's cache would otherwise never re-run it
+# (an unchanged Dockerfile prefix means an eternally frozen snapshot, however often the
+# image is "rebuilt"), so refreshing the DB = bumping the arg — either the default below
+# or `--build-arg VULNDB_SNAPSHOT=$(date +%F)`. Parallelized, with retries so one blip
+# among thousands of per-ID fetches doesn't fail a long build; the per-ID set is the
+# full snapshot so any module in the cache resolves.
+ARG VULNDB_SNAPSHOT=2026-07-03
 RUN set -eux; \
+    : "vuln DB snapshot: ${VULNDB_SNAPSHOT}"; \
     base=https://vuln.go.dev; \
     mkdir -p /opt/harness/vulndb/index /opt/harness/vulndb/ID; \
     for f in db modules vulns; do \
-        curl -sSfL "$base/index/$f.json" -o "/opt/harness/vulndb/index/$f.json"; \
+        curl -sSfL --retry 3 "$base/index/$f.json" -o "/opt/harness/vulndb/index/$f.json"; \
     done; \
     jq -r '.[].id' /opt/harness/vulndb/index/vulns.json \
-      | xargs -P 16 -I{} curl -sSfL "$base/ID/{}.json" -o "/opt/harness/vulndb/ID/{}.json"
+      | xargs -P 16 -I{} curl -sSfL --retry 3 "$base/ID/{}.json" -o "/opt/harness/vulndb/ID/{}.json"
 ENV GOVULNDB=file:///opt/harness/vulndb
 
 # Language-server manifest at the fixed launch convention. Same file the lsmanifest Go
@@ -90,11 +113,9 @@ ENV GOVULNDB=file:///opt/harness/vulndb
 RUN mkdir -p /etc/harness
 COPY internal/sandbox/lsmanifest/language-servers.json /etc/harness/language-servers.json
 
-# In-sandbox GOPROXY shim (T5.6): the harness binary + the entrypoint that starts it.
-COPY --from=harness-build /out/harness /usr/local/bin/harness
-COPY deploy/harness-sandbox-init.sh /usr/local/bin/harness-sandbox-init
-RUN chmod +x /usr/local/bin/harness-sandbox-init
-
+# Warm the harness module cache. This lives in `base` — ABOVE the binary copy — so a
+# harness source change (which changes the binary on every commit) never re-runs the
+# download; only a go.mod/go.sum change does.
 WORKDIR /workspace
 COPY go.mod go.sum ./
 RUN go mod download
@@ -104,5 +125,14 @@ RUN go mod download
 # new dep is fetched through the runner's broker (mediated + logged) or denied by its
 # allowlist. GONOSUMCHECK is NOT set: go.sum + the checksum DB still pin every module — the
 # sumdb is served through the same shim path (/sumdb/...), preserving supply-chain integrity.
+# (Set AFTER the module warm above: at image-build time the shim isn't running, so the warm
+# needs the default proxy. Downstream images that warm their own caches override per-RUN.)
 ENV GOPROXY=http://127.0.0.1:8123 GOFLAGS=-mod=mod
+
+# Final stage: the volatile layers, deliberately LAST (see the header). The in-sandbox
+# GOPROXY shim (T5.6): the harness binary + the entrypoint that starts it.
+FROM base
+COPY --from=harness-build /out/harness /usr/local/bin/harness
+COPY deploy/harness-sandbox-init.sh /usr/local/bin/harness-sandbox-init
+RUN chmod +x /usr/local/bin/harness-sandbox-init
 ENTRYPOINT ["/usr/local/bin/harness-sandbox-init"]

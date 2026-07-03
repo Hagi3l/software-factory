@@ -69,6 +69,30 @@ checks the value is *well-formed*, but whether the selected backend is *availabl
 this host* can only be known when the runtime binds it, so the fail-closed check lives
 there.
 
+### Least-privilege boot on container backends
+
+Zero-network is necessary but not sufficient: on a shared-kernel backend the
+container's *process* privileges are the remaining escape surface, and Docker's
+defaults (root exec user, the default capability set, unbounded PIDs, swap up to
+2× the memory limit) are tuned for convenience, not hostile tenants. The
+container-based backends (Docker, and gVisor via the same provisioning path) must
+therefore boot **least-privilege**, enforced from outside the guest at provision
+time — the same posture as the resource limits:
+
+- **Drop all capabilities** (`--cap-drop=ALL`), re-adding only what the toolchain
+  profile actually needs.
+- **Forbid privilege escalation** (`--security-opt no-new-privileges`) — no setuid
+  route back to what was dropped.
+- **Cap the PID count** (`--pids-limit`) so a fork bomb exhausts the sandbox, not
+  the shared host kernel.
+- **Pin swap to the memory limit** (`--memory-swap` = `limits.mem`) so the memory
+  cap is a real ceiling, not a soft target the guest can double through swap.
+
+These controls are the backend's responsibility precisely because the guest is
+untrusted: nothing inside the sandbox can be relied on to confine itself. A
+microVM backend (Firecracker) gets the equivalent isolation from the VM boundary
+itself; the container backends have to ask the runtime for it explicitly.
+
 ---
 
 ## Profile → image resolution

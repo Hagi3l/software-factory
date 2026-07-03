@@ -215,7 +215,12 @@ the `author-tests` stage produced (threaded forward to the merge), the window in
 test author read the pure-prose spec. `Transcript` cites the full broker-captured agent
 conversation — every LLM request/response the runner relayed for the producing invocation —
 the **replayable decision trail** that lets a human reconstruct exactly what the model saw
-and did (see [observability.md](observability.md)). The `Prompt-SHA`, the evidence hashes,
+and did (see [observability.md](observability.md)). The recorded turns include the model's
+**reasoning stream as emitted**: thinking/reasoning deltas are part of the captured
+response, not just the final text and tool calls. It is recorded verbatim as evidence of
+what the model *emitted* — it is not treated as a guaranteed-faithful account of *why* the
+model acted (chain-of-thought can be incomplete or provider-redacted), so it strengthens
+the audit trail without the trail resting on it. The `Prompt-SHA`, the evidence hashes,
 the traceability hash, and the transcript hash are all such pointers, so a record cannot be
 silently altered. A check whose evidence failed to persist degrades to a bare `<name>`, and
 a change with no `author-tests` stage in its lineage carries `Traceability: (none)` (and an

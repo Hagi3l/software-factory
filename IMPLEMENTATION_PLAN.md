@@ -14,7 +14,9 @@ merge to `main` with a provenance trailer. Verified end-to-end against a real mo
 (local Ollama via `openai-compat`) and real Docker sandboxes.
 
 **Phases 2, 3, 4, 6, 7, 8, 9, 10, 11, and 13 are complete; open build work is Phase 5 (all optional
-— T5.11 warm pools + HA — or hardware-blocked — T5.2 Firecracker, needs KVM the dev box lacks)
+— T5.11 warm pools + HA — or hardware-blocked — T5.2 Firecracker, needs KVM the dev box lacks),
+Phase 14 (trusted-layer hardening from the 2026-07-03 review: least-privilege container boot,
+model-relay retry, reasoning-in-transcript — T14.1–T14.3, specs updated ahead),
 and the newly-specced Phase 12 (distilled explore tool: **COMPLETE — T12.1–T12.6 all landed: the
 `explore` tool + nested read-only sub-loop, the broker sub-context selector + runner-pinned explorer
 model + per-stream sub-budget metering, the `policy.explore_budget` / reserved-`explorer`-role config +
@@ -1037,6 +1039,50 @@ is TCB except where noted; all behind unit tests, `make check` green.
 
 ---
 
+## Phase 14 — Trusted-layer hardening (2026-07-03 review)
+
+Opened from a **2026-07-03 full-harness review** (three parallel subsystem passes:
+orchestrator/beads, runner/sandbox/agent/model, control room/config) ahead of the vault-demo
+talk. The review's findings were triaged with the operator: three became the build items
+below, four were filed to "Deferred & follow-ups", and the rest were **explicitly declined
+for now** (control-room auth/CSRF, the depth-advance duplicate-produce crash window, the
+poison-work re-dispatch loop, merge-worktree crash leaks, a dispatch WIP cap — accepted as
+bootstrap-phase risk; revisit if one bites or when Phase-5 production posture demands it).
+
+- [ ] **T14.1 Least-privilege container boot** — the sandbox `docker run` line sets only
+  `--network none` + cpu/mem (`internal/sandbox/docker.go:185-201`); the container boots as
+  root with Docker's default capability set, unbounded PIDs, and swap up to 2× the memory
+  limit — and the gVisor backend inherits the same args (shared provisioning path, T5.5).
+  Add `--cap-drop=ALL` (re-add only what the toolchain profile needs),
+  `--security-opt no-new-privileges`, `--pids-limit`, and `--memory-swap` pinned to the
+  memory limit. Unit-testable through the existing `run`-args seam
+  (`TestDockerProvision*`-style). **Spec updated ahead:**
+  [components/sandbox.md](specs/components/sandbox.md) "Least-privilege boot on container
+  backends".
+- [ ] **T14.2 Bounded transient-fault retry at the model relay** — today any provider error
+  (429, 5xx, mid-stream reset) returns verbatim from the adapter
+  (`internal/model/openai/openai.go:121-123`, `internal/model/anthropic/anthropic.go:95-97`),
+  the loop treats it as fatal (`internal/agent/loop.go:197-200`), and the runner Naks the
+  message (`internal/runner/runner.go:314`) — a full invocation re-run that discards the
+  sandbox and every token already spent, on a fault that a one-second retry would have
+  absorbed. Add bounded retry with backoff in the runner's relay (where the provider is
+  known), classifying retryable (rate-limit, 5xx, stream reset) vs terminal (auth, malformed
+  request, context overflow); every attempt's billed usage counts toward the budget so
+  termination holds. **Spec updated ahead:** [models.md](specs/models.md) "Transient provider
+  faults are absorbed at the relay".
+- [ ] **T14.3 Reasoning in the recorded transcript** — reasoning deltas stream to NATS for
+  the live view but never land in the canonical `Response`, so the harvested transcript
+  (`internal/runner/broker_handler.go:583-591` `record()`) is thinner than security.md's
+  "replayable decision trail" claim — the audited artifact drops the model's thinking.
+  Capture the reasoning stream into the canonical response/turn and persist it through
+  `record()`; recorded **as emitted** (evidence of what the model emitted, not a
+  guaranteed-faithful rationale). Also the prerequisite for **first-party thinking-block
+  preservation** (Deferred list) keeping the transcript equal to wire-truth once thinking
+  blocks ride subsequent requests. **Spec updated ahead:** [security.md](specs/security.md)
+  provenance-trailer section.
+
+---
+
 ## Deferred & follow-ups (filed, not blocking)
 
 - **Wizard: `announcesDraft()` matcher too literal** *(same run)*. The draft-nudge backstop only fires when concluding prose matches a fixed phrase list (`"draft the spec"`, `"seed issues"`, …) — it missed the model's actual `"Drafting the spec and seed issue now"` (gerund `drafting` ≠ `draft the`; singular `issue` ≠ `issues`), so the nudge never fired and the promised draft never came. **Fix:** broaden to stems/keywords (`drafting`, `seed issue`, `propose_draft`, `proposing`) in `internal/controlroom/wizard/wizard.go`.
@@ -1049,6 +1095,41 @@ is TCB except where noted; all behind unit tests, `make check` green.
   T13.6 decision** (same-family verify-path explorer accepted): routed explorer diversity was this
   item's only motivation, so the stage/role-scoped selector input is no longer needed by anything.
   If a future feature wants per-stage soul routing for its own reasons, design it fresh then.
+- **Package-proxy redirect pinning** *(from the 2026-07-03 review)*. The fetcher's
+  `http.Client` sets no `CheckRedirect` (`internal/packageproxy/packageproxy.go:50-55`):
+  `ValidatePath` confines the *first* hop to the configured proxy host, but a 3xx is followed
+  to any host — an agent-reachable SSRF from the runner (which holds the API key and full
+  network). The module-proxy protocol doesn't need redirects. **Fix:** refuse redirects, or
+  re-pin `host == base` on every hop.
+- **Broker-socket I/O deadlines + handler drain** *(2026-07-03 review)*. No `SetDeadline`
+  anywhere in `internal/broker` and no in-flight connection cap: a sandbox can open
+  connections that never send (or stall mid-frame), each wedging a goroutine + FD on the
+  trusted runner; `Serve`'s per-connection goroutines also aren't awaited at invocation end
+  (`internal/broker/server.go:98-128`, `internal/runner/runner.go:468-474`). **Fix:** per-frame
+  read/write deadlines (one request per connection makes a short deadline safe), a bounded
+  in-flight count, and a `WaitGroup` drain in `Serve`.
+- **Wizard session lifecycle** *(2026-07-03 review)*. Eviction is FIFO-by-creation, not LRU —
+  `Get` never touches `p.order` (`internal/controlroom/wizard/wizard.go:349-401`) — so 64
+  `GET /create` loads evict the *oldest-created* session even while a human is actively
+  drafting in it (the draft then silently 404s); there is no idle TTL, so abandoned sessions
+  pin their explorer sandboxes until count pressure; an evicted session's browser SSE stream
+  goes silently inert. **Fix:** LRU touch on use, an idle-timeout sweeper that tears down
+  session + explorer sandbox, and a terminal "session expired" SSE event.
+- **Control-room pagination** *(2026-07-03 review)*. Provenance history is hard-capped at the
+  newest 50 merges with no offset/cursor (`internal/controlroom/server.go:698`) — older
+  forensic history is unreachable in the UI; board/DLQ render their full sets unbounded.
+  **Fix:** limit/offset params + "showing N of M / load older" affordances.
+- **In-flight projection growth — decided 2026-07-03: do nothing for now.** `settle()`
+  retains every closed/blocked entry, `reset()` rehydrates the full closed history from
+  `ListAll` at startup, and the 2s ticks + board snapshots scan the whole map
+  (`internal/orchestrator/inflight.go:83-90,263-270`); `authorizeEpic` separately does a
+  full `ListAll` per result when an epic budget is set (`results.go:1021`). Accepted while
+  runs are session-length — the retention exists to serve the T8.2 lagging-`bd.ready()`
+  suppression, and nothing today runs long enough for the growth to bite. **Revisit
+  trigger:** a long-running deployment or a sluggish board. The sketched fix: TTL-evict
+  settled entries (the lag window is seconds; minutes of retention is generous) + a per-epic
+  running spend counter updated at settle — which also takes `authorizeEpic` off its
+  per-result `ListAll` as a bonus.
 
 ## Open decisions affecting the plan
 

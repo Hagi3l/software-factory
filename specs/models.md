@@ -102,6 +102,18 @@ why autonomous self-hosting still awaits a capable runtime model (see
   agent whose visible turn is *only tool calls* is still observable as it reasons. The
   adapter normalizes both into the one canonical channel; the [broker](components/runner.md)
   labels them (`token` vs `reasoning`) for the feed.
+- **Transient provider faults are absorbed at the relay.** A rate limit (429), a
+  provider 5xx, or a mid-stream reset is a property of the *wire*, not of the
+  invocation — but an error surfaced out of the completion call is fatal: the
+  message is Nak'd and the whole invocation re-runs, discarding the sandbox and
+  every token already spent. So the runner's relay — the layer that knows the
+  provider — retries transient completion failures with **bounded backoff** before
+  giving up. Terminal errors (auth, malformed request, context overflow) are never
+  retried; a failed stream is re-issued as a fresh request, not resumed
+  mid-stream. Retries stay inside the termination guarantee: every attempt's
+  billed usage counts toward the invocation's budget and the sandbox wall clock
+  keeps running, so a provider outage exhausts the budget and dead-letters rather
+  than looping forever.
 - **Optional capability fields** — prompt caching, reasoning effort — are **per-model
   config the adapter emits**, not canonical-`Request` fields. See the next section.
 

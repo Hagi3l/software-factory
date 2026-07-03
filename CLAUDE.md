@@ -30,7 +30,9 @@ fully complete (T2.12 run-all-independent-scanners landed; N-version diversity, 
 is resolved as configuration, with the non-fatal `harness validate` family-overlap
 advisory T2.13 done). **Phase
 5** (production isolation & distribution — Firecracker, distributed NATS, scoped
-secrets, signing) is the remaining engineering. `cmd/harness` exposes
+secrets, signing) and **Phase 14** (trusted-layer hardening: least-privilege
+container boot, model-relay retry, reasoning-in-transcript) are the remaining
+engineering. `cmd/harness` exposes
 `validate`/`seed`/`run`/`approve`/`reject`/`serve`; bootstrap config lives in
 `config/` (`harness validate --config config`). The autonomous self-hosting loop is
 buildable/testable offline but has **not been switched on** (no hosted capable

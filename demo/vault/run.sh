@@ -28,6 +28,7 @@
 #   KEEP_SITE=1 ./demo/vault/run.sh                         # don't delete the scratch repo on exit
 #   JAEGER=1 ./demo/vault/run.sh                            # spin a Jaeger container; export OTel traces to it
 #   OPENOBSERVE=1 ./demo/vault/run.sh                       # spin an OpenObserve container; export ALL THREE signals (traces+logs+metrics) to it
+#   VULNDB_SNAPSHOT=$(date +%F) ./demo/vault/run.sh         # re-mirror the baked offline vuln DB (otherwise frozen by layer cache)
 set -euo pipefail
 
 # ---- knobs (override via env) ----------------------------------------------------------
@@ -47,7 +48,8 @@ BD="${BD:-bd}"
 # (VAULT_REMOTE='') for a purely-local run with no GitHub push.
 VAULT_REMOTE="${VAULT_REMOTE:-git@github.com:Loxstomper/vault.git}"
 IMAGE='vault-toolchain'       # sandbox profile named by the vault souls
-BASE_IMAGE='go-toolchain'     # the vault image bases on this kernel image
+BASE_IMAGE='go-toolchain'     # carries the shim binary the vault image copies out
+BASE_STABLE="${BASE_IMAGE}-base"  # the binary-free stable stage the vault image bases on
 JAEGER_NAME='harness-vault-jaeger'              # container name (JAEGER=1 only)
 JAEGER_IMAGE='jaegertracing/all-in-one:1.76.0'  # single-binary OTLP collector + trace UI (pinned: v2 is a collector-based rewrite)
 # OpenObserve (OPENOBSERVE=1 only): a single-binary, multi-signal OTLP backend — unlike Jaeger
@@ -100,9 +102,21 @@ say "Building harness"
 # go-licenses) — is refreshed rather than silently reused (a stale base is what makes the qa
 # stage fail with `No such file or directory`). The vault image bases on the kernel
 # go-toolchain image, so build that first. Only the first base build is slow (it downloads
-# the Go base + the offline vuln DB); cached rebuilds are fast.
-say "Building the base '$BASE_IMAGE' image (cached rebuild is fast; first build downloads the Go base + vuln DB)"
-docker build -f "$REPO_ROOT/deploy/go-toolchain.Dockerfile" -t "$BASE_IMAGE" "$REPO_ROOT"
+# the Go base + the offline vuln DB); cached rebuilds are fast. Three builds, cheap by
+# construction: '$BASE_STABLE' is the binary-free stable stage (everything that changes
+# rarely), '$BASE_IMAGE' adds the harness shim binary on top (reusing every cached layer of
+# the first build), and the vault image bases on the STABLE tag while copying the binary out
+# of '$BASE_IMAGE' as its last layers — so a harness source change rebuilds seconds of COPY,
+# not the toolchain/module downloads (see the Dockerfile headers). Refresh the baked vuln-DB
+# snapshot deliberately with VULNDB_SNAPSHOT=$(date +%F) (defaults to the pinned date in the
+# Dockerfile; a bump re-mirrors the DB, a few minutes).
+say "Building the base '$BASE_STABLE' + '$BASE_IMAGE' images (cached rebuild is fast; first build downloads the Go base + vuln DB)"
+docker build -f "$REPO_ROOT/deploy/go-toolchain.Dockerfile" --target base \
+  ${VULNDB_SNAPSHOT:+--build-arg "VULNDB_SNAPSHOT=$VULNDB_SNAPSHOT"} \
+  -t "$BASE_STABLE" "$REPO_ROOT"
+docker build -f "$REPO_ROOT/deploy/go-toolchain.Dockerfile" \
+  ${VULNDB_SNAPSHOT:+--build-arg "VULNDB_SNAPSHOT=$VULNDB_SNAPSHOT"} \
+  -t "$BASE_IMAGE" "$REPO_ROOT"
 say "Building the '$IMAGE' image (adds templ + Tailwind + the vault module cache)"
 docker build -f "$DEMO_DIR/Dockerfile" -t "$IMAGE" "$APP_DIR"
 
