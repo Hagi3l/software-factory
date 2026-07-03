@@ -115,6 +115,13 @@ func TestProvisionArgShapes(t *testing.T) {
 	for _, frag := range []string{
 		"run -d --init",
 		"--network none",
+		// Least-privilege boot (T14.1): all caps dropped with none re-added, no
+		// setuid escalation route, a PID ceiling, and swap pinned to the memory
+		// limit so --memory is a real ceiling.
+		"--cap-drop ALL",
+		"--security-opt no-new-privileges",
+		"--pids-limit " + pidsLimit,
+		"--memory-swap 2147483648",
 		"--cpus 2",
 		"--memory " + // 2Gi in bytes
 			"2147483648",
@@ -126,6 +133,9 @@ func TestProvisionArgShapes(t *testing.T) {
 			t.Errorf("run args missing %q\n got: %s", frag, run)
 		}
 	}
+	if strings.Contains(run, "--cap-add") {
+		t.Errorf("no capability may be re-added at boot (the chown escalates per exec), got: %s", run)
+	}
 
 	cp := strings.Join((*calls)[1], " ")
 	if want := "cp /tmp/seed/. container-abc:/workspace"; cp != want {
@@ -134,8 +144,11 @@ func TestProvisionArgShapes(t *testing.T) {
 
 	// The seeded worktree is re-owned to the container's exec user (T5.4) so git's
 	// dubious-ownership guard never fires — replacing the image's safe.directory crutch.
+	// --privileged because the cap-dropped container strips CAP_CHOWN even from root:
+	// the one trusted provisioning command escalates itself at exec time instead of the
+	// whole sandbox booting with the capability.
 	chown := (*calls)[2]
-	wantChown := []string{"exec", "container-abc", "sh", "-c", chownWorktreeCmd}
+	wantChown := []string{"exec", "--privileged", "container-abc", "sh", "-c", chownWorktreeCmd}
 	if strings.Join(chown, "\x00") != strings.Join(wantChown, "\x00") {
 		t.Errorf("chown args = %v, want %v", chown, wantChown)
 	}

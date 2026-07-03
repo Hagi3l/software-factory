@@ -1049,16 +1049,27 @@ for now** (control-room auth/CSRF, the depth-advance duplicate-produce crash win
 poison-work re-dispatch loop, merge-worktree crash leaks, a dispatch WIP cap — accepted as
 bootstrap-phase risk; revisit if one bites or when Phase-5 production posture demands it).
 
-- [ ] **T14.1 Least-privilege container boot** — the sandbox `docker run` line sets only
-  `--network none` + cpu/mem (`internal/sandbox/docker.go:185-201`); the container boots as
-  root with Docker's default capability set, unbounded PIDs, and swap up to 2× the memory
-  limit — and the gVisor backend inherits the same args (shared provisioning path, T5.5).
-  Add `--cap-drop=ALL` (re-add only what the toolchain profile needs),
-  `--security-opt no-new-privileges`, `--pids-limit`, and `--memory-swap` pinned to the
-  memory limit. Unit-testable through the existing `run`-args seam
-  (`TestDockerProvision*`-style). **Spec updated ahead:**
-  [components/sandbox.md](specs/components/sandbox.md) "Least-privilege boot on container
-  backends".
+- [x] **T14.1 Least-privilege container boot** — *done.* The sandbox `docker run` now boots
+  with `--cap-drop ALL`, `--security-opt no-new-privileges`, `--pids-limit 1024` (a backend
+  constant like `keepAliveSeconds` — a safety floor, not an operator dial), and
+  `--memory-swap` pinned to the same byte value as `--memory` (swap disabled; the cap is a
+  real ceiling). **Zero capabilities are re-added** — nothing the toolchain runs needs one;
+  the one step that did (the T5.4 provisioning chown, which relied on root's default
+  `CAP_CHOWN`) now escalates itself per exec: `docker exec --privileged <id> sh -c chown…`
+  (docker exec has no per-capability grant, so `--privileged` is the scoped alternative to
+  booting the whole sandbox with the capability — full privileges for exactly one trusted,
+  fixed command, issued from the trusted layer before any untrusted code has run; NNP does
+  not block it, caps are runtime-set at spawn, not gained via execve). The gVisor backend
+  inherits everything via the shared provisioning path (no wiring — pinned by test). If a
+  future toolchain profile genuinely needs a boot capability, hang a `Capabilities` field
+  off `config.SandboxProfile` then — deliberately not built ahead. Tests:
+  `TestProvisionArgShapes` (all four flags + a no-`--cap-add` guard + `--privileged` on the
+  chown argv), `TestGVisorProvisionPinsRunscRuntime` (inheritance). **Verified live**, not
+  just arg-shaped: `TestDockerSessionRoundTrip` (real busybox boot + exec) and
+  `TestSessionsRealGopls` (real `go-toolchain` container running gopls) both pass under the
+  hardened boot on this dev box. `make check` fully green (1228 pass/0 fail). Spec was
+  written ahead (sandbox.md "Least-privilege boot on container backends") — no spec change;
+  no CLI/config surface change, so no docs/ update. ([components/sandbox.md](specs/components/sandbox.md))
 - [ ] **T14.2 Bounded transient-fault retry at the model relay** — today any provider error
   (429, 5xx, mid-stream reset) returns verbatim from the adapter
   (`internal/model/openai/openai.go:121-123`, `internal/model/anthropic/anthropic.go:95-97`),

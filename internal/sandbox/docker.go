@@ -47,11 +47,20 @@ const (
 	// `docker cp` (which preserves the host uid/gid on every copied file). Run via
 	// `sh -c` so `$(id -u)`/`$(id -g)` resolve to whoever Exec runs as — "the container
 	// user" literally, with no uid hard-coded — and chown the tree to that owner. The
-	// default exec user is root (the toolchain image declares no USER), which holds
-	// CAP_CHOWN, so the chown succeeds and the worktree owner then matches the process
-	// that runs git/`go build`. This removes git's dubious-ownership trip (exit 128)
-	// at its cause, replacing the image's blanket `safe.directory '*'` crutch (T5.4).
+	// container boots with every capability dropped (least-privilege, see Provision),
+	// so even the root exec user holds no CAP_CHOWN — Provision runs this one command
+	// under `docker exec --privileged` (see there). The chown makes the worktree owner
+	// match the process that runs git/`go build`, removing git's dubious-ownership trip
+	// (exit 128) at its cause and replacing the image's blanket `safe.directory '*'`
+	// crutch (T5.4).
 	chownWorktreeCmd = `chown -R "$(id -u):$(id -g)" ` + containerWorkdir
+
+	// pidsLimit caps the container's process count (`docker run --pids-limit`) so a
+	// fork bomb exhausts the sandbox, not the shared host kernel. A constant, not
+	// config: it is a safety floor of the backend's contract, not an operator dial —
+	// 1024 is far above what a parallel go build/test tree plus a language server
+	// spawns, and far below fork-bomb scale.
+	pidsLimit = "1024"
 )
 
 // dockerRunFunc runs one `docker` subcommand and returns its stdout, stderr, the
@@ -191,9 +200,21 @@ func (b *DockerBackend) Provision(ctx context.Context, spec Spec) (Sandbox, erro
 	}
 	runArgs = append(runArgs,
 		"--network", "none",
+		// Least-privilege boot (specs/components/sandbox.md): the guest is untrusted,
+		// so the process-privilege surface Docker's defaults leave open is closed from
+		// outside at boot, like the resource limits. All capabilities are dropped and
+		// none re-added — nothing the toolchain runs needs one; the provisioning chown
+		// (the one step that does) escalates itself per exec below instead.
+		// no-new-privileges forbids the setuid route back to what was dropped, and
+		// --memory-swap pinned to the memory limit makes the cap a real ceiling
+		// rather than a soft target the guest can double through swap.
+		"--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges",
+		"--pids-limit", pidsLimit,
 		"--name", name,
 		"--cpus", strconv.Itoa(spec.Limits.CPU),
 		"--memory", strconv.FormatInt(memBytes, 10),
+		"--memory-swap", strconv.FormatInt(memBytes, 10),
 		"-w", containerWorkdir,
 		"-v", spec.Broker.Address+":"+containerBrokerSock,
 		image,
@@ -231,7 +252,13 @@ func (b *DockerBackend) Provision(ctx context.Context, spec Spec) (Sandbox, erro
 	// breaking `go build`'s VCS stamping and the in-sandbox candidate commit. Chowning
 	// the tree to the container user fixes the owner mismatch at its cause, so the image
 	// no longer needs the blanket `safe.directory '*'` crutch (T5.4, chownWorktreeCmd).
-	if _, err := b.dockerOK(ctx, nil, "exec", id, "sh", "-c", chownWorktreeCmd); err != nil {
+	// --privileged because the container boots cap-dropped (least-privilege, above) and
+	// the chown needs CAP_CHOWN: `docker exec` has no per-capability grant, so this is
+	// the scoped alternative to booting the whole sandbox with the capability — full
+	// privileges for exactly one trusted, fixed provisioning command, issued from the
+	// trusted layer before any untrusted code has run in the container. Everything the
+	// agent later runs goes through Sandbox.Exec/OpenSession, which never escalate.
+	if _, err := b.dockerOK(ctx, nil, "exec", "--privileged", id, "sh", "-c", chownWorktreeCmd); err != nil {
 		_ = sb.Teardown(context.Background())
 		return nil, fmt.Errorf("sandbox: chown seeded worktree: %w", err)
 	}

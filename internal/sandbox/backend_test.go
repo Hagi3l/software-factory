@@ -37,6 +37,13 @@ func TestGVisorProvisionPinsRunscRuntime(t *testing.T) {
 	if ri, ii := strings.Index(run, "--runtime"), strings.Index(run, "busybox:latest"); ri < 0 || ii < 0 || ri > ii {
 		t.Errorf("--runtime must precede the image: %s", run)
 	}
+	// The least-privilege boot flags (T14.1) ride the shared provisioning path, so the
+	// gVisor backend inherits them with no wiring of its own — pin that here.
+	for _, frag := range []string{"--cap-drop ALL", "--security-opt no-new-privileges", "--pids-limit " + pidsLimit} {
+		if !strings.Contains(run, frag) {
+			t.Errorf("gVisor run args missing inherited least-privilege flag %q\n got: %s", frag, run)
+		}
+	}
 }
 
 // The plain Docker backend does NOT pin a runtime — it keeps Docker's default (runc), so
