@@ -25,6 +25,12 @@
 
 name: deploy
 on:
+  # Manual redeploy button (`gh workflow run deploy --repo <owner>/vault`). Normally not
+  # needed: run.sh grafts each seed onto the previous public main precisely so this
+  # workflow's paths filter can compute the push diff (a parentless root commit has no
+  # common ancestor, GitHub can't diff it, and the push is silently skipped — which is
+  # how seed pushes stopped deploying between 2026-06-24 and 2026-07-04).
+  workflow_dispatch:
   push:
     branches: [main]
     # Only deploy when something that actually affects the binary changes. The harness lands

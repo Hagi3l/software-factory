@@ -223,6 +223,21 @@ git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
 if [ -n "$VAULT_REMOTE" ]; then
   say "Resetting public repo to the green seed: $VAULT_REMOTE"
   git -C "$SITE" remote add public "$VAULT_REMOTE"
+  # Graft the seed onto the previous public main before pushing. A parentless root commit
+  # (what a fresh scaffold produces) has no common ancestor with the remote, so GitHub
+  # cannot compute the push's changed files and deploy.yml's `paths:` filter silently
+  # skips the workflow — seed pushes stopped deploying (observed from 2026-06-24). With
+  # the previous main as parent the push is an ordinary descendant push: the TREE is
+  # still reset to the pristine seed (all demo-run changes discarded), the diff is
+  # computable, and the deploy fires exactly when app code actually changed. Skipped
+  # when the fetch fails (first-ever push / empty remote / no access) — a branch-creation
+  # push triggers fine without it.
+  if git -C "$SITE" fetch -q public main 2>/dev/null; then
+    grafted="$(git -C "$SITE" log -1 --format=%B |
+      git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
+        commit-tree 'HEAD^{tree}' -p FETCH_HEAD -F -)" &&
+      git -C "$SITE" update-ref refs/heads/main "$grafted"
+  fi
   # Degrade to LOCAL-ONLY instead of aborting the whole demo if the push fails. Under
   # `set -e` a bare `git push` to the default SSH remote would exit the script — BEFORE the
   # control room ever binds — on a stage laptop with no deploy key / no network / no access.
