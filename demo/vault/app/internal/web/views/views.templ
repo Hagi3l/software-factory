@@ -16,14 +16,16 @@ type Secret struct {
 type Audit struct {
 	Action string
 	Target string
-	At     string
+	At     string // server-rendered UTC fallback text
+	AtISO  string // RFC 3339 instant for client-side local-time rendering
 }
 
 // Stats summarizes the vault for the dashboard cards.
 type Stats struct {
-	Total    int
-	Expiring int
-	LastSeen string
+	Total       int
+	Expiring    int
+	LastSeen    string // server-rendered UTC fallback text ("—" when no activity)
+	LastSeenISO string // RFC 3339 instant; "" when no activity
 }
 
 templ Layout(title string) {
@@ -36,6 +38,7 @@ templ Layout(title string) {
 			<link rel="stylesheet" href="/static/app.css"/>
 			<script src="/static/htmx.min.js"></script>
 			<script defer src="/static/alpine.min.js"></script>
+			<script defer src="/static/localtime.js"></script>
 		</head>
 		<body class="h-full text-slate-100 antialiased">
 			{ children... }
@@ -125,7 +128,7 @@ templ statCards(s Stats) {
 	<section class="grid gap-4 sm:grid-cols-3">
 		@statCard("Secrets", itoa(s.Total), "text-slate-100")
 		@statCard("Expiring soon", itoa(s.Expiring), "text-amber-400")
-		@statCard("Last activity", s.LastSeen, "text-slate-300")
+		@statCardTime("Last activity", s.LastSeen, s.LastSeenISO, "text-slate-300")
 	</section>
 }
 
@@ -133,6 +136,21 @@ templ statCard(label, value, valueClass string) {
 	<div class="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
 		<div class="text-xs uppercase tracking-wide text-slate-500">{ label }</div>
 		<div class={ "mt-1 text-2xl font-semibold", valueClass }>{ value }</div>
+	</div>
+}
+
+// statCardTime is statCard for an instant: when iso is non-empty the value is wrapped
+// in <time datetime>, which static/localtime.js rewrites to the viewer's timezone.
+templ statCardTime(label, value, iso, valueClass string) {
+	<div class="rounded-xl border border-slate-800 bg-slate-900/40 p-5">
+		<div class="text-xs uppercase tracking-wide text-slate-500">{ label }</div>
+		<div class={ "mt-1 text-2xl font-semibold", valueClass }>
+			if iso != "" {
+				<time datetime={ iso }>{ value }</time>
+			} else {
+				{ value }
+			}
+		</div>
 	</div>
 }
 
@@ -228,7 +246,7 @@ templ AuditList(entries []Audit) {
 							<span class="text-slate-500">· { e.Target }</span>
 						}
 					</span>
-					<span class="text-xs text-slate-500">{ e.At }</span>
+					<span class="text-xs text-slate-500"><time datetime={ e.AtISO }>{ e.At }</time></span>
 				</li>
 			}
 		</ul>

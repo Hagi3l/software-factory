@@ -21,5 +21,10 @@ account-level actions), and a UTC timestamp. Stored in the `audit_log` table. Th
 The vault page shows the most recent entries (newest first) in an activity panel, and a
 summary card with the time of the last recorded activity. The feed is read-only.
 
+Timestamps are stored and served as UTC, but **displayed in the viewer's timezone**: the
+server emits each instant as `<time datetime="<RFC 3339>">` with a labeled-UTC text
+fallback, and `static/localtime.js` rewrites it client-side (see the timestamps convention
+in [conventions.md](conventions.md)).
+
 A new feature that performs a sensitive action **must** append a corresponding audit entry,
 so the log remains a complete record.

@@ -20,6 +20,11 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, c templ.Componen
 
 const dateLayout = "2006-01-02"
 
+// utcFallbackLayout renders the no-JS fallback text inside <time> elements. The zone is
+// labeled (MST → "UTC" after .UTC()) because this text only shows when
+// static/localtime.js hasn't rewritten the element to the viewer's local timezone.
+const utcFallbackLayout = "Jan 2 15:04 MST"
+
 func toSecretView(sec store.Secret) views.Secret {
 	v := views.Secret{
 		ID:      sec.ID,
@@ -45,7 +50,12 @@ func toSecretViews(secs []store.Secret) []views.Secret {
 func toAuditViews(entries []store.AuditEntry) []views.Audit {
 	out := make([]views.Audit, 0, len(entries))
 	for _, e := range entries {
-		out = append(out, views.Audit{Action: e.Action, Target: e.Target, At: e.At.Format("Jan 2 15:04")})
+		out = append(out, views.Audit{
+			Action: e.Action,
+			Target: e.Target,
+			At:     e.At.UTC().Format(utcFallbackLayout),
+			AtISO:  e.At.UTC().Format(time.RFC3339),
+		})
 	}
 	return out
 }
@@ -61,7 +71,8 @@ func computeStats(secs []store.Secret, audit []store.AuditEntry) views.Stats {
 		}
 	}
 	if len(audit) > 0 {
-		st.LastSeen = audit[0].At.Format("Jan 2 15:04")
+		st.LastSeen = audit[0].At.UTC().Format(utcFallbackLayout)
+		st.LastSeenISO = audit[0].At.UTC().Format(time.RFC3339)
 	}
 	return st
 }

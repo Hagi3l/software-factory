@@ -16,7 +16,7 @@ internal/crypto/      AES-256-GCM sealing + Argon2id password/key derivation
 internal/store/       SQLite persistence: schema, CRUD, audit (encryption-agnostic)
 internal/web/         net/http handlers, session-cookie auth, view mapping
 internal/web/views/   templ components (compiled to *_templ.go, committed)
-internal/web/static/  vendored htmx + Alpine + compiled app.css (committed)
+internal/web/static/  vendored htmx + Alpine, compiled app.css, localtime.js (committed)
 assets/app.tw.css     Tailwind input
 specs/                the specs (this directory)
 ```
@@ -45,6 +45,13 @@ specs/                the specs (this directory)
   middleware. `SameSite` defaults to `None; Secure` so the app is authenticatable inside the
   deck's cross-site iframe, with `VAULT_STRICT_COOKIE` to harden it back to `Strict` — see
   `specs/auth.md` for the rationale.
+- **Timestamps render in the viewer's timezone.** Store and serve UTC only. A view that
+  shows an *instant* (audit times, "last activity") emits
+  `<time datetime="<RFC 3339 UTC>">` with labeled-UTC fallback text — never
+  server-formatted local time; `static/localtime.js` (loaded by the layout) rewrites all
+  `time[datetime]` elements client-side, on load and after every htmx swap, so this works
+  in swapped-in fragments too. *Date-only* values (e.g. expiry dates) stay plain
+  `YYYY-MM-DD` strings — localizing them can shift the displayed day.
 - **htmx fragments.** Partial updates (search results, reveal, row delete) return a templ
   fragment, not a full page. Wire interactions with `hx-get` / `hx-post` / `hx-target`
   attributes, **not** an `onclick` handler: a Go expression interpolated into an `onclick`
