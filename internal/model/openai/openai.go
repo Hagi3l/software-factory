@@ -15,6 +15,8 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
@@ -28,9 +30,10 @@ import (
 type Adapter struct {
 	model       string
 	client      sdk.Client
-	caching     bool   // send a cache_control breakpoint on the stable prefix (opt-in; see WithPromptCaching)
-	effort      string // reasoning-effort level to send on every call; empty = provider default (see WithEffort)
-	effortParam string // wire form for effort: "reasoning" (reasoning:{effort}) or "verbosity" (top-level)
+	caching     bool          // send a cache_control breakpoint on the stable prefix (opt-in; see WithPromptCaching)
+	effort      string        // reasoning-effort level to send on every call; empty = provider default (see WithEffort)
+	effortParam string        // wire form for effort: "reasoning" (reasoning:{effort}) or "verbosity" (top-level)
+	idleTimeout time.Duration // abort+retry a stream that goes this long without a chunk; 0 = off (see WithIdleTimeout)
 }
 
 // New builds an Adapter for the given model. Request options configure the
@@ -70,6 +73,17 @@ func (a *Adapter) WithEffort(effort, param string) *Adapter {
 	return a
 }
 
+// WithIdleTimeout bounds the gap between streamed chunks: if the provider sends no data for
+// this long, Complete cancels the stream and returns a transient fault so the relay retries.
+// A builder (like WithEffort) so existing callers stay unchanged; the registry chains it from
+// the model's idle_timeout config. Zero (the default) disables the watchdog. The bound is
+// inter-chunk, not total, so it never cuts a long but steadily-streaming turn — see the
+// config field doc (config.ModelProvider.IdleTimeout) and specs/models.md.
+func (a *Adapter) WithIdleTimeout(d time.Duration) *Adapter {
+	a.idleTimeout = d
+	return a
+}
+
 // effortOpts returns the per-request options that carry the reasoning-effort control to an
 // openai-compat backend, or nil when effort is unset. The effort level rides as a non-schema
 // body field (Chat Completions has no native one), the field chosen by effort_param:
@@ -100,7 +114,25 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 		return model.Response{}, err
 	}
 
-	stream := a.client.Chat.Completions.NewStreaming(ctx, params, a.effortOpts()...)
+	// Idle watchdog: cancel the stream if the provider sends no chunk for idleTimeout, so a
+	// silently hung upstream is turned into a fast transient retry instead of blocking until the
+	// connection eventually resets. The timer is reset on every chunk, so the bound is inter-chunk
+	// (never a total-call cap that would cut a long steadily-streaming turn). idled records that WE
+	// canceled — distinct from the caller's own ctx being done — so stream.Err() is classified
+	// transient below rather than terminal. Off (no watchdog) when idleTimeout is 0.
+	streamCtx := ctx
+	var idled atomic.Bool
+	armIdle := func() {} // no-op unless a watchdog is armed below (kept local: one Adapter serves concurrent calls)
+	if a.idleTimeout > 0 {
+		var cancel context.CancelFunc
+		streamCtx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		watchdog := time.AfterFunc(a.idleTimeout, func() { idled.Store(true); cancel() })
+		defer watchdog.Stop()
+		armIdle = func() { watchdog.Reset(a.idleTimeout) }
+	}
+
+	stream := a.client.Chat.Completions.NewStreaming(streamCtx, params, a.effortOpts()...)
 	var acc sdk.ChatCompletionAccumulator
 	// The SDK accumulator only folds schema fields, so the reasoning stream — a
 	// non-schema delta field — is assembled here alongside it; it lands on the
@@ -108,6 +140,7 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 	// (specs/security.md), not just what the live feed happened to show.
 	var reasoning strings.Builder
 	for stream.Next() {
+		armIdle() // reset the idle deadline on each received chunk
 		chunk := stream.Current()
 		acc.AddChunk(chunk)
 		if len(chunk.Choices) == 0 {
@@ -129,6 +162,17 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 		}
 	}
 	if err := stream.Err(); err != nil {
+		// Our idle watchdog cancelled streamCtx: the stream went silent for idleTimeout. That
+		// surfaces as a ctx-cancelled error which transient() would read as terminal ("caller's
+		// ctx is done"), so classify it explicitly as transient here — a hung upstream is exactly
+		// what the bounded retry should re-issue.
+		if idled.Load() {
+			return model.Response{}, &model.Fault{
+				Err:       fmt.Errorf("openai: stream idle for %s: %w", a.idleTimeout, err),
+				Transient: true,
+				Usage:     fromCompletion(acc.ChatCompletion).Usage,
+			}
+		}
 		// Classified so the trusted relay can absorb transient faults with a bounded
 		// retry (specs/models.md); the partial accumulator's usage rides along so a
 		// failed attempt's billed tokens still draw the budget. Note the usage chunk
@@ -387,17 +431,25 @@ func fromCompletion(c sdk.ChatCompletion) model.Response {
 		}
 		resp.Stop = fromFinishReason(choice.FinishReason)
 	}
-	// OpenAI's prompt_tokens already includes any cached tokens (cached is a subset),
-	// so CacheReadTokens is reported here for visibility but is not additive to
-	// InputTokens. Native OpenAI has no separate cache-creation billing, so CacheCreationTokens
-	// is 0 there; a gateway forwarding an Anthropic model (where a cache write bills ~1.25x)
-	// reports the write count in a non-schema usage field, which cacheCreationTokens recovers
-	// so the runner can price it. The divergence from Anthropic (where cache reads are billed
-	// separately and excluded from input_tokens) is normalized away by the canonical Usage shape.
+	// OpenAI/OpenRouter report prompt_tokens as the FULL prompt count, INCLUDING any cached
+	// tokens (cached_tokens is a subset of prompt_tokens). The canonical Usage shape — matching
+	// the Anthropic adapter, ModelCost.USD, and Usage.TotalTokens — defines InputTokens as the
+	// NON-cached tokens billed at full rate, with CacheReadTokens priced and counted SEPARATELY
+	// (additively). So subtract the cached subset here: leaving prompt_tokens whole bills AND
+	// counts the cached tokens twice — once at the full input rate inside InputTokens and again
+	// at the cache-read rate — which silently negates the prompt-cache discount (a ~5x cost
+	// overstatement at 90% cache). CacheCreationTokens (a cache WRITE, ~1.25x) is recovered from a
+	// non-schema extra field a gateway bolts on for Anthropic models; it is reported alongside
+	// prompt_tokens, not within it, so it is not subtracted here.
+	cachedRead := int(c.Usage.PromptTokensDetails.CachedTokens)
+	nonCachedInput := int(c.Usage.PromptTokens) - cachedRead
+	if nonCachedInput < 0 {
+		nonCachedInput = 0 // defensive: a malformed usage payload must never yield negative input
+	}
 	resp.Usage = model.Usage{
-		InputTokens:         int(c.Usage.PromptTokens),
+		InputTokens:         nonCachedInput,
 		OutputTokens:        int(c.Usage.CompletionTokens),
-		CacheReadTokens:     int(c.Usage.PromptTokensDetails.CachedTokens),
+		CacheReadTokens:     cachedRead,
 		CacheCreationTokens: cacheCreationTokens(c.Usage),
 	}
 	return resp

@@ -393,6 +393,15 @@ models:
   through OpenRouter. The native `anthropic` adapter caches **unconditionally** and needs no
   flag; validation rejects `prompt_caching` on `anthropic`/`openai`. Cache read/write token
   counts normalize into the usage accounting either way.
+- **`idle_timeout`** (optional, a duration like `90s`) bounds the gap **between streamed
+  chunks** on a model call: if the provider sends no data for this long, the call is aborted
+  and surfaced as a *transient* fault so the relay's bounded retry re-issues it. It catches a
+  silently hung stream — an upstream that goes quiet without closing the connection — far
+  tighter than the invocation `wall`, and because the bound is inter-chunk (not a total-call
+  cap) it never cuts a legitimately long, steadily-streaming high-output turn. Set it per-model
+  so a verbose reasoning verifier can carry more slack than a fast producer. **Honored on the
+  streaming `openai` / `openai-compat` adapter**; validation rejects it on `provider: anthropic`
+  (not yet wired there). Omit (or `0`) to disable.
 - **`sandbox.backend`** selects the isolation backend and is honored at startup (not
   decorative): `docker` (the bootstrap default — weak shared-kernel isolation, dev only)
   and `gvisor` (medium-trust: the same container boot pinned to the `runsc` runtime, so

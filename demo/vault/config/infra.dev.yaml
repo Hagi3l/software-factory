@@ -98,28 +98,38 @@ models:
     effort: high
     effort_param: verbosity
     cost: { input_per_mtok: 5, output_per_mtok: 25, cache_write_per_mtok: 6.25, cache_read_per_mtok: 0.5 }
+    idle_timeout: 90s   # abort+retry a stream silent for 90s (a hung upstream); inter-chunk, not total
   "anthropic/claude-sonnet-5":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
     prompt_caching: true
     effort: medium
     effort_param: verbosity
-    cost: { input_per_mtok: 3, output_per_mtok: 15, cache_write_per_mtok: 3.75, cache_read_per_mtok: 0.3 }
+    cost: { input_per_mtok: 2, output_per_mtok: 10, cache_write_per_mtok: 2.5, cache_read_per_mtok: 0.2 }
+    idle_timeout: 90s
   # deepseek/deepseek-v4-pro is the DIVERSE verifier tier: the security/qa soul runs on a
   # different model FAMILY than the Anthropic producers, so the N-version producer!=verifier
   # independence verification.md recommends is real rather than advisory — a bug now has to slip
   # past two independently-trained judgments (and the T2.13 family-overlap advisory is silenced by
   # FIXING it, not muting it). It is also a cheap tier where cheap is safe: the qa soul's value-add
   # is scanner-driven remediation whose output is re-gated deterministically, and at ~$0.44/$0.87
-  # per Mtok it is ~7-17x cheaper than the Sonnet slot it replaces. Same host-side OpenRouter path
+  # per Mtok it is ~5-12x cheaper than the Sonnet slot it replaces. Same host-side OpenRouter path
   # and key as the others. NO `prompt_caching`: DeepSeek auto-caches server-side without
   # cache_control markers (a marker is sent only where a backend both needs AND accepts it —
   # specs/models.md); its cached reads still arrive in usage and are priced by cache_read below
   # (~0.008x input; auto-caching has no write premium, so no cache_write rate).
+  # effort: high pins full deliberation on the correctness-defining verifier — by declaration
+  # rather than provider default, mirroring the Opus roles that also grade what "correct" means.
+  # DeepSeek reads the unified reasoning:{effort} wire form, so effort_param: reasoning (NOT
+  # verbosity, the Claude-4.6+/5 form). This trades wall-time and output tokens for verifier
+  # rigor — flip to low/medium if the security stage's latency matters more than its depth.
   "deepseek/deepseek-v4-pro":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
+    effort: high
+    effort_param: reasoning
     cost: { input_per_mtok: 0.435, output_per_mtok: 0.87, cache_read_per_mtok: 0.0036 }
+    idle_timeout: 90s
   # anthropic/claude-haiku-4.5 is the CHEAP tier the explore tool's read-only helper soul runs on
   # (Phase 12, T12.6). explore delegates broad search->read->refine localization to a nested
   # sub-loop on this model so the frontier producer never spends its own context navigating; the
@@ -132,3 +142,4 @@ models:
     endpoint: https://openrouter.ai/api/v1
     prompt_caching: true
     cost: { input_per_mtok: 1, output_per_mtok: 5, cache_write_per_mtok: 1.25, cache_read_per_mtok: 0.1 }
+    idle_timeout: 90s

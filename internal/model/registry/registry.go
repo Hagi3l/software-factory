@@ -14,6 +14,7 @@ package registry
 import (
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/Loxstomper/harness/internal/config"
 	"github.com/Loxstomper/harness/internal/model"
@@ -88,7 +89,7 @@ func build(name string, mp config.ModelProvider) (model.Adapter, error) {
 		if key := os.Getenv(EnvOpenAIKey); key != "" {
 			opts = append(opts, openaiopt.WithAPIKey(key))
 		}
-		return openai.New(name, opts...), nil
+		return openai.New(name, opts...).WithIdleTimeout(time.Duration(mp.IdleTimeout)), nil
 
 	case config.ProviderOpenAICompat:
 		if mp.Endpoint == "" {
@@ -102,7 +103,10 @@ func build(name string, mp config.ModelProvider) (model.Adapter, error) {
 		// restricts them here); WithPromptCaching(false) and WithEffort("", "") are no-ops, so both
 		// are safe to chain whether or not the entry opts in. WithEffort's param (validated to
 		// reasoning|verbosity) selects the wire form the effort level rides on.
-		return openai.New(name, opts...).WithPromptCaching(mp.PromptCaching).WithEffort(mp.Effort, mp.EffortParam), nil
+		return openai.New(name, opts...).
+			WithPromptCaching(mp.PromptCaching).
+			WithEffort(mp.Effort, mp.EffortParam).
+			WithIdleTimeout(time.Duration(mp.IdleTimeout)), nil
 
 	default:
 		return nil, fmt.Errorf("registry: model %q has unknown provider %q", name, mp.Provider)

@@ -3,16 +3,20 @@ package openai
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	sdk "github.com/openai/openai-go/v3"
 	"github.com/openai/openai-go/v3/option"
 
+	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/model"
 )
 
@@ -213,8 +217,10 @@ func TestFromCompletion(t *testing.T) {
 	if resp.Stop != model.StopToolUse {
 		t.Errorf("Stop = %q, want %q", resp.Stop, model.StopToolUse)
 	}
-	// cached_tokens is a subset of prompt_tokens for OpenAI, reported but not additive.
-	wantUsage := model.Usage{InputTokens: 12, OutputTokens: 7, CacheReadTokens: 5}
+	// cached_tokens (5) is a subset of prompt_tokens (12); the adapter splits it out so InputTokens
+	// is the non-cached full-rate count (12-5=7) and CacheReadTokens (5) is priced separately —
+	// never double-counted. See fromCompletion + BUG-3 in demo/vault/demo-bugs.md.
+	wantUsage := model.Usage{InputTokens: 7, OutputTokens: 7, CacheReadTokens: 5}
 	if resp.Usage != wantUsage {
 		t.Errorf("Usage = %+v, want %+v", resp.Usage, wantUsage)
 	}
@@ -428,6 +434,88 @@ func TestCompleteStreamsReasoningAndText(t *testing.T) {
 	}
 }
 
+// TestCompleteIdleTimeoutRetries proves the idle watchdog turns a silently-hung stream into a
+// transient fault the relay can retry, rather than blocking until the connection resets (the
+// OpenRouter stall observed in the vault demo). The server flushes one chunk then hangs; with a
+// short idle_timeout the adapter must abort and return a *transient* Fault (not a terminal
+// ctx-cancelled error). The bound is inter-chunk, so a healthy stream is unaffected.
+func TestCompleteIdleTimeoutRetries(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		// One real chunk, flushed, then go silent — the hung-upstream shape.
+		fmt.Fprintf(w, "data: %s\n\n", `{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"hi"}}]}`)
+		if flusher != nil {
+			flusher.Flush()
+		}
+		<-r.Context().Done() // hang until the adapter gives up and cancels the request
+	}))
+	defer srv.Close()
+
+	a := New("stall-test", option.WithAPIKey("test"), option.WithBaseURL(srv.URL)).
+		WithIdleTimeout(150 * time.Millisecond)
+
+	start := time.Now()
+	_, err := a.Complete(context.Background(),
+		model.Request{Messages: []model.Message{{Role: model.RoleUser, Text: "hi"}}}, nil)
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("Complete returned nil error, want an idle-timeout fault")
+	}
+	var fault *model.Fault
+	if !errors.As(err, &fault) {
+		t.Fatalf("error is %T (%v), want *model.Fault", err, err)
+	}
+	if !fault.Transient {
+		t.Errorf("fault.Transient = false, want true (a hung stream must retry, not dead-letter)")
+	}
+	if !strings.Contains(fault.Err.Error(), "idle") {
+		t.Errorf("fault.Err = %q, want it to mention the idle timeout", fault.Err.Error())
+	}
+	// It must fire on the idle bound, not hang: comfortably under a second for a 150ms timeout.
+	if elapsed > 2*time.Second {
+		t.Errorf("Complete took %s, want it to abort near the 150ms idle bound", elapsed)
+	}
+}
+
+// TestCompleteIdleTimeoutHealthyStreamUnaffected proves a stream that keeps sending chunks
+// (each within the idle bound) completes normally even when its TOTAL duration exceeds that
+// bound — the watchdog resets per chunk, so it never cuts a long steadily-streaming turn.
+func TestCompleteIdleTimeoutHealthyStreamUnaffected(t *testing.T) {
+	frames := []string{
+		`{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"role":"assistant","content":"a"}}]}`,
+		`{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"b"}}]}`,
+		`{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"c"}}]}`,
+		`{"id":"1","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":3}}`,
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		flusher, _ := w.(http.Flusher)
+		for _, fr := range frames {
+			time.Sleep(40 * time.Millisecond) // < the 100ms idle bound, but 4 frames > 100ms total
+			fmt.Fprintf(w, "data: %s\n\n", fr)
+			if flusher != nil {
+				flusher.Flush()
+			}
+		}
+		fmt.Fprint(w, "data: [DONE]\n\n")
+	}))
+	defer srv.Close()
+
+	a := New("slow-but-alive", option.WithAPIKey("test"), option.WithBaseURL(srv.URL)).
+		WithIdleTimeout(100 * time.Millisecond)
+
+	resp, err := a.Complete(context.Background(),
+		model.Request{Messages: []model.Message{{Role: model.RoleUser, Text: "hi"}}}, nil)
+	if err != nil {
+		t.Fatalf("Complete on a healthy (if slow) stream errored: %v", err)
+	}
+	if resp.Text != "abc" {
+		t.Errorf("resp.Text = %q, want %q", resp.Text, "abc")
+	}
+}
+
 // With prompt caching enabled, the first user message (the Brief) must go on the wire as a
 // structured content array whose text part carries an ephemeral cache_control breakpoint — the
 // marker an OpenAI-compatible gateway forwards to an Anthropic backend, whose prefix covers the
@@ -546,9 +634,54 @@ func TestFromCompletionMapsCacheWrite(t *testing.T) {
 	if err := json.Unmarshal([]byte(raw), &c); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	want := model.Usage{InputTokens: 1000, OutputTokens: 5, CacheReadTokens: 800, CacheCreationTokens: 200}
+	// prompt_tokens (1000) includes the 800 cache-READ tokens (subtracted → InputTokens 200); the
+	// 200 cache-WRITE tokens come from the separate cache_creation_input_tokens field, reported
+	// alongside prompt_tokens (not within it), so they are not subtracted from InputTokens.
+	want := model.Usage{InputTokens: 200, OutputTokens: 5, CacheReadTokens: 800, CacheCreationTokens: 200}
 	if got := fromCompletion(c).Usage; got != want {
 		t.Errorf("Usage = %+v, want %+v", got, want)
+	}
+}
+
+// TestFromCompletionCacheAccountingNoDoubleCount is the regression guard for BUG-3
+// (demo/vault/demo-bugs.md): OpenAI/OpenRouter fold cached tokens into prompt_tokens, so the
+// adapter must exclude them from InputTokens or the cached tokens are billed AND counted twice.
+// It pins both the token split and the resulting USD so the prompt-cache discount can never again
+// be silently negated on the openai-compat path.
+func TestFromCompletionCacheAccountingNoDoubleCount(t *testing.T) {
+	// 100k prompt tokens, 90k of them cache hits (90% — the demo's observed rate).
+	raw := `{
+		"id":"c1","object":"chat.completion","created":1,"model":"anthropic/claude-opus-4.8",
+		"choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],
+		"usage":{"prompt_tokens":100000,"completion_tokens":1000,"total_tokens":101000,
+			"prompt_tokens_details":{"cached_tokens":90000}}
+	}`
+	var c sdk.ChatCompletion
+	if err := json.Unmarshal([]byte(raw), &c); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	u := fromCompletion(c).Usage
+
+	// InputTokens is the NON-cached remainder, disjoint from CacheReadTokens.
+	if u.InputTokens != 10000 || u.CacheReadTokens != 90000 {
+		t.Fatalf("InputTokens=%d CacheReadTokens=%d, want 10000 / 90000", u.InputTokens, u.CacheReadTokens)
+	}
+	// TotalTokens reconciles to prompt_tokens + completion_tokens (no cached double-count).
+	if got := u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheCreationTokens; got != 101000 {
+		t.Fatalf("TotalTokens=%d, want 101000 (prompt 100000 + completion 1000)", got)
+	}
+	// And the priced cost must reward the cache, not negate it. At Opus-ish rates
+	// (input $5, output $25, cache-read $0.5 per Mtok): 10000*5 + 1000*25 + 90000*0.5, all /1e6.
+	cost := config.ModelCost{InputPerMTok: 5, OutputPerMTok: 25, CacheReadPerMTok: 0.5}
+	usd := cost.USD(core.Usage{
+		InputTokens:     u.InputTokens,
+		OutputTokens:    u.OutputTokens,
+		CacheReadTokens: u.CacheReadTokens,
+	})
+	// want = 0.05 + 0.025 + 0.045 = 0.12. The pre-fix double-count would have priced the full
+	// 100k at $5/Mtok ($0.50) + the 90k again at cache-read = 0.50+0.025+0.045 = 0.57 (~4.75x).
+	if diff := usd - 0.12; diff < -1e-9 || diff > 1e-9 {
+		t.Fatalf("USD=%.6f, want 0.120000 (double-count would give ~0.57)", usd)
 	}
 }
 

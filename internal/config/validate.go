@@ -729,6 +729,18 @@ func (c *Config) validateModels(add func(string, ...any)) {
 			add("model %q sets prompt_caching but provider is %q; the flag is only honored on provider %s "+
 				"(anthropic caches unconditionally, openai auto-caches)", name, mp.Provider, ProviderOpenAICompat)
 		}
+		// idle_timeout is enforced in the streaming openai adapter (openai + openai-compat). Reject
+		// it on anthropic (not yet wired) rather than let it silently do nothing, and reject a
+		// negative duration.
+		if mp.IdleTimeout != 0 {
+			if mp.IdleTimeout < 0 {
+				add("model %q has negative idle_timeout %s", name, mp.IdleTimeout.Duration())
+			}
+			if mp.Provider == ProviderAnthropic {
+				add("model %q sets idle_timeout but provider is %q; it is only honored on provider %s / %s "+
+					"(not yet wired on the native anthropic adapter)", name, mp.Provider, ProviderOpenAI, ProviderOpenAICompat)
+			}
+		}
 	}
 	for _, s := range c.Souls {
 		if s.Model == "" {

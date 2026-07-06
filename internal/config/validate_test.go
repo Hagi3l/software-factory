@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Loxstomper/harness/internal/core"
 )
@@ -509,6 +510,32 @@ func TestValidateEffortRejectedOnNativeOpenAI(t *testing.T) {
 	c.Souls = fullSouls(t)
 	c.Infra.Models["gpt"] = ModelProvider{Provider: "openai", Effort: "medium"}
 	mustContain(t, problems(t, c), "native openai is not yet wired")
+}
+
+// idle_timeout is enforced by the streaming openai adapter, so it passes on openai-compat...
+func TestValidateIdleTimeoutOnOpenAICompatPasses(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["compat"] = ModelProvider{Provider: "openai-compat", Endpoint: "https://x", IdleTimeout: Duration(90 * time.Second)}
+	if err := c.Validate(); err != nil {
+		t.Errorf("Validate returned %v, want nil for openai-compat idle_timeout entry", err)
+	}
+}
+
+// ...is rejected on native anthropic (not wired there) rather than silently doing nothing...
+func TestValidateIdleTimeoutRejectedOnAnthropic(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["opus"] = ModelProvider{Provider: "anthropic", IdleTimeout: Duration(90 * time.Second)}
+	mustContain(t, problems(t, c), "sets idle_timeout but provider is")
+}
+
+// ...and a negative duration is a config error.
+func TestValidateIdleTimeoutRejectsNegative(t *testing.T) {
+	c := validConfig()
+	c.Souls = fullSouls(t)
+	c.Infra.Models["compat"] = ModelProvider{Provider: "openai-compat", Endpoint: "https://x", IdleTimeout: Duration(-1)}
+	mustContain(t, problems(t, c), "negative idle_timeout")
 }
 
 func TestValidateEffortParamWithoutEffort(t *testing.T) {

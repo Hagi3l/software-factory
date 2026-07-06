@@ -113,7 +113,12 @@ why autonomous self-hosting still awaits a capable runtime model (see
   mid-stream. Retries stay inside the termination guarantee: every attempt's
   billed usage counts toward the invocation's budget and the sandbox wall clock
   keeps running, so a provider outage exhausts the budget and dead-letters rather
-  than looping forever.
+  than looping forever. A **silently hung stream** — an upstream that stops sending
+  without closing the connection — would otherwise block until a TCP reset, wasting
+  the invocation wall; an optional per-model **`idle_timeout`** (the gap between
+  streamed chunks, not a total-call cap) aborts such a stream and re-issues it as a
+  transient fault, so a stall costs seconds rather than minutes without ever cutting
+  a legitimately long, steadily-streaming turn.
 - **Optional capability fields** — prompt caching, reasoning effort — are **per-model
   config the adapter emits**, not canonical-`Request` fields. See the next section.
 
@@ -162,6 +167,14 @@ provider-unaware while letting a deployment tune each model.
   Anthropic models served through an OpenAI-compatible gateway, which forwards the
   markers and sticky-routes to keep the cache warm. Cache read/write token counts
   normalize into the canonical `Usage` so the runner prices them like any other tokens.
+  The normalization is **disjoint**: `Usage.InputTokens` is the *non-cached* count billed
+  at full rate, with cache reads/writes counted separately and additively, so pricing and
+  `TotalTokens` never double-count. An adapter whose provider reports a prompt-token total
+  that *includes* the cached subset (the OpenAI/OpenRouter shape — `cached_tokens` is part
+  of `prompt_tokens`) must **subtract** it to recover the full-rate count; the Anthropic
+  shape already excludes it. Leaving it in bills the cached tokens twice — full rate *and*
+  the cache-read rate — silently negating the cache discount (a ~5× overstatement at 90%
+  cache).
   One inherent limit: the provider cache has a short TTL (Anthropic: ~5 minutes on the
   default tier), so a single tool call that runs longer than that — a cold `run_gate`
   self-check, a slow suite under `run_tests` — forfeits the cache for the next turn no

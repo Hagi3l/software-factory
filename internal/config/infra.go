@@ -355,6 +355,16 @@ type ModelProvider struct {
 	// automatically, so this is for bare-slug compat models (two distinct Ollama models on
 	// one endpoint) or to override the inferred value. Not a secret; see ModelFamily.
 	Family string `yaml:"family,omitempty"`
+	// IdleTimeout bounds the gap between streamed chunks on a model call: if the provider sends
+	// no data for this long, the call is aborted and surfaced as a *transient* fault so the
+	// relay's bounded retry re-issues it (specs/models.md). It catches a silently hung stream —
+	// an upstream that goes quiet without closing the connection (observed on OpenRouter: an
+	// 11-minute stall ending in a bare TCP reset) — far tighter than the invocation wall, and
+	// because the bound is INTER-CHUNK rather than total it never cuts a legitimately long,
+	// steadily-streaming high-output turn. Honored on the streaming openai / openai-compat
+	// adapter; 0 (the default) disables it. Set per-model so a verbose reasoning verifier can
+	// carry more slack than a fast producer.
+	IdleTimeout Duration `yaml:"idle_timeout,omitempty"`
 }
 
 // ModelFamily returns the correlated-blind-spot family key for a registry entry under name
