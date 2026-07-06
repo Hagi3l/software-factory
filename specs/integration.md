@@ -233,7 +233,16 @@ the provenance record. Provenance is **two-tier**: each child's per-child proven
 commit stays reachable under the merge (issue → soul → model → prompt → per-child
 evidence), and the merge commit records the **whole-feature** layer on top — so the
 granular audit trail is preserved while `main`'s first-parent history reads as one
-commit per feature.
+commit per feature. The whole-feature layer must be a genuine feature-level record — the
+epic root id and title **plus** an aggregate of the integrated children (their issue ids
+and integration-commit hashes, and/or a combined verification summary). It must **not**
+degrade to a bare `Issue`+`Subject` that renders the producer fields
+(`Soul`/`Model`/`Tests-Soul`/`Verified`/…) as `(none)`: the terminal merge is the
+**headline** commit on `main` (and on any public mirror the deploy watches), so an
+empty-looking trailer there undercuts provenance-by-construction to a reader — even though
+the per-child trailers under the merge remain the durable truth. The epic root is a *plan*
+issue with no producer provenance of its own, so the aggregate is assembled from the
+children, not read off the root.
 
 **The whole-feature gate is emergent, not extra.** Children serialize onto the epic
 branch, each rebasing onto the prior tip and re-gating (step 3 above). So when the

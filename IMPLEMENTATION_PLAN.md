@@ -13,9 +13,14 @@ in-process orchestrator + runner carry a seed issue through implement → gate �
 merge to `main` with a provenance trailer. Verified end-to-end against a real model
 (local Ollama via `openai-compat`) and real Docker sandboxes.
 
-**Phases 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, and 14 are complete; the only open build work is
-Phase 5 (all optional — T5.11 warm pools + HA — or hardware-blocked — T5.2 Firecracker, needs
-KVM the dev box lacks).** Phase 14 (trusted-layer hardening from the 2026-07-03 review) closed
+**Phases 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, and 14 are complete.** Phase 15 (2026-07-06
+vault-demo run hardening) is **partially done** — T15.1 (OpenRouter cost double-count) and
+T15.2 (per-model idle timeout) are fixed; **T15.3 (durable stage-close — the race that stalled
+the run twice and needed manual `bd` recovery) and T15.4 (whole-feature terminal-merge
+provenance) remain open**, T15.3 being the one that blocks a stage-reliable demo. Otherwise the
+only open build work is Phase 5 (all optional — T5.11 warm pools + HA — or hardware-blocked —
+T5.2 Firecracker, needs KVM the dev box lacks). Phase 14 (trusted-layer hardening from the
+2026-07-03 review) closed
 with T14.1 least-privilege container boot, T14.2 bounded transient-fault retry at the model
 relay, and T14.3 reasoning-in-the-recorded-transcript. Phase 12 (distilled explore tool,
 T12.1–T12.6) landed the `explore` tool + nested read-only sub-loop, the broker sub-context
@@ -1133,6 +1138,76 @@ follow-ups".
 
 ---
 
+## Phase 15 — Vault-demo run hardening (2026-07-06)
+
+Opened from the **2026-07-06 live vault-demo run** (the one-time share-link feature: an epic
+with a `generate` + `reveal` child). The run reached its terminal state — feature merged to
+`main`, pushed to the public repo, deploy fired — but only after **two silent stalls** that
+needed manual `bd` reconciliation to clear, and it surfaced a ~5× cost-reporting error and an
+~11-minute model stall. All findings are logged in
+[`demo/vault/demo-bugs.md`](demo/vault/demo-bugs.md) (BUG-1…BUG-4); **T15.1–T15.2 are fixed
+here, T15.3–T15.4 remain open** (T15.3 is the one that blocks a stage-reliable demo).
+
+- [x] **T15.1 OpenRouter cost accounting — cached tokens no longer double-billed** *(BUG-3)*.
+  *done.* The openai-compat adapter set `InputTokens = prompt_tokens`, but OpenAI/OpenRouter
+  fold the cached subset **into** `prompt_tokens`, while the canonical `Usage` contract (and
+  the anthropic adapter, `ModelCost.USD`, `Usage.TotalTokens`) define `InputTokens` as the
+  **non-cached** tokens billed at full rate — so cached tokens were priced *and* counted
+  twice: full-rate inside `InputTokens` and again at the cache-read rate. At 90% cache that is
+  a ~5.3× USD overstatement (and it tripped `policy.budget` ~5× early). Fix:
+  `InputTokens = prompt_tokens − cached_tokens` (clamped ≥0) in
+  `internal/model/openai/openai.go`; the two adapter tests that had baked the bug in were
+  corrected and `TestFromCompletionCacheAccountingNoDoubleCount` added as the guard. Also
+  corrected the demo's Sonnet-5 rate (`$3/$15` → the live `$2/$10`; Opus/DeepSeek/Haiku
+  verified correct against openrouter.ai). No spec change — the fix aligns the adapter *to*
+  the existing `Usage` contract. ([models.md](specs/models.md))
+- [x] **T15.2 Per-model idle timeout at the streaming adapter** *(BUG-4)*. *done.* A silently
+  hung stream (an OpenRouter→DeepSeek stall — 667s ending in a bare `connection reset by
+  peer`) blocked `stream.Next()` until the connection dropped, wasting ~11 min of the
+  invocation wall with only the coarse ~18 min wall as backstop. New per-model `idle_timeout`
+  (`config.ModelProvider.IdleTimeout`), enforced by a per-chunk-reset watchdog in the openai
+  adapter's stream loop: the bound is **inter-chunk** (never a total-call cap that would cut a
+  long, steadily-streaming turn), and on fire it cancels the stream and returns an **explicit
+  transient fault** so the T14.2 relay retry re-issues it (a naive ctx-cancel would be misread
+  as terminal). Wired for `openai` + `openai-compat`; validation rejects it on native
+  `anthropic` (unwired). Demo config sets `90s` on all four models. Tests: hung stream →
+  transient fault in ~0.15s; slow-but-alive stream (total > bound, gaps < bound) → completes.
+  Spec + docs updated ([models.md](specs/models.md), [docs/configuration.md](docs/configuration.md)).
+- [ ] **T15.3 Durable stage-close on the produce-next-stage path** *(BUG-1 — the stall)*. *the
+  one that blocks a stage-reliable demo.* On the produce-next-stage path the orchestrator
+  issues create-successor and close-self as **two separate `bd` processes**; when the beads
+  backend is not a single serialised engine — as in the demo, where every `bd` call
+  round-trips the whole `.beads/issues.jsonl` ("auto-importing … into empty database") instead
+  of using the warm `--server` engine `run.sh` intended — the two round-trips **race** and the
+  successor-create's export **clobbers the close** (lost update). The close lands in the
+  projection (so the pipeline advances) but never in the durable store; because
+  `scheduleReady`'s `bd.ready()` and `sweepEpicCompletion` read the durable store, a lost close
+  **permanently strands** the dependent sibling and blocks the epic drain — a silent stall (it
+  hit 5× across the two-child epic; only the terminal integrate steps, no concurrent create,
+  survived). Durability twin of the Phase-10 creation window; violates the spec's "single
+  writer ⇒ no write race" assumption (which holds only if the backend serialises the writer).
+  **Fix (any/all):** (a) make `bd` actually use the warm serialised server — confirm why server
+  mode is not engaged despite `bd init --server` in `run.sh`; (b) make create-successor +
+  close-self one atomic beads transaction (or hold `createMu` across both) so a close can't be
+  clobbered; (c) reconcile the readiness/drain oracles with the projection so a lost durable
+  write can't strand work the single writer believes is done. Spec updated
+  ([components/orchestrator.md](specs/components/orchestrator.md) "Durable-write loss").
+- [ ] **T15.4 Whole-feature provenance on the terminal merge** *(BUG-2)*. The terminal-merge
+  commit is meant to carry the two-tier **whole-feature** provenance layer
+  ([integration.md](specs/integration.md)), but `terminalMerge` builds
+  `core.Provenance{Issue: epic, Subject: title}` and leaves every producer field zero, so the
+  public repo's **headline** commit renders `Soul/Model/Tests-Soul/Verified/… = (none)` — the
+  first commit an audience sees reads as if provenance were missing. The per-child integration
+  commits carry full trailers and stay reachable under the merge's second parent, so
+  accountability is intact; this is an aggregation/rendering gap, not data loss (the epic root
+  is a *plan* issue with no producer provenance of its own). **Fix:** have `terminalMerge`
+  synthesise a feature-level trailer — the integrated children's issue ids + integration-commit
+  hashes and/or an aggregate `Verified:` summary — or render a feature-level trailer that omits
+  inapplicable producer fields rather than printing `(none)`. Spec sharpened
+  ([integration.md](specs/integration.md) "whole-feature layer").
+
+---
+
 ## Deferred & follow-ups (filed, not blocking)
 
 - **Wizard: `announcesDraft()` matcher too literal** *(same run)*. The draft-nudge backstop only fires when concluding prose matches a fixed phrase list (`"draft the spec"`, `"seed issues"`, …) — it missed the model's actual `"Drafting the spec and seed issue now"` (gerund `drafting` ≠ `draft the`; singular `issue` ≠ `issues`), so the nudge never fired and the promised draft never came. **Fix:** broaden to stems/keywords (`drafting`, `seed issue`, `propose_draft`, `proposing`) in `internal/controlroom/wizard/wizard.go`.
@@ -1165,6 +1240,16 @@ follow-ups".
   pin their explorer sandboxes until count pressure; an evicted session's browser SSE stream
   goes silently inert. **Fix:** LRU touch on use, an idle-timeout sweeper that tears down
   session + explorer sandbox, and a terminal "session expired" SSE event.
+- **OpenRouter provider routing / pinning** *(2026-07-06 vault-demo run)*. `ModelProvider` has
+  no seam to pin or order the upstream provider OpenRouter routes a slug to — it load-balances
+  `deepseek/deepseek-v4-pro` across DeepSeek/Fireworks/Together/… each with different throughput
+  and reliability, so behaviour varies run-to-run. Injectable via the adapter's existing
+  `option.WithJSONSet` escape hatch (a top-level `provider: {order|only|sort}` field) behind a
+  new `ModelProvider` field. Value: run-to-run **reproducibility** and the ability to route to a
+  high-throughput host; **not** a reliability win on its own (`allow_fallbacks:false` trades
+  resilience for determinism, so prefer an ordered preference with fallbacks on, or
+  `sort: throughput`). Deferred as an enhancement — it is not the fix for the BUG-4 stall
+  (T15.2's idle timeout is), and does nothing for DeepSeek's intrinsic per-turn latency.
 - **Control-room pagination** *(2026-07-03 review)*. Provenance history is hard-capped at the
   newest 50 merges with no offset/cursor (`internal/controlroom/server.go:698`) — older
   forensic history is unreachable in the UI; board/DLQ render their full sets unbounded.

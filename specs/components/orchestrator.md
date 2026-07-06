@@ -261,6 +261,29 @@ never re-surfaces it, so it is never retried or dead-lettered. This is not theor
 it stalled the **2026-06-23 vault-demo run** (the creation-tracking added in T8.4 met
 the non-atomic `bd.Apply` window). The remediation is **Phase 10**.
 
+**Durable-write loss — the backend must actually serialise the single writer.** The
+single-writer guarantee above ("there is never a write race to resolve") has a hidden
+precondition: the beads **backend** must durably serialise the writes the one writer
+issues. The orchestrator issues them as separate `bd` invocations, and a stage advance on
+the produce-next-stage path is **two** of them — create the successor issue, then close
+the predecessor. Against a single serialised engine (a warm `dolt sql-server`) those
+commit in order. Against a backend that is *not* serialised — e.g. every `bd` process
+round-trips the whole `.beads/issues.jsonl` (import-into-empty-DB → mutate → export)
+instead of hitting the server — the two round-trips **race**, and the successor-create's
+export can clobber the close (a lost update). The lost close still lands in the projection
+(so the pipeline advances and the successor runs) but never reaches the durable store —
+and because both the readiness oracle (`bd.ready()`) and the epic-drain oracle
+([`sweepEpicCompletion`](../integration.md)) read the **durable** store, not the
+projection, a lost close does not merely lag: it **permanently strands** the dependent
+sibling (never `ready`) and blocks the epic terminal merge (never `drained`) — a silent
+stall the projection cannot self-heal, because the projection believes the work is done.
+This bit the **2026-07-06 vault-demo run** five times across a two-child epic; only the
+terminal integrate steps (no concurrent create racing the close) survived. Two
+requirements close it: the backend must serialise the writer's writes (run beads against
+the warm server, never a per-call jsonl round-trip), **and** create-successor +
+close-predecessor must be atomic with respect to that store (one transaction, or serialised
+through the creation choke point) so a close can never be clobbered by an adjacent create.
+
 ---
 
 ## What it must never do
@@ -274,6 +297,11 @@ the non-atomic `bd.Apply` window). The remediation is **Phase 10**.
   edges and its projection record exist**, and never let a creation/reopen write
   downgrade a live claim. Creation must be atomic with respect to `bd.ready()` (see
   *The creation window*) — the alternative wedges the issue silently.
+- **Never treat a status write that reached only the projection as durable.** The
+  readiness and epic-drain oracles read the durable store, so a stage-transition close
+  that lands in the projection but not the store strands the dependent work silently (see
+  *Durable-write loss*). The backend must serialise the single writer's writes, and
+  create-successor + close-predecessor must be atomic against it.
 
 ---
 
