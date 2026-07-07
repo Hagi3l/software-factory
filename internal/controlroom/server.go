@@ -777,8 +777,24 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 		s.render(w, r, views.CreateMessage("The requirements planner is not configured — the Create-Task wizard is available when the control room runs with `harness run --serve-addr` and a requirements_planner is set in harness.yaml."))
 		return
 	}
-	sess := s.planner.New()
-	s.render(w, r, views.CreatePage(sess.ID, s.prefillText(r.Context()), sess.Messages()))
+	// ?session=<id> REOPENS a live conversation (or mints one under that id); no argument opens a
+	// fresh random-id session. This is what lets the wizard be embedded in a surface that reloads
+	// its iframe — a slide deck pins a stable id in the frame's src, so every slide-visit/reload
+	// rejoins the one live conversation instead of orphaning it (specs/control-room.md "A session
+	// survives a reload").
+	var sess *wizard.Session
+	if id := strings.TrimSpace(r.URL.Query().Get("session")); id != "" {
+		sess = s.planner.GetOrCreate(id)
+	} else {
+		sess = s.planner.New()
+	}
+	// Render the session's CURRENT ledger + draft server-side, so a REOPENED session is correct on
+	// first paint rather than depending on an SSE round-trip landing after connect — the property
+	// an iframe that reloads on every slide visit needs. A fresh session's ledger/draft are empty,
+	// so this is byte-identical to the prior blank render for the no-argument New case.
+	draft := sess.Draft()
+	specs := wizard.SpecFileDiffs(draft.Specs, s.readSpecFile)
+	s.render(w, r, views.CreatePage(sess.ID, s.prefillText(r.Context()), sess.Messages(), sess.Ledger(), draft, specs, s.seeder != nil))
 }
 
 // prefillText loads the optional prepared requirement (requirements_planner.prefill) the

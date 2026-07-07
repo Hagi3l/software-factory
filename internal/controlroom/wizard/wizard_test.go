@@ -677,3 +677,44 @@ func waitFor(t *testing.T, cond func() bool, msg string) {
 	}
 	t.Fatalf("condition not met: %s", msg)
 }
+
+// TestGetOrCreateReopensPinnedSession proves the reopen-by-id contract (specs/control-room.md "A
+// session survives a reload"): a pinned id reopens the SAME live session, distinct ids are distinct
+// sessions, and an empty id falls back to a fresh random-id session.
+func TestGetOrCreateReopensPinnedSession(t *testing.T) {
+	p := wizard.NewPlanner(&fakeAdapter{reply: "x"}, "persona")
+
+	s1 := p.GetOrCreate("talk")
+	if s1.ID != "talk" {
+		t.Fatalf("GetOrCreate minted id %q, want the caller id 'talk'", s1.ID)
+	}
+	if s2 := p.GetOrCreate("talk"); s2 != s1 {
+		t.Error("GetOrCreate did not reopen the SAME live session for a pinned id")
+	}
+	if s3 := p.GetOrCreate("other"); s3 == s1 {
+		t.Error("distinct pinned ids must be distinct sessions")
+	}
+	s4 := p.GetOrCreate("")
+	if s4.ID == "" || s4.ID == "talk" || s4.ID == "other" {
+		t.Errorf("empty id should mint a fresh random session, got %q", s4.ID)
+	}
+	if p.Get("talk") != s1 {
+		t.Error("Get lost the pinned session")
+	}
+}
+
+// TestReopenIsLRUProtectedFromEviction proves the LRU touch (which also folds in the filed
+// FIFO-eviction bug): reopening a pinned session marks it most-recently-used, so a later New
+// evicts a genuinely idle session rather than the one still in use. Under the old FIFO-by-creation
+// eviction the actively-reopened "demo" session would have been the one evicted.
+func TestReopenIsLRUProtectedFromEviction(t *testing.T) {
+	p := wizard.NewPlanner(&fakeAdapter{reply: "x"}, "persona", wizard.WithMaxSessions(2))
+	p.GetOrCreate("demo") // pinned session, created first
+	p.New()               // second session (pool now at cap)
+	p.GetOrCreate("demo") // reopen -> marks demo most-recently-used
+	p.New()               // third -> evicts the LRU (the SECOND session), NOT demo
+
+	if p.Get("demo") == nil {
+		t.Error("a reopened (most-recently-used) session was evicted; LRU must protect the in-use session")
+	}
+}

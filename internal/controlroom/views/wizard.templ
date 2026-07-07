@@ -26,7 +26,14 @@ import (
 // prefill is the optional prepared requirement (requirements_planner.prefill): non-empty, the
 // composer offers a button that inserts it for the operator to review and send. Empty renders
 // the composer unchanged.
-templ CreatePage(sessionID, prefill string, msgs []wizard.Message) {
+//
+// ledger/draft/specs render the session's CURRENT state server-side, so a REOPENED session
+// (GET /create?session=<id>) is correct on first paint rather than depending on an SSE
+// round-trip landing after connect — the property an iframe that reloads on every slide visit
+// needs (specs/control-room.md "A session survives a reload"). A fresh session passes empty
+// values, so the render is unchanged from the prior blank-slate open. canApprove wires the
+// draft's APPROVE button (a Seeder present).
+templ CreatePage(sessionID, prefill string, msgs []wizard.Message, ledger []wizard.LedgerItem, draft wizard.Draft, specs []wizard.SpecFileDiff, canApprove bool) {
 	@Layout("Harness — Create Task", "create") {
 		<script src="/static/wizard.js" defer></script>
 		<div class="mx-auto flex max-w-3xl flex-col gap-4">
@@ -42,18 +49,18 @@ templ CreatePage(sessionID, prefill string, msgs []wizard.Message) {
 				<div
 					id="wizard-ledger"
 					hx-get={ "/create/ledger/" + sessionID }
-					hx-trigger="sse:ledger, htmx:sseOpen from:closest [hx-ext='sse']"
+					hx-trigger="sse:ledger, htmx:sseOpen from:closest [hx-ext='sse'], refresh"
 					hx-swap="innerHTML"
 				>
-					@LedgerPanel(sessionID, nil)
+					@LedgerPanel(sessionID, ledger)
 				</div>
 				<div
 					id="wizard-draft"
 					hx-get={ "/create/draft/" + sessionID }
-					hx-trigger="sse:draft, htmx:sseOpen from:closest [hx-ext='sse']"
+					hx-trigger="sse:draft, htmx:sseOpen from:closest [hx-ext='sse'], refresh"
 					hx-swap="innerHTML"
 				>
-					@DraftPanel(sessionID, wizard.Draft{}, nil, true)
+					@DraftPanel(sessionID, draft, specs, canApprove)
 				</div>
 				<div id="wizard-result"></div>
 				@wizardConversation(sessionID, "Describe the change you want, or answer the planner's question…", prefill, msgs)
@@ -211,14 +218,17 @@ templ wizardBubble(m wizard.Message) {
 // flag. The whole panel is ONE batch form: the human resolves any combination of open forks in a
 // single submit (T4.27 "forks are surfaced and answered in batches"), funneled back through the
 // planner. It is the htmx swap target the page re-fetches on the `ledger` SSE nudge (the planner's
-// `update_ledger` tool call) — and ONLY that, plus an `htmx:sseOpen` refetch to recover a nudge
-// missed across an SSE reconnect. It deliberately carries NO periodic `every Ns` backstop (T4.33):
-// the panel holds the human's in-progress, unsubmitted answers (selected chips, typed free-text),
-// and a blind periodic re-render would discard them. Safe because the planner only re-emits the
-// ledger at a turn boundary (never during the human's answer window), so the `ledger` nudge covers
-// every real change. See specs/control-room.md "Rendering" (the interactive-panel exception) and
-// "The alignment ledger". Empty, it shows a muted invitation rather than nothing, so the panel
-// reads as a deliberate surface from the first paint.
+// `update_ledger` tool call) and an `htmx:sseOpen` refetch to recover a nudge missed across an SSE
+// reconnect. It ALSO carries an idle-gated backstop: the `refresh` event wizard.js fires on a slow
+// timer refetches the panel, but ONLY while the human is not interacting with it (form not dirty,
+// nothing focused inside) — so it converges to the planner's latest ledger when the human looks
+// away yet never discards their in-progress, unsubmitted answers (selected chips, typed free-text).
+// The `ledger` nudge and `sseOpen` refetch stay unconditional (both fire only at a planner-turn
+// boundary or on reconnect, never mid-answer). This supersedes the earlier no-backstop rule (T4.33),
+// which left the panel stranded when its single nudge was missed with no reconnect — acute when the
+// wizard is embedded in a reloading iframe. See specs/control-room.md "Rendering" (the
+// interactive-panel exception) and "The alignment ledger". Empty, it shows a muted invitation rather
+// than nothing, so the panel reads as a deliberate surface from the first paint.
 templ LedgerPanel(session string, items []wizard.LedgerItem) {
 	if len(items) == 0 {
 		<div class="rounded-lg border border-border bg-surface p-4 text-sm text-muted">
@@ -390,11 +400,15 @@ func ledgerStatusClass(status string) string {
 // DraftPanel renders the drafted spec + seed issues the planner proposes (T4.14,
 // specs/control-room.md "The wizard") and the APPROVE button — the consent boundary. It is the
 // htmx swap target the page re-fetches on the `draft` SSE nudge (the planner's `propose_draft`
-// tool call) — and ONLY that, plus an `htmx:sseOpen` refetch to recover a nudge missed across an
-// SSE reconnect. It carries NO periodic `every Ns` backstop (T4.33): the proposed spec diffs render
-// in expandable `<details>`, and a blind periodic re-render would snap shut a panel the human is
-// mid-read (and is pointless until the planner re-emits a draft, which only happens at a turn
-// boundary). Empty (the planner has not drafted anything yet) it shows a muted invitation, so
+// tool call) and an `htmx:sseOpen` refetch to recover a nudge missed across an SSE reconnect. It
+// ALSO carries an idle-gated backstop: the `refresh` event wizard.js fires on a slow timer
+// refetches the panel, but ONLY while the human is not interacting with it — in particular, never
+// while a spec-diff `<details>` is open, so a periodic re-render can't snap shut a diff the human is
+// mid-read, yet a panel the human has looked away from still converges to the planner's latest
+// draft. The `draft` nudge and `sseOpen` refetch stay unconditional (both fire only at a turn
+// boundary or on reconnect). This supersedes the earlier no-backstop rule (T4.33), which left the
+// panel stranded when its single nudge was missed with no reconnect — acute when the wizard is
+// embedded in a reloading iframe. Empty (the planner has not drafted anything yet) it shows a muted invitation, so
 // the surface reads as deliberate from the first paint. When canApprove is false (a standalone
 // serve with no repo to write) the draft is shown read-only with a note instead of a dead
 // button. The proposed spec content is templ-escaped as inert text — it is the trusted planner's

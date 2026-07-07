@@ -1236,7 +1236,38 @@ provenance-rendering gap).
   candidate commits, deduped Verified names), `TestFeatureProvenanceDegradesOnGitError`, and the
   extended `TestGitMergerEpicTerminalMergeIntegration` (real git: no `(none)`/producer leak, both
   children cited, cited hashes resolve on the epic branch). BUG-2 marked FIXED in
-  demo/vault/demo-bugs.md. **Phase 15 is now complete.** ([integration.md](specs/integration.md))
+  demo/vault/demo-bugs.md. ([integration.md](specs/integration.md))
+- [x] **T15.5 Wizard survives an iframe reload — reopenable session + idle-gated panel backstop**
+  *(2026-07-07 presentation dry-run)* — *done.* The vault demo embeds the live control room's
+  `/create` wizard as an **iframe in a reveal.js slide deck**. reveal blanks+reloads an iframe on
+  slide navigation (`stopEmbeddedContent`), and `GET /create` minted a **fresh** session every load
+  (no cookie/reopen), so revisiting the slide **orphaned** the session that had run the planner — the
+  human saw an empty wizard while the real ledger/draft sat on a dead session id. Compounded by T4.33
+  having stripped the ledger/draft panels' periodic poll: a missed SSE nudge (no reconnect) left them
+  stranded with no recovery. **Fix, two parts.** (1) **Reopenable session:** `Planner.GetOrCreate(id)`
+  (atomic under the pool mutex, double-checked so a racing reopen can't duplicate) reopens a live
+  session by id or mints one under it; `GET /create?session=<id>` reopens (no arg → fresh random id,
+  the unchanged default), **rendering the session's current ledger/draft server-side on first paint**
+  (`handleCreate` passes `sess.Ledger()/Draft()`+specs into `CreatePage`) so a reopened page is
+  correct without waiting on an SSE round-trip — the deck pins `?session=demo` in the frame src, so
+  every slide-visit rejoins the one live conversation. (2) **Idle-gated backstop:** the ledger/draft
+  (+resolve) panels regain a periodic refetch (`refresh` event on a 12s `wizard.js` timer) **gated on
+  the panel being idle** — nothing focused inside, the ledger form not dirty, no spec-diff `<details>`
+  open — so it converges to server truth when the human looks away yet never clobbers an in-progress
+  answer or an open diff (the precise SSE nudge + `htmx:sseOpen` still refetch unconditionally). Also
+  **folded in the filed FIFO-eviction bug**: session eviction is now **LRU** (`Get`/reopen touch
+  most-recently-used), so an actively-used/pinned session is never evicted out from under the human.
+  Specs updated ([control-room.md](specs/control-room.md) "Rendering" — the interactive-panel
+  exception is now idle-gated, not no-backstop; "A session survives a reload"; the alignment-ledger
+  "form is the human's" paragraph); docs/control-room.md gained the iframe-embedding subsection.
+  `templ generate` re-ran from the repo root (wizard/resolve `*_templ.go`). The deck's slide-23 iframe
+  `data-harness-path` changed `/create` → `/create?session=demo`. Tests: wizard
+  `TestGetOrCreateReopensPinnedSession`, `TestReopenIsLRUProtectedFromEviction`; controlroom
+  `TestCreateReopenPinnedSession` (pinned id stable across reloads; unpinned mints fresh),
+  `TestCreateReopenRendersLiveLedger` (B2 — live ledger on first paint). `make check` green.
+  ([control-room.md](specs/control-room.md))
+
+  **Phase 15 is now complete (T15.1–T15.5).**
 
 ---
 
@@ -1265,13 +1296,12 @@ provenance-rendering gap).
   (`internal/broker/server.go:98-128`, `internal/runner/runner.go:468-474`). **Fix:** per-frame
   read/write deadlines (one request per connection makes a short deadline safe), a bounded
   in-flight count, and a `WaitGroup` drain in `Serve`.
-- **Wizard session lifecycle** *(2026-07-03 review)*. Eviction is FIFO-by-creation, not LRU —
-  `Get` never touches `p.order` (`internal/controlroom/wizard/wizard.go:349-401`) — so 64
-  `GET /create` loads evict the *oldest-created* session even while a human is actively
-  drafting in it (the draft then silently 404s); there is no idle TTL, so abandoned sessions
-  pin their explorer sandboxes until count pressure; an evicted session's browser SSE stream
-  goes silently inert. **Fix:** LRU touch on use, an idle-timeout sweeper that tears down
-  session + explorer sandbox, and a terminal "session expired" SSE event.
+- **Wizard session lifecycle** *(2026-07-03 review; partially resolved by T15.5)*. The
+  **LRU-touch-on-use** part is now **done** (T15.5): `Get`/reopen mark a session
+  most-recently-used, so an actively-used session is no longer evicted out from under a human
+  drafting in it. **Still open:** an idle-timeout sweeper that tears down an abandoned session
+  + its explorer sandbox (today they pin the sandbox until count pressure), and a terminal
+  "session expired" SSE event so an evicted session's browser stream isn't silently inert.
 - **OpenRouter provider routing / pinning** *(2026-07-06 vault-demo run)*. `ModelProvider` has
   no seam to pin or order the upstream provider OpenRouter routes a slug to — it load-balances
   `deepseek/deepseek-v4-pro` across DeepSeek/Fireworks/Together/… each with different throughput

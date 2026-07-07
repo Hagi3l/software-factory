@@ -181,6 +181,24 @@ is autonomous. It's a guided conversation, not a form:
 If the wizard isn't configured (no `requirements_planner` block, or standalone
 `harness serve`), `/create` shows a "wizard disabled" notice.
 
+### Reopening a session (embedding the wizard in an iframe)
+
+A wizard conversation survives a page reload. `GET /create` with no argument always opens a
+**fresh** session; `GET /create?session=<id>` **reopens** the session with that id if it is live
+(re-rendering its transcript, ledger, and draft), or creates it under that id if not. Reopening
+also renders the ledger/draft **server-side on first paint**, so a reopened page shows the current
+state immediately rather than waiting for the live stream to catch up.
+
+This is what makes it safe to embed the wizard in a surface that reloads its iframe — e.g. a
+**slide deck**, where navigating to (or back to) the slide re-issues the frame's request. Point
+the frame at a **pinned** id (`http://<host>/create?session=demo`) rather than bare `/create`, and
+every reload rejoins the *one* live conversation instead of minting a new empty one. A reload
+mid-turn is safe: the in-flight turn keeps running and its result lands on the reopened page.
+Because a caller-named id lets anyone who knows it reopen that conversation, this is a
+single-user/localhost affordance — do not expose a pinned `?session=` on a shared control room (no
+auth gate exists yet). The bounded session pool is **LRU**, so an actively-used or recently-reopened
+session is never evicted out from under you.
+
 ## Resolve mode
 
 The wizard's second entry mode, launched from a dead-lettered issue (`/resolve/{id}`,
@@ -221,12 +239,14 @@ job is to show per-turn agent progress as it happens. The **Merge Queue** refres
 the dedicated [`merge-state` event](../specs/messaging.md), since the steps it shows
 (`rebasing`/`re-gating`) are merge-queue transitions, not beads-status transitions.
 Budgets and Provenance refresh on the same substrate. The **wizard** is the one exception
-to the periodic backstop: its alignment-ledger form and draft panel refetch *only* on their
-precise tool-channel nudge (the planner's `update_ledger`/`propose_draft` calls) plus an
-SSE-reconnect recovery, with **no** `every Ns` poll — a blind periodic re-render would wipe
-the answer chips and free-text you're mid-selecting or collapse a spec diff you're reading,
-so those panels are left untouched until the planner actually re-emits (only at a turn
-boundary). Forensic pages (issue detail, Replay, Verification) are deliberately *not* live —
-they're snapshots, not feeds. Authentication is not yet implemented (an open item); session ids
-in the wizard are crypto-random but there's no login gate.
+to the periodic backstop: its alignment-ledger form and draft panel refetch on their precise
+tool-channel nudge (the planner's `update_ledger`/`propose_draft` calls) plus an SSE-reconnect
+recovery, and carry an **idle-gated** periodic backstop — the clock refetch fires only while you're
+*not* interacting with the panel (form untouched, nothing focused, no spec diff expanded), so it
+converges to the planner's latest state when you look away yet never wipes answer chips/free-text
+you're mid-selecting or collapses a diff you're reading. Forensic pages (issue detail, Replay,
+Verification) are deliberately *not* live — they're snapshots, not feeds. Authentication is not yet
+implemented (an open item); a fresh wizard session id is crypto-random, but a pinned
+`/create?session=<id>` (for iframe embedding, above) is caller-chosen — neither is behind a login
+gate, so keep pinned ids to single-user/localhost use.
 </content>

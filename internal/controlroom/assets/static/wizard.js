@@ -44,6 +44,53 @@ function wizardChat() {
   };
 }
 
+// --- Idle-gated panel backstop (specs/control-room.md "Rendering" — the interactive-panel
+// exception). The ledger/draft/resolve panels refetch on their precise SSE nudge
+// (sse:ledger/sse:draft) and on reconnect (htmx:sseOpen). Those cover every real change, but a
+// nudge missed with no reconnect to recover it — a dropped frame, or an event that fires before
+// htmx bound the listener — would strand the panel showing state the server has moved past, with
+// no clock to converge it. That is acute when the wizard is embedded in an iframe that reloads (a
+// slide deck). So a slow timer fires a `refresh` event the panels also listen for — but ONLY while
+// the panel is IDLE, so a periodic refetch never discards a half-filled answer or snaps shut a spec
+// diff the human is mid-read. "Idle" = nothing focused inside it, the ledger form not dirty
+// (untouched since its last render), and no <details> open. The real nudge + sseOpen refetch stay
+// unconditional (they fire only at a planner-turn boundary or on reconnect). This is the runtime
+// half of the spec's idle-gated backstop; supersedes the T4.33 no-backstop rule.
+(function wizardPanelBackstop() {
+  var PANEL_IDS = ['wizard-ledger', 'wizard-draft', 'resolve-panel'];
+  var REFRESH_MS = 12000;
+
+  // Mark the ledger dirty on any input so an in-progress answer suppresses the timed refetch; a
+  // real swap (afterSwap) re-renders it clean. Delegated from document so it survives the panel's
+  // own innerHTML swaps (the listeners are never torn down with the swapped content).
+  function markLedgerDirty(e) {
+    var led = e.target.closest && e.target.closest('#wizard-ledger');
+    if (led) led.dataset.dirty = '1';
+  }
+  document.addEventListener('input', markLedgerDirty);
+  document.addEventListener('change', markLedgerDirty);
+  document.addEventListener('htmx:afterSwap', function (e) {
+    if (e.target && e.target.id === 'wizard-ledger') delete e.target.dataset.dirty;
+  });
+
+  // idle reports whether the timed backstop may refetch this panel without clobbering the human:
+  // nothing focused inside it, the ledger form not dirty, and no spec-diff <details> expanded.
+  function idle(el) {
+    return el &&
+      !el.contains(document.activeElement) &&
+      !el.dataset.dirty &&
+      !el.querySelector('details[open]');
+  }
+
+  setInterval(function () {
+    if (typeof htmx === 'undefined') return;
+    for (var i = 0; i < PANEL_IDS.length; i++) {
+      var el = document.getElementById(PANEL_IDS[i]);
+      if (idle(el)) htmx.trigger(el, 'refresh');
+    }
+  }, REFRESH_MS);
+})();
+
 // wizardElapsed(elapsed) drives the activity line's live "mm:ss" clock. `elapsed` is the whole
 // seconds the turn had already run when the server rendered this line; the component anchors a
 // base time off the *client* clock at mount (now − elapsed) and ticks up from it every second, so

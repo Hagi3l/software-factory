@@ -65,19 +65,28 @@ of the build (`go generate`), not the runtime.
   dead-letter views refetch on the typed [`issue-state` event](messaging.md) (so a
   refresh fires on the actual transition), the activity feed on `agent-event` (the
   thing it *is* showing); the periodic backstop stays on all of them.
-  **Exception — interactive/stateful panels carry no periodic backstop.** A fragment
-  that holds in-progress human input or client-side disclosure state — the wizard's
-  [alignment-ledger](#the-alignment-ledger) batch form, and the draft panel's
-  expandable spec diffs — must *not* be re-fetched on an `every Ns` clock: a blind
-  periodic re-render would discard a half-filled answer (selected chips, typed
-  free-text) or snap shut a spec diff the human is mid-read. These panels refetch
-  **only** on their precise tool-channel nudge — the ledger on the planner's
-  `update_ledger` (`ledger` event), the draft on `propose_draft` (`draft` event) —
-  which by construction fires only at a planner-turn boundary, never while the human
-  owns the form; a nudge missed across an SSE drop is recovered by refetching on
-  **(re)connect** (`htmx:sseOpen`), not on a clock. The clock backstop is right for
-  read-only views that converge to server truth; it is wrong wherever the client DOM
-  carries unsubmitted state the server does not yet know.
+  **Exception — interactive/stateful panels gate their periodic backstop on idle.** A
+  fragment that holds in-progress human input or client-side disclosure state — the
+  wizard's [alignment-ledger](#the-alignment-ledger) batch form, and the draft panel's
+  expandable spec diffs — must *not* be **blindly** re-fetched on an `every Ns` clock: a
+  periodic re-render would discard a half-filled answer (selected chips, typed free-text)
+  or snap shut a spec diff the human is mid-read. But carrying **no** backstop is also
+  wrong: if the panel's single tool-channel nudge is missed with no reconnect to recover
+  it — a dropped frame, or an event that fires before the client bound its listener — the
+  panel is then stranded showing state the server has already moved past, with no clock to
+  converge it (acutely so when the fragment is embedded in an iframe that reloads, e.g. a
+  slide-deck demo). So these panels **do** carry a periodic backstop, **gated on the panel
+  being idle**: the clock refetch fires only when the human is not interacting with the
+  panel — nothing focused inside it, the ledger form not dirty (untouched since its last
+  render), no spec-diff `<details>` open. Any interaction re-arms the guard, so an
+  in-progress answer or an open diff is never clobbered. A **real** nudge (`ledger`/`draft`
+  event) or a **(re)connect** (`htmx:sseOpen`) still refetches **unconditionally** — those
+  fire only at a planner-turn boundary (never while the human owns the form) or re-sync a
+  fresh connection, so neither can clobber live input. This keeps "the form is the human's
+  until they submit it" while guaranteeing the panel converges to server truth the moment
+  the human looks away — the property a fragment embedded in a reloading iframe needs. The
+  clock backstop is still *ungated* for read-only views (board/DAG/feed): they carry no
+  client state to protect.
 - **Historical/forensic:** plain server-rendered pages from the stores, with the
   structured timeline from the OTel trace backend. Supports **replay** of an
   invocation's decision trail (see [observability.md](observability.md)), including
@@ -491,6 +500,23 @@ code; its only *read* of untrusted code is sandbox-confined and network-isolated
 model-directed command can never reach the host or the network. Its conversation is itself an
 LLM interaction and is therefore observable/replayable like any other.
 
+**A session survives a reload.** A wizard conversation is addressable, so a page reload
+re-binds to the *same* live session instead of orphaning it. `GET /create` with no argument
+opens a **fresh** session (a random, unguessable id — the default); `GET /create?session=<id>`
+**reopens** the named session if it is live (re-rendering its transcript **and** its current
+ledger/draft server-side, so a reopened page is correct on first paint, not dependent on an
+SSE round-trip landing) and **creates** it under that id if it is not. This is what lets the
+wizard be embedded in a surface that reloads its iframe — a slide deck pins a stable
+`?session=<id>` in the frame's src, so every slide-visit/reload rejoins the one live
+conversation rather than minting an empty one. A reload *mid-turn* is safe: reopening renders
+the transcript-so-far while the in-flight turn keeps running host-side, and its completion
+nudge lands on the reopened page's stream. **Caveat:** a caller-named session id is a
+single-user/localhost affordance (anyone who knows the id can reopen that conversation) — a
+multi-user control room keeps the random-id default and scopes reopen to the requester's own
+authenticated session; the `?session=` form is not an authorization boundary. Reopen also
+marks the session **most-recently-used**, so the bounded session pool never evicts a
+conversation that is actively in use.
+
 ---
 
 ## The alignment ledger
@@ -550,10 +576,13 @@ Dependent forks simply appear in the next batch once their prerequisites are agr
 **The form is the human's until they submit it.** The planner re-emits the whole
 ledger every turn, but only at a *turn boundary* — after the human sends answers or a
 message — never while they are mid-selection (the planner is idle then, awaiting
-them). The ledger panel relies on exactly this: it re-renders **only** on the
-planner's `update_ledger` nudge, with no periodic poll (see [Rendering](#rendering)),
-so a human resolving a batch of chips and free-text across several forks is never
-re-rendered out from under them and can take their time and submit once. This is the
+them). The ledger panel relies on exactly this: it re-renders on the planner's
+`update_ledger` nudge, and its periodic backstop is **gated on the form being idle** (see
+[Rendering](#rendering)) — the clock refetch is skipped while the form is dirty (touched
+since its last render) or focused, so a human resolving a batch of chips and free-text
+across several forks is never re-rendered out from under them and can take their time and
+submit once, while a panel the human has *stopped* touching still converges to the
+planner's latest ledger. This is the
 in-progress complement to the question-keyed attribution above: keying each answer to
 its question keeps a *submitted* batch correct across a re-emit; suppressing the
 periodic re-render keeps an *unsubmitted* batch from being discarded before it is

@@ -33,7 +33,7 @@ templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messa
 				<div
 					id="wizard-ledger"
 					hx-get={ "/create/ledger/" + sessionID }
-					hx-trigger="sse:ledger, htmx:sseOpen from:closest [hx-ext='sse']"
+					hx-trigger="sse:ledger, htmx:sseOpen from:closest [hx-ext='sse'], refresh"
 					hx-swap="innerHTML"
 				>
 					@LedgerPanel(sessionID, nil)
@@ -41,7 +41,7 @@ templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Messa
 				<div
 					id="resolve-panel"
 					hx-get={ "/resolve/blast/" + sessionID }
-					hx-trigger="sse:draft, htmx:sseOpen from:closest [hx-ext='sse']"
+					hx-trigger="sse:draft, htmx:sseOpen from:closest [hx-ext='sse'], refresh"
 					hx-swap="innerHTML"
 				>
 					@ResolvePanel(sessionID, wizard.Draft{}, nil, canResolve, query.BlastRadius{})

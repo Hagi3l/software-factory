@@ -771,3 +771,64 @@ func collectSSE(t *testing.T, resp *http.Response, until string, timeout time.Du
 	}
 	return names
 }
+
+// TestCreateReopenPinnedSession proves the iframe-reload fix (specs/control-room.md "A session
+// survives a reload"): GET /create?session=<id> binds to a STABLE session across reloads — so a
+// slide-deck iframe that re-issues the request on every slide visit rejoins the one live
+// conversation — while GET /create with no argument mints a fresh random session each time.
+func TestCreateReopenPinnedSession(t *testing.T) {
+	p := wizard.NewPlanner(scriptedAdapter{text: "hi"}, "persona")
+	ts := httptest.NewServer(New(Options{Planner: p}).Handler())
+	defer ts.Close()
+
+	sessionOf := func(body string) string {
+		const marker = "/create/stream/"
+		i := strings.Index(body, marker)
+		if i < 0 {
+			t.Fatalf("no wizard stream id in page")
+		}
+		rest := body[i+len(marker):]
+		j := strings.IndexAny(rest, "\"'")
+		return rest[:j]
+	}
+
+	// A pinned id is reused across reloads.
+	if id := sessionOf(get(t, ts, "/create?session=talk").body); id != "talk" {
+		t.Errorf("first ?session=talk bound %q, want talk", id)
+	}
+	if id := sessionOf(get(t, ts, "/create?session=talk").body); id != "talk" {
+		t.Errorf("reopened ?session=talk bound %q, want the same talk", id)
+	}
+	// No argument -> a fresh, distinct random id each time.
+	a := sessionOf(get(t, ts, "/create").body)
+	b := sessionOf(get(t, ts, "/create").body)
+	if a == b || a == "talk" || b == "talk" {
+		t.Errorf("unpinned /create should mint fresh random ids, got %q then %q", a, b)
+	}
+}
+
+// TestCreateReopenRendersLiveLedger proves the server-side-render-on-reopen half (B2): a reopened
+// session's CURRENT ledger is in the page on first paint, so an iframe reload shows the decisions
+// immediately rather than depending on an SSE round-trip landing after connect.
+func TestCreateReopenRendersLiveLedger(t *testing.T) {
+	const ledgerArgs = `{"items":[{"question":"Which datastore?","status":"open"}]}`
+	p := wizard.NewPlanner(scriptedAdapter{text: "here we stand", calls: []model.ToolCall{ledgerCall(ledgerArgs)}}, "persona")
+	ts := httptest.NewServer(New(Options{Planner: p}).Handler())
+	defer ts.Close()
+
+	// Open the pinned session and drive one turn so it accrues a ledger.
+	sess := p.GetOrCreate("demo")
+	if !sess.Send("build me a CSV importer") {
+		t.Fatal("Send returned false")
+	}
+	waitFor(t, func() bool { return !sess.Busy() && len(sess.Ledger()) == 1 }, "ledger turn never settled")
+
+	// Reopen: the ledger question must be rendered server-side on first paint.
+	r := get(t, ts, "/create?session=demo")
+	if r.status != http.StatusOK {
+		t.Fatalf("GET /create?session=demo: status %d", r.status)
+	}
+	if !strings.Contains(r.body, "Which datastore?") {
+		t.Error("reopened /create?session=demo did not render the live ledger on first paint")
+	}
+}

@@ -240,9 +240,56 @@ func NewPlanner(adapter model.Adapter, persona string, opts ...Option) *Planner 
 	return p
 }
 
-// New creates a fresh, empty conversation session and registers it. When the session cap is
-// reached the oldest session is evicted (best-effort working state — see defaultMaxSessions).
+// New creates a fresh, empty conversation session under a random, unguessable id and registers
+// it. When the session cap is reached the least-recently-used session is evicted (best-effort
+// working state — see defaultMaxSessions).
 func (p *Planner) New() *Session {
+	return p.register(p.build(newID()))
+}
+
+// GetOrCreate reopens the session with the given id if it is live (marking it most-recently-used
+// so it is protected from eviction while in use), or mints a fresh session UNDER that id if it is
+// not. This is what lets a caller pin a stable session across page reloads — the iframe-embedded
+// wizard sets the frame's src to /create?session=<id>, so every reload rejoins the one live
+// conversation instead of orphaning it (specs/control-room.md "A session survives a reload"). An
+// empty id falls back to New (a fresh random-id session). Creation re-checks under the lock so two
+// concurrent reopens of the same id cannot mint two sessions.
+//
+// Caveat: a caller-named id is a single-user/localhost affordance (anyone who knows the id can
+// reopen that conversation); a multi-user control room keeps New's random id as the default and
+// scopes reopen to the requester's own authenticated session — this is not an authorization
+// boundary.
+func (p *Planner) GetOrCreate(id string) *Session {
+	if id == "" {
+		return p.New()
+	}
+	p.mu.Lock()
+	if s := p.sessions[id]; s != nil {
+		p.touchLocked(id)
+		p.mu.Unlock()
+		return s
+	}
+	p.mu.Unlock()
+	// Not present: build outside the lock (pure — no Docker; the exploration sandbox is lazy),
+	// then register under the lock with a re-check so a racing reopen of the same id wins once
+	// rather than minting a duplicate. A build discarded on the race is inert (no goroutine, no
+	// sandbox) and simply GC'd.
+	s := p.build(id)
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if existing := p.sessions[id]; existing != nil {
+		p.touchLocked(id)
+		return existing
+	}
+	return p.registerLocked(s)
+}
+
+// build assembles a fresh, empty session under the given id — persona grounding, the opening
+// message, and the per-session exploration-sandbox copy — but does NOT register it. New wraps it
+// with a random id and registers; GetOrCreate reuses it to mint a session under a caller-supplied
+// id. Pure and cheap: the exploration sandbox is provisioned lazily on the first tool call, not
+// here, so a build discarded on a reopen race leaks nothing.
+func (p *Planner) build(id string) *Session {
 	persona := p.persona
 	var opening []model.Message
 	// When grounded in a project's spec index, fold it into the system prompt (so the first reply
@@ -260,9 +307,9 @@ func (p *Planner) New() *Session {
 	if p.epicMode {
 		persona += epicGrounding()
 	}
-	return p.register(&Session{
-		ID:          newID(),
-		hub:         live.NewHub(),
+	return &Session{
+		ID:           id,
+		hub:          live.NewHub(),
 		adapter:      p.adapter,
 		persona:      persona,
 		maxTokens:    p.maxTokens,
@@ -271,7 +318,7 @@ func (p *Planner) New() *Session {
 		log:          p.log,
 		sandboxCfg:   p.sessionSandboxCfg(),
 		messages:     opening,
-	})
+	}
 }
 
 // projectGrounding folds the project's spec index into the system prompt so the planner starts a
@@ -343,11 +390,33 @@ func (p *Planner) sessionSandboxCfg() *sandboxConfig {
 	return &c
 }
 
-// register installs a freshly built session in the bounded map (evicting the oldest past the
-// cap) and returns it. Shared by New (a blank Create session) and NewResolve (a session
+// register installs a freshly built session in the bounded map (evicting the least-recently-used
+// past the cap) and returns it. Shared by New (a blank Create session) and NewResolve (a session
 // pre-grounded in a dead-lettered issue), so both obey the same eviction discipline.
 func (p *Planner) register(s *Session) *Session {
 	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.registerLocked(s)
+}
+
+// touchLocked marks a session most-recently-used by moving its id to the end of the recency
+// order, so the bounded pool evicts genuinely idle sessions (LRU) rather than merely the
+// oldest-created (the prior FIFO behavior, which could evict a conversation still being actively
+// read/streamed). Called on every Get and on a GetOrCreate reopen, so an in-use or pinned session
+// is protected from eviction. Caller holds p.mu; a no-op if the id is unknown.
+func (p *Planner) touchLocked(id string) {
+	for i, v := range p.order {
+		if v == id {
+			p.order = append(p.order[:i], p.order[i+1:]...)
+			p.order = append(p.order, id)
+			return
+		}
+	}
+}
+
+// registerLocked installs a session in the bounded map, evicting the least-recently-used entry
+// (order[0]) past the cap. Caller holds p.mu.
+func (p *Planner) registerLocked(s *Session) *Session {
 	for len(p.order) >= p.maxSessions {
 		oldest := p.order[0]
 		p.order = p.order[1:]
@@ -362,7 +431,6 @@ func (p *Planner) register(s *Session) *Session {
 	}
 	p.sessions[s.ID] = s
 	p.order = append(p.order, s.ID)
-	p.mu.Unlock()
 	return s
 }
 
@@ -397,11 +465,17 @@ func (p *Planner) Shutdown(ctx context.Context) {
 }
 
 // Get returns the session with the given id, or nil if it is unknown (never created, or
-// evicted). A nil return is how the server answers a stale session id.
+// evicted). A nil return is how the server answers a stale session id. A hit marks the session
+// most-recently-used, so a conversation whose stream/fragments are being actively fetched is
+// protected from eviction (LRU, not FIFO-by-creation).
 func (p *Planner) Get(id string) *Session {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	return p.sessions[id]
+	s := p.sessions[id]
+	if s != nil {
+		p.touchLocked(id)
+	}
+	return s
 }
 
 // Session is one human's conversation with the requirements planner: the running message
