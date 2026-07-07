@@ -118,17 +118,18 @@ models:
   # cache_control markers (a marker is sent only where a backend both needs AND accepts it —
   # specs/models.md); its cached reads still arrive in usage and are priced by cache_read below
   # (~0.19x input; auto-caching has no write premium, so no cache_write rate).
-  # effort: high pins full deliberation on the correctness-defining verifier — by declaration
-  # rather than provider default, mirroring the Opus roles that also grade what "correct" means.
-  # GLM reads the unified reasoning:{effort} wire form (supported_parameters lists reasoning +
-  # reasoning_effort), so effort_param: reasoning (NOT verbosity, the Claude-4.6+/5 form). This
-  # trades wall-time and output tokens for verifier rigor — flip to low/medium if the security
-  # stage's latency matters more than its depth (the deepseek predecessor's high effort ran a
-  # slow ~30m gate). Slug + pricing verified live against OpenRouter /api/v1/models 2026-07-07.
+  # effort: medium trims the verifier's deliberation (and wall-time/output tokens) — the
+  # deepseek predecessor ran at high and produced a slow ~30m gate, so medium is the deliberate
+  # latency/depth trade for the live demo; the gate's real floor is the deterministic scanners +
+  # re-run postconditions, not the model's reasoning depth, so a lighter effort degrades polish,
+  # never the gate itself. GLM reads the unified reasoning:{effort} wire form (supported_parameters
+  # lists reasoning + reasoning_effort), so effort_param: reasoning (NOT verbosity, the Claude-4.6+/5
+  # form). Flip back to high if verifier depth matters more than latency. Slug + pricing verified
+  # live against OpenRouter /api/v1/models 2026-07-07.
   "z-ai/glm-5.2":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
-    effort: high
+    effort: medium
     effort_param: reasoning
     cost: { input_per_mtok: 0.9086, output_per_mtok: 2.8556, cache_read_per_mtok: 0.16874 }
     idle_timeout: 90s
