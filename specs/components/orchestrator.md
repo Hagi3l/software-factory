@@ -294,6 +294,25 @@ are atomic against the store by never overlapping, and backend serialisation is 
 (a per-call jsonl round-trip is slow, and full serialisation makes those round-trips sequential),
 but a slow store can only add latency now, never lose a write.
 
+**Correction (2026-07-07) — serialisation is necessary but not sufficient; the store must be
+JSONL-authoritative-free in server mode.** The paragraph above is wrong that serialising the `bd`
+processes closes the hole. BUG-1 **recurred** with that serialisation in force, and the live Dolt
+history proved the close *committed* and was then reverted by the writer's **own next serialised
+call** — not an overlapping process. The real mechanism is an asymmetry inside `bd` itself: even
+in `--server` mode it auto-**imports** `issues.jsonl` → Dolt at the start of **every write**
+(unthrottled), but auto-**exports** Dolt → `issues.jsonl` only **throttled** (`export.interval`,
+default 60s). Within one throttle window `issues.jsonl` freezes at an early snapshot, so each
+write's import re-applies stale rows over freshly committed ones — reverting any close whose issue
+is still present in the frozen snapshot. This reproduces with a **single writer and no
+concurrency** (`bd close A; bd update B` reverts A), which is precisely why serialisation cannot
+help. The fix is to make the warm server the **sole** source of truth by disabling `bd`'s JSONL
+auto-export (`export.auto=false`) for the run, so no import reconciliation ever runs against a
+lagging file; the orchestrator reads/writes only the server. Serialising the single writer is
+retained as hygiene (it is still correct that only one writer touches the store), but the
+load-bearing invariant is: **in server mode, nothing may treat `issues.jsonl` as an input.** In
+file/no-db mode the opposite holds — `issues.jsonl` *is* the store — so auto-export must stay on
+there; the "JSONL-authoritative-free" rule is specific to a server-backed store.
+
 ---
 
 ## What it must never do

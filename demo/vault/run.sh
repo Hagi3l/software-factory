@@ -212,8 +212,29 @@ git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
 # (observed: every intermediate author-tests/implement/qa issue stuck open after a clean merge).
 # The orchestrator is the single beads writer via the warm Dolt server; it never wants a git
 # hook reconciling beads behind its back, so the hooks are pure foot-gun here. Disable them.
+# NOTE: this closes only the GIT-triggered reimport. bd reimports jsonl on its own writes too;
+# the `bd config set export.auto false` below closes that second (and, as it turns out, the
+# actually-fatal) vector. Both are needed.
 ( cd "$SITE" && "$BD" init --prefix vault --server --non-interactive --skip-hooks >/dev/null )
 "$BD" -C "$SITE" dolt status >/dev/null 2>&1 || { echo "error: beads dolt sql-server did not come up (see $SITE/.beads/dolt-server.log)"; exit 1; }
+# Make the warm Dolt server the SOLE source of truth: disable bd's JSONL auto-export.
+# --skip-hooks (above) stops GIT-triggered reimports, but bd ALSO round-trips .beads/issues.jsonl
+# on its own, and that reimport reverts committed writes the same way. Mechanism: on every write
+# bd auto-IMPORTS issues.jsonl -> Dolt (unthrottled), but auto-EXPORTS Dolt -> issues.jsonl only
+# throttled (export.interval, default 60s). During a burst of writes — a stage advance is a
+# create-successor + close-predecessor, and the whole epic runs in a few minutes — issues.jsonl
+# freezes at an early snapshot while each subsequent write reimports it, silently reverting a
+# just-committed close back to in_progress. That strands the dependent sibling (its blocker never
+# closes) and the epic never drains (BUG-1; the 2026-07-06/07 stalls). The trusted-layer bd
+# serialization (T15.3) does NOT cover this — the reverting reimport is the writer's OWN next
+# call, not a concurrent process, so serializing changes nothing. Turning auto-export off makes
+# Dolt authoritative (the orchestrator reads/writes it via the server, never the JSONL), so no
+# reimport can clobber a write. Safe here because the demo never consumes issues.jsonl (it reads
+# beads via bd/Dolt, and .beads is git-excluded); a final `bd export` could still regenerate it on
+# demand. Only valid in --server mode — in file/no-db mode issues.jsonl IS the store, so never
+# disable export there. Verified: with default export.auto a close-then-write burst reverts the
+# close 3/3; with export.auto=false it survives 3/3.
+( cd "$SITE" && "$BD" config set export.auto false >/dev/null ) || { echo "error: could not disable beads JSONL auto-export (export.auto)"; exit 1; }
 
 # ---- reset the public repo to the green seed -------------------------------------------
 # The audience inspects this repo, so each run starts it from an identical pristine baseline

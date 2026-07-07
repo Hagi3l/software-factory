@@ -7,12 +7,49 @@ the demo, not vault-app bugs.
 
 ---
 
-## BUG-1 — Intermediate stage closes are reverted; a dependent sibling never dispatches (pipeline stalls) — FIXED
+## BUG-1 — Intermediate stage closes are reverted; a dependent sibling never dispatches (pipeline stalls) — FIXED (T15.3 was insufficient; real fix below)
 
 **First seen:** 2026-07-06, share-link epic (`vault-bpc`), children `generate` (`vault-qkq`
 lineage) and `reveal` (`vault-532`).
 
-### Fix (T15.3) — the trusted beads client serializes every `bd` invocation
+### Correction (2026-07-07) — the real root cause, and the fix that actually holds
+**BUG-1 recurred with T15.3 in the running binary** (share-link epic `vault-tbh`, run at
+14:36–14:46; binary built 14:30, well after the T15.3 commit). `vault-0cg`'s close was reverted
+and `vault-273` (blocked on it) never dispatched — the identical stall. So the T15.3 diagnosis
+below (*concurrent* `bd` processes racing on the jsonl round-trip) is **wrong**, and serializing
+`bd` processes cannot fix it.
+
+Proven against the live Dolt server's own versioned history (`dolt_history_issues`):
+
+```
+04:39:51.862   vault-0cg  status=closed        ← the close COMMITTED to Dolt
+04:39:52.478   vault-0cg  status=in_progress   ← REVERTED by the next bd call's import
+```
+
+The reverting call (`04:39:52.478`, the harness's *own* next serialized write — the claim of the
+successor `vault-c3n`) begins with a `bd: create N issue(s)` commit: **bd auto-imports
+`issues.jsonl` → Dolt at the start of every write, even in `--server` mode.** The reverted row's
+`updated_at` rolls back to a *pre-close* value that matches the on-disk jsonl — so the import
+re-applied a stale jsonl over the committed close.
+
+Why jsonl is stale is an **asymmetry**, not a race: `bd config` shows auto-IMPORT runs on every
+write **unthrottled**, but auto-EXPORT (Dolt → jsonl) is **throttled** (`export.interval`, default
+**60s**). A stage advance is create-successor + close-predecessor, and a whole epic runs in a few
+minutes — so within one 60s window `issues.jsonl` freezes at an early snapshot while every
+subsequent write reimports it, reverting any close whose issue is still present in that frozen
+snapshot. This reproduces with a **single writer, no concurrency** (`bd close A; bd update B`
+reverts A to `open`, 3/3), which is why T15.3's process-serialization changed nothing.
+
+**Real fix (applied):** `bd config set export.auto false` immediately after `bd init --server`
+in `demo/vault/run.sh`, making the warm Dolt server the sole source of truth — the orchestrator
+reads/writes it via the server and never consumes `issues.jsonl` during a run, so no reimport can
+clobber a write. Verified: default `export.auto` reverts a close-then-write burst 3/3; with
+`export.auto=false` the close survives 3/3. Only valid in `--server` mode (in file/no-db mode
+jsonl *is* the store — never disable export there). The T15.3 serialization is retained as
+single-writer hygiene but is **not** what fixes BUG-1. `--skip-hooks` remains necessary (it closes
+the git-triggered reimport vector); `export.auto false` closes the second, fatal one.
+
+### Fix (T15.3, SUPERSEDED as the cause) — the trusted beads client serializes every `bd` invocation
 The root cause is concurrent `bd` processes racing on the jsonl round-trip (one export
 clobbering another's write). The fix makes serialization a property the trusted layer owns
 instead of a precondition it *assumes* of the backend: `internal/beads/Client` now holds a
