@@ -8,7 +8,7 @@
 # the scanners re-audit the crypto/auth code. Runs in the vault-toolchain sandbox. Model
 # resolves via infra.dev.yaml; key from the environment.
 #
-# N-version note: this soul runs on deepseek-v4-pro — a different model FAMILY than every
+# N-version note: this soul runs on z-ai/glm-5.2 (Zhipu GLM) — a different model FAMILY than every
 # Anthropic producer — so the producer≠verifier independence verification.md recommends is
 # real: a bug must slip past two independently-trained judgments. This was the config edit
 # the old advisory asked for; `harness validate` is now family-clean. Also the cheap slot:
@@ -22,7 +22,7 @@
 # read raw instead — the stricter posture.
 name:    vault-security
 role:    security
-model:   "deepseek/deepseek-v4-pro"
+model:   "z-ai/glm-5.2"
 persona: souls/prompts/security.md
 tools:   [fs, shell, git, explore]
 sandbox: vault-toolchain

@@ -74,7 +74,7 @@ models:
   #     merge-resolver. Near-Opus quality on coding/agentic work at Sonnet cost — a good fit now
   #     that the implementor also designs the store/view layers. MODEL= rewrites this shared
   #     Sonnet slug across those roles without touching the pinned Opus roles (see run.sh).
-  #   - deepseek/deepseek-v4-pro for the security/qa verifier — a different model FAMILY than
+  #   - z-ai/glm-5.2 for the security/qa verifier — a different model FAMILY (Zhipu GLM) than
   #     every producer (real N-version diversity, see its entry below) at a fraction of the cost.
   #
   # The keys are OpenRouter slugs, sent verbatim as the request's model id; the openai-compat
@@ -107,28 +107,30 @@ models:
     effort_param: verbosity
     cost: { input_per_mtok: 2, output_per_mtok: 10, cache_write_per_mtok: 2.5, cache_read_per_mtok: 0.2 }
     idle_timeout: 90s
-  # deepseek/deepseek-v4-pro is the DIVERSE verifier tier: the security/qa soul runs on a
-  # different model FAMILY than the Anthropic producers, so the N-version producer!=verifier
+  # z-ai/glm-5.2 is the DIVERSE verifier tier: the security/qa soul runs on a different model
+  # FAMILY (Zhipu GLM) than the Anthropic producers, so the N-version producer!=verifier
   # independence verification.md recommends is real rather than advisory — a bug now has to slip
   # past two independently-trained judgments (and the T2.13 family-overlap advisory is silenced by
   # FIXING it, not muting it). It is also a cheap tier where cheap is safe: the qa soul's value-add
-  # is scanner-driven remediation whose output is re-gated deterministically, and at ~$0.44/$0.87
-  # per Mtok it is ~5-12x cheaper than the Sonnet slot it replaces. Same host-side OpenRouter path
-  # and key as the others. NO `prompt_caching`: DeepSeek auto-caches server-side without
+  # is scanner-driven remediation whose output is re-gated deterministically, and at ~$0.91/$2.86
+  # per Mtok it is still well under the Sonnet slot it replaces. 1M context + tools, same host-side
+  # OpenRouter path and key as the others. NO `prompt_caching`: GLM auto-caches server-side without
   # cache_control markers (a marker is sent only where a backend both needs AND accepts it —
   # specs/models.md); its cached reads still arrive in usage and are priced by cache_read below
-  # (~0.008x input; auto-caching has no write premium, so no cache_write rate).
+  # (~0.19x input; auto-caching has no write premium, so no cache_write rate).
   # effort: high pins full deliberation on the correctness-defining verifier — by declaration
   # rather than provider default, mirroring the Opus roles that also grade what "correct" means.
-  # DeepSeek reads the unified reasoning:{effort} wire form, so effort_param: reasoning (NOT
-  # verbosity, the Claude-4.6+/5 form). This trades wall-time and output tokens for verifier
-  # rigor — flip to low/medium if the security stage's latency matters more than its depth.
-  "deepseek/deepseek-v4-pro":
+  # GLM reads the unified reasoning:{effort} wire form (supported_parameters lists reasoning +
+  # reasoning_effort), so effort_param: reasoning (NOT verbosity, the Claude-4.6+/5 form). This
+  # trades wall-time and output tokens for verifier rigor — flip to low/medium if the security
+  # stage's latency matters more than its depth (the deepseek predecessor's high effort ran a
+  # slow ~30m gate). Slug + pricing verified live against OpenRouter /api/v1/models 2026-07-07.
+  "z-ai/glm-5.2":
     provider: openai-compat
     endpoint: https://openrouter.ai/api/v1
     effort: high
     effort_param: reasoning
-    cost: { input_per_mtok: 0.435, output_per_mtok: 0.87, cache_read_per_mtok: 0.0036 }
+    cost: { input_per_mtok: 0.9086, output_per_mtok: 2.8556, cache_read_per_mtok: 0.16874 }
     idle_timeout: 90s
   # anthropic/claude-haiku-4.5 is the CHEAP tier the explore tool's read-only helper soul runs on
   # (Phase 12, T12.6). explore delegates broad search->read->refine localization to a nested

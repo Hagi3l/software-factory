@@ -82,14 +82,14 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
     and cost; the Opus roles pin `effort: high` — full deliberation on the tier that defines
     correctness, by declaration rather than provider default. `MODEL=` swaps this shared Sonnet slug
     across those roles (an OpenRouter slug) without touching the pinned Opus roles or the
-    DeepSeek verifier. The wizard's model is `requirements_planner.model` in
+    GLM verifier. The wizard's model is `requirements_planner.model` in
     `config/harness.yaml`.
-  - **`deepseek/deepseek-v4-pro`** for the **security/qa** verifier — a different model
-    **family** than every producer, so the `producer ≠ verifier` invariant holds at the model
+  - **`z-ai/glm-5.2`** for the **security/qa** verifier — a different model
+    **family** (Zhipu GLM) than every producer, so the `producer ≠ verifier` invariant holds at the model
     level too (real N-version diversity: a bug must slip past two independently-trained
     judgments, and `harness validate`'s family-overlap advisory is silenced by *fixing* it).
     It is also the cheap slot by design: the qa soul's value-add is scanner-driven remediation
-    whose output is re-gated deterministically, so at ~$0.44/$0.87 per Mtok (~7–17× under
+    whose output is re-gated deterministically, so at ~$0.91/$2.86 per Mtok (still well under
     Sonnet) a cheaper model degrades polish, never the gate's floor. Set in
     `config/souls/security.yaml`.
   - *(If you switch to first-party Anthropic — `provider: anthropic`, an `ANTHROPIC_API_KEY` —

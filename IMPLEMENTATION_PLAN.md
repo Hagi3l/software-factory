@@ -1273,6 +1273,29 @@ provenance-rendering gap).
 
 ## Deferred & follow-ups (filed, not blocking)
 
+- **`run.sh` leaks its `dolt sql-server` on exit** *(2026-07-07 presentation run)*. Each
+  `demo/vault/run.sh` invocation `bd init --server`-starts a `dolt sql-server` for the scratch
+  repo but never tears it down, so repeated runs leave **orphaned dolt servers** accumulating
+  (4 observed live). They hold RAM + open DBs and worsen the memory pressure below. **Fix:** trap
+  EXIT in run.sh to stop the per-run dolt server (it prints its pid/socket under
+  `$SITE/.beads/`), alongside the existing scratch-repo cleanup.
+- **Durable stage-close lost under memory pressure (OOM `signal: killed`), not just the T15.3
+  race** *(2026-07-07 presentation run — the run wedged with generate done but `vault-0e4`/reveal
+  stuck)*. T15.3 serialized `bd` invocations to kill the lost-update *race*, but a stage-close is
+  still lost if the OS **SIGKILLs the `bd`/`dolt` write process** mid-operation — which happens
+  when the host is out of RAM (observed 176 MB free of 32 GB; the log showed `bd … signal:
+  killed`, a harvested result "ignored as stale/duplicate", then a 6-min stall). Predecessor
+  beads (`ntg`/`rwl`) stayed `in_progress` in the durable store though the projection had
+  advanced through security, so the dependent sibling's readiness oracle never cleared. This is
+  an OOM/robustness gap, not a concurrency one. **Fix directions:** (a) relieve pressure — the
+  demo needs materially more free RAM (drop `OPENOBSERVE=1`, kill orphaned dolt servers, cap
+  Docker sandbox memory); (b) make the trusted layer **detect a killed `bd` write and retry**
+  (a non-zero/killed exit on a write is currently not reconciled); (c) a projection→durable
+  **reconciler** that re-asserts a stage-close the durable store is missing (the plan's T15.3
+  option (c), deferred there as unnecessary once the race was closed — an OS kill re-opens the
+  need). Interacts with the "In-flight projection growth" note below.
+
+
 - **Wizard: `announcesDraft()` matcher too literal** *(same run)*. The draft-nudge backstop only fires when concluding prose matches a fixed phrase list (`"draft the spec"`, `"seed issues"`, …) — it missed the model's actual `"Drafting the spec and seed issue now"` (gerund `drafting` ≠ `draft the`; singular `issue` ≠ `issues`), so the nudge never fired and the promised draft never came. **Fix:** broaden to stems/keywords (`drafting`, `seed issue`, `propose_draft`, `proposing`) in `internal/controlroom/wizard/wizard.go`.
 - Live-streaming replay (reconstruct the decision trail as the invocation runs) — needs the broker to emit structured per-turn events; overlaps the activity feed *(from T4.11)*.
 - Consolidate the status bar's 2–3 per-page SSE connections (page content + status bar + alerts.js) onto one connection or h2c *(from T4.19)*.
