@@ -91,6 +91,24 @@ function wizardChat() {
   }, REFRESH_MS);
 })();
 
+// --- Session-aware refresh (specs/control-room.md "A session survives a reload"). The wizard
+// header carries a Refresh control that reloads the frame REJOINING the current session id: GET
+// /create?session=<id> reopens the live session and re-renders its conversation/ledger/draft
+// server-side on first paint (the T15.5 reopen path), so a manual reload keeps all server-held
+// state. It is the operator-triggered sibling of an iframe host pinning ?session=; it matters most
+// for a bare /create (unpinned) view — where a plain browser reload would instead mint an empty
+// session and appear to lose the conversation — and inside an embedding iframe whose own reload
+// chrome the operator cannot click. Delegated from document so it needs no per-render rebind (the
+// header is not swapped, but delegation keeps this uniform with the backstop above). It navigates
+// window.location — the wizard's OWN frame — never `top`, so it can never reload a parent deck.
+// Unsent composer text is client-only and is intentionally dropped by the reload.
+document.addEventListener('click', function (e) {
+  var btn = e.target.closest && e.target.closest('[data-wizard-refresh]');
+  if (!btn) return;
+  var id = btn.dataset.session;
+  if (id) window.location.assign('/create?session=' + encodeURIComponent(id));
+});
+
 // wizardElapsed(elapsed) drives the activity line's live "mm:ss" clock. `elapsed` is the whole
 // seconds the turn had already run when the server rendered this line; the component anchors a
 // base time off the *client* clock at mount (now − elapsed) and ticks up from it every second, so

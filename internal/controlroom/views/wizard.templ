@@ -37,13 +37,36 @@ templ CreatePage(sessionID, prefill string, msgs []wizard.Message, ledger []wiza
 	@Layout("Harness — Create Task", "create") {
 		<script src="/static/wizard.js" defer></script>
 		<div class="mx-auto flex max-w-3xl flex-col gap-4">
-			<div>
-				<h1 class="text-xl font-semibold tracking-tight">Create Task</h1>
-				<p class="mt-1 text-sm text-muted">
-					A steered conversation with the requirements planner. Describe what you want
-					built; it will probe for examples, edge cases, what to reject, and what is out
-					of scope — converging on testable intent. Nothing is written until you approve.
-				</p>
+			<div class="flex items-start justify-between gap-4">
+				<div>
+					<h1 class="text-xl font-semibold tracking-tight">Create Task</h1>
+					<p class="mt-1 text-sm text-muted">
+						A steered conversation with the requirements planner. Describe what you want
+						built; it will probe for examples, edge cases, what to reject, and what is out
+						of scope — converging on testable intent. Nothing is written until you approve.
+					</p>
+				</div>
+				// Session-aware refresh (T15.6): reload the wizard REJOINING this session id via GET
+				// /create?session=<id> — the same reopen path an iframe host pins — so the conversation,
+				// ledger, and draft survive (they render server-side on first paint, T15.5), unlike a bare
+				// reload of an unpinned /create, which mints an empty session and appears to lose everything.
+				// The id rides data-session; wizard.js binds the click and navigates the wizard's OWN frame
+				// (window.location, never the parent), so it also works inside a slide-deck iframe whose
+				// reload chrome the operator can't reach. Unsent composer text is client-only and is
+				// intentionally not preserved across the reload.
+				<button
+					type="button"
+					data-wizard-refresh
+					data-session={ sessionID }
+					title="Reload the wizard, rejoining this session — keeps the conversation, ledger and draft; discards any unsent text in the composer."
+					class="inline-flex shrink-0 items-center gap-1.5 self-start rounded-md border border-border-strong bg-canvas px-3 py-1.5 text-xs font-medium text-fg transition hover:bg-st-idle-bg"
+				>
+					<svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+						<path d="M21 12a9 9 0 1 1-2.64-6.36"></path>
+						<path d="M21 3v6h-6"></path>
+					</svg>
+					Refresh
+				</button>
 			</div>
 			<div hx-ext="sse" sse-connect={ "/create/stream/" + sessionID } class="flex flex-col gap-3">
 				<div

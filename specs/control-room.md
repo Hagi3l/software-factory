@@ -508,7 +508,13 @@ ledger/draft server-side, so a reopened page is correct on first paint, not depe
 SSE round-trip landing) and **creates** it under that id if it is not. This is what lets the
 wizard be embedded in a surface that reloads its iframe — a slide deck pins a stable
 `?session=<id>` in the frame's src, so every slide-visit/reload rejoins the one live
-conversation rather than minting an empty one. A reload *mid-turn* is safe: reopening renders
+conversation rather than minting an empty one. The wizard header also carries a **Refresh
+control** that reloads the frame through this same reopen path — it navigates the wizard's own
+frame to `/create?session=<current-id>` (reading the id the page was rendered with), so it
+converges to server truth on demand even when the embedding host exposes no reachable reload
+chrome, and it *pins* an otherwise-ephemeral unpinned session into the URL so subsequent plain
+reloads survive too. It reloads server-held state only; text typed-but-not-sent in the composer
+is client-only and is intentionally dropped. A reload *mid-turn* is safe: reopening renders
 the transcript-so-far while the in-flight turn keeps running host-side, and its completion
 nudge lands on the reopened page's stream. **Caveat:** a caller-named session id is a
 single-user/localhost affordance (anyone who knows the id can reopen that conversation) — a

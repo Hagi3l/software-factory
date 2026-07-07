@@ -192,7 +192,11 @@ state immediately rather than waiting for the live stream to catch up.
 This is what makes it safe to embed the wizard in a surface that reloads its iframe — e.g. a
 **slide deck**, where navigating to (or back to) the slide re-issues the frame's request. Point
 the frame at a **pinned** id (`http://<host>/create?session=demo`) rather than bare `/create`, and
-every reload rejoins the *one* live conversation instead of minting a new empty one. A reload
+every reload rejoins the *one* live conversation instead of minting a new empty one. The wizard
+header also has a **Refresh** button that reloads through this same reopen path — it navigates the
+wizard's own frame to `/create?session=<current-id>`, so you can resync to server state on demand
+even when the embedding surface (an iframe) gives you no reload button to click. It keeps the
+conversation, ledger, and draft; any text you have typed but not sent is dropped. A reload
 mid-turn is safe: the in-flight turn keeps running and its result lands on the reopened page.
 Because a caller-named id lets anyone who knows it reopen that conversation, this is a
 single-user/localhost affordance — do not expose a pinned `?session=` on a shared control room (no

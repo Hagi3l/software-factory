@@ -807,6 +807,25 @@ func TestCreateReopenPinnedSession(t *testing.T) {
 	}
 }
 
+// TestCreateRendersSessionAwareRefresh proves the wizard renders a session-aware Refresh control
+// (T15.6, specs/control-room.md "A session survives a reload"): a button carrying data-wizard-refresh
+// and the CURRENT session id, so wizard.js reloads the frame via GET /create?session=<id> (the reopen
+// path) rather than a bare /create that would orphan the session. Guards the id actually threading
+// through to the control the operator clicks.
+func TestCreateRendersSessionAwareRefresh(t *testing.T) {
+	p := wizard.NewPlanner(scriptedAdapter{text: "hi"}, "persona")
+	ts := httptest.NewServer(New(Options{Planner: p}).Handler())
+	defer ts.Close()
+
+	body := get(t, ts, "/create?session=demo").body
+	if !strings.Contains(body, "data-wizard-refresh") {
+		t.Error("wizard page has no session-aware refresh control (data-wizard-refresh)")
+	}
+	if !strings.Contains(body, `data-session="demo"`) {
+		t.Error("refresh control did not carry the current session id (data-session=\"demo\")")
+	}
+}
+
 // TestCreateReopenRendersLiveLedger proves the server-side-render-on-reopen half (B2): a reopened
 // session's CURRENT ledger is in the page on first paint, so an iframe reload shows the decisions
 // immediately rather than depending on an SSE round-trip landing after connect.
