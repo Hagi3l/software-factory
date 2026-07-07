@@ -124,6 +124,55 @@ func TestTrailerExploreLineOptional(t *testing.T) {
 	}
 }
 
+// TestFeatureTrailerOmitsProducerFieldsAndRoundTrips pins the whole-feature (epic terminal-merge)
+// layer that fixes BUG-2 (T15.4). The headline commit on main must NOT render the producer fields
+// (Soul/Model/Tests-Soul/…) as "(none)" — the epic root is a plan issue with no soul of its own —
+// so FeatureTrailer omits them entirely and instead names the feature and aggregates its children
+// (id@integration-hash) plus the union of verified checks. The read side must recover the aggregate
+// unchanged (Children + Verified + Issue), so the control-room provenance view renders a real record.
+func TestFeatureTrailerOmitsProducerFieldsAndRoundTrips(t *testing.T) {
+	p := Provenance{
+		Issue:    "feat-1",
+		Subject:  "Add single-use share link",
+		Children: []string{"iss-2@abc123", "iss-3@def456"},
+		Verified: []string{"build", "gosec", "test"},
+	}
+	trailer := p.FeatureTrailer()
+
+	// The failure BUG-2 reported: producer fields shown as "(none)" on the headline commit.
+	for _, forbidden := range []string{"Soul:", "Model:", "Tests-Soul:", "(none)"} {
+		if strings.Contains(trailer, forbidden) {
+			t.Errorf("feature trailer must omit producer fields, found %q:\n%s", forbidden, trailer)
+		}
+	}
+	// It carries the feature identity and the child aggregate.
+	want := "Issue: feat-1 | Children: iss-2@abc123,iss-3@def456 | Verified: build,gosec,test"
+	if trailer != want {
+		t.Errorf("feature trailer =\n %q\nwant\n %q", trailer, want)
+	}
+	// The idempotency probe greps for "Issue: <epic> |"; that substring must survive.
+	if !strings.Contains(trailer, "Issue: feat-1 |") {
+		t.Errorf("feature trailer lost the idempotency-probe substring:\n%s", trailer)
+	}
+
+	// Read side: the aggregate round-trips over FeatureCommitMessage (Subject is cosmetic, not
+	// recovered — the same contract as the per-item trailer).
+	got, ok := ParseCommitMessage(p.FeatureCommitMessage())
+	if !ok {
+		t.Fatalf("ParseCommitMessage(feature) reported no trailer:\n%s", p.FeatureCommitMessage())
+	}
+	want2 := Provenance{Issue: "feat-1", Children: []string{"iss-2@abc123", "iss-3@def456"}, Verified: []string{"build", "gosec", "test"}}
+	if !reflect.DeepEqual(got, want2) {
+		t.Errorf("feature round trip:\n got %+v\nwant %+v", got, want2)
+	}
+
+	// Subject falls back to "Integrate <Issue>" when no title was threaded (the plan issue had none).
+	noTitle := Provenance{Issue: "feat-1", Children: []string{"iss-2@abc123"}}
+	if first, _, _ := splitFirstLine(noTitle.FeatureCommitMessage()); first != "Integrate feat-1" {
+		t.Errorf("feature fallback subject = %q, want %q", first, "Integrate feat-1")
+	}
+}
+
 func splitFirstLine(s string) (first, rest string, ok bool) {
 	for i := 0; i < len(s); i++ {
 		if s[i] == '\n' {

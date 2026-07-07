@@ -150,7 +150,7 @@ survived. This is not an edge case — it fires on essentially every stage advan
 
 ---
 
-## BUG-2 — Terminal merge commit (the public repo's headline commit) has an empty provenance trailer
+## BUG-2 — Terminal merge commit (the public repo's headline commit) has an empty provenance trailer — FIXED
 
 **First seen:** 2026-07-06, same run — terminal commit `98bb972`.
 
@@ -171,11 +171,31 @@ real provenance lives on the **child integration commits** (`d8fc022` generate, 
 reveal), which carry full trailers (soul, model, tests-soul, all 5 gate-check evidence
 hashes, traceability, transcript, explorer-model) and are ancestors of `main`.
 
-### Fix direction
-Consider having `terminalMerge` synthesize an **epic-level** trailer on the merge commit —
-e.g. the set of child issue ids + their integration commits, or an aggregate
-`Verified:`/`Issue:` summary — so the headline commit points at the accountability rather
-than showing `(none)`. Purely additive; the child trailers remain the source of truth.
+### Fix (T15.4)
+`gitMerger.MergeEpic` now synthesizes an **epic-level** trailer on the merge commit instead
+of stamping the bare `{Issue, Subject}` the sweep passes. It reads the epic branch itself —
+the single source of truth — by walking `main..epic` and parsing each commit's trailer, which
+recovers exactly the per-child provenance commits: their issue ids, their integration-commit
+hashes, and the deduped union of the gate-check names that verified them. The headline commit
+now renders
+
+```
+Issue: vault-bpc | Children: <gen>@<hash>,<rev>@<hash> | Verified: build,gosec,govulncheck,license-scan,test
+```
+
+— a genuine feature record that omits the inapplicable producer fields (`Soul`/`Model`/…)
+rather than printing them as `(none)`. `Issue: <epic> |` is preserved, so the idempotency
+grep still no-ops a repeated sweep. Purely additive; the per-child trailers reachable under
+the merge's second parent remain the source of truth, and a git fault while aggregating
+degrades to the bare layer rather than blocking the landing. New render/parse methods
+`Provenance.FeatureTrailer`/`FeatureCommitMessage` + a `Children []string` field
+(`internal/core/provenance.go`); aggregation in `internal/orchestrator/merge.go`
+`featureProvenance`. Spec sharpened with the exact format ([integration.md](../../specs/integration.md)
+"The terminal merge is a merge commit"). Tests: core
+`TestFeatureTrailerOmitsProducerFieldsAndRoundTrips`; orchestrator
+`TestFeatureProvenanceAggregatesChildren`, `TestFeatureProvenanceDegradesOnGitError`, and the
+extended `TestGitMergerEpicTerminalMergeIntegration` (asserts no `(none)`/producer leak, both
+children cited, hashes resolve on the epic branch).
 
 ---
 

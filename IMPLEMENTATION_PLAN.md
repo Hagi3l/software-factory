@@ -13,11 +13,10 @@ in-process orchestrator + runner carry a seed issue through implement → gate �
 merge to `main` with a provenance trailer. Verified end-to-end against a real model
 (local Ollama via `openai-compat`) and real Docker sandboxes.
 
-**Phases 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, and 14 are complete.** Phase 15 (2026-07-06
-vault-demo run hardening) is **partially done** — T15.1 (OpenRouter cost double-count) and
-T15.2 (per-model idle timeout) are fixed; **T15.3 (durable stage-close — the race that stalled
-the run twice and needed manual `bd` recovery) is now done**, leaving **T15.4 (whole-feature
-terminal-merge provenance) as the sole remaining Phase 15 item**. Otherwise the
+**Phases 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, and 15 are complete.** Phase 15 (2026-07-06
+vault-demo run hardening) closed with T15.4 (whole-feature terminal-merge provenance) landing —
+T15.1 (OpenRouter cost double-count), T15.2 (per-model idle timeout), T15.3 (durable stage-close),
+and T15.4 (feature-level provenance trailer on the epic terminal merge) are all fixed. Otherwise the
 only open build work is Phase 5 (all optional — T5.11 warm pools + HA — or hardware-blocked —
 T5.2 Firecracker, needs KVM the dev box lacks). Phase 14 (trusted-layer hardening from the
 2026-07-03 review) closed
@@ -1145,8 +1144,9 @@ with a `generate` + `reveal` child). The run reached its terminal state — feat
 `main`, pushed to the public repo, deploy fired — but only after **two silent stalls** that
 needed manual `bd` reconciliation to clear, and it surfaced a ~5× cost-reporting error and an
 ~11-minute model stall. All findings are logged in
-[`demo/vault/demo-bugs.md`](demo/vault/demo-bugs.md) (BUG-1…BUG-4); **T15.1–T15.2 are fixed
-here, T15.3–T15.4 remain open** (T15.3 is the one that blocks a stage-reliable demo).
+[`demo/vault/demo-bugs.md`](demo/vault/demo-bugs.md) (BUG-1…BUG-4); **all four (T15.1–T15.4) are
+fixed** (T15.3 was the one that blocked a stage-reliable demo; T15.4 was the headline-commit
+provenance-rendering gap).
 
 - [x] **T15.1 OpenRouter cost accounting — cached tokens no longer double-billed** *(BUG-3)*.
   *done.* The openai-compat adapter set `InputTokens = prompt_tokens`, but OpenAI/OpenRouter
@@ -1207,19 +1207,36 @@ here, T15.3–T15.4 remain open** (T15.3 is the one that blocks a stage-reliable
   ([components/orchestrator.md](specs/components/orchestrator.md) "Durable-write loss" + the "must never"
   bullet: the client owns serialization, never remove it assuming the backend serializes). BUG-1 marked
   FIXED in demo/vault/demo-bugs.md. ([components/orchestrator.md](specs/components/orchestrator.md))
-- [ ] **T15.4 Whole-feature provenance on the terminal merge** *(BUG-2)*. The terminal-merge
-  commit is meant to carry the two-tier **whole-feature** provenance layer
-  ([integration.md](specs/integration.md)), but `terminalMerge` builds
-  `core.Provenance{Issue: epic, Subject: title}` and leaves every producer field zero, so the
-  public repo's **headline** commit renders `Soul/Model/Tests-Soul/Verified/… = (none)` — the
-  first commit an audience sees reads as if provenance were missing. The per-child integration
-  commits carry full trailers and stay reachable under the merge's second parent, so
-  accountability is intact; this is an aggregation/rendering gap, not data loss (the epic root
-  is a *plan* issue with no producer provenance of its own). **Fix:** have `terminalMerge`
-  synthesise a feature-level trailer — the integrated children's issue ids + integration-commit
-  hashes and/or an aggregate `Verified:` summary — or render a feature-level trailer that omits
-  inapplicable producer fields rather than printing `(none)`. Spec sharpened
-  ([integration.md](specs/integration.md) "whole-feature layer").
+- [x] **T15.4 Whole-feature provenance on the terminal merge** *(BUG-2)* — *done.* The
+  terminal-merge commit (main's headline commit, the first thing an audience sees on the public
+  mirror) rendered every producer field as `(none)` because `terminalMerge` stamped the bare
+  `core.Provenance{Issue: epic, Subject: title}` — the epic root is a *plan* issue with no
+  producer provenance of its own. **Fix:** a distinct **feature-level trailer**. New
+  `core.Provenance.Children []string` + `FeatureTrailer()`/`FeatureCommitMessage()`
+  (`internal/core/provenance.go`) render a **single line** `Issue: <epic> | Children:
+  <id>@<integration-hash>,… | Verified: <deduped check names>` that **omits** the inapplicable
+  producer fields (`Soul`/`Model`/`Tests-Soul`/`Prompt-SHA`/`Traceability`/`Transcript`) rather
+  than printing them `(none)`; `ParseCommitMessage`/`parseTrailerLine` gained the `Children` key
+  (and `splitVerified`→`splitCommaList`, shared by both `Verified` and `Children` — same
+  `x@hash` grammar), so the read side (control-room provenance view) parses it like any trailer.
+  The `Issue: <epic> |` substring is preserved, so `MergeEpic`'s idempotency grep still no-ops a
+  repeated sweep. **Aggregation is read straight off the epic branch (single source of truth, no
+  new durable record):** `gitMerger.featureProvenance` (`internal/orchestrator/merge.go`, called
+  in `MergeEpic` after both no-op guards) walks `main..epic`, parses each commit, and keeps the
+  per-child provenance commits (a trailer naming a non-root issue) — recovering each child's id,
+  its integration-commit hash (`%H` of that provenance commit), and the deduped union of the
+  gate-check *names*; a git fault degrades to the bare layer (never blocks the landing, since
+  BUG-2 is a rendering gap and the per-child commits reachable under the merge's 2nd parent stay
+  the durable truth). `terminalMerge` is unchanged (still passes `{Issue, Subject}`); enrichment
+  is internal to the merger, so the orchestrator-level fake-merger tests are untouched. Spec
+  sharpened with the exact format + a fenced example
+  ([integration.md](specs/integration.md) "The terminal merge is a merge commit"). Tests: core
+  `TestFeatureTrailerOmitsProducerFieldsAndRoundTrips` (omission + round trip + idempotency
+  substring); orchestrator `TestFeatureProvenanceAggregatesChildren` (run-seam: children vs
+  candidate commits, deduped Verified names), `TestFeatureProvenanceDegradesOnGitError`, and the
+  extended `TestGitMergerEpicTerminalMergeIntegration` (real git: no `(none)`/producer leak, both
+  children cited, cited hashes resolve on the epic branch). BUG-2 marked FIXED in
+  demo/vault/demo-bugs.md. **Phase 15 is now complete.** ([integration.md](specs/integration.md))
 
 ---
 

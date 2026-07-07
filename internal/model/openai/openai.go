@@ -162,8 +162,8 @@ func (a *Adapter) Complete(ctx context.Context, req model.Request, onEvent model
 		}
 	}
 	if err := stream.Err(); err != nil {
-		// Our idle watchdog cancelled streamCtx: the stream went silent for idleTimeout. That
-		// surfaces as a ctx-cancelled error which transient() would read as terminal ("caller's
+		// Our idle watchdog canceled streamCtx: the stream went silent for idleTimeout. That
+		// surfaces as a ctx-canceled error which transient() would read as terminal ("caller's
 		// ctx is done"), so classify it explicitly as transient here — a hung upstream is exactly
 		// what the bounded retry should re-issue.
 		if idled.Load() {

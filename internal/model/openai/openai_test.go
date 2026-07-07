@@ -438,7 +438,7 @@ func TestCompleteStreamsReasoningAndText(t *testing.T) {
 // transient fault the relay can retry, rather than blocking until the connection resets (the
 // OpenRouter stall observed in the vault demo). The server flushes one chunk then hangs; with a
 // short idle_timeout the adapter must abort and return a *transient* Fault (not a terminal
-// ctx-cancelled error). The bound is inter-chunk, so a healthy stream is unaffected.
+// ctx-canceled error). The bound is inter-chunk, so a healthy stream is unaffected.
 func TestCompleteIdleTimeoutRetries(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")

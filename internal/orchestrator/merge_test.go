@@ -487,6 +487,65 @@ func TestGitMergerIdempotentReMerge(t *testing.T) {
 }
 
 // hasArg reports whether args contains v.
+// TestFeatureProvenanceAggregatesChildren drives featureProvenance over the run seam (no real
+// git): the epic branch holds two per-child provenance commits interleaved with the agents' own
+// candidate commits, and the aggregate must recover ONLY the children — their issue ids paired
+// with the provenance-commit hashes, and the deduped union of their verified check NAMES (stripped
+// of the per-child evidence hash). This is the whole-feature layer that fixes BUG-2 (T15.4).
+func TestFeatureProvenanceAggregatesChildren(t *testing.T) {
+	// The epic branch, newest-first as rev-list emits: prov(iss-2), candidate B, prov(iss-1), candidate A.
+	bodies := map[string]string{
+		"h4": core.Provenance{Issue: "iss-2", Soul: "impl", Model: "m", Verified: []string{"build@sha256:cc", "gosec@sha256:dd"}}.CommitMessage(),
+		"h3": "B work\n\nan agent candidate commit, not a trailer",
+		"h2": core.Provenance{Issue: "iss-1", Soul: "impl", Model: "m", Verified: []string{"build@sha256:aa", "test@sha256:bb"}}.CommitMessage(),
+		"h1": "A work",
+	}
+	m, _ := scriptedGit(func(args []string) (string, error) {
+		switch {
+		case args[0] == "rev-list" && args[1] == "m0..etip":
+			return "h4\nh3\nh2\nh1", nil
+		case args[0] == "show" && hasArg(args, "--format=%B"):
+			return bodies[args[len(args)-1]], nil
+		}
+		return "", errors.New("unexpected: " + strings.Join(args, " "))
+	})
+
+	base := core.Provenance{Issue: "feat-1", Subject: "Add sharing"}
+	got := m.featureProvenance(context.Background(), "/repo", "m0", "etip", base)
+
+	// Children: id@prov-hash, sorted; the candidate commits (h1/h3) are excluded.
+	wantChildren := []string{"iss-1@h2", "iss-2@h4"}
+	if strings.Join(got.Children, ",") != strings.Join(wantChildren, ",") {
+		t.Errorf("Children = %v, want %v", got.Children, wantChildren)
+	}
+	// Verified: deduped union of check NAMES (build appears in both children → once), sorted.
+	wantVerified := []string{"build", "gosec", "test"}
+	if strings.Join(got.Verified, ",") != strings.Join(wantVerified, ",") {
+		t.Errorf("Verified = %v, want %v", got.Verified, wantVerified)
+	}
+	// The base identity is preserved (Issue + Subject untouched).
+	if got.Issue != "feat-1" || got.Subject != "Add sharing" {
+		t.Errorf("base identity lost: Issue=%q Subject=%q", got.Issue, got.Subject)
+	}
+}
+
+// TestFeatureProvenanceDegradesOnGitError proves the aggregation never blocks a landing: a
+// rev-list fault returns the bare base layer (no Children/Verified), so the terminal merge still
+// writes a commit carrying at least the epic id rather than failing outright.
+func TestFeatureProvenanceDegradesOnGitError(t *testing.T) {
+	m, _ := scriptedGit(func(args []string) (string, error) {
+		return "", errors.New("git exploded")
+	})
+	base := core.Provenance{Issue: "feat-1", Subject: "Add sharing"}
+	got := m.featureProvenance(context.Background(), "/repo", "m0", "etip", base)
+	if got.Children != nil || got.Verified != nil {
+		t.Errorf("git error should degrade to the bare layer, got Children=%v Verified=%v", got.Children, got.Verified)
+	}
+	if got.Issue != "feat-1" {
+		t.Errorf("bare layer must keep the epic id, got %q", got.Issue)
+	}
+}
+
 func hasArg(args []string, v string) bool {
 	for _, a := range args {
 		if a == v {

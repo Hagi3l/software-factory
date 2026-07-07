@@ -244,6 +244,30 @@ the per-child trailers under the merge remain the durable truth. The epic root i
 issue with no producer provenance of its own, so the aggregate is assembled from the
 children, not read off the root.
 
+The whole-feature trailer is a **single line** that omits the inapplicable producer fields
+(`Soul`/`Model`/`Tests-Soul`/`Prompt-SHA`/`Traceability`/`Transcript`) rather than printing
+them as `(none)`, and instead names the feature and aggregates its children:
+
+```
+Add single-use share link
+
+Issue: feat-1 | Children: gen-1@a1b2c3d,rev-2@e4f5a6b | Verified: build,gosec,govulncheck,license-scan,test
+```
+
+`Issue` is the epic root id (the durable reference and the idempotency key — the same
+`Issue: <id> |` grep that guards a per-item re-merge guards the terminal one). `Children`
+pairs each integrated child's issue id with its **integration-commit hash** in the same
+`<id>@<hash>` grammar `Verified` uses for `<name>@<hash>`; those hashes point at the per-child
+provenance commits reachable under the merge's second parent, where the full producer record
+lives. `Verified` is the **deduped union of the gate-check names** that verified the children
+(names only — the per-child evidence hashes stay on the per-child commits). The aggregate is
+read **straight off the epic branch**: every child integrated by writing a provenance commit
+there, so walking `main..epic` and parsing each commit's trailer recovers exactly the children,
+their hashes, and their checks — no separate durable record is needed, and a git fault while
+aggregating degrades to the bare `Issue`+`Subject` layer (never blocking the landing). The read
+side parses this line exactly like any trailer (it is a recognized `Issue:`/`Verified:`/`Children:`
+record), so the control room renders a real feature record, not an empty row.
+
 **The whole-feature gate is emergent, not extra.** Children serialize onto the epic
 branch, each rebasing onto the prior tip and re-gating (step 3 above). So when the
 *last* child lands, the epic tip already holds all its siblings and was just

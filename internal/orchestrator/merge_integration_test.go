@@ -398,8 +398,38 @@ func TestGitMergerEpicTerminalMergeIntegration(t *testing.T) {
 	if subject := git("show", "--no-patch", "--format=%s", commit); subject != "Add sharing" {
 		t.Errorf("terminal merge subject = %q, want the feature title", subject)
 	}
-	if body := git("show", "--no-patch", "--format=%b", commit); !strings.Contains(body, "Issue: feat-1 |") {
+	body := git("show", "--no-patch", "--format=%b", commit)
+	if !strings.Contains(body, "Issue: feat-1 |") {
 		t.Errorf("terminal merge trailer missing the epic id; body:\n%s", body)
+	}
+	// Whole-feature provenance (T15.4, BUG-2): the headline commit must NOT render producer fields
+	// as "(none)" — it carries the two children (id@integration-hash) and the aggregate of the
+	// checks that verified them, assembled from the epic branch's per-child provenance commits.
+	if strings.Contains(body, "(none)") || strings.Contains(body, "Soul:") {
+		t.Errorf("terminal merge trailer leaked producer/(none) fields; body:\n%s", body)
+	}
+	for _, child := range []string{"iss-1@", "iss-2@"} {
+		if !strings.Contains(body, child) {
+			t.Errorf("terminal merge trailer missing child %q; body:\n%s", child, body)
+		}
+	}
+	if !strings.Contains(body, "Verified: build") {
+		t.Errorf("terminal merge trailer missing the aggregate Verified summary; body:\n%s", body)
+	}
+	// The recorded integration-commit hashes must actually be the epic branch's per-child
+	// provenance commits (parse them back out and confirm they resolve on the epic branch).
+	if fp, ok := core.ParseCommitMessage("x\n\n" + body); ok {
+		for _, cite := range fp.Children {
+			_, hash, _ := strings.Cut(cite, "@")
+			if got := git("rev-parse", "--verify", hash+"^{commit}"); got != hash {
+				t.Errorf("child integration hash %q in %q does not resolve on the epic branch", hash, cite)
+			}
+			if s := git("log", epicRef, "--format=%H"); !strings.Contains(s, hash) {
+				t.Errorf("child integration hash %q is not reachable from the epic tip", hash)
+			}
+		}
+	} else {
+		t.Errorf("terminal merge trailer did not parse as provenance; body:\n%s", body)
 	}
 	// Per-child provenance stays reachable below the merge (via the second parent).
 	if log := git("log", "--format=%s", commit); !strings.Contains(log, "A work") || !strings.Contains(log, "B work") {

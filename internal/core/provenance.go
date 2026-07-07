@@ -44,6 +44,17 @@ type Provenance struct {
 	ExploreModel      string
 	ExploreTranscript string
 
+	// Children is the whole-feature (epic terminal-merge) layer: each integrated child rendered
+	// as <child-issue-id>@<integration-commit-hash>, read straight off the epic branch's per-child
+	// provenance commits (the durable truth, which stays reachable under the merge's second
+	// parent). It is set ONLY on an epic's terminal merge commit — a per-item integration commit
+	// leaves it empty, so its two-line trailer is byte-for-byte unchanged. It is rendered by
+	// FeatureTrailer, never by Trailer: on the terminal merge the producer fields (Soul/Model/
+	// Tests-Soul/…) that a *plan-issue* epic root has none of are OMITTED rather than shown as
+	// "(none)", so main's headline commit reads as a real feature record instead of missing
+	// provenance (specs/integration.md "The terminal merge is a merge commit", BUG-2 / T15.4).
+	Children []string
+
 	// Subject is the human-readable commit subject line (the issue's title), purely
 	// cosmetic so a merge reads like ordinary project history ("Add single-use share
 	// link") rather than "Integrate <id>". It is NOT part of the audited trailer: it is
@@ -71,6 +82,34 @@ func (p Provenance) Trailer() string {
 		trailer += fmt.Sprintf("\nExplorer-Model: %s | Explore-Transcript: %s", orNone(p.ExploreModel), orNone(p.ExploreTranscript))
 	}
 	return trailer
+}
+
+// FeatureTrailer renders the whole-feature provenance recorded on an epic's terminal merge —
+// the single commit that advances main for a whole feature (specs/integration.md "The terminal
+// merge is a merge commit"). Unlike the per-item Trailer it OMITS the producer fields
+// (Soul/Model/Tests-Soul/Prompt-SHA/Traceability/Transcript): the epic root is a plan issue with
+// no implementing soul or model of its own, so printing them as "(none)" on main's headline
+// commit would read as missing provenance (BUG-2). Instead it names the feature (the epic id) and
+// aggregates its integrated children — their issue ids paired with their integration-commit
+// hashes, plus the union of the gate-check names that verified them — so the headline commit
+// points at the accountability that lives in full on the per-child commits reachable below the
+// merge. It stays a recognized trailer (the "Issue:" key), so the idempotency probe and the read
+// side (ParseCommitMessage / the control-room provenance view) treat it exactly like any commit.
+func (p Provenance) FeatureTrailer() string {
+	return fmt.Sprintf("Issue: %s | Children: %s | Verified: %s",
+		orNone(p.Issue), orNone(strings.Join(p.Children, ",")), orNone(strings.Join(p.Verified, ",")))
+}
+
+// FeatureCommitMessage is the full message for an epic terminal-merge commit: the feature title
+// (the epic root's Subject, falling back to "Integrate <Issue>") plus the whole-feature trailer.
+// The terminal merge calls this instead of CommitMessage so main's headline commit carries the
+// feature-level record, not an all-"(none)" per-item trailer.
+func (p Provenance) FeatureCommitMessage() string {
+	subject := p.Subject
+	if subject == "" {
+		subject = "Integrate " + orNone(p.Issue)
+	}
+	return fmt.Sprintf("%s\n\n%s", subject, p.FeatureTrailer())
 }
 
 // CommitMessage is the full message for the integration commit: a one-line subject plus
@@ -127,7 +166,9 @@ func ParseCommitMessage(msg string) (Provenance, bool) {
 			case "Explore-Transcript":
 				prov.ExploreTranscript = v
 			case "Verified":
-				prov.Verified = splitVerified(v)
+				prov.Verified = splitCommaList(v)
+			case "Children":
+				prov.Children = splitCommaList(v)
 			}
 		}
 	}
@@ -156,7 +197,7 @@ func parseTrailerLine(line string) (map[string]string, bool) {
 		val = noneToEmpty(strings.TrimSpace(val))
 		fields[key] = val
 		switch key {
-		case "Soul", "Tests-Soul", "Model", "Issue", "Prompt-SHA", "Verified", "Traceability", "Transcript", "Explorer-Model", "Explore-Transcript":
+		case "Soul", "Tests-Soul", "Model", "Issue", "Prompt-SHA", "Verified", "Traceability", "Transcript", "Explorer-Model", "Explore-Transcript", "Children":
 			recognized = true
 		}
 	}
@@ -166,10 +207,10 @@ func parseTrailerLine(line string) (map[string]string, bool) {
 	return fields, true
 }
 
-// splitVerified decodes the comma-joined "Verified:" field back into its name@<hash>
-// entries, dropping empties so a "(none)" (already mapped to "") yields a nil slice
-// rather than a one-element slice of "".
-func splitVerified(v string) []string {
+// splitCommaList decodes a comma-joined trailer field (Verified's name@<hash> entries, or
+// Children's <id>@<hash> entries — the same grammar) back into a slice, dropping empties so a
+// "(none)" (already mapped to "") yields a nil slice rather than a one-element slice of "".
+func splitCommaList(v string) []string {
 	if v == "" {
 		return nil
 	}

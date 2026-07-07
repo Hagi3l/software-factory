@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/Loxstomper/harness/internal/core"
@@ -308,6 +309,14 @@ func (m *gitMerger) MergeEpic(ctx context.Context, repo, epicRef, target string,
 	if epicTip == mainTip {
 		return mainTip, false, nil
 	}
+	// Enrich the bare {Issue, Subject} the sweep passes into the whole-feature provenance layer:
+	// aggregate the epic branch's per-child provenance commits (child ids + integration-commit
+	// hashes + the union of their verified checks), so main's headline commit carries a real
+	// feature record instead of an all-"(none)" per-item trailer (T15.4, BUG-2). Done only here,
+	// on the real landing path (after both no-op guards), and never fatal — a git fault degrades
+	// to the bare layer, the full accountability still lives on the reachable per-child commits.
+	prov = m.featureProvenance(ctx, repo, mainTip, epicTip, prov)
+
 	tree, err := m.run(ctx, repo, "rev-parse", "--verify", epicRef+"^{tree}")
 	if err != nil {
 		return "", false, fmt.Errorf("orchestrator: resolve epic tree for terminal merge of %q: %w", epicRef, err)
@@ -319,10 +328,10 @@ func (m *gitMerger) MergeEpic(ctx context.Context, repo, epicRef, target string,
 		"-c", "user.name=" + provenanceCommitterName,
 		"-c", "user.email=" + provenanceCommitterEmail,
 	}
-	commitArgs := []string{"commit-tree", tree, "-p", mainTip, "-p", epicTip, "-m", prov.CommitMessage()}
+	commitArgs := []string{"commit-tree", tree, "-p", mainTip, "-p", epicTip, "-m", prov.FeatureCommitMessage()}
 	if m.signingKey != "" {
 		args = append(args, "-c", "gpg.format=ssh", "-c", "user.signingkey="+m.signingKey)
-		commitArgs = []string{"commit-tree", "-S", tree, "-p", mainTip, "-p", epicTip, "-m", prov.CommitMessage()}
+		commitArgs = []string{"commit-tree", "-S", tree, "-p", mainTip, "-p", epicTip, "-m", prov.FeatureCommitMessage()}
 	}
 	commit, err := m.run(ctx, repo, append(args, commitArgs...)...)
 	if err != nil {
@@ -332,6 +341,63 @@ func (m *gitMerger) MergeEpic(ctx context.Context, repo, epicRef, target string,
 		return "", false, fmt.Errorf("orchestrator: advance %q to epic terminal merge for %q: %w", target, epicRef, err)
 	}
 	return commit, true, nil
+}
+
+// featureProvenance builds the whole-feature provenance layer for an epic terminal merge by
+// reading the epic branch itself — the single source of truth, no separate durable record needed
+// (specs/integration.md "The whole-feature layer … is assembled from the children"). Every child
+// integrated onto the epic branch by writing a trusted per-child provenance commit (with the
+// agent's own candidate commits below it as ancestors). Walking mainTip..epicTip and keeping the
+// commits whose message parses as a provenance trailer naming a NON-root issue recovers exactly
+// those children: their issue ids, their integration-commit hashes (the %H of the provenance
+// commit), and the union of the gate-check names that verified them. base carries the epic id +
+// feature title; this returns it with Children and an aggregate Verified filled in. It never
+// fails the landing — any git error degrades to the bare layer (BUG-2 is a rendering gap; the
+// per-child commits remain the full, reachable record either way).
+func (m *gitMerger) featureProvenance(ctx context.Context, repo, mainTip, epicTip string, base core.Provenance) core.Provenance {
+	hashes, err := m.run(ctx, repo, "rev-list", mainTip+".."+epicTip)
+	if err != nil {
+		return base
+	}
+	childHash := map[string]string{} // child issue id -> its integration (provenance) commit hash
+	var order []string               // child ids in first-seen order (deduped; sorted below for determinism)
+	checks := map[string]bool{}      // union of passed gate-check NAMES across the children
+	for _, hash := range strings.Fields(hashes) {
+		msg, err := m.run(ctx, repo, "show", "-s", "--format=%B", hash)
+		if err != nil {
+			continue
+		}
+		cp, ok := core.ParseCommitMessage(msg)
+		// Keep only per-child provenance commits: a parsed trailer naming an issue other than the
+		// epic root. The agents' candidate commits below don't parse as trailers; the epic root is
+		// a plan issue with no commit of its own on the branch, but guard against it defensively.
+		if !ok || cp.Issue == "" || cp.Issue == base.Issue {
+			continue
+		}
+		if _, seen := childHash[cp.Issue]; !seen {
+			childHash[cp.Issue] = hash
+			order = append(order, cp.Issue)
+		}
+		for _, v := range cp.Verified {
+			name, _, _ := strings.Cut(v, "@") // Verified entries are name@<evidence-hash>; the feature summary keeps names
+			if name != "" {
+				checks[name] = true
+			}
+		}
+	}
+	children := make([]string, 0, len(order))
+	for _, id := range order {
+		children = append(children, id+"@"+childHash[id])
+	}
+	sort.Strings(children)
+	names := make([]string, 0, len(checks))
+	for n := range checks {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	base.Children = children
+	base.Verified = names
+	return base
 }
 
 // rebaseOnto replays the candidate's commits onto the current target tip (refs/heads/main, or
