@@ -16,8 +16,8 @@ merge to `main` with a provenance trailer. Verified end-to-end against a real mo
 **Phases 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, and 14 are complete.** Phase 15 (2026-07-06
 vault-demo run hardening) is **partially done** — T15.1 (OpenRouter cost double-count) and
 T15.2 (per-model idle timeout) are fixed; **T15.3 (durable stage-close — the race that stalled
-the run twice and needed manual `bd` recovery) and T15.4 (whole-feature terminal-merge
-provenance) remain open**, T15.3 being the one that blocks a stage-reliable demo. Otherwise the
+the run twice and needed manual `bd` recovery) is now done**, leaving **T15.4 (whole-feature
+terminal-merge provenance) as the sole remaining Phase 15 item**. Otherwise the
 only open build work is Phase 5 (all optional — T5.11 warm pools + HA — or hardware-blocked —
 T5.2 Firecracker, needs KVM the dev box lacks). Phase 14 (trusted-layer hardening from the
 2026-07-03 review) closed
@@ -1173,25 +1173,40 @@ here, T15.3–T15.4 remain open** (T15.3 is the one that blocks a stage-reliable
   `anthropic` (unwired). Demo config sets `90s` on all four models. Tests: hung stream →
   transient fault in ~0.15s; slow-but-alive stream (total > bound, gaps < bound) → completes.
   Spec + docs updated ([models.md](specs/models.md), [docs/configuration.md](docs/configuration.md)).
-- [ ] **T15.3 Durable stage-close on the produce-next-stage path** *(BUG-1 — the stall)*. *the
-  one that blocks a stage-reliable demo.* On the produce-next-stage path the orchestrator
-  issues create-successor and close-self as **two separate `bd` processes**; when the beads
-  backend is not a single serialised engine — as in the demo, where every `bd` call
-  round-trips the whole `.beads/issues.jsonl` ("auto-importing … into empty database") instead
-  of using the warm `--server` engine `run.sh` intended — the two round-trips **race** and the
-  successor-create's export **clobbers the close** (lost update). The close lands in the
-  projection (so the pipeline advances) but never in the durable store; because
-  `scheduleReady`'s `bd.ready()` and `sweepEpicCompletion` read the durable store, a lost close
-  **permanently strands** the dependent sibling and blocks the epic drain — a silent stall (it
-  hit 5× across the two-child epic; only the terminal integrate steps, no concurrent create,
-  survived). Durability twin of the Phase-10 creation window; violates the spec's "single
-  writer ⇒ no write race" assumption (which holds only if the backend serialises the writer).
-  **Fix (any/all):** (a) make `bd` actually use the warm serialised server — confirm why server
-  mode is not engaged despite `bd init --server` in `run.sh`; (b) make create-successor +
-  close-self one atomic beads transaction (or hold `createMu` across both) so a close can't be
-  clobbered; (c) reconcile the readiness/drain oracles with the projection so a lost durable
-  write can't strand work the single writer believes is done. Spec updated
-  ([components/orchestrator.md](specs/components/orchestrator.md) "Durable-write loss").
+- [x] **T15.3 Durable stage-close on the produce-next-stage path** *(BUG-1 — the stall)* — *done.*
+  The stall was concurrent `bd` processes racing on the jsonl round-trip: on the produce-next-stage
+  path a stage advance is two writes (create-successor, then close-predecessor) issued from the
+  orchestrator's concurrent loops, and against a non-serialized backend (every `bd` call round-trips
+  the whole `.beads/issues.jsonl` — import-into-empty-DB → mutate → export) the create's export
+  clobbered the close (a lost update). The lost close still landed in the projection (so the pipeline
+  advanced) but never in the durable store, and because both the readiness oracle (`bd.ready()`) and
+  the epic-drain oracle (`sweepEpicCompletion`) read the durable store, it **permanently stranded**
+  the dependent sibling and blocked the epic terminal merge — a silent stall (hit a two-child epic 5×).
+  **Fix (chose the most robust of the plan's (a)/(b)/(c): make serialization a property the trusted
+  layer OWNS, not a precondition it assumes of the backend).** `internal/beads/Client` now serializes
+  **every** `bd` invocation on a store behind a **per-store-directory lock** (`Client.mu`/`storeLock`,
+  taken in the new `Client.run` choke point; the exec seam was renamed `run`→`exec` field and `run`
+  became the locking method — the 4 test seam sites updated to `c.exec =`). The lock is keyed on the
+  store directory (a package-level `map[dir]*sync.Mutex`), so it serializes **across the three separate
+  Clients that share one repo** in `cmd/harness/run.go` — the orchestrator's long-lived writer, the
+  wizard seeder, and the control-room reader — not just within one Client; a per-Client mutex would
+  miss that cross-Client race. With no two `bd` processes ever overlapping, create-successor +
+  close-predecessor are issued strictly one-after-another (each a full import→mutate→export against the
+  previous export), so a close can never be clobbered and the durable store stays correct — the oracles
+  read correct data, no stranding. This subsumes the plan's requirements (a) backend-serialization and
+  (b) create+close atomicity, and makes (c) oracle-reconciliation unnecessary: there is no lost write to
+  reconcile. Reads are serialized too (single `sync.Mutex`, not RWMutex — simplest, and it also blocks
+  torn reads of a jsonl mid-export); acceptable because T8.4 moved the control room's hot reads onto the
+  projection, so `bd` read traffic is light. A warm `dolt sql-server` remains the **throughput**
+  recommendation (a slow store now only adds latency, never loses a write); the `run.sh` warm-server
+  question (fix direction (a)) is moot for correctness and left as a throughput follow-up. Tests:
+  `internal/beads.TestClientSerializesInvocationsPerStore` (50×2 concurrent writes over two same-dir
+  Clients observe max-concurrency 1 — fails without the lock) and `TestClientDistinctStoresDoNotShareLock`
+  (per-store scoping). `go build ./...`, `go vet`, `golangci-lint run ./internal/beads/` all clean;
+  beads + orchestrator + controlroom/query suites green. Spec updated
+  ([components/orchestrator.md](specs/components/orchestrator.md) "Durable-write loss" + the "must never"
+  bullet: the client owns serialization, never remove it assuming the backend serializes). BUG-1 marked
+  FIXED in demo/vault/demo-bugs.md. ([components/orchestrator.md](specs/components/orchestrator.md))
 - [ ] **T15.4 Whole-feature provenance on the terminal merge** *(BUG-2)*. The terminal-merge
   commit is meant to carry the two-tier **whole-feature** provenance layer
   ([integration.md](specs/integration.md)), but `terminalMerge` builds

@@ -278,11 +278,21 @@ projection, a lost close does not merely lag: it **permanently strands** the dep
 sibling (never `ready`) and blocks the epic terminal merge (never `drained`) — a silent
 stall the projection cannot self-heal, because the projection believes the work is done.
 This bit the **2026-07-06 vault-demo run** five times across a two-child epic; only the
-terminal integrate steps (no concurrent create racing the close) survived. Two
-requirements close it: the backend must serialise the writer's writes (run beads against
-the warm server, never a per-call jsonl round-trip), **and** create-successor +
-close-predecessor must be atomic with respect to that store (one transaction, or serialised
-through the creation choke point) so a close can never be clobbered by an adjacent create.
+terminal integrate steps (no concurrent create racing the close) survived.
+
+The remediation is to make serialisation a property the trusted layer owns rather than a
+precondition it *assumes* of the backend: **the trusted beads client serialises every `bd`
+invocation on a store behind a per-store-directory lock**, so no two `bd` processes on the
+same store ever overlap — process-wide, across the several Clients that share one repo (the
+orchestrator's long-lived writer, the wizard seeder, the control room's reader). Because the
+create and the close are then issued strictly one-after-another (each a complete
+import→mutate→export against the previous export's result), a create can no longer clobber an
+adjacent close regardless of whether the backend is a warm serialised engine or a per-call
+jsonl round-trip. This subsumes both earlier requirements — create-successor + close-predecessor
+are atomic against the store by never overlapping, and backend serialisation is no longer a
+*correctness* precondition. A warm `dolt sql-server` remains the **throughput** recommendation
+(a per-call jsonl round-trip is slow, and full serialisation makes those round-trips sequential),
+but a slow store can only add latency now, never lose a write.
 
 ---
 
@@ -300,8 +310,10 @@ through the creation choke point) so a close can never be clobbered by an adjace
 - **Never treat a status write that reached only the projection as durable.** The
   readiness and epic-drain oracles read the durable store, so a stage-transition close
   that lands in the projection but not the store strands the dependent work silently (see
-  *Durable-write loss*). The backend must serialise the single writer's writes, and
-  create-successor + close-predecessor must be atomic against it.
+  *Durable-write loss*). The trusted beads client serialises every `bd` invocation on a
+  store, so no two `bd` writes ever race and a close can never be clobbered by an adjacent
+  create — never remove that serialisation (or reintroduce a second, unsynchronised beads
+  client on the same store) on the assumption the backend serialises for you; it may not.
 
 ---
 

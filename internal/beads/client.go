@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Loxstomper/harness/internal/core"
@@ -29,15 +30,56 @@ const MetadataKeyRole = "role"
 // specs/components/orchestrator.md). This type currently reads; the orchestrator's
 // single-writer transitions are added to it in T1.4.
 type Client struct {
-	bin string
-	dir string
-	run runFunc
+	bin  string
+	dir  string
+	exec runFunc
+	// mu serializes every bd invocation this client issues against every other invocation
+	// on the same store directory (see storeLock). It is load-bearing for CORRECTNESS, not
+	// tidiness: the beads backend is not guaranteed to serialize the single writer's writes.
+	// When bd runs against a per-call jsonl round-trip (import-into-empty-DB → mutate → export)
+	// rather than a warm serialized engine, two concurrent bd processes race and the later
+	// export silently clobbers the earlier one's write — a lost update. On the produce-next-stage
+	// path a stage advance is two writes (create the successor, then close the predecessor)
+	// issued from the orchestrator's several concurrent loops, so a close could vanish and
+	// permanently strand the dependent sibling: the 2026-07-06 vault-demo stall (BUG-1) that hit
+	// a two-child epic five times. Holding this lock across each bd process guarantees no two ever
+	// overlap, so the spec's "single writer ⇒ no write race" precondition holds regardless of the
+	// backend (specs/components/orchestrator.md "Durable-write loss"). A warm server remains the
+	// throughput recommendation, but is no longer a correctness precondition.
+	mu *sync.Mutex
 }
 
 // runFunc executes a bd subcommand and returns its stdout. It is a seam so the
 // decode/mapping logic can be exercised against canned output and error paths in
-// unit tests; the default implementation execs the real bd binary.
+// unit tests; the default implementation execs the real bd binary. It is invoked only
+// through Client.run, which serializes it under the store lock.
 type runFunc func(ctx context.Context, args []string) ([]byte, error)
+
+// storeLocks holds one mutex per store directory, so EVERY Client pointing at the same
+// .beads store — the orchestrator's long-lived writer, the wizard seeder, and the control
+// room's reader are three separate Clients over one repo (cmd/harness/run.go) — serializes
+// its bd invocations against the others. A per-Client mutex would miss that cross-Client race;
+// keying the lock on the directory makes serialization a structural property no construction
+// site can forget. Separate OS processes (harness approve/seed) get their own registry and are
+// not concurrent writers within their own process, so in-process serialization suffices for the
+// races BUG-1 documents (cross-process serialization is the warm server's job).
+var (
+	storeLocksMu sync.Mutex
+	storeLocks   = map[string]*sync.Mutex{}
+)
+
+// storeLock returns the shared mutex for a store directory, creating it on first use. The
+// empty dir (an unconfigured Client, e.g. in a unit test) keys its own lock like any other.
+func storeLock(dir string) *sync.Mutex {
+	storeLocksMu.Lock()
+	defer storeLocksMu.Unlock()
+	l, ok := storeLocks[dir]
+	if !ok {
+		l = &sync.Mutex{}
+		storeLocks[dir] = l
+	}
+	return l
+}
 
 // Option configures a Client.
 type Option func(*Client)
@@ -55,10 +97,25 @@ func New(opts ...Option) *Client {
 	for _, o := range opts {
 		o(c)
 	}
-	if c.run == nil {
-		c.run = c.execRun
+	if c.exec == nil {
+		c.exec = c.execRun
 	}
+	// Bind the store-directory lock so this client serializes against every other client
+	// on the same store (see Client.mu, storeLock). Resolved after options so it keys on the
+	// configured dir.
+	c.mu = storeLock(c.dir)
 	return c
+}
+
+// run is the single serialized choke point every bd invocation funnels through: it holds the
+// store lock for the whole bd subprocess so no two bd processes on the same store ever overlap
+// (see Client.mu). All read and write methods call it — reads too, so a read can never observe a
+// torn jsonl mid-export. It never nests (no method holds the lock across another run), so the
+// non-reentrant mutex cannot self-deadlock.
+func (c *Client) run(ctx context.Context, args []string) ([]byte, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.exec(ctx, args)
 }
 
 // Ready returns the issues that are claimable now: open, with no active blocker

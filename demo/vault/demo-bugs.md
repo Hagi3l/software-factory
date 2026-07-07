@@ -7,10 +7,29 @@ the demo, not vault-app bugs.
 
 ---
 
-## BUG-1 — Intermediate stage closes are reverted; a dependent sibling never dispatches (pipeline stalls)
+## BUG-1 — Intermediate stage closes are reverted; a dependent sibling never dispatches (pipeline stalls) — FIXED
 
 **First seen:** 2026-07-06, share-link epic (`vault-bpc`), children `generate` (`vault-qkq`
 lineage) and `reveal` (`vault-532`).
+
+### Fix (T15.3) — the trusted beads client serializes every `bd` invocation
+The root cause is concurrent `bd` processes racing on the jsonl round-trip (one export
+clobbering another's write). The fix makes serialization a property the trusted layer owns
+instead of a precondition it *assumes* of the backend: `internal/beads/Client` now holds a
+**per-store-directory lock** across every `bd` subprocess (`Client.mu`/`storeLock`, taken in
+`Client.run`), so no two `bd` processes on the same store ever overlap — process-wide, across
+the three Clients that share one repo (the orchestrator's writer, the wizard seeder, the
+control-room reader). Create-successor and close-predecessor are then issued strictly
+one-after-another (each a complete import→mutate→export against the previous export), so a
+create can no longer clobber an adjacent close, and both readiness (`bd.ready()`) and epic-drain
+(`sweepEpicCompletion`) read a durable store that stays correct — no stranding. This holds
+regardless of whether the backend is a warm serialized engine or a per-call jsonl round-trip;
+the warm server is now a *throughput* recommendation, not a correctness precondition (a slow
+store can only add latency, never lose a write). Regression:
+`internal/beads.TestClientSerializesInvocationsPerStore` (50×2 concurrent writes over two
+same-dir Clients see max-concurrency 1). Spec: `specs/components/orchestrator.md`
+"Durable-write loss". The `run.sh` warm-server question (fix direction (a)) is moot for
+correctness and left as a throughput follow-up.
 
 ### Symptom
 The `generate` slice built, gated, and integrated onto `epic/vault-bpc` cleanly

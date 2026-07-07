@@ -5,6 +5,8 @@ import (
 	"errors"
 	"os/exec"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -18,7 +20,7 @@ import (
 func fakeClient(out string, err error) (*Client, *[]string) {
 	var gotArgs []string
 	c := New()
-	c.run = func(_ context.Context, args []string) ([]byte, error) {
+	c.exec = func(_ context.Context, args []string) ([]byte, error) {
 		gotArgs = args
 		return []byte(out), err
 	}
@@ -233,7 +235,7 @@ func TestGetMapsSingleIssue(t *testing.T) {
 func TestGetEmptyID(t *testing.T) {
 	c := New()
 	called := false
-	c.run = func(_ context.Context, _ []string) ([]byte, error) { called = true; return nil, nil }
+	c.exec = func(_ context.Context, _ []string) ([]byte, error) { called = true; return nil, nil }
 	if _, err := c.Get(context.Background(), ""); err == nil {
 		t.Fatal("Get accepted an empty id, want failure")
 	}
@@ -266,7 +268,7 @@ func TestListPassesStatusAndDecodes(t *testing.T) {
 func TestListEmptyStatusRejected(t *testing.T) {
 	c := New()
 	called := false
-	c.run = func(_ context.Context, _ []string) ([]byte, error) { called = true; return nil, nil }
+	c.exec = func(_ context.Context, _ []string) ([]byte, error) { called = true; return nil, nil }
 	if _, err := c.List(context.Background(), ""); err == nil {
 		t.Fatal("List accepted an empty status, want failure")
 	}
@@ -456,5 +458,56 @@ func TestListIntegration(t *testing.T) {
 	}
 	if got := ids(all); !got[openID] || !got[doneID] {
 		t.Errorf("ListAll = %v, want both %s and %s present", all, openID, doneID)
+	}
+}
+
+// TestClientSerializesInvocationsPerStore is the BUG-1 regression (2026-07-06 vault-demo stall):
+// two clients over the SAME store must never run two bd invocations concurrently, so that a
+// per-call jsonl round-trip backend cannot lose a write when the produce-next-stage path fires
+// create-successor + close-predecessor from the orchestrator's concurrent loops. Without the
+// store lock a close could be clobbered and the dependent sibling stranded forever (see Client.mu,
+// specs/components/orchestrator.md "Durable-write loss").
+func TestClientSerializesInvocationsPerStore(t *testing.T) {
+	const dir = "/tmp/harness-beads-serialize-test"
+	var inFlight, maxSeen int32
+	seam := func(_ context.Context, _ []string) ([]byte, error) {
+		n := atomic.AddInt32(&inFlight, 1)
+		for {
+			m := atomic.LoadInt32(&maxSeen)
+			if n <= m || atomic.CompareAndSwapInt32(&maxSeen, m, n) {
+				break
+			}
+		}
+		time.Sleep(time.Millisecond) // widen the overlap window so a missing lock would be caught
+		atomic.AddInt32(&inFlight, -1)
+		return []byte("[]"), nil
+	}
+	a := New(WithDir(dir))
+	a.exec = seam
+	b := New(WithDir(dir))
+	b.exec = seam
+	if a.mu != b.mu {
+		t.Fatalf("clients on the same store dir must share one lock; got distinct mutexes")
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		wg.Add(2)
+		go func() { defer wg.Done(); _ = a.Close(context.Background(), "x") }()
+		go func() { defer wg.Done(); _ = b.Close(context.Background(), "y") }()
+	}
+	wg.Wait()
+	if got := atomic.LoadInt32(&maxSeen); got != 1 {
+		t.Fatalf("bd invocations overlapped: max concurrent = %d, want 1 (store lock not held)", got)
+	}
+}
+
+// TestClientDistinctStoresDoNotShareLock confirms the serialization is scoped per store, so
+// unrelated stores are not needlessly serialized against one another.
+func TestClientDistinctStoresDoNotShareLock(t *testing.T) {
+	a := New(WithDir("/tmp/harness-beads-distinct-A"))
+	b := New(WithDir("/tmp/harness-beads-distinct-B"))
+	if a.mu == b.mu {
+		t.Fatalf("clients on different store dirs must not share a lock")
 	}
 }

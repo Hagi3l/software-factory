@@ -18,7 +18,7 @@ import (
 func recordingClient(reply func(args []string) ([]byte, error)) (*Client, *[][]string) {
 	var calls [][]string
 	c := New()
-	c.run = func(_ context.Context, args []string) ([]byte, error) {
+	c.exec = func(_ context.Context, args []string) ([]byte, error) {
 		calls = append(calls, args)
 		return reply(args)
 	}
