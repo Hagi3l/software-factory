@@ -24,7 +24,7 @@ type WorkGraphSnapshot interface {
 // work-graph projection instead of polling beads, so those views never lag the single writer (no
 // card shows `open` while its agent runs) and place no `bd list` load on the store — the
 // `signal: killed` read overload the demo run hit under polling (specs/observability.md "The live
-// read model", demo-run-issues.md #4/#8). beads stays the durable truth the forensic pages still
+// read model"). beads stays the durable truth the forensic pages still
 // render from; this only replaces the *live* issue read, and only when co-located. Under a
 // standalone `harness serve` (no attached orchestrator) the control room keeps the beads-backed
 // reader instead — the same way the live SSE feed degrades there.

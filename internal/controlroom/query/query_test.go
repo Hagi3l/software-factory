@@ -718,7 +718,7 @@ func TestBoardEpicModeBadgeAndHero(t *testing.T) {
 // any closed-but-not-integrated bead (a superseded on_failure retry or an advanced intermediate
 // stage). The fixture is one feature whose two children each spawned a superseded attempt before
 // one integrated and one stayed in flight — so a naive closed-count would read 4/6, but the honest
-// progress is 1/2 (specs/integration.md "Integrated vs. closed", demo-run-issues.md #7). Spend
+// progress is 1/2 (specs/integration.md "Integrated vs. closed"). Spend
 // still aggregates over EVERY bead (root and corpses burned tokens) so it matches the Budgets view.
 func TestBoardEpicProgressExcludesRootAndSupersededBeads(t *testing.T) {
 	issues := []core.Issue{

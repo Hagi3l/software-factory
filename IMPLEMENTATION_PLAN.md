@@ -483,8 +483,7 @@ per epic, not new machinery. Spec contract:
 
 ## Phase 8 — Demo-hardening: authoritative read model + decomposition granularity
 
-Opened from the **2026-06-18 live vault-demo run** (findings: [`demo-run-issues.md`](demo-run-issues.md);
-design: [`REMEDIATION_PLAN.md`](REMEDIATION_PLAN.md)). The run worked end-to-end (one child went
+Opened from the **2026-06-18 live vault-demo run**. The run worked end-to-end (one child went
 spec→red→implement→qa→integrate onto the epic branch with full provenance) but surfaced two root
 causes: **(1)** the scheduler *and* control room read beads/Dolt directly, and those reads are
 neither read-your-writes consistent nor scalable under polling — producing a redundant planner

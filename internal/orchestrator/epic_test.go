@@ -107,7 +107,7 @@ func TestMergeCandidateUsesEpicTarget(t *testing.T) {
 // marker on the child's bead — the signal the epic roll-up counts instead of `closed` and the
 // cold-start projection rebuild re-derives. The marker is set the instant the merge lands (before
 // the bead is closed) and survives the close, so a later read distinguishes this integration from
-// any other close (specs/integration.md "Integrated vs. closed", demo-run-issues.md #7).
+// any other close (specs/integration.md "Integrated vs. closed").
 func TestMergeCandidateStampsIntegratedMarker(t *testing.T) {
 	bd := newFakeBeads()
 	bd.put(core.Issue{ID: "iss-1", Role: "implement", Status: "open", EpicID: "feat-1"})
