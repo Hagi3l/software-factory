@@ -138,4 +138,3 @@ policy; the allowlist and proxy base live on the runner. See [configuration.md](
 |------|---------|---------|
 | `--broker NET:ADDR` | `unix:/run/harness/broker.sock` | runner broker endpoint (`unix:<path>` or `vsock:<cid>:<port>`) |
 | `--addr HOST:PORT` | `127.0.0.1:8123` | loopback address to serve the GOPROXY on |
-</content>

@@ -187,11 +187,11 @@ type GitConfig struct {
 // NEVER committed or baked into an image; its existence is therefore not checked at config
 // time (a missing/unreadable key fails loudly on the first push — fail-closed).
 type GitHubAppConfig struct {
-	APIBase        string `yaml:"api_base,omitempty"`     // GitHub REST API base; empty = public api.github.com (Enterprise Server overrides)
-	AppID          string `yaml:"app_id,omitempty"`       // the App's id (the JWT issuer)
+	APIBase        string `yaml:"api_base,omitempty"`        // GitHub REST API base; empty = public api.github.com (Enterprise Server overrides)
+	AppID          string `yaml:"app_id,omitempty"`          // the App's id (the JWT issuer)
 	InstallationID string `yaml:"installation_id,omitempty"` // the installation to mint a token for
-	Repository     string `yaml:"repository,omitempty"`   // "owner/name" — the one repo the token is scoped to
-	PrivateKey     string `yaml:"private_key,omitempty"`  // PATH to the App's PEM private key (a runtime secret, never the bytes)
+	Repository     string `yaml:"repository,omitempty"`      // "owner/name" — the one repo the token is scoped to
+	PrivateKey     string `yaml:"private_key,omitempty"`     // PATH to the App's PEM private key (a runtime secret, never the bytes)
 }
 
 // Active reports whether the GitHub App minter is fully configured and should be built. All

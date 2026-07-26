@@ -42,10 +42,10 @@ func TestInvocationPageRendersHeaderMeterAndScopedFeed(t *testing.T) {
 	for _, want := range []string{
 		"harness-1", "implementor", "Build the thing", // header
 		"Budget", "run_tests", // meter section + this invocation's activity row
-		`hx-get="/invocation/harness-1/items"`,    // live body fragment target
-		"sse:issue-state",                         // crisp transition nudge
-		"sse:agent-event",                         // per-turn progress nudge
-		`href="/issue/harness-1"`,                 // forensic drill-back in the header
+		`hx-get="/invocation/harness-1/items"`, // live body fragment target
+		"sse:issue-state",                      // crisp transition nudge
+		"sse:agent-event",                      // per-turn progress nudge
+		`href="/issue/harness-1"`,              // forensic drill-back in the header
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("invocation page missing %q", want)

@@ -17,7 +17,7 @@ A **secure, autonomous software factory.** A human collaborates with an LLM to
 turn an idea into specifications and seed work items. From there, a fleet of
 ephemeral, sandboxed agents — each with its own *soul* — plans, writes tests,
 implements, verifies, and integrates the change, coordinating over NATS with
-[beads](https://github.com) as the work-item store. The terminal state is code
+[beads](https://github.com/steveyegge/beads) as the work-item store. The terminal state is code
 **merged to `main`**. Humans never read or write code; they author and refine
 specs.
 
@@ -107,10 +107,9 @@ oddly (Soul, Role, Runner, Brief), it's defined there.
 ## Status
 
 These specs are the contract the implementation satisfies, and most have been
-**validated and refined by implementation** through Phase 4 (kernel + independent
-verification + full DAG + control room; see `IMPLEMENTATION_PLAN.md`). Decisions are
-recorded as the specs assert them. Open questions are called out inline with
-**OPEN:** markers; the few that remain are concentrated in Phase 5 (production
-isolation & distribution) and Phase 7 (atomic feature integration — concurrent epics
-are deferred, see [integration.md](integration.md)), with the live ones tracked in
-the plan.
+**validated and refined by implementation** through Phase 15 (see
+`IMPLEMENTATION_PLAN.md`). Decisions are recorded as the specs assert them. Open
+questions are called out inline with **OPEN:** markers; the few that remain are
+concentrated in the unbuilt tail of Phase 5 (the Firecracker microVM backend and
+warm pools) and in deferred design choices (e.g. concurrent epics, see
+[integration.md](integration.md)), with the live ones tracked in the plan.

@@ -101,14 +101,17 @@ func TestValidateDraft(t *testing.T) {
 	})
 
 	cases := map[string]func(*wizard.SeedRequest){
-		"no issues":         func(r *wizard.SeedRequest) { r.Issues = nil },
-		"no specs":          func(r *wizard.SeedRequest) { r.Specs = nil },
+		"no issues":          func(r *wizard.SeedRequest) { r.Issues = nil },
+		"no specs":           func(r *wizard.SeedRequest) { r.Specs = nil },
 		"path outside specs": func(r *wizard.SeedRequest) { r.Specs[0].Path = "evil.md"; r.Issues[0].Spec = "evil.md" },
-		"path traversal":    func(r *wizard.SeedRequest) { r.Specs[0].Path = "specs/../../etc/x.md" },
-		"not markdown":      func(r *wizard.SeedRequest) { r.Specs[0].Path = "specs/orders.txt"; r.Issues[0].Spec = "specs/orders.txt" },
-		"broken link":       func(r *wizard.SeedRequest) { r.Specs[0].Content += "\n[gone](nope.md)\n" },
-		"orphan spec":       func(r *wizard.SeedRequest) { r.Issues[0].Spec = "" },
-		"illegal role":      func(r *wizard.SeedRequest) { r.Issues[0].Role = "implementor" },
+		"path traversal":     func(r *wizard.SeedRequest) { r.Specs[0].Path = "specs/../../etc/x.md" },
+		"not markdown": func(r *wizard.SeedRequest) {
+			r.Specs[0].Path = "specs/orders.txt"
+			r.Issues[0].Spec = "specs/orders.txt"
+		},
+		"broken link":        func(r *wizard.SeedRequest) { r.Specs[0].Content += "\n[gone](nope.md)\n" },
+		"orphan spec":        func(r *wizard.SeedRequest) { r.Issues[0].Spec = "" },
+		"illegal role":       func(r *wizard.SeedRequest) { r.Issues[0].Role = "implementor" },
 		"unknown issue spec": func(r *wizard.SeedRequest) { r.Issues[0].Spec = "specs/ghost.md" },
 	}
 	for name, mutate := range cases {

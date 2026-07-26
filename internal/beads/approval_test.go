@@ -52,14 +52,14 @@ func TestAwaitApprovalOmitsEmptyProvenance(t *testing.T) {
 // resume drives blocked→closed through the merge path, not here.
 func TestRecordApproval(t *testing.T) {
 	c, calls := recordingClient(func([]string) ([]byte, error) { return nil, nil })
-	if err := c.RecordApproval(context.Background(), "harness-1", "candidate/harness-1", "lochie"); err != nil {
+	if err := c.RecordApproval(context.Background(), "harness-1", "candidate/harness-1", "alice"); err != nil {
 		t.Fatalf("RecordApproval: %v", err)
 	}
 	got := strings.Join((*calls)[0], " ")
 	if strings.Contains(got, "--status") {
 		t.Errorf("args = %q, want no status change (metadata-only)", got)
 	}
-	if !strings.Contains(got, "--set-metadata approved_ref=candidate/harness-1") || !strings.Contains(got, "--set-metadata approver=lochie") {
+	if !strings.Contains(got, "--set-metadata approved_ref=candidate/harness-1") || !strings.Contains(got, "--set-metadata approver=alice") {
 		t.Errorf("args = %q, want approved_ref + approver metadata", got)
 	}
 }

@@ -63,9 +63,9 @@ func TestMultiHandlerFansOutToEverySink(t *testing.T) {
 // capturingProcessor records the severities of every record it is forwarded, so a test
 // can assert exactly which records the min-severity filter let through.
 type capturingProcessor struct {
-	emitted    []otellog.Severity
-	flushed    bool
-	shutdown   bool
+	emitted  []otellog.Severity
+	flushed  bool
+	shutdown bool
 }
 
 func (c *capturingProcessor) OnEmit(_ context.Context, r *sdklog.Record) error {

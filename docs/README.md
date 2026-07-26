@@ -40,8 +40,9 @@ specs are the truth — and term definitions live in
 
 ## What you can do today
 
-The kernel and Phases 2–4 are built and run end-to-end in development (Docker sandbox,
-in-process NATS, local-repo merge). You can:
+The kernel and every engineering phase through 15 are built and run end-to-end in
+development (Docker or gVisor sandbox, embedded or distributed NATS, local-repo
+merge). You can:
 
 - Validate config, seed work, and run the full pipeline against a real or local model.
 - Drive the trusted-dev approval gate with `harness approve` / `harness reject`.
@@ -49,7 +50,8 @@ in-process NATS, local-repo merge). You can:
   and author specs through the Create-Task wizard, or unstick dead-lettered work
   through Resolve mode.
 
-Production isolation & distribution (Firecracker, distributed NATS, scoped secrets,
-artifact object store, signing) is Phase 5 — not yet built. See the
+Most of Phase 5 (production isolation & distribution) has landed too — distributed
+NATS, scoped short-lived secrets, the S3/MinIO artifact backend, provenance signing,
+and the gVisor sandbox backend. What remains is the Firecracker microVM backend
+(blocked on KVM hardware) and optional warm pools / HA orchestration. See the
 [implementation plan](../IMPLEMENTATION_PLAN.md).
-</content>

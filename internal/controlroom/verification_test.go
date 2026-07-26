@@ -17,24 +17,24 @@ func TestVerificationPageRenders(t *testing.T) {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		"Verification — Merged work",      // header (issue title)
-		"harness-1",                       // id
-		"gate passed",                     // the overall verdict badge
-		"Producer ≠ verifier",             // the soul-split section
-		"go-test-author",                  // the author-tests producing soul
-		"go-implementor",                  // the implement producing soul
-		"verification sandbox",            // qa has no verifier soul — runs in the clean sandbox
-		"Red→green proof",                 // the red→green check kind label
-		"base exit 1",                     // the red half (base must fail)
-		"candidate exit 0",                // the green half (candidate must pass)
-		"0.86 &gt;= 0.80",                 // the mutation metric vs threshold (HTML-escaped >=)
-		"govulncheck",                     // the scanner check
-		"Traceability map",                // the test↔spec map evidence label
-		"/artifact/" + mergedTraceHash,    // …a resolvable click-through
-		"/artifact/" + verdictHash,        // the raw gate-verdict bytes link
-		"/artifact/" + gateHash,           // a check's own captured-output evidence
-		"/issue/harness-1",                // drill-back to the detail page
-		`href="/static/app.css"`,          // inside the base layout chrome
+		"Verification — Merged work",   // header (issue title)
+		"harness-1",                    // id
+		"gate passed",                  // the overall verdict badge
+		"Producer ≠ verifier",          // the soul-split section
+		"go-test-author",               // the author-tests producing soul
+		"go-implementor",               // the implement producing soul
+		"verification sandbox",         // qa has no verifier soul — runs in the clean sandbox
+		"Red→green proof",              // the red→green check kind label
+		"base exit 1",                  // the red half (base must fail)
+		"candidate exit 0",             // the green half (candidate must pass)
+		"0.86 &gt;= 0.80",              // the mutation metric vs threshold (HTML-escaped >=)
+		"govulncheck",                  // the scanner check
+		"Traceability map",             // the test↔spec map evidence label
+		"/artifact/" + mergedTraceHash, // …a resolvable click-through
+		"/artifact/" + verdictHash,     // the raw gate-verdict bytes link
+		"/artifact/" + gateHash,        // a check's own captured-output evidence
+		"/issue/harness-1",             // drill-back to the detail page
+		`href="/static/app.css"`,       // inside the base layout chrome
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("verification page missing %q", want)
@@ -54,14 +54,14 @@ func TestVerificationRendersTransformLog(t *testing.T) {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		"Transformations",                                  // the section heading
-		"semantic",                                         // the precise-mechanism badge
-		"text fallback",                                    // the imprecise-mechanism badge
-		"1 via text fallback",                              // the header count of fallbacks
-		"greet → hello at a.go:3:6",                        // the semantic transform's target
-		"2 files · 4 edits",                                // its blast radius
-		"inside comments or string literals",              // the fallback's precision note
-		"/artifact/" + transformHash,                      // the raw-bytes link to the log
+		"Transformations",                    // the section heading
+		"semantic",                           // the precise-mechanism badge
+		"text fallback",                      // the imprecise-mechanism badge
+		"1 via text fallback",                // the header count of fallbacks
+		"greet → hello at a.go:3:6",          // the semantic transform's target
+		"2 files · 4 edits",                  // its blast radius
+		"inside comments or string literals", // the fallback's precision note
+		"/artifact/" + transformHash,         // the raw-bytes link to the log
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("verification page missing transform-log content %q", want)

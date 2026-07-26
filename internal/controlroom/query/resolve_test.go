@@ -102,8 +102,8 @@ func TestBlastRadiusAmbientEditTouchesAllPinned(t *testing.T) {
 	issues := &fakeIssues{all: []core.Issue{
 		{ID: "h-1", Role: "implement", Status: "in_progress", Spec: "specs/a.md", SpecHash: "sha256:pin1"},
 		{ID: "h-2", Role: "qa", Status: "in_progress", Spec: "specs/c.md", SpecHash: "sha256:pin2"}, // unrelated spec, still drifts
-		{ID: "h-3", Role: "implement", Status: "in_progress", Spec: "specs/a.md", SpecHash: ""},      // no pin → skipped
-		{ID: "h-4", Status: "closed", EpicID: "e1", Spec: "specs/a.md", SpecHash: "sha256:z1"},       // merged group, also re-derived
+		{ID: "h-3", Role: "implement", Status: "in_progress", Spec: "specs/a.md", SpecHash: ""},     // no pin → skipped
+		{ID: "h-4", Status: "closed", EpicID: "e1", Spec: "specs/a.md", SpecHash: "sha256:z1"},      // merged group, also re-derived
 	}}
 	r := NewReader(issues, &fakeArts{}, &fakeProv{})
 

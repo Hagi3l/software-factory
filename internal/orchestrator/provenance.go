@@ -29,7 +29,7 @@ const (
 // verified.
 func (o *Orchestrator) provenanceFor(issue core.Issue, res core.Result, report gate.Report) core.Provenance {
 	prov := core.Provenance{
-		Issue:        issue.ID,
+		Issue: issue.ID,
 		// The issue title becomes the commit subject so main's history reads like an
 		// ordinary project's ("Add single-use share link"), not "Integrate <id>". Purely
 		// cosmetic — the durable reference stays the Issue id on the trailer below.

@@ -25,7 +25,7 @@ import (
 // they created. Guarded by a mutex because the Result consumer and the tick loop run
 // concurrently.
 type fakeBeads struct {
-	mu       sync.Mutex
+	mu     sync.Mutex
 	ready  []core.Issue
 	issues map[string]core.Issue
 
@@ -881,9 +881,9 @@ func TestHandleResultAcceptBuildsProvenance(t *testing.T) {
 	o, _ := newOrch(t, cfg, bd, g, m)
 
 	res := core.Result{
-		IssueID:  "iss-1",
-		Status:   core.StatusDone,
-		Branch:   core.Branch{Ref: core.CandidateBranch("iss-1")},
+		IssueID: "iss-1",
+		Status:  core.StatusDone,
+		Branch:  core.Branch{Ref: core.CandidateBranch("iss-1")},
 		Evidence: core.Evidence{
 			PromptSHA: "sha256:9af",
 			// The runner harvested the agent conversation; its hash rides on Evidence and must

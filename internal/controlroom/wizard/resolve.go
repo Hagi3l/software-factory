@@ -36,8 +36,8 @@ const resolveOpening = "Let's resolve this escalation. Review the escalation and
 // It obeys the same session-eviction discipline as New (via register).
 func (p *Planner) NewResolve(seed ResolveSeed) *Session {
 	s := p.register(&Session{
-		ID:          newID(),
-		hub:         live.NewHub(),
+		ID:           newID(),
+		hub:          live.NewHub(),
 		adapter:      p.adapter,
 		persona:      p.persona + "\n\n" + resolveContext(seed),
 		maxTokens:    p.maxTokens,

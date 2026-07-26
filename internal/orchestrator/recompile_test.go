@@ -292,7 +292,7 @@ func TestRecompileMergedDeltaSkipsWithoutDriftSignal(t *testing.T) {
 	o := orchWithPlanDAG(repo, 1)
 	bd := newFakeBeads()
 	o.bd = bd
-	bd.put(core.Issue{ID: "no-pin", Role: "implement", Status: statusClosed, Spec: "specs/orders.md", EpicID: "e1"})    // closed but never pinned -> no version to diff
+	bd.put(core.Issue{ID: "no-pin", Role: "implement", Status: statusClosed, Spec: "specs/orders.md", EpicID: "e1"})                    // closed but never pinned -> no version to diff
 	bd.put(core.Issue{ID: "settled", Role: "implement", Status: statusClosed, Spec: "specs/orders.md", SpecHash: pinned, EpicID: "e2"}) // matches current -> no drift
 	bd.put(core.Issue{ID: "gone", Role: "implement", Status: statusClosed, Spec: "specs/gone.md", SpecHash: "sha256:x", EpicID: "e3"})  // unresolvable -> leave alone
 

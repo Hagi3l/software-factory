@@ -95,13 +95,13 @@ func TestResolveRendersPage(t *testing.T) {
 		t.Fatalf("/resolve status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		"harness-9",                          // the escalation identity
-		"needs-spec-clarification",           // the orchestrator's reason
-		"acceptance criteria are ambiguous",  // the resolved spec slice content
-		`sse-connect="/create/stream/`,       // the shared per-session live stream
-		`hx-get="/resolve/blast/`,            // the resolve-specific blast panel
-		`hx-post="/create/message"`,          // the shared turn form
-		`href="/issue/harness-9"`,            // the drill-through to forensics
+		"harness-9",                         // the escalation identity
+		"needs-spec-clarification",          // the orchestrator's reason
+		"acceptance criteria are ambiguous", // the resolved spec slice content
+		`sse-connect="/create/stream/`,      // the shared per-session live stream
+		`hx-get="/resolve/blast/`,           // the resolve-specific blast panel
+		`hx-post="/create/message"`,         // the shared turn form
+		`href="/issue/harness-9"`,           // the drill-through to forensics
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("/resolve page missing %q\nbody: %s", want, r.body)
@@ -132,9 +132,9 @@ func TestResolveBlastPanel(t *testing.T) {
 		t.Fatalf("/resolve/blast status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		"specs/export.md",  // the proposed spec edit
-		"Blast radius",     // the preview heading
-		"harness-3",        // the in-flight item that would be reissued
+		"specs/export.md",            // the proposed spec edit
+		"Blast radius",               // the preview heading
+		"harness-3",                  // the in-flight item that would be reissued
 		`hx-post="/resolve/approve"`, // the resolve consent gate
 	} {
 		if !strings.Contains(r.body, want) {

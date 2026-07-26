@@ -219,7 +219,7 @@ func TestFromCompletion(t *testing.T) {
 	}
 	// cached_tokens (5) is a subset of prompt_tokens (12); the adapter splits it out so InputTokens
 	// is the non-cached full-rate count (12-5=7) and CacheReadTokens (5) is priced separately —
-	// never double-counted. See fromCompletion + BUG-3 in demo/vault/demo-bugs.md.
+	// never double-counted. See fromCompletion and TestFromCompletionCacheAccountingNoDoubleCount.
 	wantUsage := model.Usage{InputTokens: 7, OutputTokens: 7, CacheReadTokens: 5}
 	if resp.Usage != wantUsage {
 		t.Errorf("Usage = %+v, want %+v", resp.Usage, wantUsage)
@@ -643,8 +643,8 @@ func TestFromCompletionMapsCacheWrite(t *testing.T) {
 	}
 }
 
-// TestFromCompletionCacheAccountingNoDoubleCount is the regression guard for BUG-3
-// (demo/vault/demo-bugs.md): OpenAI/OpenRouter fold cached tokens into prompt_tokens, so the
+// TestFromCompletionCacheAccountingNoDoubleCount is the regression guard for a live-run
+// cost bug (a ~5× overstatement): OpenAI/OpenRouter fold cached tokens into prompt_tokens, so the
 // adapter must exclude them from InputTokens or the cached tokens are billed AND counted twice.
 // It pins both the token split and the resulting USD so the prompt-cache discount can never again
 // be silently negated on the openai-compat path.

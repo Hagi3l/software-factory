@@ -36,10 +36,10 @@ func TestEntryRole(t *testing.T) {
 	// conflict, not through a produces edge — but it is NOT a pipeline entry, so it must be
 	// excluded: plan + resolve must still resolve to the single entry `planner`, not error.
 	withResolve := &config.Config{Harness: &config.Harness{DAG: map[string]config.Stage{
-		"plan":     {Role: "planner", Kind: config.StageKindPlan, Produces: []string{"implement"}},
+		"plan":      {Role: "planner", Kind: config.StageKindPlan, Produces: []string{"implement"}},
 		"implement": {Role: "implementor", Produces: []string{"integrate"}},
 		"integrate": {Kind: config.StageKindTrustedMerge},
-		"resolve":  {Role: "merge-resolver", Kind: config.StageKindResolve, Produces: []string{"integrate"}},
+		"resolve":   {Role: "merge-resolver", Kind: config.StageKindResolve, Produces: []string{"integrate"}},
 	}}}
 	if r, rerr := entryRole(withResolve); rerr != nil || r != "planner" {
 		t.Fatalf("entryRole with a resolve stage = (%q,%v), want (planner,nil) — resolve is not a pipeline entry", r, rerr)

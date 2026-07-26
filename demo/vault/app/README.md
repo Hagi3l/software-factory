@@ -22,8 +22,10 @@ sensitive action. Go + templ + htmx + Tailwind + SQLite, no JavaScript build ste
 > the immutable starting point), so the history here is intentionally short — it shows one
 > baseline plus whatever was just built on stage.
 >
-> The factory that does this lives in a separate, private repository. This repo only ever
-> contains the vault and the features the agents add to it.
+> The factory that does this lives in this repository: the vault app is the demo subject of
+> the harness it ships inside (`demo/vault/app`). A demo run copies the app into a scratch
+> repo, so the demo's target only ever contains the vault and the features the agents add
+> to it.
 
 ## Features
 
@@ -60,7 +62,11 @@ every change. Binding rules (see [`specs/`](specs/)): parameterized SQL only; `c
 for all tokens/nonces/salts; `subtle.ConstantTimeCompare` for secret comparisons;
 `HttpOnly` session cookies behind auth middleware (`SameSite=None; Secure` by default so the
 app runs inside the deck's cross-site iframe — `VAULT_STRICT_COOKIE` hardens it to `Strict`;
-see `specs/auth.md`).
+see `specs/auth.md`). One deliberate trade-off: `SameSite=None` removes the browser's
+implicit CSRF defence and the app adds no CSRF token or Origin check on its state-changing
+endpoints; this demo accepts that because it holds no real secrets. A production deployment
+must set `VAULT_STRICT_COOKIE` **and** add CSRF protection (a token or an
+Origin/`Sec-Fetch-Site` check).
 
 ## Layout
 

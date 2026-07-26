@@ -21,17 +21,14 @@ A CI/CD pipeline whose build steps are hostile-by-assumption agents.
   rationale, link to the spec instead of duplicating it (the spec stays the truth).
 
 ## Status
-**Phases 2–4 essentially built out (by hand, human-reviewed — not self-hosted).**
-The kernel does `spec → implement → gate → merge` end-to-end (a live run needs a
-Docker daemon + `ANTHROPIC_API_KEY`); on top of it Phase 2 (independent
-verification), Phase 3 (full DAG, decomposition, merge queue), and Phase 4 (control
-room + Create-Task wizard, incl. **T4.15 Resolve mode**) are complete; Phase 2 is now
-fully complete (T2.12 run-all-independent-scanners landed; N-version diversity, T2.11,
-is resolved as configuration, with the non-fatal `harness validate` family-overlap
-advisory T2.13 done). Phase 14 (trusted-layer hardening) is complete. **Phase
-5** (production isolation & distribution — Firecracker, distributed NATS, scoped
-secrets, signing) is the only remaining engineering (all optional or
-hardware-blocked). `cmd/harness` exposes
+**All engineering phases through 15 are complete (built by hand, human-reviewed —
+not self-hosted).** The kernel does `spec → implement → gate → merge` end-to-end (a
+live run needs a Docker daemon + `ANTHROPIC_API_KEY`); on top of it sit independent
+verification, the full DAG with decomposition and a merge queue, the control room
+with the Create-Task/Resolve wizard, and most of Phase 5's production substrate
+(gVisor backend, distributed NATS, scoped secrets, S3 artifacts, provenance
+signing). The only open build work is the rest of **Phase 5**: T5.2 Firecracker
+(hardware-blocked — needs KVM) and optional warm pools / HA (T5.11). `cmd/harness` exposes
 `validate`/`seed`/`run`/`approve`/`reject`/`serve`; bootstrap config lives in
 `config/` (`harness validate --config config`). The autonomous self-hosting loop is
 buildable/testable offline but has **not been switched on** (no hosted capable
@@ -61,7 +58,7 @@ model). See `IMPLEMENTATION_PLAN.md` for the per-task detail.
   all statuses) needs `--all` / `--status ... --flat` (this is `beads.ListAll`).
 - Model layer: canonical types + thin per-provider adapters over official Go SDKs.
   No agent framework.
-- Control room (later): htmx + Alpine + templ + Tailwind standalone CLI + embed.FS.
+- Control room: htmx + Alpine + templ + Tailwind standalone CLI + embed.FS.
 
 ## Code search
 Prefer LSP over Grep for code navigation (once code exists):
@@ -75,9 +72,8 @@ golangci-lint v2 — `brew install golangci-lint`; if it's in `$(go env GOPATH)/
 but not on PATH, run `export PATH="$PATH:$(go env GOPATH)/bin"` first), then unit
 tests. The `misspell` linter is `locale: US`, so use **US spellings in Go
 comments/identifiers** (`behavior`/`neighbor`/`fulfill`/`modeled`); specs may stay
-British. Code **formatting is not gated** — `.golangci.yml` enables no formatters and
-`make check` runs `golangci-lint run` (not `fmt`), so `gofmt -l` flags committed files
-that pass the gate cleanly; trust `golangci-lint run`, don't reformat unrelated files.
+British. Code formatting is not linter-gated (`.golangci.yml` enables no formatters),
+but the tree is kept `gofmt`-clean — run `gofmt -w` on files you touch.
 On **macOS** the default `$TMPDIR` (`/var/folders/…`) overruns the ~104-char unix-socket
 path limit, so broker-socket tests (`internal/gate`, `internal/runner`, incl. the embedded-NATS
 ones) fail with `bind: invalid argument` / `invoker was never called`. These are **not code
@@ -119,7 +115,7 @@ jq -rs '
 (`go install github.com/a-h/templ/cmd/templ`) compiled to committed
 `*_templ.go`; CSS is the **Tailwind v4 standalone CLI** (`make tailwind` fetches the pinned
 binary into gitignored `bin/`). Run `make generate` after editing any `*.templ` or
-`assets/app.tw.css` — it runs `templ generate` then Tailwind. **But** the committed
+`internal/controlroom/assets/app.tw.css` — it runs `templ generate` then Tailwind. **But** the committed
 `*_templ.go` carry a repo-root-relative `FileName` (`internal/controlroom/views/x.templ`),
 while `make generate`'s `go generate` runs templ from the package dir (the `//go:generate`
 directive lives in `internal/controlroom/generate.go`), rewriting every file's prefix to
@@ -128,8 +124,9 @@ from the repo root** (then `make tailwind`-built CSS via the Makefile if CSS cha
 `$(go env GOPATH)/bin`, so `make generate` needs the same `export PATH="$PATH:$(go env GOPATH)/bin"`
 the lint step does (tailwind is found via the Makefile's `bin/` path). A plain `make build` needs
 neither tool (generated Go + compiled `app.css` are committed). The Tailwind input
-(`assets/app.tw.css`) uses `@source` globs pointing at the views dir; vendored JS
-(htmx/Alpine) lives in `assets/static/` and is embedded via `//go:embed`.
+(`internal/controlroom/assets/app.tw.css`) uses `@source` globs pointing at the views
+dir; vendored JS (htmx/Alpine) lives in `internal/controlroom/assets/static/` and is
+embedded via `//go:embed`.
 
 The live SSE feed (`GET /events`) needs the run's in-process NATS, so it is served
 **co-located**: `harness run --serve-addr 127.0.0.1:8080` runs the factory *and* the
@@ -151,4 +148,4 @@ The LSP session-manager tests that exercise a **real gopls** (`agent.TestSession
 and the streamed-session round-trip (`sandbox.TestDockerSessionRoundTrip`) are not
 build-tagged — they **skip** unless `docker`+`git` are present, and the gopls one also
 needs the `go-toolchain:latest` image (build from `deploy/go-toolchain.Dockerfile`); they
-run in this dev box and stay inert elsewhere.
+run on a Docker-equipped development machine and stay inert elsewhere.

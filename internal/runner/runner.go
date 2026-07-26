@@ -445,14 +445,14 @@ func (r *Runner) invoke(ctx context.Context, brief core.Brief) (core.Result, err
 	// The relay is the audited chokepoint: model calls go through the resolved adapter,
 	// events to this invocation's subject, git push only onto this task's branch.
 	rel := newRelay(adapter, r.pub, sb, relayConfig{
-		eventSubject:  messaging.AgentEventsSubject(invID),
-		issueID:       brief.Issue.ID,
-		role:          brief.Issue.Role,
-		repo:          r.opts.Repo,
-		allowedBranch: core.CandidateBranch(brief.Issue.ID),
-		remote:        r.opts.GitRemote,
-		minter:        r.opts.Minter,
-		packageProxy:  r.opts.PackageProxy,
+		eventSubject:   messaging.AgentEventsSubject(invID),
+		issueID:        brief.Issue.ID,
+		role:           brief.Issue.Role,
+		repo:           r.opts.Repo,
+		allowedBranch:  core.CandidateBranch(brief.Issue.ID),
+		remote:         r.opts.GitRemote,
+		minter:         r.opts.Minter,
+		packageProxy:   r.opts.PackageProxy,
 		log:            ilog,
 		tel:            r.tel,
 		model:          brief.Soul.Model,
@@ -628,7 +628,6 @@ func formatTraceabilityMap(entries []core.TraceEntry) []byte {
 	}
 	return []byte(b.String())
 }
-
 
 // publishResult sends the harvested Result back on the role's result subject for the
 // orchestrator to consume and validate. Large evidence is referenced by hash into

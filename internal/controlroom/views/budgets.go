@@ -137,7 +137,7 @@ func tokenBreakdown(in, out, cacheRead, cacheCreate int) string {
 	return join(parts)
 }
 
-func join(parts []string) string  { return join2(parts, " · ") }
+func join(parts []string) string { return join2(parts, " · ") }
 func join2(parts []string, sep string) string {
 	out := ""
 	for i, p := range parts {

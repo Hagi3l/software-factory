@@ -7,10 +7,10 @@
 # pipeline (plan -> author-tests -> implement -> qa -> integrate) take it to a merge on
 # `main` — driven by Anthropic models served through OpenRouter. See demo/vault/README.md.
 #
-# The scratch repo is wired to a PUBLIC GitHub repo (VAULT_REMOTE): it is reset to the green
-# seed at startup, and each landed feature's machine-authored merge commit is pushed there —
-# the artifact the audience inspects, and the push that fires the deploy (GitHub Actions ->
-# your VPS). Set VAULT_REMOTE='' for a purely-local run.
+# The scratch repo stays local by default. Optionally wire it to a PUBLIC GitHub repo you
+# own (set VAULT_REMOTE): it is reset to the green seed at startup, and each landed feature's
+# machine-authored merge commit is pushed there — the artifact the audience inspects, and the
+# push that fires the deploy (GitHub Actions -> your VPS).
 #
 # Unlike demo/run.sh this does NOT seed an issue: the requirement is drafted on stage via
 # the wizard at /create. The repo ships green, so the agents extend a clean tree.
@@ -24,7 +24,7 @@
 #   MODEL_ENDPOINT='https://openrouter.ai/api/v1' ./demo/vault/run.sh
 #   SERVE_ADDR='127.0.0.1:9000' ./demo/vault/run.sh
 #   BD=/path/to/bd ./demo/vault/run.sh                      # override the beads CLI
-#   VAULT_REMOTE='' ./demo/vault/run.sh                     # purely local; no GitHub push (default: push to the public repo)
+#   VAULT_REMOTE='git@github.com:you/yourrepo.git' ./demo/vault/run.sh   # mirror merges to your public repo (default: local-only, no push)
 #   KEEP_SITE=1 ./demo/vault/run.sh                         # don't delete the scratch repo on exit
 #   JAEGER=1 ./demo/vault/run.sh                            # spin a Jaeger container; export OTel traces to it
 #   OPENOBSERVE=1 ./demo/vault/run.sh                       # spin an OpenObserve container; export ALL THREE signals (traces+logs+metrics) to it
@@ -35,7 +35,7 @@ set -euo pipefail
 # The Sonnet slug, shared by the wizard + the producer execution souls (implementor/merge-
 # resolver). MODEL= rewrites it (and its registry entry) across all of them, so an override is
 # a Sonnet-tier swap; the Opus-pinned correctness roles (decomposition planner, test-author)
-# and the DeepSeek-pinned security verifier (a deliberately different model family — see
+# and the GLM-pinned security verifier (a deliberately different model family — see
 # infra.dev.yaml) name their own slugs and are never touched. Set an OpenRouter model slug.
 DEFAULT_MODEL='anthropic/claude-sonnet-5'
 DEFAULT_ENDPOINT='https://openrouter.ai/api/v1'
@@ -44,9 +44,10 @@ MODEL_ENDPOINT="${MODEL_ENDPOINT:-$DEFAULT_ENDPOINT}"
 SERVE_ADDR="${SERVE_ADDR:-127.0.0.1:8080}"
 BD="${BD:-bd}"
 # Public GitHub repo the merged `main` is pushed to (the artifact the audience inspects).
-# Reset to the green seed at startup, then each landed feature is pushed onto it. Set empty
-# (VAULT_REMOTE='') for a purely-local run with no GitHub push.
-VAULT_REMOTE="${VAULT_REMOTE:-git@github.com:Loxstomper/vault.git}"
+# Reset to the green seed at startup, then each landed feature is pushed onto it. Empty by
+# default — the demo repo stays local; set VAULT_REMOTE=git@github.com:you/yourrepo.git
+# (a repo you can push to) to enable the mirror + deploy story.
+VAULT_REMOTE="${VAULT_REMOTE:-}"
 IMAGE='vault-toolchain'       # sandbox profile named by the vault souls
 BASE_IMAGE='go-toolchain'     # carries the shim binary the vault image copies out
 BASE_STABLE="${BASE_IMAGE}-base"  # the binary-free stable stage the vault image bases on
@@ -241,7 +242,9 @@ git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
 # and then the landed feature is pushed on top. `seed` is an immutable browsable ref; `main`
 # is force-reset to it. The seed commit's tree is just the app (no .beads, no build
 # artifacts), so the public repo only ever shows the vault and the feature the agents add.
-if [ -n "$VAULT_REMOTE" ]; then
+if [ -z "$VAULT_REMOTE" ]; then
+  say "VAULT_REMOTE not set — skipping GitHub mirror, demo repo stays local; set VAULT_REMOTE=git@github.com:you/yourrepo.git to enable"
+else
   say "Resetting public repo to the green seed: $VAULT_REMOTE"
   git -C "$SITE" remote add public "$VAULT_REMOTE"
   # Graft the seed onto the previous public main before pushing. A parentless root commit

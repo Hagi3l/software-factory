@@ -140,4 +140,3 @@ reject routes a fresh fix attempt (or dead-letters when retries are spent). See
   -t go-toolchain .`) so the gate runs them offline under the zero-network invariant.
 - **`make check` times out** — a known infra flake under full-suite parallel NATS load;
   re-run, or run the single package in isolation. See `IMPLEMENTATION_PLAN.md`.
-</content>

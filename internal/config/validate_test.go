@@ -253,10 +253,10 @@ func TestValidateIndependentChecksRejections(t *testing.T) {
 		names    []string
 		fragment string
 	}{
-		"reserved proof":   {[]string{"tests-red-then-green"}, `reserved proof "tests-red-then-green"`},
-		"unregistered":     {[]string{"nope"}, `references "nope", which is not a command in checks:`},
-		"metric command":   {[]string{"mutation"}, `lists "mutation", a metric measurement command`},
-		"duplicate":        {[]string{"gosec", "gosec"}, `lists "gosec" more than once`},
+		"reserved proof": {[]string{"tests-red-then-green"}, `reserved proof "tests-red-then-green"`},
+		"unregistered":   {[]string{"nope"}, `references "nope", which is not a command in checks:`},
+		"metric command": {[]string{"mutation"}, `lists "mutation", a metric measurement command`},
+		"duplicate":      {[]string{"gosec", "gosec"}, `lists "gosec" more than once`},
 	}
 	for name, tc := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -610,9 +610,9 @@ func TestValidateOTelHeadersValid(t *testing.T) {
 	c.Infra.OTel = OTelConfig{
 		Endpoint: "localhost:5081",
 		Headers: map[string]string{
-			"organization":  "default",            // routing metadata — literal OK
-			"stream-name":   "default",            // routing metadata — literal OK
-			"authorization": "${OTEL_OTLP_AUTH}",  // credential — must be an env ref
+			"organization":  "default",           // routing metadata — literal OK
+			"stream-name":   "default",           // routing metadata — literal OK
+			"authorization": "${OTEL_OTLP_AUTH}", // credential — must be an env ref
 		},
 	}
 	if err := c.Validate(); err != nil {
@@ -784,9 +784,9 @@ func TestValidateArtifactsRejectsMisconfigured(t *testing.T) {
 // a validation failure. See specs/security.md, internal/config/infra.go.
 func TestValidateSigningValidForms(t *testing.T) {
 	cases := []SigningConfig{
-		{},                                                          // unset → off, the default
-		{Enabled: false, Key: "/keys/harness"},                      // key present but disabled → off, fine
-		{Enabled: true, Key: "/keys/harness"},                       // signing on with a key
+		{},                                     // unset → off, the default
+		{Enabled: false, Key: "/keys/harness"}, // key present but disabled → off, fine
+		{Enabled: true, Key: "/keys/harness"},  // signing on with a key
 		{Enabled: true, Key: "/keys/harness", AllowedSigners: "/a"}, // sign + verify-on-read
 		{AllowedSigners: "/allowed_signers"},                        // verify-only host (no signing)
 	}
@@ -839,12 +839,12 @@ func TestSigningConfigActive(t *testing.T) {
 func TestValidateNATSValidForms(t *testing.T) {
 	cases := []NATSConfig{
 		{}, // empty url + zero knobs → embedded, single replica
-		{JetStream: JetStreamConfig{Replicas: 1, MaxAge: Duration(1)}},                 // embedded, explicit single replica
-		{URL: "nats://host:4222", JetStream: JetStreamConfig{Replicas: 3}},             // external cluster, 3 replicas
-		{URL: "nats://a:4222,nats://b:4222", JetStream: JetStreamConfig{Replicas: 2}},  // cluster list
-		{URL: "host:4222"},                                                            // bare host:port
-		{URL: "tls://host:4222"},                                                       // TLS transport
-		{URL: "nats://host"},                                                           // scheme without port (defaults to 4222)
+		{JetStream: JetStreamConfig{Replicas: 1, MaxAge: Duration(1)}},                // embedded, explicit single replica
+		{URL: "nats://host:4222", JetStream: JetStreamConfig{Replicas: 3}},            // external cluster, 3 replicas
+		{URL: "nats://a:4222,nats://b:4222", JetStream: JetStreamConfig{Replicas: 2}}, // cluster list
+		{URL: "host:4222"},       // bare host:port
+		{URL: "tls://host:4222"}, // TLS transport
+		{URL: "nats://host"},     // scheme without port (defaults to 4222)
 	}
 	for _, n := range cases {
 		c := validConfig()

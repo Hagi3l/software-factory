@@ -263,8 +263,8 @@ func TestRebuildHydratesFullWorkGraph(t *testing.T) {
 	bd := newFakeBeads()
 	bd.put(inProgress("iss-1", "implement", 0))
 	bd.put(inProgress("iss-2", "implement", 0))
-	bd.put(core.Issue{ID: "iss-3", Role: "implement", Status: "open"})           // ready, not in flight
-	bd.put(core.Issue{ID: "iss-4", Role: "implement", Status: statusClosed})     // settled (integrated/closed)
+	bd.put(core.Issue{ID: "iss-3", Role: "implement", Status: "open"})       // ready, not in flight
+	bd.put(core.Issue{ID: "iss-4", Role: "implement", Status: statusClosed}) // settled (integrated/closed)
 	o, _ := newOrch(t, kernelConfig(2), bd, &fakeGate{}, &fakeMerger{})
 
 	// newOrch already rebuilt; the in_progress set seeds the in-flight accessors, `open`/`closed` do not.

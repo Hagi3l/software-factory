@@ -41,10 +41,14 @@ specs/                the specs (this directory)
   encryption key is held in the session in memory; the store stays encryption-agnostic.
 - **Randomness & comparisons.** Use `crypto/rand` for all tokens/nonces/salts (never
   `math/rand`) and `subtle.ConstantTimeCompare` for secret comparisons.
-- **Sessions are hardened.** Cookies are `HttpOnly`; protected routes go through the `auth`
-  middleware. `SameSite` defaults to `None; Secure` so the app is authenticatable inside the
-  deck's cross-site iframe, with `VAULT_STRICT_COOKIE` to harden it back to `Strict` — see
-  `specs/auth.md` for the rationale.
+- **Sessions.** Cookies are `HttpOnly`; protected routes go through the `auth` middleware.
+  `SameSite` defaults to `None; Secure` so the app is authenticatable inside the deck's
+  cross-site iframe, with `VAULT_STRICT_COOKIE` to harden it back to `Strict` — see
+  `specs/auth.md` for the rationale. Know the trade-off: `SameSite=None` removes the
+  browser's implicit CSRF defence and the app adds no CSRF token or Origin check; this demo
+  accepts that because it holds no real secrets. A production deployment must set
+  `VAULT_STRICT_COOKIE` **and** add CSRF protection (a token or an
+  Origin/`Sec-Fetch-Site` check).
 - **Timestamps render in the viewer's timezone.** Store and serve UTC only. A view that
   shows an *instant* (audit times, "last activity") emits
   `<time datetime="<RFC 3339 UTC>">` with labeled-UTC fallback text — never

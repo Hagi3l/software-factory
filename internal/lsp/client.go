@@ -40,7 +40,7 @@ type Client struct {
 	mu      sync.Mutex
 	nextID  int
 	pending map[int]chan rpcResult
-	diags   map[string][]Diagnostic   // latest publishDiagnostics per document URI
+	diags   map[string][]Diagnostic    // latest publishDiagnostics per document URI
 	diagW   map[string][]chan struct{} // waiters blocked on the first diagnostics for a URI
 	closed  bool
 	failErr error

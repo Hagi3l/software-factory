@@ -4,27 +4,28 @@ One-time setup for the DigitalOcean droplet the vault demo deploys to. Do this *
 then **snapshot the droplet** — on demo day you restore the snapshot, re-attach the Reserved
 IP, and everything below is already in place.
 
-This file is harness-side (private) on purpose: it describes *your* VPS, domain, and
-hardening. It is **not** part of the public vault repo — that repo only ever contains the app
-and the features the agents add.
+This file is a **template runbook** for deploying *your own* instance: it uses
+`vault.example.com` / `example.com` throughout — substitute your domain (and your provider's
+equivalents, if not DigitalOcean) as you go. It stays harness-side and is **not** part of the
+public vault repo — that repo only ever contains the app and the features the agents add.
 
-Target: `https://vault.lochie.dev`, deployed by `app/.github/workflows/deploy.yml` on every
+Target: `https://vault.example.com`, deployed by `app/.github/workflows/deploy.yml` on every
 push to the public repo's `main`.
 
 ```
 browser ──HTTPS(443)──> Caddy ──> vault (127.0.0.1:8000)
 GitHub Action ──SSH(22)──> droplet
-vault.lochie.dev ──DNS──> DO Reserved IP ──> droplet (snapshot-restored)
+vault.example.com ──DNS──> DO Reserved IP ──> droplet (snapshot-restored)
 ```
 
 ## 1. Reserved IP + DNS (stable address)
 
 1. **DigitalOcean → Networking → Reserved IPs** — create one, assign it to the droplet. This
    IP is stable across snapshot restores (just re-assign it), so DNS never needs updating.
-2. **DNS for `lochie.dev`** — add an `A` record: name `vault`, value = the Reserved IP,
+2. **DNS for `example.com`** — add an `A` record: name `vault`, value = the Reserved IP,
    **proxy off (grey cloud / DNS-only)**, TTL 60s. Grey cloud is required — SSH and Caddy's
    HTTP-01 cert challenge both need the real IP reachable.
-3. Verify: `dig +short vault.lochie.dev` returns the Reserved IP.
+3. Verify: `dig +short vault.example.com` returns the Reserved IP.
 
 ## 2. Harden SSH
 
@@ -124,12 +125,12 @@ sudo apt install -y caddy   # or the official Caddy apt repo
 `/etc/caddy/Caddyfile`:
 
 ```
-vault.lochie.dev {
+vault.example.com {
     reverse_proxy 127.0.0.1:8000
 }
 ```
 
-`sudo systemctl reload caddy`. Caddy fetches a Let's Encrypt cert for `vault.lochie.dev`
+`sudo systemctl reload caddy`. Caddy fetches a Let's Encrypt cert for `vault.example.com`
 automatically on first request.
 
 ## 6. GitHub Actions secrets
@@ -138,7 +139,7 @@ On the public vault repo → Settings → Secrets and variables → Actions:
 
 | Secret | Value |
 |---|---|
-| `VPS_HOST` | `vault.lochie.dev` (or the Reserved IP) |
+| `VPS_HOST` | `vault.example.com` (or the Reserved IP) |
 | `VPS_USER` | `deploy` |
 | `VPS_SSH_KEY` | the **private** half of the `vault-deploy` keypair |
 
@@ -148,5 +149,5 @@ On the public vault repo → Settings → Secrets and variables → Actions:
    (DigitalOcean → droplet → Snapshots).
 2. Destroy the droplet to stop paying for it.
 3. **Demo day:** create a droplet from the snapshot, re-attach the Reserved IP, confirm
-   `vault.lochie.dev` resolves, and you're live. Nothing else changes — `VPS_HOST` and the
+   `vault.example.com` resolves, and you're live. Nothing else changes — `VPS_HOST` and the
    browser URL are stable. Destroy it again afterward.

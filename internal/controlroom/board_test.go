@@ -239,14 +239,14 @@ func TestBoardInMotion(t *testing.T) {
 	created := strconv.FormatInt(cardEntered.Add(-24*time.Hour).Unix(), 10)
 	for _, want := range []string{
 		`hx-trigger="sse:issue-state throttle:2s, every 15s"`, // crisp refresh off the typed event
-		"transition:true",                       // View Transitions opt-in for animated moves
-		`id="card-harness-1"`,                    // stable identity per card
-		"view-transition-name: card-harness-1",  // the pairing key the browser tweens on
-		`x-data="cardTicker()"`,                  // the client-ticked timer
-		`data-state-since="` + since + `"`,       // time-in-state anchor (StateEnteredAt)
-		`data-created="` + created + `"`,         // total-time anchor (CreatedAt)
-		"working",                                // status→label for the in_progress card
-		`<script src="/static/ticker.js"`,        // the ticker is loaded
+		"transition:true",                      // View Transitions opt-in for animated moves
+		`id="card-harness-1"`,                  // stable identity per card
+		"view-transition-name: card-harness-1", // the pairing key the browser tweens on
+		`x-data="cardTicker()"`,                // the client-ticked timer
+		`data-state-since="` + since + `"`,     // time-in-state anchor (StateEnteredAt)
+		`data-created="` + created + `"`,       // total-time anchor (CreatedAt)
+		"working",                              // status→label for the in_progress card
+		`<script src="/static/ticker.js"`,      // the ticker is loaded
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("board page missing %q", want)
@@ -452,11 +452,11 @@ func TestBoardEpicChromeRenders(t *testing.T) {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		"epic feat-1",          // the shared epic badge text (the robust, non-color identifier)
-		"border-left-color",    // the hue-hashed tint on the card's inline style
-		"integrating",          // the hero's feature state (nothing landed on main in the fake prov)
-		"integrated",           // the hero's progress label
-		"1/2",                  // children integrated / total (feat-1.1 integrated; feat-1.2 in flight; root excluded)
+		"epic feat-1",       // the shared epic badge text (the robust, non-color identifier)
+		"border-left-color", // the hue-hashed tint on the card's inline style
+		"integrating",       // the hero's feature state (nothing landed on main in the fake prov)
+		"integrated",        // the hero's progress label
+		"1/2",               // children integrated / total (feat-1.1 integrated; feat-1.2 in flight; root excluded)
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("epic board missing %q", want)
@@ -493,12 +493,12 @@ func TestBoardLineageChromeRenders(t *testing.T) {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		`data-epic="feat-1"`,        // the grouping key the overlay reads
-		`data-parent="feat-1"`,      // the lineage edge: a child threads to the epic root
-		"--epic:",                   // the one color source published on the card
-		"var(--epic)",               // the tint reads the custom property, not a re-hash
-		"data-board-scroll",         // the overlay's content-space anchor
-		"/static/lineage.js",        // the thread overlay is loaded
+		`data-epic="feat-1"`,   // the grouping key the overlay reads
+		`data-parent="feat-1"`, // the lineage edge: a child threads to the epic root
+		"--epic:",              // the one color source published on the card
+		"var(--epic)",          // the tint reads the custom property, not a re-hash
+		"data-board-scroll",    // the overlay's content-space anchor
+		"/static/lineage.js",   // the thread overlay is loaded
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("lineage board missing %q", want)

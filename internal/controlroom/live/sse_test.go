@@ -104,9 +104,9 @@ func TestStreamHeartbeat(t *testing.T) {
 // writer that would buffer the live feed.
 type nonFlushWriter struct{ h http.Header }
 
-func (n *nonFlushWriter) Header() http.Header       { return n.h }
+func (n *nonFlushWriter) Header() http.Header         { return n.h }
 func (n *nonFlushWriter) Write(b []byte) (int, error) { return len(b), nil }
-func (n *nonFlushWriter) WriteHeader(int)            {}
+func (n *nonFlushWriter) WriteHeader(int)             {}
 
 func TestStreamRequiresFlusher(t *testing.T) {
 	w := &nonFlushWriter{h: http.Header{}}

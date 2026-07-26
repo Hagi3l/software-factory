@@ -88,7 +88,7 @@ func TestConfigSurfacesAdvisories(t *testing.T) {
 		"verifier role",                       // names the verifier role
 		"implementor",                         // the producer role
 		"security",                            // the verifier role
-		"weakening the N-version independent",  // the rationale
+		"weakening the N-version independent", // the rationale
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("/config missing advisory content %q", want)

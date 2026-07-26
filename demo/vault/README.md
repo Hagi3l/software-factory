@@ -3,9 +3,9 @@
 This demo shows the harness doing its real job on a **non-trivial, already-built
 codebase**: a human authors a *new feature requirement* in the control-room wizard, and
 sandboxed, independently-verified agents plan it, write failing tests, implement it, pass
-an independent security re-gate, and merge it to `main` — driven by **Anthropic + DeepSeek
+an independent security re-gate, and merge it to `main` — driven by **Anthropic + GLM
 models via OpenRouter** (Opus for the roles that define correctness, Sonnet for the rest of
-the producer path, and a **different-family DeepSeek verifier** so producer≠verifier holds
+the producer path, and a **different-family GLM (Zhipu) verifier** so producer≠verifier holds
 at the model level too), so all you need is one OpenRouter API key.
 
 The target repo is an **established secrets vault**: a Go + templ + htmx + Tailwind +
@@ -92,10 +92,12 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
     whose output is re-gated deterministically, so at ~$0.91/$2.86 per Mtok (still well under
     Sonnet) a cheaper model degrades polish, never the gate's floor. Set in
     `config/souls/security.yaml`.
-  - *(If you switch to first-party Anthropic — `provider: anthropic`, an `ANTHROPIC_API_KEY` —
-    each model entry can take an optional `effort:` (`low`|`medium`|`high`|`xhigh`|`max`), the
-    `output_config.effort` intelligence↔latency↔cost dial. It's not wired on the openai-compat
-    /OpenRouter path, so the demo as shipped runs at the models' default effort.)*
+  - *(The `effort:` dial (`low`|`medium`|`high`|`xhigh`|`max`) is wired on both paths. On the
+    openai-compat/OpenRouter path each entry pairs it with `effort_param`, the request field the
+    model actually reads — `verbosity` for the Claude tiers (mapped to `output_config.effort`),
+    `reasoning` for GLM — which is how `config/infra.dev.yaml` pins Opus at `high`, Sonnet and
+    GLM at `medium`. On first-party Anthropic (`provider: anthropic`, an `ANTHROPIC_API_KEY`)
+    `effort:` maps straight to `output_config.effort`, no `effort_param` needed.)*
 - **beads** (`bd`) on your `PATH` (or pass `BD=/path/to/bd`), and **dolt** on your `PATH`
   (`brew install dolt`). The demo runs beads in **server mode**: `run.sh` has `bd init`
   auto-start a persistent per-run `dolt sql-server` (data under the scratch repo's
@@ -107,9 +109,9 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
 - *(only for `OPENOBSERVE=1`)* **`curl`** on your `PATH` — `run.sh` uses it to health-check
   OpenObserve and POST the dashboard. Not needed for a default or `JAEGER=1` run.
 - *(optional, for the public-repo + deploy story)* a **public GitHub repo** you can push to
-  (default `git@github.com:Loxstomper/vault.git`; override with `VAULT_REMOTE=`) and a **VPS**
-  for the deploy. Run with `VAULT_REMOTE=''` to stay purely local — the full pipeline still
-  runs and merges, it just doesn't push or deploy.
+  (set `VAULT_REMOTE=git@github.com:you/yourrepo.git`) and a **VPS** for the deploy. Unset —
+  the default — the demo stays purely local: the full pipeline still runs and merges, it just
+  doesn't push or deploy.
 
 On every run the `go-toolchain-base` / `go-toolchain` images and then the `vault-toolchain`
 image are (re)built automatically. Docker's layer cache makes an unchanged rebuild
@@ -155,9 +157,10 @@ Then open the control room at <http://127.0.0.1:8080>.
 ### Push to a public repo + deploy
 
 This is the "no smoke and mirrors" surface: the audience inspects a **real public GitHub
-repo** and watches a feature they didn't write appear on it. Set `VAULT_REMOTE` to that repo
-(it defaults to `git@github.com:Loxstomper/vault.git`; the host running `run.sh` needs push
-access — a deploy key or SSH key).
+repo** and watches a feature they didn't write appear on it. It is opt-in: set `VAULT_REMOTE`
+to a repo you own (e.g. `VAULT_REMOTE=git@github.com:you/yourrepo.git`; the host running
+`run.sh` needs push access — a deploy key or SSH key). Left unset, `run.sh` skips the mirror
+entirely and the demo repo stays local.
 
 - **At startup**, `run.sh` resets the public repo to the green baseline: it force-pushes the
   seed to `main` and to an immutable `seed` ref. Every run starts from an identical pristine
@@ -170,7 +173,7 @@ access — a deploy key or SSH key).
 - **The push fires the deploy.** [`app/.github/workflows/deploy.yml`](app/.github/workflows/deploy.yml)
   builds a single static binary (pure-Go SQLite + embedded assets — no runtime deps) and
   ships it to your VPS over SSH, where it runs as a `vault` systemd service behind Caddy at
-  `https://vault.lochie.dev`. The one-time VPS setup (Reserved IP, DNS, SSH hardening, deploy
+  `https://vault.example.com`. The one-time VPS setup (Reserved IP, DNS, SSH hardening, deploy
   user, Caddy, systemd) is the runbook in [`DEPLOY.md`](DEPLOY.md) — do it once and snapshot.
   The full loop on stage: **describe → agents build → commit appears on GitHub (machine author
   + provenance) → Actions go green → refresh the live URL → the feature is there.**

@@ -314,9 +314,9 @@ func TestApplyDuplicateKeyRejected(t *testing.T) {
 func TestApplyValidation(t *testing.T) {
 	c, calls := recordingClient(func([]string) ([]byte, error) { return nil, nil })
 	cases := []core.Proposal{
-		{Issue: core.Issue{Title: "  ", Role: "implement"}},                            // empty title
-		{Issue: core.Issue{Title: "t"}},                                                // empty role
-		{Issue: core.Issue{Title: "t", Role: "implement"}, DependsOn: []string{""}},    // empty dep id
+		{Issue: core.Issue{Title: "  ", Role: "implement"}},                         // empty title
+		{Issue: core.Issue{Title: "t"}},                                             // empty role
+		{Issue: core.Issue{Title: "t", Role: "implement"}, DependsOn: []string{""}}, // empty dep id
 	}
 	for i, p := range cases {
 		if _, err := c.Apply(context.Background(), []core.Proposal{p}); err == nil {

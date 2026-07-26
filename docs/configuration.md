@@ -516,4 +516,3 @@ models:
 ```
 
 This is how the kernel was validated end-to-end without a hosted key.
-</content>

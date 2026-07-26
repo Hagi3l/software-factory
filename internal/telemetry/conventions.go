@@ -51,18 +51,18 @@ const (
 //
 // See specs/observability.md "Correlation: one schema across all three signals".
 const (
-	AttrComponent      = "harness.component" // emitting component: orchestrator|runner|broker|gate
-	AttrIssueID        = "harness.issue.id"
-	AttrIssueRole      = "harness.issue.role"
-	AttrEpicID         = "harness.epic.id"
-	AttrInvocationID   = "harness.invocation.id"
-	AttrSoul           = "harness.soul"
-	AttrModel          = "harness.model"
+	AttrComponent    = "harness.component" // emitting component: orchestrator|runner|broker|gate
+	AttrIssueID      = "harness.issue.id"
+	AttrIssueRole    = "harness.issue.role"
+	AttrEpicID       = "harness.epic.id"
+	AttrInvocationID = "harness.invocation.id"
+	AttrSoul         = "harness.soul"
+	AttrModel        = "harness.model"
 	// AttrSubContext labels an llm-turn with the model stream it belongs to within one
 	// invocation: "parent" (the soul's model) or "explorer" (the explore tool's pinned cheap
 	// model). Bounded (two values), so it is safe as a metric dimension; it lets the budget /
 	// verification views separate frontier spend from helper-loop spend (T12.2).
-	AttrSubContext = "harness.sub_context"
+	AttrSubContext     = "harness.sub_context"
 	AttrBase           = "harness.base"
 	AttrResultStatus   = "harness.result.status"
 	AttrSandboxBackend = "harness.sandbox.backend"
@@ -79,15 +79,15 @@ const (
 	AttrOutputTokens     = "harness.tokens.output"
 	AttrCacheReadTokens  = "harness.tokens.cache_read"
 	AttrCacheWriteTokens = "harness.tokens.cache_write"
-	AttrToolName       = "harness.tool.name"  // tool invoked, e.g. git-push (egress) or edit_file (workspace)
-	AttrToolError      = "harness.tool.error" // tool returned an error result (e.g. a failed compile), not a loop-fatal error
-	AttrToolTurn       = "harness.tool.turn"  // 1-based agent-loop turn the tool call belongs to
-	AttrGitBranch      = "harness.git.branch"
-	AttrGitCommit      = "harness.git.commit"
-	AttrCandidateRef   = "harness.candidate.ref"
-	AttrGatePassed     = "harness.gate.passed"
-	AttrGateChecksRun  = "harness.gate.checks_run"
-	AttrHTTPStatus     = "harness.http.status" // upstream status of a brokered package fetch
+	AttrToolName         = "harness.tool.name"  // tool invoked, e.g. git-push (egress) or edit_file (workspace)
+	AttrToolError        = "harness.tool.error" // tool returned an error result (e.g. a failed compile), not a loop-fatal error
+	AttrToolTurn         = "harness.tool.turn"  // 1-based agent-loop turn the tool call belongs to
+	AttrGitBranch        = "harness.git.branch"
+	AttrGitCommit        = "harness.git.commit"
+	AttrCandidateRef     = "harness.candidate.ref"
+	AttrGatePassed       = "harness.gate.passed"
+	AttrGateChecksRun    = "harness.gate.checks_run"
+	AttrHTTPStatus       = "harness.http.status" // upstream status of a brokered package fetch
 	// AttrAttempt is the per-issue retry count (0 on the first try, incremented on each
 	// re-dispatch up to the budget cap). It is a bounded small integer, so unlike the
 	// unbounded ids above it is safe as a metric dimension — a retries-by-stage panel —

@@ -259,8 +259,8 @@ func TestBoardFrontier(t *testing.T) {
 		{
 			name: "leftmost incomplete, skipping a fully-closed earlier column",
 			issues: []core.Issue{
-				{ID: "h-1", Role: "plan", Status: "closed"},      // plan all done
-				{ID: "h-2", Role: "implement", Status: "open"},   // ← leftmost incomplete
+				{ID: "h-1", Role: "plan", Status: "closed"},    // plan all done
+				{ID: "h-2", Role: "implement", Status: "open"}, // ← leftmost incomplete
 				{ID: "h-3", Role: "qa", Status: "in_progress"},
 			},
 			want: "implement",

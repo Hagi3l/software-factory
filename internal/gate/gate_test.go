@@ -275,9 +275,9 @@ func TestRunStopsAtFirstFailure(t *testing.T) {
 // the candidate once per scanner).
 func TestRunAggregatesIndependentFailures(t *testing.T) {
 	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
-		"make test-unit":   {ExitCode: 0, Stdout: []byte("ok")},
-		"make gosec":       {ExitCode: 1, Stdout: []byte("G104 unhandled error")},
-		"make govulncheck": {ExitCode: 0},
+		"make test-unit":    {ExitCode: 0, Stdout: []byte("ok")},
+		"make gosec":        {ExitCode: 1, Stdout: []byte("G104 unhandled error")},
+		"make govulncheck":  {ExitCode: 0},
 		"make license-scan": {ExitCode: 1, Stdout: []byte("forbidden GPL dep")},
 	}}
 	be := &fakeBackend{sb: sb}
@@ -432,9 +432,9 @@ func TestRunEvidencePersistenceIsBestEffort(t *testing.T) {
 // verdict still fails closed: not-run is never a pass.
 func TestRunBuildPreconditionShortCircuitsDependents(t *testing.T) {
 	sb := &scriptedSandbox{id: "gate-sb", results: map[string]sandbox.ExecResult{
-		"make build":       {ExitCode: 2, Stderr: []byte("pkg/x.go:3:1: undefined: Foo")},
-		"make test-unit":   {ExitCode: 0},
-		"make gosec":       {ExitCode: 0},
+		"make build":        {ExitCode: 2, Stderr: []byte("pkg/x.go:3:1: undefined: Foo")},
+		"make test-unit":    {ExitCode: 0},
+		"make gosec":        {ExitCode: 0},
 		"make license-scan": {ExitCode: 0},
 	}}
 	be := &fakeBackend{sb: sb}

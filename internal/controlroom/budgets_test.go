@@ -124,7 +124,7 @@ func TestProvenanceRendersChain(t *testing.T) {
 	}
 	for _, want := range []string{
 		"implementor", "claude-opus-4-8",
-		`href="/issue/h-1"`,               // issue drill-through
+		`href="/issue/h-1"`,                  // issue drill-through
 		`href="/artifact/sha256:promptaaaa"`, // prompt → raw artifact
 		`href="/artifact/sha256:gatebbbb"`,   // verified check → evidence artifact
 		"acceptance-tests",

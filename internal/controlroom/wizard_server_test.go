@@ -95,10 +95,10 @@ func TestCreateRendersPageAndSession(t *testing.T) {
 		t.Fatalf("/create status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		`hx-ext="sse"`,         // the live SSE wiring
-		"sse-connect=",         // bound to this session's stream
+		`hx-ext="sse"`,              // the live SSE wiring
+		"sse-connect=",              // bound to this session's stream
 		`hx-post="/create/message"`, // the turn form
-		"No messages yet",      // the empty-state prompt
+		"No messages yet",           // the empty-state prompt
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("/create missing %q\nbody: %s", want, r.body)
@@ -251,15 +251,15 @@ func TestCreateLedgerRendersPanel(t *testing.T) {
 		t.Fatalf("ledger status = %d, want 200", frag.status)
 	}
 	for _, want := range []string{
-		"Alignment ledger",        // the titled panel
-		"Which datastore?",        // the question
-		"Postgres",                // a chip label
-		"SQLite",                  // the other chip
+		"Alignment ledger",                // the titled panel
+		"Which datastore?",                // the question
+		"Postgres",                        // a chip label
+		"SQLite",                          // the other chip
 		`hx-post="/create/ledger/answer"`, // the batch form funnels through the planner
-		`name="opt-0"`,            // the per-fork chip radios
-		`name="text-0"`,           // the first-class free-text box
-		`name="discuss-0"`,        // the "let's discuss" flag
-		"Submit answers",          // the batch submit button
+		`name="opt-0"`,                    // the per-fork chip radios
+		`name="text-0"`,                   // the first-class free-text box
+		`name="discuss-0"`,                // the "let's discuss" flag
+		"Submit answers",                  // the batch submit button
 	} {
 		if !strings.Contains(frag.body, want) {
 			t.Errorf("ledger panel missing %q\nbody: %s", want, frag.body)
@@ -392,10 +392,10 @@ func TestCreateDraftRendersPanel(t *testing.T) {
 		t.Fatalf("draft status = %d, want 200", frag.status)
 	}
 	for _, want := range []string{
-		"specs/export.md",        // the proposed spec path
-		"Add CSV export",         // the seed issue title
+		"specs/export.md",           // the proposed spec path
+		"Add CSV export",            // the seed issue title
 		`hx-post="/create/approve"`, // the consent-gate form
-		"Approve",                // the button
+		"Approve",                   // the button
 	} {
 		if !strings.Contains(frag.body, want) {
 			t.Errorf("draft panel missing %q\nbody: %s", want, frag.body)

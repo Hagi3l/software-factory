@@ -10,8 +10,8 @@ import (
 
 	"github.com/Loxstomper/harness/internal/artifact"
 	"github.com/Loxstomper/harness/internal/beads"
-	"github.com/Loxstomper/harness/internal/core"
 	"github.com/Loxstomper/harness/internal/controlroom/wizard"
+	"github.com/Loxstomper/harness/internal/core"
 )
 
 // validResolveRequest is a well-formed Resolve draft: one refined spec, no broken links, no seed

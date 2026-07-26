@@ -253,4 +253,3 @@ Verification) are deliberately *not* live — they're snapshots, not feeds. Auth
 implemented (an open item); a fresh wizard session id is crypto-random, but a pinned
 `/create?session=<id>` (for iframe embedding, above) is caller-chosen — neither is behind a login
 gate, so keep pinned ids to single-user/localhost use.
-</content>

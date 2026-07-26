@@ -307,8 +307,8 @@ func TestPositionToOffset(t *testing.T) {
 		want int
 	}{
 		{lsp.Position{Line: 0, Character: 0}, 0},
-		{lsp.Position{Line: 1, Character: 1}, 4}, // 'd'
-		{lsp.Position{Line: 2, Character: 2}, 8}, // end of file
+		{lsp.Position{Line: 1, Character: 1}, 4},  // 'd'
+		{lsp.Position{Line: 2, Character: 2}, 8},  // end of file
 		{lsp.Position{Line: 0, Character: 99}, 2}, // column past line end clamps to line end
 		{lsp.Position{Line: 9, Character: 0}, 8},  // line past EOF clamps to len
 	}
@@ -325,12 +325,12 @@ func TestRiskyMatch(t *testing.T) {
 		col  int
 		want bool
 	}{
-		{"func greet() {}", 5, false},        // code
-		{`x := "greet"`, 7, true},            // inside a string literal
-		{"// greet helper", 3, true},         // after a line comment
-		{`f("greet") // x`, 4, true},         // inside the string before the comment
-		{`f("done") // greet`, 14, true},     // after the comment, string already closed
-		{`a + b // ok`, 0, false},            // before any comment/string
+		{"func greet() {}", 5, false},    // code
+		{`x := "greet"`, 7, true},        // inside a string literal
+		{"// greet helper", 3, true},     // after a line comment
+		{`f("greet") // x`, 4, true},     // inside the string before the comment
+		{`f("done") // greet`, 14, true}, // after the comment, string already closed
+		{`a + b // ok`, 0, false},        // before any comment/string
 	}
 	for _, c := range cases {
 		if got := riskyMatch(c.line, c.col); got != c.want {

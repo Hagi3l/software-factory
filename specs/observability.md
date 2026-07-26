@@ -20,7 +20,7 @@ git op, every package fetch. **The security chokepoint and the telemetry chokepo
 are the same point.**
 
 So observability falls out of the architecture: emit structured events and
-[OpenTelemetry](#opentelemetry) spans at the broker, and you have a complete,
+[OpenTelemetry](#opentelemetry--three-signals-one-endpoint) spans at the broker, and you have a complete,
 tamper-evident record of agent behaviour with nowhere for an agent to act
 unobserved. No separate instrumentation pass is required.
 

@@ -23,13 +23,13 @@ func TestParseVsockAddr(t *testing.T) {
 		{in: "1:0", wantCID: 1, wantPort: 0},
 		{in: "4294967295:65535", wantCID: 4294967295, wantPort: 65535},
 		{in: "", wantErr: true},
-		{in: "5000", wantErr: true},          // no colon
-		{in: "host:5000", wantErr: true},     // non-numeric cid
-		{in: "2:port", wantErr: true},        // non-numeric port
-		{in: "2:5000:6000", wantErr: true},   // too many parts
-		{in: "4294967296:1", wantErr: true},  // cid overflows uint32
-		{in: "1:4294967296", wantErr: true},  // port overflows uint32
-		{in: "-1:1", wantErr: true},          // negative cid
+		{in: "5000", wantErr: true},         // no colon
+		{in: "host:5000", wantErr: true},    // non-numeric cid
+		{in: "2:port", wantErr: true},       // non-numeric port
+		{in: "2:5000:6000", wantErr: true},  // too many parts
+		{in: "4294967296:1", wantErr: true}, // cid overflows uint32
+		{in: "1:4294967296", wantErr: true}, // port overflows uint32
+		{in: "-1:1", wantErr: true},         // negative cid
 	}
 	for _, c := range cases {
 		cid, port, err := parseVsockAddr(c.in)

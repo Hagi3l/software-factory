@@ -344,7 +344,7 @@ func (s *Sessions) readFile(ctx context.Context, relPath string) (string, error)
 	return string(res.Stdout), nil
 }
 
-func (s *Sessions) rootURI() string  { return "file://" + s.root }
+func (s *Sessions) rootURI() string { return "file://" + s.root }
 func (s *Sessions) uriFor(rel string) string {
 	return "file://" + path.Join(s.root, rel)
 }

@@ -27,8 +27,8 @@ type lspSandbox struct {
 	workdir  string
 
 	mu       sync.Mutex
-	sessions int        // OpenSession call count
-	rec      *recorder  // events the fake server observed
+	sessions int       // OpenSession call count
+	rec      *recorder // events the fake server observed
 }
 
 func (s *lspSandbox) ID() string { return "lsp-sbx" }

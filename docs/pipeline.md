@@ -114,4 +114,3 @@ recompile sweeps: in-flight issues whose spec slice changed are reissued, and
 already-merged `(epic, spec-path)` groups whose slice changed spawn a fresh `plan` pass
 to re-derive only the delta against merged code. This is why the spec — not the code —
 is the durable source of intent.
-</content>

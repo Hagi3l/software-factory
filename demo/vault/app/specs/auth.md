@@ -34,6 +34,11 @@ derived key is used, and [architecture in the index](README.md#architecture--con
   restores the hardened `SameSite=Strict` for a standalone, non-embedded deployment. (Note:
   `None` only makes the cookie *eligible* cross-site — Safari still blocks third-party iframe
   cookies outright, so demo in Chrome/Firefox.)
+- **CSRF.** `SameSite=None` removes the browser's implicit CSRF defence, and the app adds no
+  CSRF token or Origin check on its state-changing endpoints (`POST /secrets`,
+  `POST /secrets/{id}`, `DELETE /secrets/{id}`, `POST /logout`). This demo accepts that
+  because it holds no real secrets. A production deployment must set `VAULT_STRICT_COOKIE`
+  **and** add CSRF protection (a token or an Origin/`Sec-Fetch-Site` check).
 - Sessions expire after 30 minutes. Protected routes redirect to `/login` when the cookie is
   missing or expired.
 - Sign-out destroys the server-side session and clears the cookie.

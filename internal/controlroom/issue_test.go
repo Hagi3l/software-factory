@@ -140,27 +140,27 @@ func TestIssueDetailMergedRendersEvidence(t *testing.T) {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		"Merged work",                 // title
-		"harness-1",                   // id
-		">merged<",                    // the merged badge
-		"implementor",                 // role
-		"specs/x.md",                  // spec path (the brief)
-		"Implement the widget.",       // the body brief
-		"1,234 tokens",                // budget spend (comma-grouped, matching the Budgets view)
-		"$0.0456",                     // budget spend in dollars
+		"Merged work",                    // title
+		"harness-1",                      // id
+		">merged<",                       // the merged badge
+		"implementor",                    // role
+		"specs/x.md",                     // spec path (the brief)
+		"Implement the widget.",          // the body brief
+		"1,234 tokens",                   // budget spend (comma-grouped, matching the Budgets view)
+		"$0.0456",                        // budget spend in dollars
 		"1,000 in · 200 out · 34 cached", // the in/out/cache token breakdown
-		"go-implementor",              // provenance soul
-		"claude-test",                 // provenance model
-		"tests-pass",                  // a verified gate check label
-		"/artifact/" + promptHash,     // the prompt link points at the content endpoint
-		"/artifact/" + transcriptHash, // the transcript (replayable decision trail) link too
-		"Transcript",                  // its label
-		"/artifact/" + gateHash,       // the gate-evidence link too
-		"mutation",                    // the bare-name check still shows
-		"no evidence persisted",       // …without a link
-		"Candidate diff",              // the diff section heading
-		"diff --git a/widget.go",      // the landed candidate diff, rendered inline
-		`href="/static/app.css"`,      // inside the base layout chrome
+		"go-implementor",                 // provenance soul
+		"claude-test",                    // provenance model
+		"tests-pass",                     // a verified gate check label
+		"/artifact/" + promptHash,        // the prompt link points at the content endpoint
+		"/artifact/" + transcriptHash,    // the transcript (replayable decision trail) link too
+		"Transcript",                     // its label
+		"/artifact/" + gateHash,          // the gate-evidence link too
+		"mutation",                       // the bare-name check still shows
+		"no evidence persisted",          // …without a link
+		"Candidate diff",                 // the diff section heading
+		"diff --git a/widget.go",         // the landed candidate diff, rendered inline
+		`href="/static/app.css"`,         // inside the base layout chrome
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("issue detail missing %q", want)

@@ -40,16 +40,16 @@ func TestDLQRendersEscalations(t *testing.T) {
 	for _, want := range []string{
 		"Cannot satisfy spec", "Ambiguous acceptance", // both blocked issues
 		"harness-7", "harness-2", // their ids
-		"specs/orders.md",         // the spec to refine
-		"attempt 3",               // the retry generation
-		"120000 tokens",           // the budget burn surfaced at a glance
-		"$1.2345",                 // priced spend
+		"specs/orders.md",                // the spec to refine
+		"attempt 3",                      // the retry generation
+		"120000 tokens",                  // the budget burn surfaced at a glance
+		"$1.2345",                        // priced spend
 		`href="/issue/harness-7"`,        // drill-through into the detail view
 		`href="/verification/harness-7"`, // T4.23 — verification drill for triage
-		`sse-connect="/events"`,   // wired to the T4.3 substrate
-		`hx-get="/dlq/items"`,     // live fragment refresh target
-		`sse:issue-state`,         // crisp refresh off the typed event (T4.18)
-		`href="/static/app.css"`,  // inside the base layout chrome
+		`sse-connect="/events"`,          // wired to the T4.3 substrate
+		`hx-get="/dlq/items"`,            // live fragment refresh target
+		`sse:issue-state`,                // crisp refresh off the typed event (T4.18)
+		`href="/static/app.css"`,         // inside the base layout chrome
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("dlq page missing %q", want)

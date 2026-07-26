@@ -482,10 +482,10 @@ func (p *Planner) Get(id string) *Session {
 // history plus its own SSE hub the browser streams from. Safe for concurrent use; at most
 // one reply turn runs at a time (Send rejects a second while one is in flight).
 type Session struct {
-	ID          string
-	hub         *live.Hub
-	adapter     model.Adapter
-	persona     string
+	ID           string
+	hub          *live.Hub
+	adapter      model.Adapter
+	persona      string
 	maxTokens    int
 	maxToolTurns int
 	turnTimeout  time.Duration

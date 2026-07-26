@@ -110,7 +110,7 @@ func TestApproveResumesMergeAndCloses(t *testing.T) {
 		t.Fatalf("park: %v", err)
 	}
 
-	req := core.ApprovalRequest{IssueID: "iss-1", CandidateSHA: core.CandidateBranch("iss-1"), Approved: true, Approver: "lochie"}
+	req := core.ApprovalRequest{IssueID: "iss-1", CandidateSHA: core.CandidateBranch("iss-1"), Approved: true, Approver: "alice"}
 	transient, err := o.handleApproval(context.Background(), req)
 	if err != nil || transient {
 		t.Fatalf("handleApproval = (%v,%v), want (false,nil)", transient, err)
@@ -126,8 +126,8 @@ func TestApproveResumesMergeAndCloses(t *testing.T) {
 	if len(closed) != 1 || closed[0] != "iss-1" {
 		t.Errorf("closed = %v, want [iss-1] after a successful approved merge", closed)
 	}
-	if bd.approvedBy["iss-1"] != "lochie" {
-		t.Errorf("approver recorded = %q, want lochie", bd.approvedBy["iss-1"])
+	if bd.approvedBy["iss-1"] != "alice" {
+		t.Errorf("approver recorded = %q, want alice", bd.approvedBy["iss-1"])
 	}
 }
 
@@ -144,7 +144,7 @@ func TestRejectRoutesFix(t *testing.T) {
 		t.Fatalf("park: %v", err)
 	}
 
-	req := core.ApprovalRequest{IssueID: "iss-1", CandidateSHA: core.CandidateBranch("iss-1"), Approved: false, Approver: "lochie"}
+	req := core.ApprovalRequest{IssueID: "iss-1", CandidateSHA: core.CandidateBranch("iss-1"), Approved: false, Approver: "alice"}
 	transient, err := o.handleApproval(context.Background(), req)
 	if err != nil || transient {
 		t.Fatalf("handleApproval = (%v,%v), want (false,nil)", transient, err)
@@ -173,7 +173,7 @@ func TestApprovalStaleCandidateIgnored(t *testing.T) {
 		t.Fatalf("park: %v", err)
 	}
 
-	req := core.ApprovalRequest{IssueID: "iss-1", CandidateSHA: "candidate/stale", Approved: true, Approver: "lochie"}
+	req := core.ApprovalRequest{IssueID: "iss-1", CandidateSHA: "candidate/stale", Approved: true, Approver: "alice"}
 	if _, err := o.handleApproval(context.Background(), req); err != nil {
 		t.Fatalf("handleApproval: %v", err)
 	}
@@ -194,7 +194,7 @@ func TestApprovalForNonParkedIgnored(t *testing.T) {
 	m := &fakeMerger{}
 	o, _ := newOrch(t, trustedDevConfig(), bd, &fakeGate{}, m)
 
-	req := core.ApprovalRequest{IssueID: "iss-1", Approved: true, Approver: "lochie"}
+	req := core.ApprovalRequest{IssueID: "iss-1", Approved: true, Approver: "alice"}
 	if _, err := o.handleApproval(context.Background(), req); err != nil {
 		t.Fatalf("handleApproval: %v", err)
 	}

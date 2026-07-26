@@ -84,15 +84,16 @@ the right fix is to update the spec.
 ## Status
 
 Working, end-to-end, in development: the kernel does `spec → implement → gate →
-merge`, and on top of it independent verification (Phase 2), the full DAG with
-decomposition and a merge queue (Phase 3), and the control room with the
-Create-Task/Resolve wizard (Phase 4) are complete. What remains is Phase 5 —
-production isolation and distribution (Firecracker, distributed NATS, scoped
-secrets, signing).
+merge`, and on top of it independent verification, the full DAG with decomposition
+and a merge queue, the control room with the Create-Task/Resolve wizard, and most
+of the production substrate (gVisor backend, distributed NATS, scoped secrets,
+S3 artifact store, provenance signing) are complete. What remains is the
+Firecracker microVM sandbox backend — blocked on KVM hardware, not on code — and
+optional warm pools / HA orchestration.
 
 Two honest caveats:
 
-- Phases 2–4 were built by hand with human review, **not** self-hosted. The
+- Everything so far was built by hand with human review, **not** self-hosted. The
   autonomous self-hosting loop is buildable and tested offline but has not been
   switched on.
 - This is a research/portfolio project, not a supported product. Expect sharp edges.

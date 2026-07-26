@@ -14,11 +14,14 @@ merge to `main` with a provenance trailer. Verified end-to-end against a real mo
 (local Ollama via `openai-compat`) and real Docker sandboxes.
 
 **Phases 2, 3, 4, 6, 7, 8, 9, 10, 11, 12, 13, 14, and 15 are complete.** Phase 15 (2026-07-06
-vault-demo run hardening) closed with T15.4 (whole-feature terminal-merge provenance) landing —
-T15.1 (OpenRouter cost double-count), T15.2 (per-model idle timeout), T15.3 (durable stage-close),
-and T15.4 (feature-level provenance trailer on the epic terminal merge) are all fixed. Otherwise the
+vault-demo run hardening) closed with T15.6 (session-aware wizard Refresh) landing — T15.1
+(OpenRouter cost double-count), T15.2 (per-model idle timeout), T15.3 (durable stage-close — the
+serialization diagnosis was later corrected: the real stall fix was making the Dolt server
+authoritative, `bd config set export.auto false`, commit 1202889; see the Correction under T15.3),
+T15.4 (feature-level provenance trailer on the epic terminal merge), T15.5 (reload-safe wizard
+sessions), and T15.6 are all in. Otherwise the
 only open build work is Phase 5 (all optional — T5.11 warm pools + HA — or hardware-blocked —
-T5.2 Firecracker, needs KVM the dev box lacks). Phase 14 (trusted-layer hardening from the
+T5.2 Firecracker, needs KVM the development machine lacks). Phase 14 (trusted-layer hardening from the
 2026-07-03 review) closed
 with T14.1 least-privilege container boot, T14.2 bounded transient-fault retry at the model
 relay, and T14.3 reasoning-in-the-recorded-transcript. Phase 12 (distilled explore tool,
@@ -26,7 +29,8 @@ T12.1–T12.6) landed the `explore` tool + nested read-only sub-loop, the broker
 selector + runner-pinned explorer model + per-stream sub-budget metering, the
 `policy.explore_budget` / reserved-`explorer`-role config + validation, explore
 evidence/provenance/observability nesting, per-role enablement, and the vault demo wiring
-(remaining is a live-run cost/context validation, not a build item). Phase 11
+(exercised live by the 2026-07-06/07 vault runs; the isolated cost/context win was never
+separately measured). Phase 11
 closed with T11.2 (prompt caching) landing — the Anthropic
 adapter now caches unconditionally and the openai-compat adapter caches opt-in, with cache
 read/write tokens normalized into the canonical Usage for accurate USD accounting.
@@ -45,15 +49,17 @@ authoritative read model + decomposition granularity), Phase 9 (structured check
 & agent context discipline), and Phase 10 (read-model concurrency correctness) are complete.
 The only remaining *engineering* of new substrate is Phase 5 (production isolation &
 distribution), and within it every still-open item is either **optional** (T5.11 warm pools +
-HA orchestrator) or **hardware-blocked** (T5.2 Firecracker, needs KVM the dev box lacks). T5.5
+HA orchestrator) or **hardware-blocked** (T5.2 Firecracker, needs KVM the development machine lacks). T5.5
 (gVisor backend) is now **done** — and landing it wired up the previously-missing config→backend
 selection, so `sandbox.backend` is finally honored at startup (firecracker fails closed rather
 than silently degrading to Docker).
 
-**Outstanding runtime validation:** a clean `./demo/vault` re-run (the exercising use case — Go,
-a `qa` gate running gosec/govulncheck/license-scan, an inner loop running `go test`) to confirm
-the read-model concurrency fixes and the structured-findings context/cost reduction; that needs a
-live run (Docker + a capable model), not a build item.
+**Runtime validation: satisfied by the 2026-07-02/06/07 live vault runs** (Phases 13–15). The
+2026-07-06 run carried the exercising use case — Go, a `qa` gate running
+gosec/govulncheck/license-scan, an inner loop running `go test` — through a two-child epic to its
+terminal merge on `main`, exercising the read-model concurrency fixes and the structured-findings
+context discipline live; the defects those runs *did* surface became Phase 15 and the
+Deferred list.
 
 **Development mode for Phases 2–6: built by hand with Claude Code, human-reviewed —
 not self-hosted.** Bootstrap's threshold (a) ("the harness builds itself as a
@@ -290,7 +296,7 @@ them); only the *order of attention* changes.
   `sandbox.NewBackend(cfg.Infra.Sandbox)` factory honors the selection: docker/""→Docker,
   gvisor→gVisor, **firecracker→fail-closed error** (hardware-blocked T5.2, must not degrade
   to a weaker backend than asked), unknown→error. The test-injected backend seam
-  (`opts.backend`) still takes precedence. runsc isn't installed in this dev box (no network
+  (`opts.backend`) still takes precedence. runsc isn't installed on the development machine (no network
   to fetch it), so the live boot is unexercised here, but the runtime-arg shaping and factory
   selection are fully unit-tested via the existing `run` seam (no daemon needed). Tests:
   `TestGVisorProvisionPinsRunscRuntime`, `TestDockerProvisionHasNoRuntimeFlag`,
@@ -420,7 +426,7 @@ where relevant, and the vault README's telemetry section) per the doc-tracking r
   `otel.endpoint`). No Go code changed — the unit is the shell bootstrap + committed assets;
   verified by `bash -n`, a simulated overlay rewrite, and a real `harness validate` (accept +
   reject cases). **Verified live against a booted OpenObserve `v0.14.7`** (network is available
-  in this dev box): the pinned image pulls + boots healthy in ~4s; the dashboard JSON POSTs
+  on the development machine): the pinned image pulls + boots healthy in ~4s; the dashboard JSON POSTs
   **HTTP 200** (OO assigned a dashboardId — the v5 schema is correct); and driving the harness's
   *real* `telemetry.Setup` pipeline at `127.0.0.1:5081` with the demo's
   `authorization`/`organization`/`stream-name` headers landed **all three signals** — confirmed
@@ -491,7 +497,7 @@ re-dispatch, an "open" card on work-in-progress, a retry that looked like a dupl
 integrated-count miscount, and `signal: killed` read overloads; **(2)** the planner bundled four
 concerns into one child, so the test-author flailed ~1.35M tokens twice (~80% of run cost).
 
-The fix is **systemic, not surgical** (decided this session): promote the orchestrator's
+The fix is **systemic, not surgical** (decided up front when this phase opened): promote the orchestrator's
 in-flight projection into the authoritative work-graph read model; beads becomes the durable log
 + cold-start hydration. T8.1–T8.4 are the read-model spine (do their spec work first); T8.5
 addresses cost; T8.6–T8.7 are clarity/hardening. **TCB note:** T8.1/T8.2 touch the orchestrator
@@ -523,7 +529,7 @@ retry Brief. The extraction is **infra, not persona**: the model never has to kn
 (Phase 6 LSP). Complements T8.5: that bounds the failure at *planning* time (decompose smaller);
 this bounds it at *runtime* (smaller, signal-dense histories).
 
-**Spec landed first** (per CLAUDE.md, commit 653824a): `verification.md` ("Findings: structured
+**Spec landed first**, per the repo's spec-is-truth rule (commit 653824a): `verification.md` ("Findings: structured
 evidence, not the grade"; tri-state passed/failed/not-run + build precondition; structured
 producer self-check), `glossary.md` (`Finding`), `configuration.md` (per-tool adapters; `fail_on`
 deferred), `components/agent.md` (`run_tests`/`run_gate`), `components/artifact-store.md`,
@@ -683,7 +689,7 @@ Additive and never load-bearing: the parent keeps every raw comprehension tool, 
 **not** fight prompt caching (T11.2) the way in-loop compaction would — an explore call is one
 tool-call/result appended at the tail, leaving the cacheable prefix intact.
 
-**Spec landed first** (per CLAUDE.md, this session): [components/agent.md](specs/components/agent.md)
+**Spec landed first**, per the repo's spec-is-truth rule: [components/agent.md](specs/components/agent.md)
 "Explore — distilled comprehension" (the tool, the five rules, the free-form-in/structured-out
 contract), [models.md](specs/models.md) "Helper souls — two models in one sandbox" (sub-context
 selector + trusted-pinned model resolution + fixed sub-budget), [configuration.md](specs/configuration.md)
@@ -866,23 +872,24 @@ Build order (each a single, independently testable concern; the two TCB pieces f
   (planner finds decomposition seams; implementor finds where layers hook up); the qa gate
   re-grades independently and should read raw for full producer≠verifier independence — the
   spec's explicitly-endorsed stricter alternative (verification.md "verify-path diversity").
-  (2) **Machinery gap found this session:** an issue's `Tags` thread forward *unchanged* across
+  (2) **Machinery gap found during this task:** an issue's `Tags` thread forward *unchanged* across
   all of a child's stages (`internal/orchestrator/results.go` — author-tests/implement/qa share
   one tag set) and there is no per-stage/role tag, so a `verify=1`-selectored explorer soul
   cannot be routed to *only* the qa stage of a child — tagging the child `verify=1` would route
   its producer stages to the "verify" explorer too. So a *routed* diverse verify-path explorer is
   not honestly wireable today; a two-family explorer pool would silence the static advisory
-  without actually diversifying at runtime. Filed as a follow-up below. **Validate the
-  context/cost win on a live vault re-run** (a runtime check, not a build item — broad
+  without actually diversifying at runtime. Filed as a follow-up below. Explore ran live in the
+  2026-07-06/07 vault runs (T13.3 gave the test-author `explore`) without incident; the isolated
+  context/cost win was never separately measured — an open measurement, not a build item (broad
   localization on the established Go app, the same loop Phase 9 targets). ([configuration.md](specs/configuration.md))
 
 ---
 
 ## Phase 13 — Live-demo hardening II (context cost + wizard kickoff)
 
-Opened from a **2026-07-02 pass** preparing the `./demo/vault` run for a live security-meetup
-talk. The organizing complaint was the operator's own experience — "implement was slow and burned
-tokens" — traced to two shared roots: the OpenAI-compat model path under-caching the growing
+Opened from a **2026-07-02 pass** preparing the `./demo/vault` run for the July 2026
+security-meetup talk. The organizing complaint came straight from running the demo — "implement
+was slow and burned tokens" — traced to two shared roots: the OpenAI-compat model path under-caching the growing
 conversation, and per-invocation config caps that fought a healthy deep run. Plus one net-new
 control-room affordance so a time-boxed stage kickoff doesn't depend on live typing. None of this
 is TCB except where noted; all behind unit tests, `make check` green.
@@ -900,8 +907,9 @@ is TCB except where noted; all behind unit tests, `make check` green.
   breakpoint, plain string when caching off). Spec updated ahead: [models.md](specs/models.md)
   "Prompt caching" now describes the two-breakpoint scheme for **both** adapters and the ~5-min
   provider cache-TTL floor (a slow `run_gate`/`run_tests` between turns forfeits the cache — a
-  provider property, not an adapter bug). **Verify `cache_read_tokens` goes nonzero and per-turn
-  input stops growing on a live vault re-run** (runtime check, needs a hosted key). ([models.md](specs/models.md))
+  provider property, not an adapter bug). **Validated by the 2026-07-06 live vault run**:
+  `cache_read_tokens` ran nonzero at ~90% cache on the deep runs — high enough that it exposed
+  the T15.1 cost double-count. ([models.md](specs/models.md))
 - [x] **T13.2 Wizard `requirements_planner.prefill` — insert-a-prepared-requirement button** — *done.*
   A new optional `prefill` field on the `requirements_planner` config block naming a text/markdown
   file (resolved against the config root like `persona`; `harness validate` checks it exists). When
@@ -933,7 +941,9 @@ is TCB except where noted; all behind unit tests, `make check` green.
   editing and re-state remaining steps after a failed self-check; the plan lives in the soul's own
   assistant messages, so it survives context growth (and any future tool-result aging, T-below) and
   directly counters the observed goal-drift/over-build that burned turn budgets. `harness validate
-  --config demo/vault/config` OK. **Validate the cost/pass-rate win on a live re-run.**
+  --config demo/vault/config` OK. **Validated by the 2026-07-06 live run**, which carried the epic
+  to its terminal merge under these walls (no healthy attempt was wall-killed; the stalls it did
+  hit were the Phase 15 bugs, not budget exhaustion).
 - [x] **T13.4 Wizard rejection backstop — a rejected `propose_draft`/`update_ledger` is never
   silent** — *done.* Fixes the filed "silently-swallowed `propose_draft` rejection" (observed
   live 2026-06-24: the model emitted Python-style `True` in the draft JSON; `harvestDraft`
@@ -990,8 +1000,9 @@ is TCB except where noted; all behind unit tests, `make check` green.
   `TestToolResultAgingOnTheWire` (18-turn scripted run: turn-16 request unelided, turn-17
   stubs rounds 1-8 keeps 9-16 + Brief + first-appearance tail, turn-18 aged region
   byte-identical, earlier captured requests unmutated); telemetry
-  `TestRecordContextElisionByRoleSkipsZero` + Noop-safety. **Validate the token/pass-rate
-  effect on a live vault re-run** (the counters make it measurable); interacts with T13.3's
+  `TestRecordContextElisionByRoleSkipsZero` + Noop-safety. Aging was on for the 2026-07-06/07
+  live vault runs; the token/pass-rate effect was never separately quantified — an open
+  measurement (the counters make it measurable); interacts with T13.3's
   walls — aging slightly raises turn count (occasional re-reads) while cutting per-turn cost.
   ([components/agent.md](specs/components/agent.md), [observability.md](specs/observability.md))
 - [x] **T13.6 Decision: same-family verify-path explorer accepted — advisory removed, demo qa
@@ -1018,17 +1029,18 @@ is TCB except where noted; all behind unit tests, `make check` green.
   [configuration.md](specs/configuration.md))
 - [x] **T13.7 Demo: DeepSeek verifier — real N-version diversity + cheap qa tier** — *done.*
   Operator decision (2026-07-02, follow-on from T13.6's discussion): mix model families for
-  diversity + cost. The **security/qa soul now runs `deepseek/deepseek-v4-pro`** (new
+  diversity + cost. The **security/qa soul moved to `deepseek/deepseek-v4-pro`** (new
   `infra.dev.yaml` entry; slug + pricing verified live against OpenRouter's `/api/v1/models`:
-  $0.435/$0.87 per Mtok, 1M ctx, tools supported, cache-read ~0.008x input) — a different
+  $0.435/$0.87 per Mtok, 1M ctx, tools supported, cache-read ~0.008x input; later swapped to
+  `z-ai/glm-5.2` — commits 338e46c/0421240 — keeping the same different-family rationale) — a different
   model **family** than every Anthropic producer, so producer≠verifier now holds at the model
   level and the **T2.13 family-overlap advisory is silenced by fixing it** (`harness validate`
   = OK, 4 models, zero advisories). Rationale recorded in the config comments: the qa soul's
   value-add is scanner-driven remediation whose output is re-gated deterministically, so the
   cheap slot is safe there (~7-17x under the Sonnet it replaces); the *highest-leverage*
   diversity spot (test-author — its tests are the judgment that gates the implementor) was
-  deliberately left on Opus for the imminent live demo (T13.3's walls/personas were tuned
-  around it) — swap it after the talk if desired. **No `prompt_caching`** on the DeepSeek
+  deliberately left on Opus for the then-imminent July 2026 live demo (T13.3's walls/personas
+  were tuned around it) — still open to a swap if desired. **No `prompt_caching`** on the DeepSeek
   entry: it auto-caches server-side without cache_control markers (T11.2's "send only where
   needed AND accepted"); `cache_read_per_mtok: 0.0036` keeps USD accounting accurate.
   `run.sh`'s `MODEL=` Sonnet-tier rewrite no longer touches security (comment updated);
@@ -1070,7 +1082,7 @@ bootstrap-phase risk; revisit if one bites or when Phase-5 production posture de
   chown argv), `TestGVisorProvisionPinsRunscRuntime` (inheritance). **Verified live**, not
   just arg-shaped: `TestDockerSessionRoundTrip` (real busybox boot + exec) and
   `TestSessionsRealGopls` (real `go-toolchain` container running gopls) both pass under the
-  hardened boot on this dev box. `make check` fully green (1228 pass/0 fail). Spec was
+  hardened boot on the development machine. `make check` fully green (1228 pass/0 fail). Spec was
   written ahead (sandbox.md "Least-privilege boot on container backends") — no spec change;
   no CLI/config surface change, so no docs/ update. ([components/sandbox.md](specs/components/sandbox.md))
 - [x] **T14.2 Bounded transient-fault retry at the model relay** — *done.* **Canonical
@@ -1142,10 +1154,12 @@ Opened from the **2026-07-06 live vault-demo run** (the one-time share-link feat
 with a `generate` + `reveal` child). The run reached its terminal state — feature merged to
 `main`, pushed to the public repo, deploy fired — but only after **two silent stalls** that
 needed manual `bd` reconciliation to clear, and it surfaced a ~5× cost-reporting error and an
-~11-minute model stall. All findings are logged in
-[`demo/vault/demo-bugs.md`](demo/vault/demo-bugs.md) (BUG-1…BUG-4); **all four (T15.1–T15.4) are
-fixed** (T15.3 was the one that blocked a stage-reliable demo; T15.4 was the headline-commit
-provenance-rendering gap).
+~11-minute model stall. The run's four findings were labeled BUG-1…BUG-4 at the time and map to
+T15.1–T15.4 here: BUG-1 the bd stage-close-revert stall (the one that blocked a stage-reliable
+demo), BUG-2 the headline-commit provenance-rendering gap, BUG-3 the ~5× cost overstatement,
+BUG-4 the silently hung model stream. **All four are fixed**, though BUG-1 took two rounds —
+T15.3's serialization diagnosis proved insufficient and the real fix (make the Dolt server
+authoritative, commit 1202889) landed after a recurrence; see the Correction under T15.3.
 
 - [x] **T15.1 OpenRouter cost accounting — cached tokens no longer double-billed** *(BUG-3)*.
   *done.* The openai-compat adapter set `InputTokens = prompt_tokens`, but OpenAI/OpenRouter
@@ -1172,8 +1186,9 @@ provenance-rendering gap).
   `anthropic` (unwired). Demo config sets `90s` on all four models. Tests: hung stream →
   transient fault in ~0.15s; slow-but-alive stream (total > bound, gaps < bound) → completes.
   Spec + docs updated ([models.md](specs/models.md), [docs/configuration.md](docs/configuration.md)).
-- [x] **T15.3 Durable stage-close on the produce-next-stage path** *(BUG-1 — the stall)* — *done.*
-  The stall was concurrent `bd` processes racing on the jsonl round-trip: on the produce-next-stage
+- [x] **T15.3 Durable stage-close on the produce-next-stage path** *(BUG-1 — the stall)* — *done,
+  but see the Correction below: this diagnosis was insufficient.* The stall was diagnosed at the
+  time as concurrent `bd` processes racing on the jsonl round-trip: on the produce-next-stage
   path a stage advance is two writes (create-successor, then close-predecessor) issued from the
   orchestrator's concurrent loops, and against a non-serialized backend (every `bd` call round-trips
   the whole `.beads/issues.jsonl` — import-into-empty-DB → mutate → export) the create's export
@@ -1204,8 +1219,29 @@ provenance-rendering gap).
   (per-store scoping). `go build ./...`, `go vet`, `golangci-lint run ./internal/beads/` all clean;
   beads + orchestrator + controlroom/query suites green. Spec updated
   ([components/orchestrator.md](specs/components/orchestrator.md) "Durable-write loss" + the "must never"
-  bullet: the client owns serialization, never remove it assuming the backend serializes). BUG-1 marked
-  FIXED in demo/vault/demo-bugs.md. ([components/orchestrator.md](specs/components/orchestrator.md))
+  bullet: the client owns serialization, never remove it assuming the backend serializes).
+  ([components/orchestrator.md](specs/components/orchestrator.md))
+
+  **Correction (2026-07-07) — the serialization diagnosis was wrong (necessary but not
+  sufficient); the real cause was bd's JSONL auto-export/auto-import asymmetry, and the real fix
+  was making the Dolt server authoritative** *(commit 1202889)*. BUG-1 **recurred** with the
+  serialization above already in the running binary, and the live Dolt history proved the close
+  *committed* and was then reverted by the writer's **own next serialized call** (`vault-0cg`
+  committed `closed` at 14:39:51.862 and was back to `in_progress` at 14:39:52.478). Even in
+  `--server` mode, `bd` auto-**imports** `.beads/issues.jsonl` → Dolt on every write
+  (unthrottled) while auto-**exporting** Dolt → jsonl only throttled (`export.interval`, default
+  60s): during a burst of writes the jsonl freezes at an early snapshot and each write reimports
+  it, reverting any just-committed close still held in the frozen file. It reproduces
+  single-writer (`bd close A; bd update B` reverts A), so no amount of process serialization can
+  fix it. **Fix:** `bd config set export.auto false` right after `bd init --server` in
+  `demo/vault/run.sh`, making the warm Dolt server the sole source of truth — the orchestrator
+  reads/writes via the server and never consumes `issues.jsonl` during a run, so no reimport can
+  clobber a write. Verified: default `export.auto` reverts a close-then-write burst 3/3;
+  `export.auto=false` survives 3/3. Server-mode only — in file/no-db mode the jsonl IS the store,
+  so export must stay on there. The T15.3 serialization is retained as single-writer hygiene, and
+  `--skip-hooks` still closes the git-triggered reimport vector. Recorded in
+  [components/orchestrator.md](specs/components/orchestrator.md) "Correction (2026-07-07)" (in
+  server mode nothing may treat `issues.jsonl` as an input).
 - [x] **T15.4 Whole-feature provenance on the terminal merge** *(BUG-2)* — *done.* The
   terminal-merge commit (main's headline commit, the first thing an audience sees on the public
   mirror) rendered every producer field as `(none)` because `terminalMerge` stamped the bare
@@ -1234,11 +1270,10 @@ provenance-rendering gap).
   substring); orchestrator `TestFeatureProvenanceAggregatesChildren` (run-seam: children vs
   candidate commits, deduped Verified names), `TestFeatureProvenanceDegradesOnGitError`, and the
   extended `TestGitMergerEpicTerminalMergeIntegration` (real git: no `(none)`/producer leak, both
-  children cited, cited hashes resolve on the epic branch). BUG-2 marked FIXED in
-  demo/vault/demo-bugs.md. ([integration.md](specs/integration.md))
+  children cited, cited hashes resolve on the epic branch). ([integration.md](specs/integration.md))
 - [x] **T15.5 Wizard survives an iframe reload — reopenable session + idle-gated panel backstop**
-  *(2026-07-07 presentation dry-run)* — *done.* The vault demo embeds the live control room's
-  `/create` wizard as an **iframe in a reveal.js slide deck**. reveal blanks+reloads an iframe on
+  *(2026-07-07 live-demo dry-run)* — *done.* The talk's slide deck (a reveal.js deck, external to
+  this repo) embeds the live control room's `/create` wizard as an **iframe**. reveal blanks+reloads an iframe on
   slide navigation (`stopEmbeddedContent`), and `GET /create` minted a **fresh** session every load
   (no cookie/reopen), so revisiting the slide **orphaned** the session that had run the planner — the
   human saw an empty wizard while the real ledger/draft sat on a dead session id. Compounded by T4.33
@@ -1259,27 +1294,42 @@ provenance-rendering gap).
   Specs updated ([control-room.md](specs/control-room.md) "Rendering" — the interactive-panel
   exception is now idle-gated, not no-backstop; "A session survives a reload"; the alignment-ledger
   "form is the human's" paragraph); docs/control-room.md gained the iframe-embedding subsection.
-  `templ generate` re-ran from the repo root (wizard/resolve `*_templ.go`). The deck's slide-23 iframe
-  `data-harness-path` changed `/create` → `/create?session=demo`. Tests: wizard
+  `templ generate` re-ran from the repo root (wizard/resolve `*_templ.go`). Tests: wizard
   `TestGetOrCreateReopensPinnedSession`, `TestReopenIsLRUProtectedFromEviction`; controlroom
   `TestCreateReopenPinnedSession` (pinned id stable across reloads; unpinned mints fresh),
   `TestCreateReopenRendersLiveLedger` (B2 — live ledger on first paint). `make check` green.
   ([control-room.md](specs/control-room.md))
+- [x] **T15.6 Session-aware Refresh button on the wizard** — *done* (commit c1bc640). The wizard
+  header gains a **Refresh** control that reloads the frame through the T15.5 reopen path: it
+  navigates the wizard's **own** frame to `/create?session=<current-id>` (reading the id off
+  `data-session`), so the conversation, ledger, and draft survive — they render server-side on
+  first paint — where a bare reload of an unpinned `/create` would instead mint an empty session
+  and appear to lose everything. It converges to server truth on demand even when the embedding
+  surface (e.g. a slide-deck iframe) exposes no reachable reload chrome, and it pins an
+  otherwise-ephemeral session into the URL so later plain reloads survive too. Unsent composer
+  text is client-only and intentionally dropped; a reload mid-turn is safe (the transcript
+  renders so-far and the messages panel's `sse:turn`/every-8s refetch fills the reply in when the
+  turn lands). `wizard.js` binds the click delegated from `document` and navigates
+  `window.location` (never `top`), so it can never reload a parent frame. templ regenerated from
+  the repo root; `app.css` rebuilt for the new utilities. Tests:
+  `TestCreateRendersSessionAwareRefresh` (the control renders carrying the current session id).
+  Specs: [control-room.md](specs/control-room.md) "A session survives a reload";
+  docs/control-room.md iframe subsection. `make check` green. ([control-room.md](specs/control-room.md))
 
-  **Phase 15 is now complete (T15.1–T15.5).**
+  **Phase 15 is now complete (T15.1–T15.6).**
 
 ---
 
 ## Deferred & follow-ups (filed, not blocking)
 
-- **`run.sh` leaks its `dolt sql-server` on exit** *(2026-07-07 presentation run)*. Each
+- **`run.sh` leaks its `dolt sql-server` on exit** *(2026-07-07 live demo run)*. Each
   `demo/vault/run.sh` invocation `bd init --server`-starts a `dolt sql-server` for the scratch
   repo but never tears it down, so repeated runs leave **orphaned dolt servers** accumulating
   (4 observed live). They hold RAM + open DBs and worsen the memory pressure below. **Fix:** trap
   EXIT in run.sh to stop the per-run dolt server (it prints its pid/socket under
   `$SITE/.beads/`), alongside the existing scratch-repo cleanup.
 - **Durable stage-close lost under memory pressure (OOM `signal: killed`), not just the T15.3
-  race** *(2026-07-07 presentation run — the run wedged with generate done but `vault-0e4`/reveal
+  race** *(2026-07-07 live demo run — the run wedged with generate done but `vault-0e4`/reveal
   stuck)*. T15.3 serialized `bd` invocations to kill the lost-update *race*, but a stage-close is
   still lost if the OS **SIGKILLs the `bd`/`dolt` write process** mid-operation — which happens
   when the host is out of RAM (observed 176 MB free of 32 GB; the log showed `bd … signal:
@@ -1325,15 +1375,16 @@ provenance-rendering gap).
   + its explorer sandbox (today they pin the sandbox until count pressure), and a terminal
   "session expired" SSE event so an evicted session's browser stream isn't silently inert.
 - **OpenRouter provider routing / pinning** *(2026-07-06 vault-demo run)*. `ModelProvider` has
-  no seam to pin or order the upstream provider OpenRouter routes a slug to — it load-balances
-  `deepseek/deepseek-v4-pro` across DeepSeek/Fireworks/Together/… each with different throughput
+  no seam to pin or order the upstream provider OpenRouter routes a slug to — it load-balances a
+  slug like `z-ai/glm-5.2` (the current security/qa verifier; `deepseek/deepseek-v4-pro` before
+  the 338e46c swap) across multiple upstream hosts each with different throughput
   and reliability, so behaviour varies run-to-run. Injectable via the adapter's existing
   `option.WithJSONSet` escape hatch (a top-level `provider: {order|only|sort}` field) behind a
   new `ModelProvider` field. Value: run-to-run **reproducibility** and the ability to route to a
   high-throughput host; **not** a reliability win on its own (`allow_fallbacks:false` trades
   resilience for determinism, so prefer an ordered preference with fallbacks on, or
-  `sort: throughput`). Deferred as an enhancement — it is not the fix for the BUG-4 stall
-  (T15.2's idle timeout is), and does nothing for DeepSeek's intrinsic per-turn latency.
+  `sort: throughput`). Deferred as an enhancement — it is not the fix for the hung-stream stall
+  (T15.2's idle timeout is), and does nothing for an upstream model's intrinsic per-turn latency.
 - **Control-room pagination** *(2026-07-03 review)*. Provenance history is hard-capped at the
   newest 50 merges with no offset/cursor (`internal/controlroom/server.go:698`) — older
   forensic history is unreachable in the UI; board/DLQ render their full sets unbounded.
