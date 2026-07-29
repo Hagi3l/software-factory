@@ -83,20 +83,20 @@ the right fix is to update the spec.
 
 ## Status
 
-Working, end-to-end, in development: the kernel does `spec → implement → gate →
-merge`, and on top of it independent verification, the full DAG with decomposition
-and a merge queue, the control room with the Create-Task/Resolve wizard, and most
-of the production substrate (gVisor backend, distributed NATS, scoped secrets,
-S3 artifact store, provenance signing) are complete. What remains is the
-Firecracker microVM sandbox backend — blocked on KVM hardware, not on code — and
-optional warm pools / HA orchestration.
+**It works, end to end.** The vault demo ([`demo/vault`](demo/vault/README.md)) has
+run the whole loop live: agents planned a feature, authored its tests, implemented
+against them, passed an independent security/QA gate in a fresh sandbox, and the
+trusted layer merged the result into a real Go web app — with every commit carrying
+its full provenance trail.
 
-Two honest caveats:
+All of the machinery above is built: the kernel, independent verification, the
+staged DAG with decomposition and a merge queue, the control room, and most of the
+production substrate (gVisor sandboxes, distributed NATS, scoped secrets, S3
+artifacts, provenance signing). The one notable gap is the Firecracker microVM
+backend, blocked on KVM hardware — the per-task detail lives in
+[`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md).
 
-- Everything so far was built by hand with human review, **not** self-hosted. The
-  autonomous self-hosting loop is buildable and tested offline but has not been
-  switched on.
-- This is a research/portfolio project, not a supported product. Expect sharp edges.
+This is a personal research project, not a supported product — expect sharp edges.
 
 Amusingly for a project about agent orchestration, the repo itself was largely built
 by an agent loop — see `loop.sh` and `PROMPT_BUILD.md` for the harness that built the
