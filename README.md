@@ -131,4 +131,6 @@ Stack:
 
 ## License
 
-[MIT](LICENSE).
+[MIT](LICENSE). Bundled third-party components — htmx, Alpine, Tailwind, the Geist
+fonts, and the Go dependencies — are recorded in
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
