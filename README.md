@@ -117,5 +117,4 @@ the binary via `embed.FS`.
 
 ## License
 
-**TBD.** A license has not been chosen yet; until one is added, all rights are
-reserved. If you want to use this for something, open an issue.
+[MIT](LICENSE).
