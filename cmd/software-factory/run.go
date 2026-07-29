@@ -186,7 +186,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		if mkErr := os.MkdirAll(storeDir, 0o750); mkErr != nil {
 			return nil, mkErr
 		}
-		srv, serr := messaging.NewEmbeddedServer(messaging.ServerConfig{Name: "harness", StoreDir: storeDir, ClientAddr: opts.natsAddr})
+		srv, serr := messaging.NewEmbeddedServer(messaging.ServerConfig{Name: "factory", StoreDir: storeDir, ClientAddr: opts.natsAddr})
 		if serr != nil {
 			return nil, serr
 		}
@@ -199,7 +199,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		if opts.natsAddr != "" {
 			log.WarnContext(context.Background(), "software-factory run: --nats-addr ignored because nats.url points at an external cluster", "nats_url", url)
 		}
-		nc, err = messaging.Connect(url, nats.Name("harness"))
+		nc, err = messaging.Connect(url, nats.Name("factory"))
 		if err != nil {
 			return nil, err
 		}
@@ -238,7 +238,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// failure. Shutdown joins the teardown stack so a clean exit flushes the final batch.
 	tel, err := telemetry.Setup(context.Background(), telemetry.Config{
 		Endpoint:    cfg.Infra.OTel.Endpoint,
-		ServiceName: "harness",
+		ServiceName: "factory",
 		// Resolve ${ENV} references in the export headers here, at the last responsible
 		// moment, so a backend credential lives in config only as an env reference.
 		Headers: cfg.Infra.OTel.ResolveHeaders(),
@@ -257,7 +257,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// loop) logs through it, never the sandboxed agent (logs are trusted-side only). The
 	// control-room LogBridge below then wraps this so the same record also reaches the live
 	// feed — one slog source, three sinks.
-	log = slog.New(tel.WrapLogHandler(log.Handler(), "harness"))
+	log = slog.New(tel.WrapLogHandler(log.Handler(), "factory"))
 
 	// Model registry: soul.model -> provider adapter. Keys come from the environment
 	// inside the registry, never from config. Built before the control room so the
@@ -285,7 +285,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 
 	// One temp dir holds every per-sandbox broker socket (runner, gate, and the planner's
 	// read-only exploration sandbox), cleaned up on teardown.
-	sockDir, err := os.MkdirTemp("", "harness-broker-")
+	sockDir, err := os.MkdirTemp("", "factory-broker-")
 	if err != nil {
 		return nil, err
 	}
@@ -399,7 +399,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			// Read-only codebase exploration (T4.28): when a sandbox profile is configured, give the
 			// planner the agent's read tools over a fresh read-only sandbox seeded from the repo, so
 			// it grounds specs + seed issues in the real code. baseRef defaults to the repo's current
-			// branch (the harness repo is master, a target repo may differ — never hardcode main).
+			// branch (the factory repo is master, a target repo may differ — never hardcode main).
 			if rp.SandboxProfile != "" {
 				baseRef := rp.BaseRef
 				if baseRef == "" {
@@ -585,8 +585,8 @@ func (l *lateWorkGraph) Snapshot(ctx context.Context) ([]core.Issue, error) {
 
 // defaultBranch returns the repo's current branch name, used as the base ref the planner's
 // read-only exploration sandbox is seeded at when requirements_planner.base_ref is unset
-// (T4.28). It must not hardcode "main": the harness repo is "master" and a target repo may use
-// either. On any failure it falls back to "main" (the harness convention) — exploration will
+// (T4.28). It must not hardcode "main": the factory repo is "master" and a target repo may use
+// either. On any failure it falls back to "main" (the factory convention) — exploration will
 // then degrade loudly at provision time if that ref does not exist, which is the right signal.
 func defaultBranch(repo string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

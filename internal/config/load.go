@@ -28,7 +28,7 @@ type Config struct {
 // parses but does not validate cross-file references — that is software-factory validate's
 // job (see specs/configuration.md).
 func Load(dir, env string) (*Config, error) {
-	harness, err := LoadHarness(filepath.Join(dir, "factory.yaml"))
+	factory, err := LoadHarness(filepath.Join(dir, "factory.yaml"))
 	if err != nil {
 		return nil, err
 	}
@@ -40,7 +40,7 @@ func Load(dir, env string) (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Config{Root: dir, Harness: harness, Souls: souls, Infra: infra}, nil
+	return &Config{Root: dir, Harness: factory, Souls: souls, Infra: infra}, nil
 }
 
 // PersonaPath resolves a soul's declared persona path against the config root.

@@ -1,4 +1,4 @@
-// Package telemetry is the harness's OpenTelemetry layer. It is the single source of
+// Package telemetry is the factory's OpenTelemetry layer. It is the single source of
 // truth for the span and metric *schema* — the span names, attribute keys, and metric
 // names every component emits — separate from the instrumentation scattered across the
 // broker, runner, gate, and orchestrator. Keeping the schema in one place is the point:
@@ -10,7 +10,7 @@
 // telemetry.go; this file is data only.
 package telemetry
 
-// ScopeName is the instrumentation scope every harness span and metric is emitted
+// ScopeName is the instrumentation scope every factory span and metric is emitted
 // under, so a trace backend can attribute them to this codebase.
 const ScopeName = "github.com/Loxstomper/software-factory"
 

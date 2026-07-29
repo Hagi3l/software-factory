@@ -7,22 +7,22 @@ import (
 )
 
 // TestReplayPageRenders proves T4.11's page renders the reconstructed trail for merged work:
-// detailServer's harness-1 carries a transcript hash whose (one-turn) content is in the store,
+// detailServer's factory-1 carries a transcript hash whose (one-turn) content is in the store,
 // so the page shows the decision-trail section, a turn card, and the raw-transcript and
 // back-to-issue links. It reuses the detailServer fixture so the read fakes stay in one place.
 func TestReplayPageRenders(t *testing.T) {
 	ts := detailServer(t)
-	r := get(t, ts, "/replay/harness-1")
+	r := get(t, ts, "/replay/factory-1")
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
 		"Replay — Merged work",        // header (issue title)
-		"harness-1",                   // id
+		"factory-1",                   // id
 		"Decision trail",              // the trail section
 		"Turn 0",                      // the single turn card
 		"/artifact/" + transcriptHash, // raw-bytes link to the transcript
-		"/issue/harness-1",            // back to the detail page
+		"/issue/factory-1",            // back to the detail page
 		`href="/static/app.css"`,      // inside the base layout chrome
 	} {
 		if !strings.Contains(r.body, want) {
@@ -31,12 +31,12 @@ func TestReplayPageRenders(t *testing.T) {
 	}
 }
 
-// TestReplayNoTranscriptNotice covers a known issue with no reachable transcript (harness-2 is
+// TestReplayNoTranscriptNotice covers a known issue with no reachable transcript (factory-2 is
 // in flight — no provenance): the page still renders the issue header but shows the
 // "none captured" notice instead of a trail, and never errors.
 func TestReplayNoTranscriptNotice(t *testing.T) {
 	ts := detailServer(t)
-	r := get(t, ts, "/replay/harness-2")
+	r := get(t, ts, "/replay/factory-2")
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
@@ -55,7 +55,7 @@ func TestReplayNoTranscriptNotice(t *testing.T) {
 // not-attached notice (200, in chrome), mirroring the issue-detail page.
 func TestReplayWithoutReader(t *testing.T) {
 	ts := newTestServer(t) // no Options.Reader
-	r := get(t, ts, "/replay/harness-1")
+	r := get(t, ts, "/replay/factory-1")
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
@@ -82,13 +82,13 @@ func TestReplayUnknown(t *testing.T) {
 func TestIssueDetailLinksToReplayWhenTranscript(t *testing.T) {
 	ts := detailServer(t)
 
-	merged := get(t, ts, "/issue/harness-1")
-	if !strings.Contains(merged.body, "/replay/harness-1") || !strings.Contains(merged.body, "Replay decision trail") {
+	merged := get(t, ts, "/issue/factory-1")
+	if !strings.Contains(merged.body, "/replay/factory-1") || !strings.Contains(merged.body, "Replay decision trail") {
 		t.Errorf("merged issue detail missing the replay drill-through link")
 	}
 
-	inflight := get(t, ts, "/issue/harness-2")
-	if strings.Contains(inflight.body, "/replay/harness-2") {
+	inflight := get(t, ts, "/issue/factory-2")
+	if strings.Contains(inflight.body, "/replay/factory-2") {
 		t.Errorf("in-flight issue (no transcript) must not show a replay link")
 	}
 }

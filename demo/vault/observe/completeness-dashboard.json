@@ -1,10 +1,10 @@
 {
   "version": 5,
-  "dashboardId": "harness-completeness-overview",
+  "dashboardId": "factory-completeness-overview",
   "title": "Harness — completeness overview",
-  "description": "The whole telemetry record in one place: all three OTel signals the harness ships (traces + logs + metrics) arriving from service 'harness'. Traces and logs land in the 'default' stream; metrics arrive as Prometheus-named streams (dots become underscores, e.g. factory.invocations -> factory_invocations). Provisioned by demo/vault/run.sh under OPENOBSERVE=1; pinned to the OpenObserve dashboard v5 schema — bump it with the image (OPENOBSERVE_IMAGE).",
+  "description": "The whole telemetry record in one place: all three OTel signals the factory ships (traces + logs + metrics) arriving from service 'factory'. Traces and logs land in the 'default' stream; metrics arrive as Prometheus-named streams (dots become underscores, e.g. factory.invocations -> factory_invocations). Provisioned by demo/vault/run.sh under OPENOBSERVE=1; pinned to the OpenObserve dashboard v5 schema — bump it with the image (OPENOBSERVE_IMAGE).",
   "role": "",
-  "owner": "harness-demo",
+  "owner": "factory-demo",
   "created": "2026-01-01T00:00:00.000Z",
   "tabs": [
     {
@@ -166,7 +166,7 @@
           "id": "panel-pipeline-log",
           "type": "table",
           "title": "Pipeline — log records (issue / role / event)",
-          "description": "Every trusted-side slog record as columns, newest first — no filtering, all records. issue/role COALESCE the harness's two logging conventions (lifecycle logs from the orchestrator/agent use issue/role; broker + instrumented logs use factory_issue_id/factory_issue_role) so the column is populated on every row.",
+          "description": "Every trusted-side slog record as columns, newest first — no filtering, all records. issue/role COALESCE the factory's two logging conventions (lifecycle logs from the orchestrator/agent use issue/role; broker + instrumented logs use factory_issue_id/factory_issue_role) so the column is populated on every row.",
           "config": {
             "show_legends": false,
             "legends_position": null,

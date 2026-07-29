@@ -40,7 +40,7 @@ type GitOption func(*GitProvenance)
 func WithRef(ref string) GitOption { return func(g *GitProvenance) { g.ref = ref } }
 
 // WithAllowedSigners turns on verify-on-read (T5.10): each merged commit's SSH signature
-// is verified against the allowed-signers file at path (principal -> harness public key),
+// is verified against the allowed-signers file at path (principal -> factory public key),
 // and the verdict surfaces as MergedCommit.Signature. An empty path leaves verification
 // off — every commit reads as SignatureUnchecked — so the caller can pass the configured
 // path unconditionally. The file is public (it holds only public keys), unlike the private

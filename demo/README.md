@@ -1,6 +1,6 @@
 # Demo: a landing page, end to end
 
-This is the smallest demo that still shows the harness doing its real job: a human
+This is the smallest demo that still shows the factory doing its real job: a human
 authors a spec, and sandboxed, independently-verified agents turn it into code merged to
 `main` — driven by a **hosted model** (`deepseek/deepseek-v4-flash` via OpenRouter), so
 all you need is an API key.
@@ -32,7 +32,7 @@ demo/
       implementor.yaml + prompts/implementor.md     # writes index.html to pass it
 ```
 
-It's a self-contained config, separate from the harness's own `config/`, so it can't
+It's a self-contained config, separate from the factory's own `config/`, so it can't
 disturb the real pipeline. The target repo it builds is a throwaway created in a temp
 dir — nothing is written into this repository.
 
@@ -45,7 +45,7 @@ dir — nothing is written into this repository.
   model through structured tool calls, and a model that can't do that won't get through a
   single stage.
 - **beads** (`bd`) on your `PATH` (or pass `BD=/path/to/bd`).
-- Go + `make` (to build the `harness` binary).
+- Go + `make` (to build the `software-factory` binary).
 
 The `go-toolchain` sandbox image is built automatically on first run if it's missing
 (it's reused here only for its `bash`/`grep`/`git` — no Go runs in the shell gate).
@@ -91,7 +91,7 @@ request's model field, so it must be a valid OpenRouter slug.
   in `config/factory.yaml` (cumulative).
 - **Dead-lettered work** shows up in the control room's Dead-letter view with the reason.
   The intended fix is to refine the spec (`templates/landing-page.md`) and re-run — the
-  harness's one human lever is the spec, never the agent's code.
+  factory's one human lever is the spec, never the agent's code.
 
 ## Tweaking the demo
 

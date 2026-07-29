@@ -14,7 +14,7 @@ import (
 
 // ServerConfig configures the embedded NATS server.
 type ServerConfig struct {
-	// Name is the server name shown in logs/monitoring; defaults to "harness".
+	// Name is the server name shown in logs/monitoring; defaults to "factory".
 	Name string
 	// StoreDir is the JetStream file-storage directory. If empty, a temporary
 	// directory is created and removed on Shutdown — convenient for tests, but a
@@ -45,13 +45,13 @@ type EmbeddedServer struct {
 func NewEmbeddedServer(cfg ServerConfig) (*EmbeddedServer, error) {
 	name := cfg.Name
 	if name == "" {
-		name = "harness"
+		name = "factory"
 	}
 
 	storeDir := cfg.StoreDir
 	removeStore := false
 	if storeDir == "" {
-		d, err := os.MkdirTemp("", "harness-nats-")
+		d, err := os.MkdirTemp("", "factory-nats-")
 		if err != nil {
 			return nil, fmt.Errorf("messaging: create jetstream store dir: %w", err)
 		}

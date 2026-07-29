@@ -7,7 +7,7 @@ import "testing"
 // runs in a separate trace from the producer). A round-trip must hold, and a ref that does
 // not follow the convention must be rejected rather than yield a bogus id.
 func TestIssueIDFromCandidateBranch(t *testing.T) {
-	for _, id := range []string{"issue-1", "harness-42", "a/b-c"} {
+	for _, id := range []string{"issue-1", "factory-42", "a/b-c"} {
 		got, ok := IssueIDFromCandidateBranch(CandidateBranch(id))
 		if !ok || got != id {
 			t.Errorf("round-trip %q = (%q, %v), want (%q, true)", id, got, ok, id)

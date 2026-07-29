@@ -15,7 +15,7 @@ import (
 // configTestCfg is a small validated-shape config for the Config view server test.
 func configTestCfg() *config.Config {
 	return &config.Config{
-		Root: "/srv/harness/config",
+		Root: "/srv/factory/config",
 		Harness: &config.Harness{
 			DAG: map[string]config.Stage{
 				"plan":      {Role: "planner", Kind: config.StageKindPlan, OnFailure: "plan", Produces: []string{"implement"}},
@@ -26,10 +26,10 @@ func configTestCfg() *config.Config {
 			Policy: config.Policy{MaxRetries: 3, Profile: config.ProfileTrustedDev, TCBPaths: []string{"config/**"}},
 		},
 		Souls: []core.Soul{
-			{Name: "planner-go", Role: "planner", Model: "claude-opus-4-8", Sandbox: "go-toolchain", Persona: "/srv/harness/config/souls/prompts/planner.md", Selector: map[string]string{"lang": "go"}},
+			{Name: "planner-go", Role: "planner", Model: "claude-opus-4-8", Sandbox: "go-toolchain", Persona: "/srv/factory/config/souls/prompts/planner.md", Selector: map[string]string{"lang": "go"}},
 		},
 		Infra: &config.Infra{
-			Sandbox:   config.SandboxConfig{Backend: config.BackendDocker, Egress: "broker-only", Profiles: map[string]config.SandboxProfile{"go-toolchain": {Image: "harness/go-toolchain@sha256:abc"}}},
+			Sandbox:   config.SandboxConfig{Backend: config.BackendDocker, Egress: "broker-only", Profiles: map[string]config.SandboxProfile{"go-toolchain": {Image: "factory/go-toolchain@sha256:abc"}}},
 			NATS:      config.NATSConfig{URL: "nats://secret-host:4222"},
 			Broker:    config.BrokerConfig{Allowlist: []string{"llm-api", "git"}},
 			Artifacts: config.ArtifactsConfig{Backend: "files", Path: "/var/secret/artifacts"},
@@ -43,7 +43,7 @@ func configTestCfg() *config.Config {
 // so config.Warnings() is non-empty and the Config view must surface an advisories section.
 func warningConfigCfg() *config.Config {
 	return &config.Config{
-		Root: "/srv/harness/config",
+		Root: "/srv/factory/config",
 		Harness: &config.Harness{
 			DAG: map[string]config.Stage{
 				"implement": {Role: "implementor", Postcondition: []string{"tests-red-then-green"}, Produces: []string{"qa"}},
@@ -54,11 +54,11 @@ func warningConfigCfg() *config.Config {
 			Policy: config.Policy{MaxRetries: 3, Profile: config.ProfileTrustedDev, TCBPaths: []string{"config/**"}},
 		},
 		Souls: []core.Soul{
-			{Name: "implementor-go", Role: "implementor", Model: "claude-opus-4-8", Sandbox: "go-toolchain", Persona: "/srv/harness/config/souls/prompts/impl.md"},
-			{Name: "security-go", Role: "security", Model: "claude-sonnet-4-6", Sandbox: "go-toolchain", Persona: "/srv/harness/config/souls/prompts/sec.md"},
+			{Name: "implementor-go", Role: "implementor", Model: "claude-opus-4-8", Sandbox: "go-toolchain", Persona: "/srv/factory/config/souls/prompts/impl.md"},
+			{Name: "security-go", Role: "security", Model: "claude-sonnet-4-6", Sandbox: "go-toolchain", Persona: "/srv/factory/config/souls/prompts/sec.md"},
 		},
 		Infra: &config.Infra{
-			Sandbox:   config.SandboxConfig{Backend: config.BackendDocker, Egress: "broker-only", Profiles: map[string]config.SandboxProfile{"go-toolchain": {Image: "harness/go-toolchain@sha256:abc"}}},
+			Sandbox:   config.SandboxConfig{Backend: config.BackendDocker, Egress: "broker-only", Profiles: map[string]config.SandboxProfile{"go-toolchain": {Image: "factory/go-toolchain@sha256:abc"}}},
 			Broker:    config.BrokerConfig{Allowlist: []string{"llm-api"}},
 			Artifacts: config.ArtifactsConfig{Backend: "files", Path: "/var/artifacts"},
 			Models: map[string]config.ModelProvider{

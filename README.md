@@ -84,14 +84,14 @@ first merge.
 | Look up a **term of art** (soul, gate, bead…)   | [`specs/glossary.md`](specs/glossary.md) |
 | See the **build order and status**              | [`IMPLEMENTATION_PLAN.md`](IMPLEMENTATION_PLAN.md) |
 
-`specs/` is the source of truth for *what the harness is and how it must behave*;
+`specs/` is the source of truth for *what the factory is and how it must behave*;
 `docs/` is the practical *how to use it*. When the two disagree, the spec wins — and
 the right fix is to update the spec.
 
 ## Status
 
 **It works, end to end.** The vault demo ([`demo/vault`](demo/vault/README.md)) —
-one configuration of the harness, not its purpose — has run the whole loop live:
+one configuration of the factory, not its purpose — has run the whole loop live:
 agents planned a feature, authored its tests, implemented
 against them, passed an independent security/QA gate in a fresh sandbox, and the
 trusted layer merged the result into a real Go web app — with every commit carrying
@@ -107,8 +107,8 @@ backend, blocked on KVM hardware — the per-task detail lives in
 This is a personal research project, not a supported product — expect sharp edges.
 
 Amusingly for a project about agent orchestration, the repo itself was largely built
-by an agent loop — see `loop.sh` and `PROMPT_BUILD.md` for the harness that built the
-harness.
+by an agent loop — see `loop.sh` and `PROMPT_BUILD.md` for the factory that built the
+factory.
 
 ## Development
 

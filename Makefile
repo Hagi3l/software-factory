@@ -1,4 +1,4 @@
-# Build and test entry points for the harness.
+# Build and test entry points for the factory.
 #
 # test-* targets follow the convention documented in CLAUDE.md: they emit
 # `go test -json` to test/results/ (gitignored) as <target>.json plus a
@@ -15,7 +15,7 @@ RESULTS := test/results
 
 # Control-room build tooling. templ is a `go install` dependency; the Tailwind standalone
 # CLI is a static binary fetched on demand into bin/ (gitignored), keeping the deployable
-# harness a single self-contained binary while the toolchain stays build-time only.
+# factory a single self-contained binary while the toolchain stays build-time only.
 TEMPL          ?= templ
 TAILWIND       := $(BIN_DIR)/tailwindcss
 TAILWIND_VER   := v4.3.0
@@ -33,7 +33,7 @@ all: build
 ## check: the full local gate — vet, lint, then unit tests. Run before committing.
 check: vet lint test-unit
 
-## build: compile the harness binary into bin/ with the version stamped in.
+## build: compile the factory binary into bin/ with the version stamped in.
 build:
 	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/software-factory
 
@@ -107,7 +107,7 @@ govulncheck:
 	govulncheck $(if $(strip $(GOVULNDB)),-db $(GOVULNDB),) ./...
 
 ## license-scan: dependency/licence policy (qa gate). Rejects disallowed licences.
-## --ignore the harness's own module: go-licenses classifies the local packages too,
+## --ignore the factory's own module: go-licenses classifies the local packages too,
 ## but the policy this gate enforces is about what we *depend on*, not our own licence
 ## (MIT, see LICENSE). Scoping to third-party deps keeps a failure meaningful — it can
 ## only mean a dependency's licence, never a finding about the repo itself.

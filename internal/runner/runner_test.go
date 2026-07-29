@@ -130,7 +130,7 @@ func (i *harvestingInvoker) Invoke(ctx context.Context, _ sandbox.Sandbox, _ cor
 	return i.result, nil
 }
 
-// --- harness -----------------------------------------------------------------
+// --- factory -----------------------------------------------------------------
 
 func testBrief() core.Brief {
 	return core.Brief{
@@ -172,7 +172,7 @@ func newRunner(t *testing.T, b *fakeBackend, inv Invoker, mod ...func(*Options))
 		Allowlist: []string{"llm-api"},
 		AckWait:   2 * time.Second,
 		ResolveImage: func(profile string) string {
-			return "harness/" + profile + "@sha256:test"
+			return "factory/" + profile + "@sha256:test"
 		},
 	}
 	for _, m := range mod {
@@ -250,7 +250,7 @@ func TestRunProvisionsInvokesPublishesAndAcks(t *testing.T) {
 	}
 	// The logical profile was resolved to a concrete image via Options.ResolveImage and
 	// carried on the spec for the backend to boot (and for provenance).
-	if spec.Image != "harness/go-toolchain@sha256:test" {
+	if spec.Image != "factory/go-toolchain@sha256:test" {
 		t.Errorf("spec image = %q, want resolved concrete image", spec.Image)
 	}
 	if spec.Workspace.BaseRef != "main" || spec.Workspace.Repo != "/repo" {

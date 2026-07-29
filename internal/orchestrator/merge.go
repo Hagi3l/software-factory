@@ -80,9 +80,9 @@ type gitRunFunc func(ctx context.Context, dir string, args ...string) (string, e
 type MergerOption func(*gitMerger)
 
 // WithSigningKey makes the merger SSH-sign every provenance commit it writes with the
-// harness identity key at keyPath (gpg.format=ssh). An empty path is a no-op, so the
+// factory identity key at keyPath (gpg.format=ssh). An empty path is a no-op, so the
 // caller can pass the configured key unconditionally and signing simply stays off when
-// none is set (T5.10, specs/security.md). The key is the harness's private SSH key; only
+// none is set (T5.10, specs/security.md). The key is the factory's private SSH key; only
 // the trusted provenance commit on top of the candidate is signed — the agent's own
 // candidate commits below it are never signed (they are untrusted by construction).
 func WithSigningKey(keyPath string) MergerOption {
@@ -113,7 +113,7 @@ func NewGitMerger(bin string, opts ...MergerOption) Merger {
 // The serialized queue means the target may have moved since the candidate branched (another
 // candidate merged first). So the candidate is rebased onto the current target tip, then a
 // trusted provenance commit is written on top of the rebased result — same tree (no file
-// changes), parent the rebased tip, authored by the harness identity, with the provenance
+// changes), parent the rebased tip, authored by the factory identity, with the provenance
 // trailer as its message — and the target is advanced to it. The target's tip is therefore
 // always a trusted, attributable commit, and advancing to it stays within fast-forward
 // semantics by construction: after the rebase, the target is an ancestor of the rebased tip (a
@@ -235,17 +235,17 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref, target string, prov co
 		return "", fmt.Errorf("orchestrator: resolve landed tree for %q: %w", ref, err)
 	}
 	// commit-tree writes a commit with the rebased tree and the rebased tip as its sole
-	// parent. Identity is forced via -c so the integration commit is the harness's, not
+	// parent. Identity is forced via -c so the integration commit is the factory's, not
 	// whatever git config the host carries; when a signing key is configured the same
 	// command SSH-signs the commit, so the target's tip is cryptographically attributable to
-	// the harness, not merely labeled with its name (T5.10, specs/security.md).
+	// the factory, not merely labeled with its name (T5.10, specs/security.md).
 	args := []string{
 		"-c", "user.name=" + provenanceCommitterName,
 		"-c", "user.email=" + provenanceCommitterEmail,
 	}
 	commitArgs := []string{"commit-tree", tree, "-p", landed, "-m", prov.CommitMessage()}
 	if m.signingKey != "" {
-		// gpg.format=ssh + user.signingkey point git at the harness SSH key; -S (a commit-tree
+		// gpg.format=ssh + user.signingkey point git at the factory SSH key; -S (a commit-tree
 		// flag, so it precedes the tree) requests the signature. Forced via -c, like the
 		// identity, so the host's own git config cannot redirect signing to a different key.
 		args = append(args, "-c", "gpg.format=ssh", "-c", "user.signingkey="+m.signingKey)
@@ -274,7 +274,7 @@ func (m *gitMerger) Merge(ctx context.Context, repo, ref, target string, prov co
 // tree is the epic branch's tree: in v1 the epic branch was cut from main and main has not moved,
 // so that tree already is the complete, re-gated feature — nothing new is introduced at the merge.
 // The subject is the feature's (epic root's) title and the trailer carries the whole-feature
-// provenance, signed with the harness key when one is configured, exactly like a per-item
+// provenance, signed with the factory key when one is configured, exactly like a per-item
 // provenance commit.
 //
 // It is idempotent on the epic id: a merge commit citing it already on main means a prior sweep
@@ -321,7 +321,7 @@ func (m *gitMerger) MergeEpic(ctx context.Context, repo, epicRef, target string,
 	if err != nil {
 		return "", false, fmt.Errorf("orchestrator: resolve epic tree for terminal merge of %q: %w", epicRef, err)
 	}
-	// commit-tree with TWO parents builds the merge commit. Identity is forced via -c (the harness
+	// commit-tree with TWO parents builds the merge commit. Identity is forced via -c (the factory
 	// owns main's tip), and a configured key SSH-signs it — the same plumbing as the per-item
 	// provenance commit, only with a second -p for the epic branch tip.
 	args := []string{
@@ -415,7 +415,7 @@ func (m *gitMerger) featureProvenance(ctx context.Context, repo, mainTip, epicTi
 // until after the target has advanced, at which point the target reaches the commits and the
 // ref is redundant. On conflict/error the worktree is torn down internally and no ref is left.
 func (m *gitMerger) rebaseOnto(ctx context.Context, repo, ref, target, issueID string) (landed, tmpRef string, cleanup func(), conflict bool, err error) {
-	parent, err := os.MkdirTemp("", "harness-rebase-")
+	parent, err := os.MkdirTemp("", "factory-rebase-")
 	if err != nil {
 		return "", "", nil, false, fmt.Errorf("orchestrator: create rebase worktree dir: %w", err)
 	}

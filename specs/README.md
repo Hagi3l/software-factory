@@ -1,6 +1,6 @@
-# Harness Specifications
+# Software Factory Specifications
 
-This directory is the source of truth for **what the harness is and how it must
+This directory is the source of truth for **what the factory is and how it must
 behave**. It is written for humans first and agents second. In the system these
 specs describe, this is the *only* place humans author intent — everything
 downstream is autonomous.
@@ -66,7 +66,7 @@ in favour of these.
 
 ## Reading order
 
-New to the harness? Read in this order:
+New to the factory? Read in this order:
 
 1. [architecture.md](architecture.md) — the big picture: trust model, topology, the two graphs.
 2. [workflow.md](workflow.md) — how work flows from a spec to merged code.
@@ -95,7 +95,7 @@ oddly (Soul, Role, Runner, Brief), it's defined there.
 | [specs-process.md](specs-process.md) | How specs are written, the human re-entry invariant, spec-drift handling, spec-version pinning. |
 | [observability.md](observability.md) | Broker-as-collector, the three stores, the OTel signal model (traces/metrics/logs, trusted-side-only), live vs. history, replayability. |
 | [control-room.md](control-room.md) | The web UI: stack, the views, live/historical rendering, and the Create-Task/Resolve wizard. |
-| [bootstrap.md](bootstrap.md) | How the harness comes to build itself: the minimal kernel, the TCB caveat, the trusted→autonomous progression. |
+| [bootstrap.md](bootstrap.md) | How the factory comes to build itself: the minimal kernel, the TCB caveat, the trusted→autonomous progression. |
 | [components/orchestrator.md](components/orchestrator.md) | The scheduler + gatekeeper + sole beads writer and its reconciliation loop. |
 | [components/runner.md](components/runner.md) | The per-host daemon: sandbox lifecycle and the I/O broker. |
 | [components/agent.md](components/agent.md) | The `Agent` interface, the `Soul`, the invocation lifecycle, the task envelope. |

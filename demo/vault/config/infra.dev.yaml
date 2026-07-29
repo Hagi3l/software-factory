@@ -1,4 +1,4 @@
-# Vault demo infrastructure overlay (env: dev) — points the harness at Anthropic models served
+# Vault demo infrastructure overlay (env: dev) — points the factory at Anthropic models served
 # through OpenRouter's OpenAI-compatible endpoint. See demo/vault/README.md.
 #
 # The model call is made by the runner on the HOST (the trusted side holds the adapter +

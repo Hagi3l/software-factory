@@ -41,7 +41,7 @@ type Config struct {
 	// host:port. config.Validate enforces this set before Setup runs.
 	Endpoint string
 	// ServiceName is the resource service.name reported to the backend. Defaults to
-	// "harness" when empty.
+	// "software-factory" when empty.
 	ServiceName string
 	// Headers are sent with every OTLP export — the auth + routing metadata an
 	// authenticated backend (e.g. OpenObserve, Grafana Cloud, Honeycomb) requires. Values
@@ -56,7 +56,7 @@ type Config struct {
 	TLS bool
 }
 
-// Provider is the harness's live telemetry: a tracer for spans and a set of metric
+// Provider is the factory's live telemetry: a tracer for spans and a set of metric
 // instruments, plus a shutdown that flushes pending exports. Every instrumented call
 // site holds one and emits unconditionally; whether anything is actually exported is the
 // Provider's concern, not the call site's — an off Provider (Noop) makes every emit a
@@ -75,7 +75,7 @@ func (p *Provider) Tracer() trace.Tracer { return p.tracer }
 // LoggerProvider returns the OTel logs provider the trusted-side slog→OTel bridge
 // (T5.13) builds its handler over. It is never nil (Noop supplies an inert one), so the
 // bridge wiring is unconditional — whether a record is actually exported is the
-// Provider's concern, mirroring Tracer()/the metric instruments. The harness only ever
+// Provider's concern, mirroring Tracer()/the metric instruments. The factory only ever
 // feeds it from trusted host-side code; untrusted model text and sandbox output are span
 // attributes / artifact-store evidence, never log records (specs/observability.md "Logs
 // are trusted-side only").
@@ -106,7 +106,7 @@ func Noop() *Provider {
 
 // NewWith builds a Provider over caller-supplied OTel providers instead of the
 // endpoint-driven exporter pipeline Setup wires. It exists so a caller that already owns a
-// TracerProvider/MeterProvider — chiefly the cross-package tests that assert the harness's
+// TracerProvider/MeterProvider — chiefly the cross-package tests that assert the factory's
 // call sites emit the right spans and metrics against in-memory recorders — can obtain a
 // real, recording Provider without Setup's exporter machinery. Production uses Setup; this
 // has no Shutdown (the caller owns the pipelines' lifecycle). It returns an error only if
@@ -129,7 +129,7 @@ func Setup(ctx context.Context, cfg Config) (*Provider, error) {
 	}
 	name := cfg.ServiceName
 	if name == "" {
-		name = "harness"
+		name = "software-factory"
 	}
 	res := resource.NewSchemaless(attribute.String("service.name", name))
 

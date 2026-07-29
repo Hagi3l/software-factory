@@ -13,7 +13,7 @@ import (
 	"github.com/Loxstomper/software-factory/internal/core"
 )
 
-// MetadataKeyRole is the beads metadata key under which an issue's harness role
+// MetadataKeyRole is the beads metadata key under which an issue's factory role
 // (its DAG stage, e.g. "implement") is stored. Role lives in metadata, not in
 // labels: labels are the issue's tags, matched against a soul's selector to pick
 // which soul fulfills a role (see specs/configuration.md), whereas the role is the
@@ -196,7 +196,7 @@ func (c *Client) ListAll(ctx context.Context) ([]core.Issue, error) {
 	return decodeIssues(out)
 }
 
-// issueJSON is the subset of bd's --json issue object the harness consumes. bd
+// issueJSON is the subset of bd's --json issue object the factory consumes. bd
 // emits many more fields (priority, owner, timestamps, counts); only the facets an
 // agent is handed are decoded. Metadata is decoded as raw values so a non-string
 // entry written by another tool cannot fail the whole read.
@@ -215,7 +215,7 @@ type issueJSON struct {
 // array). Only depends_on_id is consumed — the id of the issue this one is blocked by; the
 // edge's own issue_id is the enclosing record's id, and the type (e.g. "blocks") is not
 // needed for the DAG read. It is decoded into core.Issue.DependsOn (blocked-by targets),
-// the read-side edge source for the control room's dependency graph (T4.6), so the harness
+// the read-side edge source for the control room's dependency graph (T4.6), so the factory
 // need not issue a separate `bd dep` query.
 type depJSON struct {
 	DependsOnID string `json:"depends_on_id"`
@@ -282,7 +282,7 @@ func (r issueJSON) toCore() core.Issue {
 		// in-memory lease sweep recovers stranded work on the original deadline (T3.13). Zero
 		// (absent/unparsable) on an issue not in_progress; lenient like the other decoders.
 		Lease: metaTime(r.Metadata, MetadataKeyLease),
-		// Beads' own top-level created_at (not harness metadata) — the board's per-card
+		// Beads' own top-level created_at (not factory metadata) — the board's per-card
 		// "total time" anchor (T4.18). Lenient like the metadata decoders: an absent or
 		// malformed timestamp reads as the zero time, never failing the read.
 		CreatedAt: parseRFC3339(r.CreatedAt),
@@ -318,7 +318,7 @@ func dependsOn(deps []depJSON) []string {
 // map[string]string a soul's selector matches against (see core.Issue.Tags,
 // core.Soul.Matches). A label with no `=` is kept as a valueless tag (key with empty
 // value): it cannot satisfy a {k: v} selector but is preserved rather than dropped, and
-// being lenient keeps the read path robust to labels the harness did not write. Returns
+// being lenient keeps the read path robust to labels the factory did not write. Returns
 // nil for no labels so an untagged issue carries a nil map (the trivial 1:1 case).
 func parseLabels(labels []string) map[string]string {
 	if len(labels) == 0 {
@@ -339,7 +339,7 @@ func parseLabels(labels []string) map[string]string {
 }
 
 // metaString returns the string value of a metadata key, or "" if absent or not a
-// string. Being lenient here keeps the read path robust to metadata the harness did
+// string. Being lenient here keeps the read path robust to metadata the factory did
 // not write.
 func metaString(m map[string]json.RawMessage, key string) string {
 	raw, ok := m[key]

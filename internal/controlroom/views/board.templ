@@ -236,7 +236,7 @@ templ statusBadge(status string) {
 }
 
 // BoardMessage renders the board chrome with a single notice instead of columns — used
-// when the control room is not attached to a running factory (a standalone `harness
+// when the control room is not attached to a running factory (a standalone `factory
 // serve` has no beads to read) or when the board read fails.
 templ BoardMessage(msg string) {
 	@Layout("Harness — Board", "board") {

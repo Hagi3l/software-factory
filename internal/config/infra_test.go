@@ -7,9 +7,9 @@ import "testing"
 // total fallback when the profile is unregistered or missing the backend's field.
 func TestResolveImage(t *testing.T) {
 	profiles := map[string]SandboxProfile{
-		"go-toolchain": {Image: "harness/go-toolchain@sha256:abc", Rootfs: "/var/lib/harness/go.ext4"},
-		"image-only":   {Image: "harness/image-only:dev"},
-		"rootfs-only":  {Rootfs: "/var/lib/harness/rootfs-only.ext4"},
+		"go-toolchain": {Image: "factory/go-toolchain@sha256:abc", Rootfs: "/var/lib/factory/go.ext4"},
+		"image-only":   {Image: "factory/image-only:dev"},
+		"rootfs-only":  {Rootfs: "/var/lib/factory/rootfs-only.ext4"},
 	}
 	cases := []struct {
 		name    string
@@ -17,9 +17,9 @@ func TestResolveImage(t *testing.T) {
 		profile string
 		want    string
 	}{
-		{"docker picks image", BackendDocker, "go-toolchain", "harness/go-toolchain@sha256:abc"},
-		{"gvisor picks image", BackendGVisor, "go-toolchain", "harness/go-toolchain@sha256:abc"},
-		{"firecracker picks rootfs", BackendFirecracker, "go-toolchain", "/var/lib/harness/go.ext4"},
+		{"docker picks image", BackendDocker, "go-toolchain", "factory/go-toolchain@sha256:abc"},
+		{"gvisor picks image", BackendGVisor, "go-toolchain", "factory/go-toolchain@sha256:abc"},
+		{"firecracker picks rootfs", BackendFirecracker, "go-toolchain", "/var/lib/factory/go.ext4"},
 		{"unregistered falls back to name", BackendDocker, "rust-toolchain", "rust-toolchain"},
 		{"docker missing image falls back to name", BackendDocker, "rootfs-only", "rootfs-only"},
 		{"firecracker missing rootfs falls back to name", BackendFirecracker, "image-only", "image-only"},

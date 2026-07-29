@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/harness-demo/vault/internal/store"
+	"github.com/factory-demo/vault/internal/store"
 )
 
 // newTestServer returns a running httptest server and a cookie-jar client. The client

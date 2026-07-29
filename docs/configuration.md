@@ -1,6 +1,6 @@
 # Configuration
 
-The harness is entirely config-driven: the workflow, the souls, and the infrastructure
+The factory is entirely config-driven: the workflow, the souls, and the infrastructure
 are declarative and validated before anything runs (`software-factory validate`). This is the
 practical guide; the authoritative contract is
 [`specs/configuration.md`](../specs/configuration.md).
@@ -50,7 +50,7 @@ decides how many items to emit within a stage.
 
 Each command-check postcondition (e.g. `gosec`, `tests-pass`) maps to the shell command
 the gate runs in the clean verification sandbox — exit 0 = pass, non-zero = fail
-(closed). The shipped checks are the harness's own make targets, so "how QA runs" lives
+(closed). The shipped checks are the factory's own make targets, so "how QA runs" lives
 in one reviewable place:
 
 ```yaml
@@ -237,7 +237,7 @@ read-only; the planner still writes nothing but the consent-gated spec + seed is
 the wizard's composer shows an "Insert prepared requirement" button that drops the file's
 content into the message box — a canned opening for a rehearsed or scripted kickoff (e.g. a
 live demo). Insert only: the operator still reviews and sends it, and the conversation
-proceeds normally. The file is read on each page load, so it can be refined while the harness
+proceeds normally. The file is read on each page load, so it can be refined while the factory
 runs.
 
 ## A soul
@@ -293,7 +293,7 @@ sandboxed-soul analog of the wizard's `requirements_planner.max_tool_turns`.
 > Stricter postures remain pure config: a second `explorer` soul on a different model family with
 > a distinguishing `selector`, or giving the verify path no `explore` (it reads raw).
 
-> **Model diversity** (`producer ≠ verifier` strengthened): the harness *enables and
+> **Model diversity** (`producer ≠ verifier` strengthened): the factory *enables and
 > recommends* running the verifier on a different model family than the producer, but
 > the assignment is yours — it's a config capability, not a built-in mechanism.
 > `software-factory validate` emits a non-fatal **warning** if a producer and its verifier share
@@ -318,7 +318,7 @@ sandbox:
   max_concurrency: 1         # optional — same-role invocations a runner serves at once (1 = serial)
   profiles:                  # soul.sandbox name -> concrete artifact for this backend
     go-toolchain:
-      image: harness/go-toolchain@sha256:…   # docker/gvisor: `image`; firecracker: `rootfs`
+      image: factory/go-toolchain@sha256:…   # docker/gvisor: `image`; firecracker: `rootfs`
 nats:
   url: ""                    # "" = embedded in-process server (dev); set = external cluster
   jetstream: { replicas: 1, max_age: 168h }   # replicas: per-stream replication; max_age: result retention
@@ -336,7 +336,7 @@ artifacts:
   backend: files             # files (single-host dev) | s3 (distributed: S3/MinIO)
   path: ./.software-factory/artifacts # files backend root (relative paths resolve against the repo)
   # backend: s3              # for s3, set bucket + (endpoint | region); creds come from the env
-  # bucket: harness-artifacts
+  # bucket: factory-artifacts
   # endpoint: minio.internal:9000   # MinIO/non-AWS host[:port]; prefix http:// for plaintext dev
   # region: us-east-1               # required when endpoint is empty (derives the AWS endpoint)
 otel:
@@ -347,8 +347,8 @@ otel:
   #   authorization: ${OTEL_OTLP_AUTH}   # credential — MUST be an ${ENV_VAR} ref, never a literal secret
 signing:                     # provenance-commit signing; omit/disable to leave commits unsigned
   # enabled: true
-  # key: /run/secrets/factory_ed25519        # SSH private signing key (the harness identity); a runtime secret
-  # allowed_signers: /etc/harness/allowed_signers   # principal -> harness public key, for verify-on-read
+  # key: /run/secrets/factory_ed25519        # SSH private signing key (the factory identity); a runtime secret
+  # allowed_signers: /etc/factory/allowed_signers   # principal -> factory public key, for verify-on-read
 models:
   claude-opus-4-8:
     provider: anthropic
@@ -413,7 +413,7 @@ models:
 - **`broker.allowlist`** is the deny-by-default egress set (a destination not listed is
   refused at the broker). `package-proxy` permits Go module fetches: the zero-network
   sandbox can't reach a proxy directly, so the image runs an in-sandbox GOPROXY shim
-  (`harness sandbox-goproxy`) that forwards `go`'s module-proxy requests over the broker to
+  (`software-factory sandbox-goproxy`) that forwards `go`'s module-proxy requests over the broker to
   the runner, which fetches from **`broker.package_proxy`** (default the public
   `proxy.golang.org`) and logs every pull. Omit `package-proxy` and dependency
   fetches are denied — a build then resolves only from the image's baked module cache.
@@ -461,7 +461,7 @@ models:
   cluster** instead — the distributed deployment, same code and no rebuild
   (location transparency); the embedded server is not started and `--nats-addr` is
   ignored. `jetstream.replicas` is the per-stream replication factor (1 on the single
-  embedded server; `>1` needs an external cluster of at least that size — `harness
+  embedded server; `>1` needs an external cluster of at least that size — `factory
   validate` rejects `>1` with no `url`), and `jetstream.max_age` bounds the **result
   stream's** retention (the work, dead-letter, and approvals streams are deliberately
   unbounded — work is consume-once, the others must survive until a human acts).
@@ -490,14 +490,14 @@ models:
   discipline as model API keys. Routing metadata (`organization`, `stream-name`) may be a
   plain literal. `software-factory validate` rejects a literal credential or a malformed
   `${ENV_VAR}` reference.
-- **`signing`** turns on cryptographic signing of the harness-authored provenance commit
+- **`signing`** turns on cryptographic signing of the factory-authored provenance commit
   (SSH signing, `gpg.format=ssh`; see [security.md](../specs/security.md)). With
-  `enabled: true` and a `key` (path to the harness's SSH **private** signing key) the
-  orchestrator signs every integration commit, so `main`'s tip is provably the harness's,
+  `enabled: true` and a `key` (path to the factory's SSH **private** signing key) the
+  orchestrator signs every integration commit, so `main`'s tip is provably the factory's,
   not just labeled with its name. The key is a **runtime-provisioned secret** like an API
   key — referenced by path, never committed or baked into an image; its existence is *not*
   checked at `software-factory validate` (a missing key fails loudly on the first merge).
-  `allowed_signers` (a public file mapping the `harness@localhost` principal to the public
+  `allowed_signers` (a public file mapping the `factory@localhost` principal to the public
   key) drives **verify-on-read**: the control room's provenance view shows each merged
   commit's signature verdict (signed / unsigned / unverified). Omitting the block, or
   leaving `enabled` false, leaves commits unsigned — the unchanged dev default.

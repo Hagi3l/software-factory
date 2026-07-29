@@ -1,4 +1,4 @@
-// Package core holds the pure domain types shared across the harness — Soul,
+// Package core holds the pure domain types shared across the factory — Soul,
 // Issue, Brief, and Result — with no behavior and no dependencies on other
 // internal packages.
 //

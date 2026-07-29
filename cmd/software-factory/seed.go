@@ -16,7 +16,7 @@ import (
 // Errors entryRole returns when the entry stage cannot be inferred. They steer the
 // operator to pass --role explicitly rather than letting seed guess.
 var (
-	errNoHarness    = errors.New("config has no harness (DAG) loaded")
+	errNoHarness    = errors.New("config has no factory (DAG) loaded")
 	errNoEntryStage = errors.New("no entry agent stage found (every agent stage is produced by another); pass --role")
 )
 

@@ -70,7 +70,7 @@ type Options struct {
 	// adding runners — see specs/messaging.md).
 	Roles []string
 	// Repo is the source repository each sandbox worktree is seeded from. In bootstrap
-	// this is the local harness repo path; the backend clones it at the Brief's base ref.
+	// this is the local factory repo path; the backend clones it at the Brief's base ref.
 	Repo string
 	// SocketDir is the directory the per-invocation broker unix sockets are created in.
 	SocketDir string

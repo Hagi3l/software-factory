@@ -28,8 +28,8 @@ import (
 // specs/components/runner.md, internal/goproxy.
 func cmdSandboxGoproxy(args []string) error {
 	fs := flag.NewFlagSet("sandbox-goproxy", flag.ContinueOnError)
-	brokerEndpoint := fs.String("broker", "unix:/run/harness/broker.sock",
-		"runner broker endpoint as <network>:<address> (e.g. unix:/run/harness/broker.sock or vsock:2:1024)")
+	brokerEndpoint := fs.String("broker", "unix:/run/factory/broker.sock",
+		"runner broker endpoint as <network>:<address> (e.g. unix:/run/factory/broker.sock or vsock:2:1024)")
 	addr := fs.String("addr", "127.0.0.1:8123", "loopback address to serve the GOPROXY on")
 	if err := fs.Parse(args); err != nil {
 		return err

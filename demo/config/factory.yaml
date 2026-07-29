@@ -1,8 +1,8 @@
 # Demo workflow — a minimal, web-flavored pipeline for the landing-page demo.
 #
-# This is a deliberately stripped-down DAG, separate from the harness's own
+# This is a deliberately stripped-down DAG, separate from the factory's own
 # config/factory.yaml, so the demo has the smallest possible surface to drive while still
-# exercising the harness's signature guarantee — the red→green,
+# exercising the factory's signature guarantee — the red→green,
 # producer ≠ verifier gate. See demo/README.md and specs/workflow.md.
 #
 # Differences from the shipped config, and why:

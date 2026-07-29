@@ -48,7 +48,7 @@ func resolveRepo(t *testing.T) string {
 // blockedIssue is a dead-lettered issue the Resolve wizard unsticks.
 func blockedIssue() core.Issue {
 	return core.Issue{
-		ID: "harness-9", Title: "stuck export", Status: "blocked", Role: "implementor",
+		ID: "factory-9", Title: "stuck export", Status: "blocked", Role: "implementor",
 		Spec: "specs/export.md", DeadLetterReason: "agent escalated: needs-spec-clarification",
 		Transcript: "sha256:tx", Attempt: 1,
 	}
@@ -63,7 +63,7 @@ func TestResolveNotConfigured(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 
-	if r := get(t, ts, "/resolve/harness-9"); r.status != http.StatusOK || !strings.Contains(r.body, "not configured") {
+	if r := get(t, ts, "/resolve/factory-9"); r.status != http.StatusOK || !strings.Contains(r.body, "not configured") {
 		t.Errorf("/resolve no-planner = %d %q, want 200 with not-configured notice", r.status, r.body)
 	}
 	if r := get(t, ts, "/resolve/blast/x"); r.status != http.StatusServiceUnavailable {
@@ -75,7 +75,7 @@ func TestResolveNotConfigured(t *testing.T) {
 	s2 := New(Options{Planner: p})
 	ts2 := httptest.NewServer(s2.Handler())
 	t.Cleanup(ts2.Close)
-	if r := get(t, ts2, "/resolve/harness-9"); r.status != http.StatusOK || !strings.Contains(r.body, "Not attached") {
+	if r := get(t, ts2, "/resolve/factory-9"); r.status != http.StatusOK || !strings.Contains(r.body, "Not attached") {
 		t.Errorf("/resolve no-reader = %d %q, want 200 with not-attached notice", r.status, r.body)
 	}
 }
@@ -90,18 +90,18 @@ func TestResolveRendersPage(t *testing.T) {
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 
-	r := get(t, ts, "/resolve/harness-9")
+	r := get(t, ts, "/resolve/factory-9")
 	if r.status != http.StatusOK {
 		t.Fatalf("/resolve status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		"harness-9",                         // the escalation identity
+		"factory-9",                         // the escalation identity
 		"needs-spec-clarification",          // the orchestrator's reason
 		"acceptance criteria are ambiguous", // the resolved spec slice content
 		`sse-connect="/create/stream/`,      // the shared per-session live stream
 		`hx-get="/resolve/blast/`,           // the resolve-specific blast panel
 		`hx-post="/create/message"`,         // the shared turn form
-		`href="/issue/harness-9"`,           // the drill-through to forensics
+		`href="/issue/factory-9"`,           // the drill-through to forensics
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("/resolve page missing %q\nbody: %s", want, r.body)
@@ -117,14 +117,14 @@ func TestResolveBlastPanel(t *testing.T) {
 	reader := query.NewReader(&fakeIssues{all: []core.Issue{
 		blockedIssue(),
 		// an in-flight issue whose slice (specs/export.md) includes the edited path → reissued.
-		{ID: "harness-3", Status: "in_progress", Role: "implementor", Spec: "specs/export.md", SpecHash: "sha256:pin"},
+		{ID: "factory-3", Status: "in_progress", Role: "implementor", Spec: "specs/export.md", SpecHash: "sha256:pin"},
 	}}, fakeArts{}, fakeProv{})
 	s := New(Options{Planner: p, Reader: reader, Resolver: &fakeResolver{}, Repo: resolveRepo(t), SpecDepth: 0})
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
 
 	// NewResolve auto-opens a turn; the scripted draftAdapter gives the session a spec edit.
-	sess := p.NewResolve(wizard.ResolveSeed{IssueID: "harness-9", Spec: "specs/export.md"})
+	sess := p.NewResolve(wizard.ResolveSeed{IssueID: "factory-9", Spec: "specs/export.md"})
 	waitFor(t, func() bool { return !sess.Busy() && !sess.Draft().Empty() }, "resolve draft not produced")
 
 	r := get(t, ts, "/resolve/blast/"+sess.ID)
@@ -134,7 +134,7 @@ func TestResolveBlastPanel(t *testing.T) {
 	for _, want := range []string{
 		"specs/export.md",            // the proposed spec edit
 		"Blast radius",               // the preview heading
-		"harness-3",                  // the in-flight item that would be reissued
+		"factory-3",                  // the in-flight item that would be reissued
 		`hx-post="/resolve/approve"`, // the resolve consent gate
 	} {
 		if !strings.Contains(r.body, want) {
@@ -152,14 +152,14 @@ func TestResolveBlastPanel(t *testing.T) {
 // link), plus the degenerate guards.
 func TestResolveApprove(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		resolver := &fakeResolver{res: wizard.ResolveResult{Commit: "abc123def4567", ReopenedIssue: "harness-9"}}
+		resolver := &fakeResolver{res: wizard.ResolveResult{Commit: "abc123def4567", ReopenedIssue: "factory-9"}}
 		p := wizard.NewPlanner(draftAdapter(), "persona")
 		reader := query.NewReader(&fakeIssues{all: []core.Issue{blockedIssue()}}, fakeArts{}, fakeProv{})
 		s := New(Options{Planner: p, Reader: reader, Resolver: resolver, Repo: resolveRepo(t)})
 		ts := httptest.NewServer(s.Handler())
 		t.Cleanup(ts.Close)
 
-		sess := p.NewResolve(wizard.ResolveSeed{IssueID: "harness-9", Spec: "specs/export.md"})
+		sess := p.NewResolve(wizard.ResolveSeed{IssueID: "factory-9", Spec: "specs/export.md"})
 		waitFor(t, func() bool { return !sess.Busy() && !sess.Draft().Empty() }, "resolve draft not produced")
 
 		pr, err := http.PostForm(ts.URL+"/resolve/approve", url.Values{"session": {sess.ID}})
@@ -171,11 +171,11 @@ func TestResolveApprove(t *testing.T) {
 		if pr.StatusCode != http.StatusOK {
 			t.Fatalf("status = %d, want 200", pr.StatusCode)
 		}
-		if !strings.Contains(string(data), "spec refined") || !strings.Contains(string(data), `/issue/harness-9`) {
+		if !strings.Contains(string(data), "spec refined") || !strings.Contains(string(data), `/issue/factory-9`) {
 			t.Errorf("resolve result missing the reopened-issue link: %s", string(data))
 		}
 		// The resolver got the server-bound issue id and the planner's drafted spec — never browser content.
-		if resolver.got == nil || resolver.got.IssueID != "harness-9" {
+		if resolver.got == nil || resolver.got.IssueID != "factory-9" {
 			t.Fatalf("resolver got wrong issue id: %+v", resolver.got)
 		}
 		if len(resolver.got.Specs) != 1 || resolver.got.Specs[0].Path != "specs/export.md" {
@@ -189,7 +189,7 @@ func TestResolveApprove(t *testing.T) {
 		s := New(Options{Planner: p, Reader: reader, Repo: resolveRepo(t)}) // no Resolver
 		ts := httptest.NewServer(s.Handler())
 		t.Cleanup(ts.Close)
-		sess := p.NewResolve(wizard.ResolveSeed{IssueID: "harness-9", Spec: "specs/export.md"})
+		sess := p.NewResolve(wizard.ResolveSeed{IssueID: "factory-9", Spec: "specs/export.md"})
 		waitFor(t, func() bool { return !sess.Busy() }, "opening turn never settled")
 
 		pr, _ := http.PostForm(ts.URL+"/resolve/approve", url.Values{"session": {sess.ID}})

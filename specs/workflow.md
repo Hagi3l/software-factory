@@ -102,7 +102,7 @@ create breadth, the orchestrator creates depth.
 Emergent breadth is still **validated, not trusted**: a planner *proposes* child
 issues in its Result; the orchestrator checks they are DAG-legal (valid roles,
 every dependency target exists, edges keep the graph acyclic, within budget) before
-writing them. The existence check is the harness's own, not delegated to the store:
+writing them. The existence check is the factory's own, not delegated to the store:
 the work-item store may treat a dependency id whose prefix differs from its own as an
 unchecked external reference, so a hostile proposal naming a fabricated id would
 otherwise plant a dangling edge — the orchestrator resolves every non-sibling target

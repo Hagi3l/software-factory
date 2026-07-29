@@ -63,29 +63,29 @@ const (
 	promptHash      = "sha256:promptaaaaaaaaaa"
 	transcriptHash  = "sha256:transcriptccccc"
 	gateHash        = "sha256:gatebbbbbbbbbbbb"
-	traceHash       = "sha256:tracedddddddddd" // harness-2's threaded map — deliberately NOT in the store (degrades to unavailable)
-	mergedTraceHash = "sha256:tracemerged1111" // harness-1's map — present in the store (a resolvable link)
+	traceHash       = "sha256:tracedddddddddd" // factory-2's threaded map — deliberately NOT in the store (degrades to unavailable)
+	mergedTraceHash = "sha256:tracemerged1111" // factory-1's map — present in the store (a resolvable link)
 	verdictHash     = "sha256:verdicteeeeeeee"
-	transformHash   = "sha256:transformfffff" // harness-1's transformation log (T6.3) — present in the store
+	transformHash   = "sha256:transformfffff" // factory-1's transformation log (T6.3) — present in the store
 )
 
 func detailServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	issues := detailIssues{m: map[string]core.Issue{
-		// harness-1 is merged: provenance is present, evidence comes from the trailer. It also
+		// factory-1 is merged: provenance is present, evidence comes from the trailer. It also
 		// carries the producing-soul stamps + a gate-verdict hash (T4.22) so the verification
 		// view (T4.23) and the issue→verification drill-link render off the same fixture.
-		"harness-1": {
-			ID: "harness-1", Title: "Merged work", Status: "closed", Role: "implementor",
-			Spec: "specs/x.md", SpecHash: "sha256:speccccccccc", Base: "harness-0-candidate",
+		"factory-1": {
+			ID: "factory-1", Title: "Merged work", Status: "closed", Role: "implementor",
+			Spec: "specs/x.md", SpecHash: "sha256:speccccccccc", Base: "factory-0-candidate",
 			Attempt: 2, SpentTokens: 1234, SpentUSD: 0.0456, Body: "Implement the widget.",
 			SpentUsage: core.Usage{InputTokens: 1000, OutputTokens: 200, CacheReadTokens: 34},
 			TestsSoul:  "go-test-author", ImplementSoul: "go-implementor",
 			TraceMap: mergedTraceHash, GateVerdict: verdictHash, TransformLog: transformHash,
 		},
-		// harness-2 is in flight: no provenance, evidence falls back to the threaded map.
-		"harness-2": {
-			ID: "harness-2", Title: "In flight", Status: "in_progress", Role: "test-author",
+		// factory-2 is in flight: no provenance, evidence falls back to the threaded map.
+		"factory-2": {
+			ID: "factory-2", Title: "In flight", Status: "in_progress", Role: "test-author",
 			TraceMap: traceHash,
 		},
 	}}
@@ -111,8 +111,8 @@ func detailServer(t *testing.T) *httptest.Server {
 	}}
 	prov := detailProv{
 		byIssue: map[string]core.Provenance{
-			"harness-1": {
-				Soul: "go-implementor", Model: "claude-test", Issue: "harness-1",
+			"factory-1": {
+				Soul: "go-implementor", Model: "claude-test", Issue: "factory-1",
 				PromptSHA:  promptHash,
 				Transcript: transcriptHash,
 				// One check with persisted evidence (a link), one bare (ran, no evidence).
@@ -120,7 +120,7 @@ func detailServer(t *testing.T) *httptest.Server {
 			},
 		},
 		diff: map[string]string{
-			"harness-1": "diff --git a/widget.go b/widget.go\n+func Widget() {}",
+			"factory-1": "diff --git a/widget.go b/widget.go\n+func Widget() {}",
 		},
 	}
 	s := New(Options{Version: "test", Reader: query.NewReader(issues, arts, prov)})
@@ -134,14 +134,14 @@ func detailServer(t *testing.T) *httptest.Server {
 // click-through (or, for a bare-name check, shows that it ran without a dead link).
 func TestIssueDetailMergedRendersEvidence(t *testing.T) {
 	ts := detailServer(t)
-	r := get(t, ts, "/issue/harness-1")
+	r := get(t, ts, "/issue/factory-1")
 
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
 		"Merged work",                    // title
-		"harness-1",                      // id
+		"factory-1",                      // id
 		">merged<",                       // the merged badge
 		"implementor",                    // role
 		"specs/x.md",                     // spec path (the brief)
@@ -176,7 +176,7 @@ func TestIssueDetailMergedRendersEvidence(t *testing.T) {
 // section, but the traceability map threaded onto the issue still surfaces as evidence.
 func TestIssueDetailInFlightFallsBackToTraceMap(t *testing.T) {
 	ts := detailServer(t)
-	r := get(t, ts, "/issue/harness-2")
+	r := get(t, ts, "/issue/factory-2")
 
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
@@ -222,7 +222,7 @@ func TestIssueDetailUnknown(t *testing.T) {
 // notice (200, in chrome) and the artifact data endpoint 503s.
 func TestIssueDetailWithoutReader(t *testing.T) {
 	ts := newTestServer(t) // no Options.Reader
-	page := get(t, ts, "/issue/harness-1")
+	page := get(t, ts, "/issue/factory-1")
 	if page.status != http.StatusOK {
 		t.Fatalf("/issue status = %d, want 200", page.status)
 	}

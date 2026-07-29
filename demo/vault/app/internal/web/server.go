@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/harness-demo/vault/internal/crypto"
-	"github.com/harness-demo/vault/internal/store"
-	"github.com/harness-demo/vault/internal/web/views"
+	"github.com/factory-demo/vault/internal/crypto"
+	"github.com/factory-demo/vault/internal/store"
+	"github.com/factory-demo/vault/internal/web/views"
 )
 
 //go:embed static

@@ -30,35 +30,35 @@ func TestActivity_CarriesIssueBinding(t *testing.T) {
 	// The pump tags each event with the invocation id (from the subject) and the issue id +
 	// role (from the wire envelope, plan T4.20). Both a discrete event and a coalesced token
 	// run must carry the binding so a view can scope a feed to one invocation (plan T4.21).
-	a.Record("inv-1", "harness-7", "implementor", token("par"))
-	a.Record("inv-1", "harness-7", "implementor", token("tial"))
-	a.Record("inv-1", "harness-7", "implementor", toolEvent("run_tests"))
+	a.Record("inv-1", "factory-7", "implementor", token("par"))
+	a.Record("inv-1", "factory-7", "implementor", token("tial"))
+	a.Record("inv-1", "factory-7", "implementor", toolEvent("run_tests"))
 
 	got := a.Recent()
 	if len(got) != 2 {
 		t.Fatalf("entries = %d, want 2 (coalesced token run + tool row)", len(got))
 	}
 	for _, e := range got {
-		if e.IssueID != "harness-7" || e.Role != "implementor" {
-			t.Fatalf("entry %+v missing issue binding, want harness-7 / implementor", e)
+		if e.IssueID != "factory-7" || e.Role != "implementor" {
+			t.Fatalf("entry %+v missing issue binding, want factory-7 / implementor", e)
 		}
 	}
 }
 
 func TestActivity_RecentForIssueScopesToOneInvocation(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", "harness-7", "implementor", token("a"))
-	a.Record("inv-2", "harness-8", "qa", token("b"))
-	a.Record("inv-1", "harness-7", "implementor", toolEvent("run_tests"))
+	a.Record("inv-1", "factory-7", "implementor", token("a"))
+	a.Record("inv-2", "factory-8", "qa", token("b"))
+	a.Record("inv-1", "factory-7", "implementor", toolEvent("run_tests"))
 	a.RecordSystem("info", "orchestrator", "scheduled") // system row — no issue binding, excluded
 
-	got := a.RecentForIssue("harness-7")
+	got := a.RecentForIssue("factory-7")
 	if len(got) != 2 {
-		t.Fatalf("scoped entries = %d, want 2 (only harness-7's agent rows)", len(got))
+		t.Fatalf("scoped entries = %d, want 2 (only factory-7's agent rows)", len(got))
 	}
 	// Newest first, and every row belongs to the scoped issue.
 	for _, e := range got {
-		if e.IssueID != "harness-7" {
+		if e.IssueID != "factory-7" {
 			t.Fatalf("entry %+v leaked from another invocation", e)
 		}
 	}
@@ -130,8 +130,8 @@ func TestActivity_TokenAndReasoningDoNotMerge(t *testing.T) {
 // into the parent's turns (specs/observability.md live nesting, T12.4).
 func TestActivity_ExplorerSubContextNestsSeparately(t *testing.T) {
 	a := live.NewActivity(16)
-	a.Record("inv-1", "harness-7", "implementor", reasoning("parent thinking"))
-	a.Record("inv-1", "harness-7", "implementor", explorerReasoning("explorer thinking"))
+	a.Record("inv-1", "factory-7", "implementor", reasoning("parent thinking"))
+	a.Record("inv-1", "factory-7", "implementor", explorerReasoning("explorer thinking"))
 
 	got := a.Recent()
 	if len(got) != 2 {
@@ -166,7 +166,7 @@ func TestActivity_ToolEventRendersLabel(t *testing.T) {
 func TestActivity_RecordSystem(t *testing.T) {
 	a := live.NewActivity(16)
 	a.Record("inv-1", "", "", token("partial"))
-	a.RecordSystem("info", "orchestrator", "dispatched issue=harness-1")
+	a.RecordSystem("info", "orchestrator", "dispatched issue=factory-1")
 	// A system row between agent tokens must break the token run: the prior entry is a
 	// system row, so the next token cannot reopen the agent's coalesced line.
 	a.Record("inv-1", "", "", token("more"))
@@ -179,7 +179,7 @@ func TestActivity_RecordSystem(t *testing.T) {
 	if sys.Source != live.SourceSystem || sys.AgentID != "orchestrator" || sys.Kind != "info" {
 		t.Fatalf("system entry = %+v, want system/orchestrator/info", sys)
 	}
-	if sys.Detail != "dispatched issue=harness-1" {
+	if sys.Detail != "dispatched issue=factory-1" {
 		t.Fatalf("system detail = %q", sys.Detail)
 	}
 	if got[0].Kind != "token" || got[0].Detail != "more" {

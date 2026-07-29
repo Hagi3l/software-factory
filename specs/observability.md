@@ -70,7 +70,7 @@ This is exactly the OpenTelemetry shape, which gives a clean **build-vs-buy** li
 
 ### OpenTelemetry — three signals, one endpoint
 
-The harness emits all three OTel signals, and they share a single OTLP exporter
+The factory emits all three OTel signals, and they share a single OTLP exporter
 endpoint so one backend can ingest the whole picture:
 
 - **Traces** — the invocation trace above. Spans at the broker (agent I/O), the
@@ -115,7 +115,7 @@ spans **and** the logs **and** the metrics for this issue / soul / stage." That
 requires every signal to carry the **same attribute keys with the same meaning**, so
 the schema is defined **once** (the `telemetry` package is its single source of truth)
 and emitted from named constants, never inline string literals, at every site —
-spans, metric dimensions, and log records alike. The join columns are the harness's
+spans, metric dimensions, and log records alike. The join columns are the factory's
 domain dimensions: issue id, epic id, soul, role, model, invocation id, attempt, and
 emitting component. A log record carries them by enriching **one per-invocation
 logger** at the invocation boundary (where the work's identity is in hand), so a log
@@ -193,7 +193,7 @@ accountable.
 ## Decisions
 
 - **Signal schema / attribute conventions — decided.** The `telemetry` package owns the
-  span names, metric names, and `harness.*` attribute keys as one definition; every
+  span names, metric names, and `factory.*` attribute keys as one definition; every
   emitter uses the constants, and all three signals share the join columns so they
   correlate (see [Correlation: one schema across all three signals](#correlation-one-schema-across-all-three-signals)).
   The binding rule: unbounded ids on traces/logs only, metric dimensions stay bounded.
@@ -201,7 +201,7 @@ accountable.
   straight to the backend; there is no standalone collector by default. A sidecar
   collector is an *optional* overlay for distributed/multi-host deployments
   — fan-out to several backends or
-  tail-sampling at scale — and is invisible to the harness, which always just speaks
+  tail-sampling at scale — and is invisible to the factory, which always just speaks
   OTLP to [`otel.endpoint`](configuration.md). Export is a **trusted-layer egress**:
   the sandbox never exports; trusted host components do, with an env-injected
   credential — the same posture as the post-merge git push in [security.md](security.md).

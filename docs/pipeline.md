@@ -76,7 +76,7 @@ don't edit the agent's code; you refine the requirement and let the pipeline re-
 
 ## The approval gate (trusted-dev)
 
-The shipped config runs in the **trusted-dev** profile (`policy.profile`): the harness
+The shipped config runs in the **trusted-dev** profile (`policy.profile`): the factory
 writes code and a human reviews every diff before it lands. Concretely, the integrate
 stage carries a `human-approved` postcondition, so on a passing integrate the
 orchestrator **parks** the candidate (blocked, recording its candidate ref and the

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Turnkey "secrets vault" demo for the harness.
+# Turnkey "secrets vault" demo for the factory.
 #
 # Scaffolds a throwaway target repo from the ESTABLISHED vault app (an already-green
-# Go/templ/htmx/SQLite codebase), then runs the harness with the control room up. You then
+# Go/templ/htmx/SQLite codebase), then runs the factory with the control room up. You then
 # author a NEW feature requirement live in the Create-Task wizard and watch the full
 # pipeline (plan -> author-tests -> implement -> qa -> integrate) take it to a merge on
 # `main` — driven by Anthropic models served through OpenRouter. See demo/vault/README.md.
@@ -51,13 +51,13 @@ VAULT_REMOTE="${VAULT_REMOTE:-}"
 IMAGE='vault-toolchain'       # sandbox profile named by the vault souls
 BASE_IMAGE='go-toolchain'     # carries the shim binary the vault image copies out
 BASE_STABLE="${BASE_IMAGE}-base"  # the binary-free stable stage the vault image bases on
-JAEGER_NAME='harness-vault-jaeger'              # container name (JAEGER=1 only)
+JAEGER_NAME='factory-vault-jaeger'              # container name (JAEGER=1 only)
 JAEGER_IMAGE='jaegertracing/all-in-one:1.76.0'  # single-binary OTLP collector + trace UI (pinned: v2 is a collector-based rewrite)
 # OpenObserve (OPENOBSERVE=1 only): a single-binary, multi-signal OTLP backend — unlike Jaeger
 # (traces only) it ingests traces + logs + metrics on one authenticated endpoint, so the demo
 # can show the WHOLE record (the T5.12/T5.13 logs+metrics work) land in one place. The image
 # tag is overridable so a schema bump (dashboard v5 is pinned in observe/) can be tracked.
-OPENOBSERVE_NAME='harness-vault-openobserve'
+OPENOBSERVE_NAME='factory-vault-openobserve'
 OPENOBSERVE_IMAGE="${OPENOBSERVE_IMAGE:-public.ecr.aws/zinclabs/openobserve:v0.14.7}"
 OO_EMAIL='admin@admin.com'          # OO root user — login is by EMAIL (ingestion token = base64(email:password))
 OO_PASSWORD='admin'                 # ephemeral container, dies on exit — not a real secret
@@ -82,7 +82,7 @@ command -v dolt   >/dev/null || { echo "error: dolt not found — server-mode be
 command -v git    >/dev/null || { echo "error: git not found"; exit 1; }
 docker info >/dev/null 2>&1   || { echo "error: docker daemon not reachable"; exit 1; }
 [ -n "${OPENAI_API_KEY:-}" ] || { echo "error: OPENAI_API_KEY is not set — put your OpenRouter API key in it"; exit 1; }
-# Fail fast if the control-room port is already taken (a leftover harness from a prior run, or
+# Fail fast if the control-room port is already taken (a leftover factory from a prior run, or
 # any other local server) — otherwise the conflict only surfaces at the very last `software-factory run`
 # line, after the full (minutes-long) image build + scaffold. bash /dev/tcp suffices; this
 # script already relies on bashisms.
@@ -92,8 +92,8 @@ if (exec 3<>"/dev/tcp/${_sa_host}/${_sa_port}") 2>/dev/null; then
   echo "error: $SERVE_ADDR is already in use — free it (lsof -i :${_sa_port}) or set SERVE_ADDR=127.0.0.1:9000"; exit 1
 fi
 
-# ---- build the harness binary ----------------------------------------------------------
-say "Building harness"
+# ---- build the factory binary ----------------------------------------------------------
+say "Building factory"
 ( cd "$REPO_ROOT" && make build )
 
 # ---- (re)build the sandbox images ------------------------------------------------------
@@ -105,9 +105,9 @@ say "Building harness"
 # go-toolchain image, so build that first. Only the first base build is slow (it downloads
 # the Go base + the offline vuln DB); cached rebuilds are fast. Three builds, cheap by
 # construction: '$BASE_STABLE' is the binary-free stable stage (everything that changes
-# rarely), '$BASE_IMAGE' adds the harness shim binary on top (reusing every cached layer of
+# rarely), '$BASE_IMAGE' adds the factory shim binary on top (reusing every cached layer of
 # the first build), and the vault image bases on the STABLE tag while copying the binary out
-# of '$BASE_IMAGE' as its last layers — so a harness source change rebuilds seconds of COPY,
+# of '$BASE_IMAGE' as its last layers — so a factory source change rebuilds seconds of COPY,
 # not the toolchain/module downloads (see the Dockerfile headers). Refresh the baked vuln-DB
 # snapshot deliberately with VULNDB_SNAPSHOT=$(date +%F) (defaults to the pinned date in the
 # Dockerfile; a bump re-mirrors the DB, a few minutes).
@@ -131,7 +131,7 @@ if [ "$MODEL" != "$DEFAULT_MODEL" ] || [ "$MODEL_ENDPOINT" != "$DEFAULT_ENDPOINT
   MODEL_OVERRIDDEN=1
 fi
 if [ -n "$MODEL_OVERRIDDEN" ] || [ -n "${JAEGER:-}" ] || [ -n "${OPENOBSERVE:-}" ]; then
-  CONFIG_DIR="$(mktemp -d -t harness-vault-cfg-XXXXXX)/config"
+  CONFIG_DIR="$(mktemp -d -t factory-vault-cfg-XXXXXX)/config"
   cp -r "$DEMO_DIR/config" "$CONFIG_DIR"
 fi
 if [ -n "$MODEL_OVERRIDDEN" ]; then
@@ -178,20 +178,20 @@ if [ -n "${OPENOBSERVE:-}" ]; then
 fi
 
 # ---- scaffold a throwaway target repo from the established app -------------------------
-SITE="$(mktemp -d -t harness-vault-site-XXXXXX)"
+SITE="$(mktemp -d -t factory-vault-site-XXXXXX)"
 say "Scaffolding scratch vault repo: $SITE"
 # Copy the app tree, then let its .gitignore exclude build artifacts from the commit.
 cp -a "$APP_DIR/." "$SITE/"
 rm -rf "$SITE/bin" "$SITE/test/results" "$SITE"/*.db 2>/dev/null || true
 git -C "$SITE" init -q -b main
-# Keep the harness work store out of git entirely: .beads is the orchestrator's local Dolt
+# Keep the factory work store out of git entirely: .beads is the orchestrator's local Dolt
 # database, not part of the app. Using .git/info/exclude (local, untracked) rather than a
 # committed .gitignore means the machinery never appears in the public repo — not even as an
 # ignore rule. (bd init below creates .beads after the seed commit, so it is out of the seed
 # regardless; this guarantees it stays out of any later commit too.)
 printf '.beads/\n' >> "$SITE/.git/info/exclude"
 git -C "$SITE" add .
-git -C "$SITE" -c user.email='demo@factory.local' -c user.name='harness demo' \
+git -C "$SITE" -c user.email='demo@factory.local' -c user.name='factory demo' \
   commit -qm 'seed: established secrets vault (auth + secrets + audit + dashboard)'
 # --server: run beads against a persistent, per-run `dolt sql-server` (bd auto-starts it and
 # records its pid/port under .beads/) instead of cold-starting the embedded Dolt engine on
@@ -206,7 +206,7 @@ git -C "$SITE" -c user.email='demo@factory.local' -c user.name='harness demo' \
 # and bd would hang forever waiting on stdin. Force the non-interactive path.
 # --skip-hooks: do NOT install beads' git hooks. By default bd init points the repo's
 # core.hooksPath at .beads/hooks, so every git operation fires a beads post-checkout/post-merge
-# that re-syncs the work store from .beads/issues.jsonl. The harness drives heavy git activity
+# that re-syncs the work store from .beads/issues.jsonl. The factory drives heavy git activity
 # on THIS repo during a run (the merger adds a detached worktree per rebase and fast-forwards
 # main), so those hooks fire mid-run and re-import a stale jsonl snapshot over the orchestrator's
 # authoritative Dolt writes — silently reverting just-closed stage issues back to in_progress
@@ -258,7 +258,7 @@ else
   # push triggers fine without it.
   if git -C "$SITE" fetch -q public main 2>/dev/null; then
     grafted="$(git -C "$SITE" log -1 --format=%B |
-      git -C "$SITE" -c user.email='demo@factory.local' -c user.name='harness demo' \
+      git -C "$SITE" -c user.email='demo@factory.local' -c user.name='factory demo' \
         commit-tree 'HEAD^{tree}' -p FETCH_HEAD -F -)" &&
       git -C "$SITE" update-ref refs/heads/main "$grafted"
   fi
@@ -308,7 +308,7 @@ cleanup() {
 trap cleanup EXIT
 
 # ---- start Jaeger (OTLP collector + trace UI), if requested ----------------------------
-# Single container: insecure OTLP/gRPC on 4317 (matches the harness exporter — no auth, no
+# Single container: insecure OTLP/gRPC on 4317 (matches the factory exporter — no auth, no
 # headers) and the trace UI on 16686. The exporter dials lazily and degrades gracefully, so
 # this need only be reachable by the time the first span is exported.
 if [ -n "${JAEGER:-}" ]; then
@@ -338,7 +338,7 @@ if [ -n "${OPENOBSERVE:-}" ]; then
 
   # OO's ingestion credential IS base64(email:password) — exactly the string its own Ingestion
   # page shows. Derive it locally (offline, no API round-trip) and export it as the env var the
-  # materialized overlay's `authorization: ${OTEL_OTLP_AUTH}` header references; the harness
+  # materialized overlay's `authorization: ${OTEL_OTLP_AUTH}` header references; the factory
   # expands it host-side (config.OTelConfig.ResolveHeaders) when it builds the exporter, so the
   # secret lives in the environment, never in config — the same key discipline as the model key.
   OO_TOKEN="$(printf '%s:%s' "$OO_EMAIL" "$OO_PASSWORD" | base64 | tr -d '\n')"
@@ -391,7 +391,7 @@ export OPENAI_API_KEY
 # Start the post-merge push watcher (no-op when VAULT_REMOTE is empty).
 if [ -n "$VAULT_REMOTE" ]; then push_main_watcher & PUSH_PID=$!; fi
 
-say "Running the harness — control room at http://$SERVE_ADDR  (Ctrl-C to stop)"
+say "Running the factory — control room at http://$SERVE_ADDR  (Ctrl-C to stop)"
 echo "    scratch repo : $SITE"
 [ -z "$VAULT_REMOTE" ] || echo "    public repo  : $VAULT_REMOTE (reset to the green seed; the feature is pushed on merge)"
 echo "    next step    : open http://$SERVE_ADDR/create and draft a feature requirement"
@@ -403,7 +403,7 @@ if [ -n "$VAULT_REMOTE" ]; then
 else
   echo "    when it lands: 'git -C $SITE log' shows the provenance trailer; the diff is the feature."
 fi
-[ -z "${JAEGER:-}" ] || echo "    telemetry    : open http://127.0.0.1:16686 (service 'harness') to watch each invocation as a trace"
+[ -z "${JAEGER:-}" ] || echo "    telemetry    : open http://127.0.0.1:16686 (service 'factory') to watch each invocation as a trace"
 [ -z "${OPENOBSERVE:-}" ] || echo "    telemetry    : open http://127.0.0.1:5080 (login $OO_EMAIL / $OO_PASSWORD) — traces, logs & metrics in the 'completeness overview' dashboard"
 echo
 "$HARNESS" run --config "$CONFIG_DIR" --repo "$SITE" --bd "$BD" --serve-addr "$SERVE_ADDR"

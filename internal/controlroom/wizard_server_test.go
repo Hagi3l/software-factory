@@ -487,7 +487,7 @@ func TestReadSpecFileConfinement(t *testing.T) {
 func TestCreateApproveSuccess(t *testing.T) {
 	seeder := &fakeSeeder{res: wizard.SeedResult{
 		Commit: "abc123def4567",
-		Issues: []wizard.SeededIssue{{ID: "harness-7", Title: "Add CSV export", Role: "planner"}},
+		Issues: []wizard.SeededIssue{{ID: "factory-7", Title: "Add CSV export", Role: "planner"}},
 	}}
 	p := wizard.NewPlanner(draftAdapter(), "persona", wizard.WithTurnTimeout(5*time.Second))
 	s := New(Options{Planner: p, Seeder: seeder})
@@ -510,7 +510,7 @@ func TestCreateApproveSuccess(t *testing.T) {
 		t.Fatalf("approve status = %d, want 200", pr.StatusCode)
 	}
 	body := string(data)
-	if !strings.Contains(body, "work seeded") || !strings.Contains(body, "harness-7") || !strings.Contains(body, `/issue/harness-7`) {
+	if !strings.Contains(body, "work seeded") || !strings.Contains(body, "factory-7") || !strings.Contains(body, `/issue/factory-7`) {
 		t.Errorf("approve result missing the seeded issue link: %s", body)
 	}
 
@@ -536,7 +536,7 @@ func TestCreateApproveSuccess(t *testing.T) {
 func TestCreateApproveIsIdempotent(t *testing.T) {
 	seeder := &fakeSeeder{res: wizard.SeedResult{
 		Commit: "abc123def4567",
-		Issues: []wizard.SeededIssue{{ID: "harness-7", Title: "Add CSV export", Role: "planner"}},
+		Issues: []wizard.SeededIssue{{ID: "factory-7", Title: "Add CSV export", Role: "planner"}},
 	}}
 	p := wizard.NewPlanner(draftAdapter(), "persona", wizard.WithTurnTimeout(5*time.Second))
 	s := New(Options{Planner: p, Seeder: seeder})
@@ -563,13 +563,13 @@ func TestCreateApproveIsIdempotent(t *testing.T) {
 	}
 
 	first := approve()
-	if !strings.Contains(first, "work seeded") || !strings.Contains(first, "harness-7") {
+	if !strings.Contains(first, "work seeded") || !strings.Contains(first, "factory-7") {
 		t.Errorf("first approve missing the seeded result: %s", first)
 	}
 
 	// Second approve on the now-consumed session: must re-render the SAME outcome, without re-seeding.
 	second := approve()
-	if !strings.Contains(second, "work seeded") || !strings.Contains(second, "harness-7") {
+	if !strings.Contains(second, "work seeded") || !strings.Contains(second, "factory-7") {
 		t.Errorf("second approve did not re-render the prior outcome: %s", second)
 	}
 	if seeder.calls != 1 {

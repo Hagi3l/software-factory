@@ -60,7 +60,7 @@ sandbox:
   limits:  { cpu: 2, mem: 2Gi, wall: 30m }
   profiles:
     go-toolchain:
-      image: harness/go-toolchain:dev
+      image: factory/go-toolchain:dev
 nats:
   url: nats://localhost:4222
   jetstream: { replicas: 1, max_age: 168h }
@@ -279,7 +279,7 @@ func TestLoad(t *testing.T) {
 		t.Fatalf("Load: %v", err)
 	}
 	if cfg.Harness == nil || cfg.Infra == nil || len(cfg.Souls) != 1 {
-		t.Fatalf("Load incomplete: harness=%v infra=%v souls=%d", cfg.Harness, cfg.Infra, len(cfg.Souls))
+		t.Fatalf("Load incomplete: factory=%v infra=%v souls=%d", cfg.Harness, cfg.Infra, len(cfg.Souls))
 	}
 	if cfg.Root != dir {
 		t.Errorf("Root = %q, want %q", cfg.Root, dir)
@@ -355,7 +355,7 @@ func TestEmptyDocument(t *testing.T) {
 		t.Fatalf("LoadHarness(empty): %v", err)
 	}
 	if len(h.DAG) != 0 {
-		t.Errorf("empty harness DAG = %v, want empty", h.DAG)
+		t.Errorf("empty factory DAG = %v, want empty", h.DAG)
 	}
 }
 

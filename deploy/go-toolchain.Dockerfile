@@ -1,6 +1,6 @@
 # Sandbox profile image for the `go-toolchain` profile named by config/souls/*.yaml.
 #
-# Build from the repo root so the module cache matches the harness's go.mod/go.sum and
+# Build from the repo root so the module cache matches the factory's go.mod/go.sum and
 # the language-server manifest is COPYd from the tree:
 #
 #   docker build -f deploy/go-toolchain.Dockerfile --target base -t go-toolchain-base .
@@ -9,19 +9,19 @@
 # Two tags, one file — a LAYER-CACHE split (run.sh does both; the second build reuses
 # every cached layer of the first). `base` holds everything that changes rarely: the
 # toolchain, gate tools, the vuln DB, the module cache. The final stage adds the one
-# thing that changes on every harness commit — the shim binary — as the LAST layers,
+# thing that changes on every factory commit — the shim binary — as the LAST layers,
 # so a source change rebuilds seconds of COPY, not the module warm. Downstream profile
 # images (demo/vault/Dockerfile) build FROM go-toolchain-base and copy the binary out
-# of go-toolchain as *their* last layers, so a harness commit no longer cascades into
+# of go-toolchain as *their* last layers, so a factory commit no longer cascades into
 # re-downloading their tools and module caches either (a child's layer cache is keyed
 # on its parent image ID — basing on the stable `base` is what breaks the cascade).
 #
 # Why each piece exists:
 #   - Go 1.26 + git + make: the toolchain the implementor agent and the gate need to
-#     build and test the harness.
+#     build and test the factory.
 #   - The module cache is baked in (`go mod download`) so a build resolves cached
 #     dependencies offline. For dependencies NOT in the cache, GOPROXY points at the
-#     in-sandbox GOPROXY shim (T5.6): `harness sandbox-goproxy` is started by the
+#     in-sandbox GOPROXY shim (T5.6): `software-factory sandbox-goproxy` is started by the
 #     entrypoint and forwards `go`'s module-proxy requests over the bind-mounted broker
 #     socket to the runner, which fetches them from the package proxy and logs them (the
 #     one egress chokepoint). A build needing only cached modules never contacts the shim;
@@ -50,17 +50,17 @@
 # Language server (T5.3 → Phase 6) — the per-language server the agent's LSP-backed
 # semantic tools resolve lives in the image alongside the toolchain it serves:
 #   - gopls (the Go language server), on PATH.
-#   - the languageId→server manifest at /etc/harness/language-servers.json (the fixed
+#   - the languageId→server manifest at /etc/factory/language-servers.json (the fixed
 #     launch convention, lsmanifest.ManifestPath). It is COPYd from the SAME file the
 #     Go package embeds (internal/sandbox/lsmanifest/language-servers.json), so the
 #     format the tools resolve and the file the image carries cannot drift.
-# Builder stage: compile the harness binary so the in-sandbox GOPROXY shim
-# (`harness sandbox-goproxy`, T5.6) is available inside the image. Only cmd + internal +
+# Builder stage: compile the factory binary so the in-sandbox GOPROXY shim
+# (`software-factory sandbox-goproxy`, T5.6) is available inside the image. Only cmd + internal +
 # the module files are copied (not .git/docs/specs), so the build is lean and deterministic.
 # The module/build caches are BuildKit cache mounts — they persist across builds on the
 # build host (an incremental recompile, no re-download) and never land in the image
 # (only /out/software-factory is copied out).
-FROM golang:1.26 AS harness-build
+FROM golang:1.26 AS factory-build
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN --mount=type=cache,target=/go/pkg/mod go mod download
@@ -76,7 +76,7 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 RUN git config --global user.email "agent@factory.local" \
- && git config --global user.name "harness agent" \
+ && git config --global user.name "factory agent" \
  && git config --global init.defaultBranch main
 
 # Gate-tool + language-server binaries (need network at build; never at run). Pinned
@@ -110,11 +110,11 @@ ENV GOVULNDB=file:///opt/software-factory/vulndb
 
 # Language-server manifest at the fixed launch convention. Same file the lsmanifest Go
 # package embeds — one source of truth, copied into the image, never duplicated.
-RUN mkdir -p /etc/harness
-COPY internal/sandbox/lsmanifest/language-servers.json /etc/harness/language-servers.json
+RUN mkdir -p /etc/factory
+COPY internal/sandbox/lsmanifest/language-servers.json /etc/factory/language-servers.json
 
-# Warm the harness module cache. This lives in `base` — ABOVE the binary copy — so a
-# harness source change (which changes the binary on every commit) never re-runs the
+# Warm the factory module cache. This lives in `base` — ABOVE the binary copy — so a
+# factory source change (which changes the binary on every commit) never re-runs the
 # download; only a go.mod/go.sum change does.
 WORKDIR /workspace
 COPY go.mod go.sum ./
@@ -130,9 +130,9 @@ RUN go mod download
 ENV GOPROXY=http://127.0.0.1:8123 GOFLAGS=-mod=mod
 
 # Final stage: the volatile layers, deliberately LAST (see the header). The in-sandbox
-# GOPROXY shim (T5.6): the harness binary + the entrypoint that starts it.
+# GOPROXY shim (T5.6): the factory binary + the entrypoint that starts it.
 FROM base
-COPY --from=harness-build /out/software-factory /usr/local/bin/software-factory
-COPY deploy/harness-sandbox-init.sh /usr/local/bin/software-factory-sandbox-init
+COPY --from=factory-build /out/software-factory /usr/local/bin/software-factory
+COPY deploy/factory-sandbox-init.sh /usr/local/bin/software-factory-sandbox-init
 RUN chmod +x /usr/local/bin/software-factory-sandbox-init
 ENTRYPOINT ["/usr/local/bin/software-factory-sandbox-init"]

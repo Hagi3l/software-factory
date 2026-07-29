@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/harness-demo/vault/internal/crypto"
+	"github.com/factory-demo/vault/internal/crypto"
 )
 
 // sessionCookie is the name of the session cookie.

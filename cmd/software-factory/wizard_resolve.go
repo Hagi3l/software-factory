@@ -148,7 +148,7 @@ func (s *wizardSeeder) resolveEpicID(ctx context.Context, issueID string) (strin
 
 // resolveCommitMessage builds the Resolve commit's message: a `specs:` subject from the summary,
 // then the provenance body recording that it refines the spec to resolve an escalation and which
-// dead-lettered issue it reopens. Like the harness's other commits it carries no co-author trailer.
+// dead-lettered issue it reopens. Like the factory's other commits it carries no co-author trailer.
 func resolveCommitMessage(req wizard.ResolveRequest, transcriptRef, sidecar string) string {
 	subject := strings.TrimSpace(req.Summary)
 	if subject == "" {

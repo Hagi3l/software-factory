@@ -1,7 +1,7 @@
 // Package dag is the control room's issue-dependency-graph model and its server-side
 // renderer (specs/control-room.md, "DAG"). It owns the graph types (Node/Edge/Graph), a
 // deterministic pure-Go layered layout, and an SVG emitter — no graphviz/d2 binary and no
-// client-side graph library, so the rendered graph keeps the harness's self-contained-binary
+// client-side graph library, so the rendered graph keeps the factory's self-contained-binary
 // property (a deployed control room is one Go binary). It imports only internal/core and the
 // standard library; the query layer returns a dag.Graph directly, so these types live here
 // and nowhere else (no parallel type, no adapter).

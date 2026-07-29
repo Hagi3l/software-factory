@@ -438,9 +438,9 @@ func verifiedBadge(v string) templ.Component {
 	})
 }
 
-// signatureBadge renders the verify-on-read verdict for a merged commit's harness signature
+// signatureBadge renders the verify-on-read verdict for a merged commit's factory signature
 // (T5.10, specs/security.md). It is the cryptographic complement to the SLSA-style trailer:
-// a green "signed" badge means main's tip is provably the harness's, an "unsigned" badge is
+// a green "signed" badge means main's tip is provably the factory's, an "unsigned" badge is
 // the neutral state of a deployment that does not sign, and a rose "unverified" badge flags
 // the one state worth alarm — a signature by a key the allowed-signers file does not know.
 // SignatureUnchecked (no allowed-signers configured) renders nothing, so an unsigned setup's
@@ -468,7 +468,7 @@ func signatureBadge(s query.SignatureStatus) templ.Component {
 		ctx = templ.ClearChildren(ctx)
 		switch s {
 		case query.SignatureVerified:
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<span class=\"rounded bg-st-ok-bg px-1.5 py-0.5 text-xs text-st-ok\" title=\"signed by the harness identity (verified against allowed-signers)\">signed</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 30, "<span class=\"rounded bg-st-ok-bg px-1.5 py-0.5 text-xs text-st-ok\" title=\"signed by the factory identity (verified against allowed-signers)\">signed</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -478,7 +478,7 @@ func signatureBadge(s query.SignatureStatus) templ.Component {
 				return templ_7745c5c3_Err
 			}
 		case query.SignatureUnsigned:
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<span class=\"rounded bg-st-idle-bg px-1.5 py-0.5 text-xs text-muted\" title=\"no harness signature on this commit\">unsigned</span>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 32, "<span class=\"rounded bg-st-idle-bg px-1.5 py-0.5 text-xs text-muted\" title=\"no factory signature on this commit\">unsigned</span>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}

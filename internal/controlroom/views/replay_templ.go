@@ -787,7 +787,7 @@ func replayStopBadge(stop string) templ.Component {
 }
 
 // ReplayNotAttached renders the replay chrome with a single notice instead of a trail —
-// used when the control room is not attached to a running factory (a standalone `harness
+// used when the control room is not attached to a running factory (a standalone `factory
 // serve` has no stores to read) or when the issue cannot be loaded (an unknown id). It is the
 // page-level fallback (a missing/undecodable transcript for a *known* issue is handled
 // inline by ReplayPage's notice, which still shows the issue header).

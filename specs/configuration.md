@@ -1,6 +1,6 @@
 # Configuration
 
-The harness is **config-driven**: the workflow, the souls, and the infrastructure
+The factory is **config-driven**: the workflow, the souls, and the infrastructure
 are declarative and validated before anything runs. No behaviour that matters is
 hard-coded.
 
@@ -199,7 +199,7 @@ policy:
   ([bootstrap.md](bootstrap.md)). This same list is the operational definition of the TCB
   boundary. The concrete glob set is **not** a hardcoded kernel default: it is a
   per-deployment operational-review decision that must be reviewed and pinned for the
-  target repository before autonomy is switched on for harness work, so the boundary
+  target repository before autonomy is switched on for factory work, so the boundary
   reflects what actually constitutes the TCB *there* ([bootstrap.md](bootstrap.md)).
 
 ---
@@ -299,8 +299,8 @@ sandbox:
   limits:  { cpu: 2, mem: 2Gi, wall: 30m }
   profiles:                # logical soul.sandbox name -> concrete backend artifact
     go-toolchain:
-      image: harness/go-toolchain@sha256:…    # docker/gvisor read `image`
-      # rootfs: /var/lib/harness/go-toolchain.ext4   # firecracker reads `rootfs`
+      image: factory/go-toolchain@sha256:…    # docker/gvisor read `image`
+      # rootfs: /var/lib/factory/go-toolchain.ext4   # firecracker reads `rootfs`
 nats:
   url: nats://...
   jetstream: { ... }
@@ -386,7 +386,7 @@ the workflow or souls.
 
 ## Validation is a safety feature
 
-In an autonomous pipeline a config typo fails silently and badly. A `harness
+In an autonomous pipeline a config typo fails silently and badly. A `factory
 validate` step must run before anything executes and check:
 
 - every DAG `role` resolves to ≥1 soul, and every soul's `role` exists — **except** the
@@ -424,11 +424,11 @@ Validation above gates startup on **faults**: a config that would break at run t
 (a role no soul fulfils, a `produces:` target that doesn't exist, a postcondition with
 no resolvable command) fails fast, before anything executes. Alongside it sits a second,
 softer channel — `config.Warnings()` — for **advisories**: configurations that are
-legal and runnable but worth a second look. These do **not** fail startup; `harness
+legal and runnable but worth a second look. These do **not** fail startup; `factory
 validate` prints them to stderr and exits `0`. The split is deliberate, and it follows
-the *config is the pipeline, so the harness recommends but does not force* principle —
+the *config is the pipeline, so the factory recommends but does not force* principle —
 the same rationale as [verification.md](verification.md)'s "Model diversity is
-configured, not mandated": faults the harness must reject because they cannot run;
+configured, not mandated": faults the factory must reject because they cannot run;
 advisories it surfaces and leaves to the operator's judgement.
 
 The known advisories are:
@@ -460,7 +460,7 @@ factory. A clean config produces no advisories.
   the orchestrator, runner/broker, sandbox, and gate harness — see
   [bootstrap.md](bootstrap.md)) is **not** a hardcoded kernel default; it is a
   per-deployment policy value. The concrete globs must be **reviewed and pinned for the
-  target repository before autonomy is enabled for harness work** — too narrow lets an
+  target repository before autonomy is enabled for factory work** — too narrow lets an
   agent edit the very code that enforces the guarantees; too broad needlessly blocks
   autonomous progress. Tracked as OPEN until that review happens.
 - Config format: YAML assumed; HCL/CUE are candidates if stronger typing/validation

@@ -13,7 +13,7 @@ import (
 // the sensitive topology fields populated (to exercise redaction).
 func sampleConfig() *config.Config {
 	return &config.Config{
-		Root: "/srv/harness/config",
+		Root: "/srv/factory/config",
 		Harness: &config.Harness{
 			DAG: map[string]config.Stage{
 				"requirements": {Kind: config.StageKindHuman},
@@ -39,9 +39,9 @@ func sampleConfig() *config.Config {
 		Souls: []core.Soul{
 			// Two souls for "implementor": a catch-all (empty selector) and a specialized one.
 			// cfg.Souls is name-sorted; "implementor-default" sorts before "implementor-go".
-			{Name: "implementor-default", Role: "implementor", Model: "claude-opus-4-8", Sandbox: "go-toolchain", Persona: "/srv/harness/config/souls/prompts/impl.md"},
-			{Name: "implementor-go", Role: "implementor", Model: "claude-opus-4-8", Sandbox: "go-toolchain", Persona: "/srv/harness/config/souls/prompts/impl-go.md", Selector: map[string]string{"lang": "go"}},
-			{Name: "planner-go", Role: "planner", Model: "claude-opus-4-8", Sandbox: "go-toolchain", Persona: "/srv/harness/config/souls/prompts/planner.md", Selector: map[string]string{"lang": "go"}},
+			{Name: "implementor-default", Role: "implementor", Model: "claude-opus-4-8", Sandbox: "go-toolchain", Persona: "/srv/factory/config/souls/prompts/impl.md"},
+			{Name: "implementor-go", Role: "implementor", Model: "claude-opus-4-8", Sandbox: "go-toolchain", Persona: "/srv/factory/config/souls/prompts/impl-go.md", Selector: map[string]string{"lang": "go"}},
+			{Name: "planner-go", Role: "planner", Model: "claude-opus-4-8", Sandbox: "go-toolchain", Persona: "/srv/factory/config/souls/prompts/planner.md", Selector: map[string]string{"lang": "go"}},
 			{Name: "security-go", Role: "security", Model: "claude-sonnet-4-6", Sandbox: "go-toolchain", Persona: "/abs/out-of-tree/security.md", Selector: map[string]string{"lang": "go"}},
 		},
 		Infra: &config.Infra{
@@ -49,7 +49,7 @@ func sampleConfig() *config.Config {
 				Backend: config.BackendDocker,
 				Egress:  "broker-only",
 				Profiles: map[string]config.SandboxProfile{
-					"go-toolchain": {Image: "harness/go-toolchain@sha256:abc123"},
+					"go-toolchain": {Image: "factory/go-toolchain@sha256:abc123"},
 				},
 			},
 			NATS:      config.NATSConfig{URL: "nats://secret-host:4222"},
@@ -70,7 +70,7 @@ func sampleConfig() *config.Config {
 func TestBuildIdentityAndStages(t *testing.T) {
 	v := Build(sampleConfig(), "dev")
 
-	if v.Identity.Root != "/srv/harness/config" || v.Identity.Env != "dev" {
+	if v.Identity.Root != "/srv/factory/config" || v.Identity.Env != "dev" {
 		t.Fatalf("identity = %+v", v.Identity)
 	}
 	if v.Identity.Profile != config.ProfileTrustedDev {
@@ -163,7 +163,7 @@ func TestSoulSpecificityOrdering(t *testing.T) {
 	if got.Provider != "anthropic" || got.Cost == "" {
 		t.Errorf("model not resolved: %+v", got)
 	}
-	if got.Image != "harness/go-toolchain@sha256:abc123" {
+	if got.Image != "factory/go-toolchain@sha256:abc123" {
 		t.Errorf("sandbox image not resolved: %q", got.Image)
 	}
 	if got.PersonaPath != "souls/prompts/impl-go.md" {
@@ -203,7 +203,7 @@ func TestRedaction(t *testing.T) {
 	}
 	var imgKept bool
 	for _, p := range v.Infra.Profiles {
-		if p.Image == "harness/go-toolchain@sha256:abc123" {
+		if p.Image == "factory/go-toolchain@sha256:abc123" {
 			imgKept = true
 		}
 	}

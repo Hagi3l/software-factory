@@ -22,5 +22,5 @@ demand rather than expecting them all in context.
 The engineering conventions binding on **every** change — stack, layout, layering,
 encryption, randomness, session hardening, htmx fragments, committed generated artifacts, the
 no-new-dependencies rule, and the gate — live in **[conventions.md](conventions.md)**. They
-are not feature-specific, so the harness injects them (with this index) into every agent's
+are not feature-specific, so the factory injects them (with this index) into every agent's
 Brief; read them before writing code.

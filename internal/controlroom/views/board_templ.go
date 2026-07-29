@@ -908,7 +908,7 @@ func statusBadge(status string) templ.Component {
 }
 
 // BoardMessage renders the board chrome with a single notice instead of columns — used
-// when the control room is not attached to a running factory (a standalone `harness
+// when the control room is not attached to a running factory (a standalone `factory
 // serve` has no beads to read) or when the board read fails.
 func BoardMessage(msg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {

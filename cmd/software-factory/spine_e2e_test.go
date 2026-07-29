@@ -153,13 +153,13 @@ func e2eInitRepo(t *testing.T, repo string) string {
 	return gitOut(t, repo, "rev-parse", "main")
 }
 
-// e2eSeedIssue initializes a beads store in the repo (prefix "harness", per the bd
+// e2eSeedIssue initializes a beads store in the repo (prefix "factory", per the bd
 // foreign-prefix caveat in CLAUDE.md) and creates one ready issue at the entry role,
 // exactly as `software-factory seed` would, going through the single-writer beads.Apply path.
 // Returns the assigned issue id.
 func e2eSeedIssue(t *testing.T, repo string) string {
 	t.Helper()
-	runBd(t, repo, "init", "--prefix", "harness")
+	runBd(t, repo, "init", "--prefix", "factory")
 	bd := beads.New(beads.WithBinary("bd"), beads.WithDir(repo))
 	created, err := bd.Apply(context.Background(), []core.Proposal{{
 		Issue: core.Issue{Title: "e2e seed", Body: "make the change", Role: "implementor"},
@@ -249,7 +249,7 @@ func (b *localBackend) Provision(ctx context.Context, spec sandbox.Spec) (sandbo
 	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
-	dir, err := os.MkdirTemp("", "harness-local-sbx-")
+	dir, err := os.MkdirTemp("", "factory-local-sbx-")
 	if err != nil {
 		return nil, err
 	}

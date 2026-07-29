@@ -1,7 +1,7 @@
 # Vault demo workflow — the FULL pipeline (requirements -> plan -> author-tests ->
 # implement -> qa -> integrate) run against an established Go/templ/htmx/SQLite app.
 #
-# This is a self-contained demo config (separate from the harness's own config/), so it
+# This is a self-contained demo config (separate from the factory's own config/), so it
 # can't disturb the real pipeline. Unlike the landing-page demo it exercises the whole DAG
 # — including decomposition and a real Go/security qa gate — on a non-trivial codebase. The
 # operator drafts a new feature requirement live in the control-room Create-Task wizard
@@ -14,7 +14,7 @@
 #     (gosec/govulncheck/license-scan) plus lint and the red->green proof stay, which is the
 #     SecTalks-relevant story. The merge-queue re-gate still re-verifies the rebased result.
 #   - `profile: autonomous`, no `tcb_paths`. The candidate diff is ordinary app code in a
-#     throwaway repo (no harness TCB path), so integrate merges hands-free — no `harness
+#     throwaway repo (no factory TCB path), so integrate merges hands-free — no `factory
 #     approve` step. Flip to trusted-dev (+ tcb_paths + a `human-approved` postcondition on
 #     integrate) to demo the approval gate instead.
 #   - `integration.mode: epic`. The shipped config is per-item (the kernel default — each work
@@ -24,7 +24,7 @@
 #     once per feature, not once per child. The unit of integration is the feature the human
 #     drafted, which is also the unit of deploy.
 #   - `checks` resolve to the *vault app's* make targets (its Makefile travels in the seed
-#     repo), not the harness's. That is the whole point: the gate runs the target project's
+#     repo), not the factory's. That is the whole point: the gate runs the target project's
 #     own QA in a clean sandbox.
 #
 # See demo/vault/README.md, specs/workflow.md, specs/verification.md.

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Turnkey landing-page demo for the harness.
+# Turnkey landing-page demo for the factory.
 #
 # Scaffolds a throwaway target repo in a temp dir, seeds a single landing-page spec, and
-# runs the harness end to end (author-tests -> implement -> integrate) against a REMOTE
+# runs the factory end to end (author-tests -> implement -> integrate) against a REMOTE
 # model served by OpenRouter. Watch it in the control room; the result lands on `main` of
 # the scratch repo. See demo/README.md.
 #
@@ -39,8 +39,8 @@ command -v git    >/dev/null || { echo "error: git not found"; exit 1; }
 docker info >/dev/null 2>&1   || { echo "error: docker daemon not reachable"; exit 1; }
 [ -n "${OPENAI_API_KEY:-}" ] || { echo "error: OPENAI_API_KEY is not set — put your OpenRouter API key in it"; exit 1; }
 
-# ---- build the harness binary ----------------------------------------------------------
-say "Building harness"
+# ---- build the factory binary ----------------------------------------------------------
+say "Building factory"
 ( cd "$REPO_ROOT" && make build )
 
 # ---- ensure the sandbox image exists ---------------------------------------------------
@@ -52,7 +52,7 @@ fi
 # ---- materialize config (substitute model/endpoint only if overridden) -----------------
 CONFIG_DIR="$DEMO_DIR/config"
 if [ "$MODEL" != "$DEFAULT_MODEL" ] || [ "$MODEL_ENDPOINT" != "$DEFAULT_ENDPOINT" ]; then
-  CONFIG_DIR="$(mktemp -d -t harness-demo-cfg-XXXXXX)/config"
+  CONFIG_DIR="$(mktemp -d -t factory-demo-cfg-XXXXXX)/config"
   cp -r "$DEMO_DIR/config" "$CONFIG_DIR"
   # The model name is the registry key in infra.dev.yaml AND the `model:` field in both
   # souls; substitute all of them so they stay consistent (validation cross-checks them).
@@ -64,18 +64,18 @@ if [ "$MODEL" != "$DEFAULT_MODEL" ] || [ "$MODEL_ENDPOINT" != "$DEFAULT_ENDPOINT
 fi
 
 # ---- scaffold a throwaway target repo --------------------------------------------------
-SITE="$(mktemp -d -t harness-demo-site-XXXXXX)"
+SITE="$(mktemp -d -t factory-demo-site-XXXXXX)"
 say "Scaffolding scratch site repo: $SITE"
 mkdir -p "$SITE/specs"
 cp "$DEMO_DIR/templates/landing-page.md" "$SITE/specs/landing-page.md"
 git -C "$SITE" init -q -b main
 git -C "$SITE" add .
-git -C "$SITE" -c user.email='demo@factory.local' -c user.name='harness demo' \
+git -C "$SITE" -c user.email='demo@factory.local' -c user.name='factory demo' \
   commit -qm 'seed: Acme landing page spec'
 # --non-interactive: bd init drops into a wizard when stdin is a tty (the normal case
 # when you run this script by hand). Its stdout is hidden below, so the prompt would be
 # invisible and bd would hang forever waiting on stdin. Force the non-interactive path.
-( cd "$SITE" && "$BD" init --prefix harness --non-interactive >/dev/null )
+( cd "$SITE" && "$BD" init --prefix factory --non-interactive >/dev/null )
 
 # ---- validate, seed, run ---------------------------------------------------------------
 say "Validating demo config"
@@ -90,7 +90,7 @@ say "Seeding the landing-page issue"
 # The openai-compat adapter sends OPENAI_API_KEY as the bearer token to OpenRouter.
 export OPENAI_API_KEY
 
-say "Running the harness — control room at http://$SERVE_ADDR  (Ctrl-C to stop)"
+say "Running the factory — control room at http://$SERVE_ADDR  (Ctrl-C to stop)"
 echo "    scratch repo : $SITE"
 echo "    when it lands: open $SITE/index.html in a browser; 'git -C $SITE log' shows the provenance trailer"
 echo

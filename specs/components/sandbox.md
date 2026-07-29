@@ -119,8 +119,8 @@ sandbox:
   backend: docker
   profiles:
     go-toolchain:
-      image: harness/go-toolchain@sha256:…       # docker / gvisor read `image`
-      # rootfs: /var/lib/harness/go-toolchain.ext4   # firecracker reads `rootfs`
+      image: factory/go-toolchain@sha256:…       # docker / gvisor read `image`
+      # rootfs: /var/lib/factory/go-toolchain.ext4   # firecracker reads `rootfs`
 ```
 
 Resolution happens where the orchestrator/runner **build the sandbox spec**, not inside
@@ -154,12 +154,12 @@ and the canonical tool surface never grows per language.
 
 To keep the semantic tools image-agnostic, each profile exposes its servers through a
 **fixed launch convention**: a `languageId`→launch-command **manifest** baked into the
-image at a known path (`/etc/harness/language-servers.json`), rather than the tool
+image at a known path (`/etc/factory/language-servers.json`), rather than the tool
 hard-coding a server per language. The tool reads the manifest, resolves the file under
 the cursor to a `languageId` (by extension), and launches that entry's command over the
 local channel. The session is launched **lazily** on the first semantic call and torn
 down deterministically with the sandbox, like any other in-sandbox state. The manifest
-is baked from the *same* file the harness embeds and validates (`lsmanifest`), so the
+is baked from the *same* file the factory embeds and validates (`lsmanifest`), so the
 format the tools resolve and the file the image carries cannot drift. The image digest
 already pinned in provenance therefore pins the *language-server version* and its manifest
 too, so semantic results are reproducible. (Demo scope ships the `go`→`gopls` entry only;
@@ -234,7 +234,7 @@ Note the deliberate separation enforced by **producer ≠ verifier**:
   (`registry/img@sha256:…`), which is content-addressed and so holds identically no
   matter which registry hosts the image — a public registry weakens nothing the
   threat model relies on, and removes the standing-up-private-infra blocker. The dev
-  overlay still resolves the local `harness/go-toolchain:dev` tag; production pins
+  overlay still resolves the local `factory/go-toolchain:dev` tag; production pins
   `<public-registry>/…@sha256:…`. (A private registry stays an optional swap for
   air-gapped or scan-on-push deployments.)
 - **Caching** package downloads across invocations without weakening the egress

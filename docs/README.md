@@ -1,7 +1,7 @@
-# Harness — operator guide
+# Software Factory — operator guide
 
-Practical, task-oriented documentation for **running and using** the harness. This is
-the *how-to*; the authoritative design contract for *what the harness is* lives in
+Practical, task-oriented documentation for **running and using** the factory. This is
+the *how-to*; the authoritative design contract for *what the factory is* lives in
 [`specs/`](../specs/README.md), and the build order/status in
 [`IMPLEMENTATION_PLAN.md`](../IMPLEMENTATION_PLAN.md). Where this guide simplifies, the
 specs are the truth — and term definitions live in

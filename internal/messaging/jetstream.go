@@ -27,7 +27,7 @@ const defaultResultMaxAge = 7 * 24 * time.Hour
 // applies to every stream definition. They come from the infra overlay
 // (config.JetStreamConfig, surfaced as nats.jetstream) and resolve the messaging.md
 // "concrete stream definitions" OPEN: the subjects and retention *policy* are fixed by
-// the harness's semantics (below), while the replication factor and the result
+// the factory's semantics (below), while the replication factor and the result
 // stream's retention window genuinely vary by deployment. The zero value keeps the
 // built-in bootstrap defaults, so a single-process dev run that omits these knobs
 // behaves exactly as before.
@@ -53,7 +53,7 @@ func JetStream(nc *nats.Conn) (jetstream.JetStream, error) {
 	return js, nil
 }
 
-// streamConfigs returns the four streams the harness depends on, with opts applied.
+// streamConfigs returns the four streams the factory depends on, with opts applied.
 // The retention choices encode the spec's semantics:
 //   - work uses WorkQueue retention so each assignment is consumed exactly once and
 //     the consumer ack doubles as the lease (AckWait → redelivery on a dead runner).

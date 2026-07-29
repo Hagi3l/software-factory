@@ -353,7 +353,7 @@ func deadLetterRow(dl query.DeadLetter) templ.Component {
 }
 
 // DeadLetterMessage renders the DLQ chrome with a single notice instead of the queue —
-// used when the control room is not attached to a running factory (a standalone `harness
+// used when the control room is not attached to a running factory (a standalone `factory
 // serve` has no beads to read) or when the queue read fails.
 func DeadLetterMessage(msg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {

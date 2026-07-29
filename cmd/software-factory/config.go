@@ -317,7 +317,7 @@ func entryRole(cfg *config.Config) (string, error) {
 // the head of the pipeline — never mid-flow (e.g. directly at `implement`, skipping the failing
 // tests author-tests would have written). The wizard's APPROVE path validates every drafted seed
 // issue's role against this set, exactly as the orchestrator validates a planner's children
-// against the plan stage's `produces`. Returns an empty set when there is no harness DAG.
+// against the plan stage's `produces`. Returns an empty set when there is no factory DAG.
 func seedRoles(cfg *config.Config) map[string]bool {
 	if cfg.Harness == nil {
 		return nil

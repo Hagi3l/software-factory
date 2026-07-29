@@ -30,7 +30,7 @@ import (
 // ManifestPath is the fixed in-image location of the language-server manifest -- the
 // "known path" launch convention the semantic tools read (sandbox.md). Absolute,
 // because it is resolved inside the sandbox independent of the working directory.
-const ManifestPath = "/etc/harness/language-servers.json"
+const ManifestPath = "/etc/factory/language-servers.json"
 
 // currentVersion gates the on-disk format. A future incompatible change bumps this so
 // an older reader fails loudly on parse rather than silently misreading.

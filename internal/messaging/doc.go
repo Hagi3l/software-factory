@@ -1,4 +1,4 @@
-// Package messaging is the NATS layer every harness component communicates over.
+// Package messaging is the NATS layer every factory component communicates over.
 // Even when co-located in one process, components speak NATS rather than in-process
 // channels, so a runner that is a goroutine today can become a separate binary on
 // another host tomorrow with no code change — location transparency is a first

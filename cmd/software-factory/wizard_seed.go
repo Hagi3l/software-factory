@@ -87,7 +87,7 @@ func (noopWriter) Write(p []byte) (int, error) { return len(p), nil }
 // (e.g. a bare commit sha from rev-parse).
 func gitRunner(repo string) func(ctx context.Context, args ...string) (string, error) {
 	return func(ctx context.Context, args ...string) (string, error) {
-		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...) // #nosec G204 -- fixed git binary, repo-scoped; args are trusted, harness-built (not agent input).
+		cmd := exec.CommandContext(ctx, "git", append([]string{"-C", repo}, args...)...) // #nosec G204 -- fixed git binary, repo-scoped; args are trusted, factory-built (not agent input).
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			return "", fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
@@ -536,7 +536,7 @@ func issueBody(body, sidecar, transcriptRef string) string {
 }
 
 // commitMessage builds the spec commit's message: a `specs:` subject from the summary, then the
-// provenance body. The harness's own commits do not carry a co-author trailer.
+// provenance body. The factory's own commits do not carry a co-author trailer.
 func commitMessage(req wizard.SeedRequest, transcriptRef, sidecar string) string {
 	subject := strings.TrimSpace(req.Summary)
 	if subject == "" {

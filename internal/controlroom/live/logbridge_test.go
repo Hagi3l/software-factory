@@ -26,7 +26,7 @@ func TestLogBridge_TeesRecordAsSystemEvent(t *testing.T) {
 	defer cancel()
 	log, buf := bridgeLogger(t, act, hub)
 
-	log.InfoContext(t.Context(), "orchestrator: dispatched", "issue", "harness-1", "role", "test-author")
+	log.InfoContext(t.Context(), "orchestrator: dispatched", "issue", "factory-1", "role", "test-author")
 
 	// The base handler still wrote the record — the bridge tees, it does not replace.
 	if !strings.Contains(buf.String(), "dispatched") {
@@ -48,7 +48,7 @@ func TestLogBridge_TeesRecordAsSystemEvent(t *testing.T) {
 		t.Errorf("kind = %q, want info", e.Kind)
 	}
 	// The "component: " prefix is stripped and the attrs are appended to the detail.
-	if !strings.Contains(e.Detail, "dispatched") || !strings.Contains(e.Detail, "issue=harness-1") || !strings.Contains(e.Detail, "role=test-author") {
+	if !strings.Contains(e.Detail, "dispatched") || !strings.Contains(e.Detail, "issue=factory-1") || !strings.Contains(e.Detail, "role=test-author") {
 		t.Errorf("detail = %q, want dispatched + issue + role", e.Detail)
 	}
 
@@ -89,8 +89,8 @@ func TestLogBridge_NoComponentPrefixAttributedToHarness(t *testing.T) {
 	log.InfoContext(t.Context(), "starting up")
 
 	got := act.Recent()
-	if len(got) != 1 || got[0].AgentID != "harness" || got[0].Detail != "starting up" {
-		t.Fatalf("entry = %+v, want component harness, detail 'starting up'", got)
+	if len(got) != 1 || got[0].AgentID != "factory" || got[0].Detail != "starting up" {
+		t.Fatalf("entry = %+v, want component factory, detail 'starting up'", got)
 	}
 }
 

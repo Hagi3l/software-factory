@@ -2,7 +2,7 @@
 
 Provisioning assets for the `OPENOBSERVE=1` path of [`../run.sh`](../run.sh). Used only when
 you want to **see the whole telemetry record land in one backend** — all three OTel signals
-the harness exports (traces + logs + metrics), authenticated, on one OTLP/gRPC endpoint.
+the factory exports (traces + logs + metrics), authenticated, on one OTLP/gRPC endpoint.
 
 This exists because the vault demo targets a *security* audience: the point isn't a trace
 waterfall (Jaeger already does that) but proving that the **complete, tamper-evident record**
@@ -22,7 +22,7 @@ POSTed to OO's REST API (`POST /api/{org}/dashboards`) by `run.sh` after the con
 | Pipeline — log records | logs | `default` stream | a `table` panel: `SELECT _timestamp, COALESCE(factory_issue_id, issue) AS issue, COALESCE(factory_issue_role, role) AS role, factory_soul, factory_attempt, body … ORDER BY _timestamp DESC` |
 
 The **Pipeline** table renders every trusted-side `slog` record as columns (issue / role / soul /
-attempt / event), newest-first, **unfiltered**. The `COALESCE`s exist because the harness emits
+attempt / event), newest-first, **unfiltered**. The `COALESCE`s exist because the factory emits
 logs under *two* attribute conventions that never co-occur on one record (see
 [`pipeline-savedview.json`](#pipeline-savedviewjson) below), so coalescing keeps `issue`/`role`
 populated on lifecycle *and* broker rows.
@@ -52,7 +52,7 @@ opens the Logs explorer (Logs → Saved Views → **Pipeline**) straight into co
 instead of the raw JSON source, so the pipeline is legible without hand-picking fields. Same
 **best-effort** discipline as the dashboard (a failed POST logs a note; add the columns by hand).
 
-**Why two `issue`/`role` columns.** The harness emits logs under *two* attribute conventions: the
+**Why two `issue`/`role` columns.** The factory emits logs under *two* attribute conventions: the
 orchestrator/agent **lifecycle** logs use plain `slog` keys (`issue`, `role`), while the broker +
 instrumented logs use the telemetry-schema keys (`factory_issue_id`, `factory_issue_role`). They
 **never co-occur** on one record. The dashboard's `table` panel can `COALESCE` them into one
@@ -72,7 +72,7 @@ bumped `OPENOBSERVE_IMAGE` can drift the shape; re-capture if the POST starts fa
 `run.sh` boots OO with a fixed root user (`ZO_ROOT_USER_EMAIL`/`ZO_ROOT_USER_PASSWORD`) and
 derives the ingestion token as `base64(email:password)` — exactly the string OO's own
 *Ingestion* page shows. It is exported as `OTEL_OTLP_AUTH` (`Basic <token>`), which the
-materialized infra overlay references as `authorization: ${OTEL_OTLP_AUTH}`. The harness
+materialized infra overlay references as `authorization: ${OTEL_OTLP_AUTH}`. The factory
 expands it host-side at export time (`config.OTelConfig.ResolveHeaders`), so the credential
 lives in the environment, never in config — the same key discipline as the model API key, and
 what `software-factory validate`'s credential-header rule enforces.

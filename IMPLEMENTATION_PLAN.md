@@ -1,6 +1,6 @@
 # Implementation Plan
 
-Build order for the harness, derived from [specs/](specs/README.md). The spine is
+Build order for the factory, derived from [specs/](specs/README.md). The spine is
 [bootstrap.md](specs/bootstrap.md): hand-build a minimal kernel that does
 `spec → implement → gate → merge` for one issue (the **self-host point**), then
 build out the full design.
@@ -80,7 +80,7 @@ Per [bootstrap.md](specs/bootstrap.md), the components that *enforce* the guaran
 orchestrator, runner/broker, sandbox, gate harness — are the Trusted Computing Base.
 **TCB-touching changes stay human-reviewed even after self-hosting.** Autonomy is
 earned first for non-TCB work (new souls, stages, the control room). While the
-harness is built by hand this is moot — everything is human-reviewed — but the
+factory is built by hand this is moot — everything is human-reviewed — but the
 boundary matters the moment a capable model is wired and autonomy is switched on.
 
 ## Testing infrastructure (cross-cutting)
@@ -146,7 +146,7 @@ development and human-reviewed runs.
 - Consolidate the status bar's 2–3 per-page SSE connections (page content + status bar + alerts.js) onto one connection or h2c.
 - Client-side live wall/token ticker on the invocation budget meter (mid-invocation spend isn't persisted to beads).
 - Decomposition-preview dry-run before APPROVE (control-room.md OPEN, "leaning defer"; seed issues stay coarse and the autonomous planner decomposes).
-- **First-party thinking-block preservation** *(from the 2026-07-02 demo-prep pass)*. Through the openai-compat/OpenRouter path, Claude's interleaved thinking blocks are dropped between tool turns, so a deep-reasoning role (the Opus test-author) re-derives its plan from scratch each turn — a quality *and* token cost. The first-party `anthropic` adapter (already built) can preserve them across a tool loop. Strategic framing: the harness stays provider-unaware, but the frontier-Claude path should be **first-party by default** with compat as the portability fallback — this, native `effort`, and native cache-TTL control all being first-class there. A deployment/config choice plus verifying the anthropic adapter round-trips thinking blocks through the loop; no architecture change. Weigh against OpenRouter's single-key convenience for the demo.
+- **First-party thinking-block preservation** *(from the 2026-07-02 demo-prep pass)*. Through the openai-compat/OpenRouter path, Claude's interleaved thinking blocks are dropped between tool turns, so a deep-reasoning role (the Opus test-author) re-derives its plan from scratch each turn — a quality *and* token cost. The first-party `anthropic` adapter (already built) can preserve them across a tool loop. Strategic framing: the factory stays provider-unaware, but the frontier-Claude path should be **first-party by default** with compat as the portability fallback — this, native `effort`, and native cache-TTL control all being first-class there. A deployment/config choice plus verifying the anthropic adapter round-trips thinking blocks through the loop; no architecture change. Weigh against OpenRouter's single-key convenience for the demo.
 - **Package-proxy redirect pinning** *(from the 2026-07-03 review)*. The fetcher's
   `http.Client` sets no `CheckRedirect` (`internal/packageproxy/packageproxy.go:50-55`):
   `ValidatePath` confines the *first* hop to the configured proxy host, but a 3xx is followed
@@ -206,6 +206,6 @@ language — are now recorded in the specs they informed, not duplicated here.)
   moved `main` + re-gating the whole feature at its terminal merge). Deferred; spec'd as OPEN
   in [integration.md](specs/integration.md).
 - Exact module set in the TCB boundary — operationally the `policy.tcb_paths` globs;
-  the concrete list must still be reviewed and pinned before autonomy is switched on for harness
+  the concrete list must still be reviewed and pinned before autonomy is switched on for factory
   work. Now formally tracked as an **OPEN question in configuration.md** (was only prose in
   bootstrap.md + this plan).

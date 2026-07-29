@@ -49,7 +49,7 @@ func startMinIO(t *testing.T) (endpoint, accessKey, secretKey string) {
 	_ = ln.Close()
 
 	accessKey, secretKey = "minioadmin", "minioadmin"
-	name := fmt.Sprintf("harness-minio-test-%d", port)
+	name := fmt.Sprintf("factory-minio-test-%d", port)
 	out, err := exec.Command("docker", "run", "-d",
 		"--name", name,
 		"-p", fmt.Sprintf("127.0.0.1:%d:9000", port),
@@ -86,7 +86,7 @@ func TestS3StoreIntegration(t *testing.T) {
 		}
 		time.Sleep(250 * time.Millisecond)
 	}
-	const bucket = "harness-artifacts"
+	const bucket = "factory-artifacts"
 	if err := setup.MakeBucket(ctx, bucket, minio.MakeBucketOptions{}); err != nil {
 		t.Fatalf("make bucket: %v", err)
 	}

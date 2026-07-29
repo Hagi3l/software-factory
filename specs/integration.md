@@ -136,13 +136,13 @@ autonomous change traceable, which matters precisely because no human reviewed i
 fast-forward.** A bare fast-forward would move `main` onto the agent's own commit,
 leaving nowhere to attach a trailer the trusted layer vouches for. Instead the
 orchestrator creates a **provenance commit on top of the verified candidate** —
-same tree (no file changes), parent = candidate tip, authored by the harness
+same tree (no file changes), parent = candidate tip, authored by the factory
 identity, message = the issue title (subject) followed by the trailer — then
 advances `main` to it. So `main`'s tip is
 always a trusted, attributable commit and the candidate history stays intact below.
 When a signing key is configured the orchestrator **SSH-signs** this commit with the
-harness identity (verified on read; see [security.md](security.md) "Signing the
-provenance commit"), so `main`'s tip is not merely labeled with the harness's name but
+factory identity (verified on read; see [security.md](security.md) "Signing the
+provenance commit"), so `main`'s tip is not merely labeled with the factory's name but
 cryptographically provable to be its work.
 This stays within fast-forward semantics (`main` must be an ancestor of the
 candidate; a non-fast-forward is still refused — that is what the rebase in step 2

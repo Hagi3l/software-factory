@@ -93,12 +93,12 @@ func (b *logBridge) tee(r slog.Record) {
 
 // splitComponent peels the "component: " prefix the factory uses off a log message,
 // returning the component and the remaining detail. A message with no such prefix is
-// attributed to the harness as a whole.
+// attributed to the factory as a whole.
 func splitComponent(msg string) (component, detail string) {
 	if c, d, ok := strings.Cut(msg, ": "); ok && c != "" && !strings.ContainsAny(c, " ") {
 		return c, d
 	}
-	return "harness", msg
+	return "factory", msg
 }
 
 // levelString maps a slog level to the lowercase kind the feed badges on.

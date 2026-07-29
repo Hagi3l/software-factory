@@ -11,14 +11,14 @@ import (
 // can be bound and replayed (T2.10).
 func TestAwaitApprovalParksWithMetadata(t *testing.T) {
 	c, calls := recordingClient(func([]string) ([]byte, error) { return nil, nil })
-	if err := c.AwaitApproval(context.Background(), "harness-1", "candidate/harness-1", `{"Issue":"harness-1"}`); err != nil {
+	if err := c.AwaitApproval(context.Background(), "factory-1", "candidate/factory-1", `{"Issue":"factory-1"}`); err != nil {
 		t.Fatalf("AwaitApproval: %v", err)
 	}
 	got := strings.Join((*calls)[0], " ")
-	if !strings.Contains(got, "update harness-1 --status blocked") {
+	if !strings.Contains(got, "update factory-1 --status blocked") {
 		t.Errorf("args = %q, want status blocked", got)
 	}
-	if !strings.Contains(got, "--set-metadata candidate_ref=candidate/harness-1") {
+	if !strings.Contains(got, "--set-metadata candidate_ref=candidate/factory-1") {
 		t.Errorf("args = %q, want candidate_ref metadata", got)
 	}
 	if !strings.Contains(got, "--set-metadata parked_prov=") {
@@ -29,7 +29,7 @@ func TestAwaitApprovalParksWithMetadata(t *testing.T) {
 // An empty candidate ref is rejected: there is nothing to approve, so the park must not run.
 func TestAwaitApprovalRejectsEmptyCandidate(t *testing.T) {
 	c, calls := recordingClient(func([]string) ([]byte, error) { return nil, nil })
-	if err := c.AwaitApproval(context.Background(), "harness-1", "", "prov"); err == nil {
+	if err := c.AwaitApproval(context.Background(), "factory-1", "", "prov"); err == nil {
 		t.Error("AwaitApproval accepted an empty candidate ref")
 	}
 	if len(*calls) != 0 {
@@ -40,7 +40,7 @@ func TestAwaitApprovalRejectsEmptyCandidate(t *testing.T) {
 // A parked issue carrying no provenance still parks (a degraded record, never a dropped park).
 func TestAwaitApprovalOmitsEmptyProvenance(t *testing.T) {
 	c, calls := recordingClient(func([]string) ([]byte, error) { return nil, nil })
-	if err := c.AwaitApproval(context.Background(), "harness-1", "candidate/harness-1", ""); err != nil {
+	if err := c.AwaitApproval(context.Background(), "factory-1", "candidate/factory-1", ""); err != nil {
 		t.Fatalf("AwaitApproval: %v", err)
 	}
 	if got := strings.Join((*calls)[0], " "); strings.Contains(got, "parked_prov=") {
@@ -52,14 +52,14 @@ func TestAwaitApprovalOmitsEmptyProvenance(t *testing.T) {
 // resume drives blocked→closed through the merge path, not here.
 func TestRecordApproval(t *testing.T) {
 	c, calls := recordingClient(func([]string) ([]byte, error) { return nil, nil })
-	if err := c.RecordApproval(context.Background(), "harness-1", "candidate/harness-1", "alice"); err != nil {
+	if err := c.RecordApproval(context.Background(), "factory-1", "candidate/factory-1", "alice"); err != nil {
 		t.Fatalf("RecordApproval: %v", err)
 	}
 	got := strings.Join((*calls)[0], " ")
 	if strings.Contains(got, "--status") {
 		t.Errorf("args = %q, want no status change (metadata-only)", got)
 	}
-	if !strings.Contains(got, "--set-metadata approved_ref=candidate/harness-1") || !strings.Contains(got, "--set-metadata approver=alice") {
+	if !strings.Contains(got, "--set-metadata approved_ref=candidate/factory-1") || !strings.Contains(got, "--set-metadata approver=alice") {
 		t.Errorf("args = %q, want approved_ref + approver metadata", got)
 	}
 }
@@ -67,15 +67,15 @@ func TestRecordApproval(t *testing.T) {
 // The read path decodes the parking metadata back into core.Issue (the inverse of
 // AwaitApproval), so the orchestrator's approval handler and the CLI see the parked state.
 func TestGetDecodesApprovalState(t *testing.T) {
-	c, _ := fakeClient(`[{"id":"harness-1","title":"t","status":"blocked","metadata":{"role":"security","candidate_ref":"candidate/harness-1","parked_prov":"{\"Issue\":\"harness-1\"}"}}]`, nil)
-	got, err := c.Get(context.Background(), "harness-1")
+	c, _ := fakeClient(`[{"id":"factory-1","title":"t","status":"blocked","metadata":{"role":"security","candidate_ref":"candidate/factory-1","parked_prov":"{\"Issue\":\"factory-1\"}"}}]`, nil)
+	got, err := c.Get(context.Background(), "factory-1")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.CandidateRef != "candidate/harness-1" {
-		t.Errorf("CandidateRef = %q, want candidate/harness-1", got.CandidateRef)
+	if got.CandidateRef != "candidate/factory-1" {
+		t.Errorf("CandidateRef = %q, want candidate/factory-1", got.CandidateRef)
 	}
-	if got.ParkedProvenance != `{"Issue":"harness-1"}` {
+	if got.ParkedProvenance != `{"Issue":"factory-1"}` {
 		t.Errorf("ParkedProvenance = %q", got.ParkedProvenance)
 	}
 }

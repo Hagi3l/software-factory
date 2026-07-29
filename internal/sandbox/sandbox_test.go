@@ -19,7 +19,7 @@ func validSpec() Spec {
 			Mem:  "2Gi",
 			Wall: config.Duration(30 * time.Minute),
 		},
-		Broker: Endpoint{Network: "unix", Address: "/run/harness/broker.sock"},
+		Broker: Endpoint{Network: "unix", Address: "/run/factory/broker.sock"},
 	}
 }
 

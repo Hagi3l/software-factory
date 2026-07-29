@@ -1,4 +1,4 @@
-// Package config defines the declarative schema for the harness — factory.yaml
+// Package config defines the declarative schema for the factory — factory.yaml
 // (DAG + policy), souls/*.yaml, and infra.<env>.yaml — together with the loader
 // and the validator that rejects malformed configuration before anything runs.
 //

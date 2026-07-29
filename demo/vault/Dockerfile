@@ -18,12 +18,12 @@
 #     the download steps override it per-RUN; a feature that adds a new dependency needs
 #     this image rebuilt.
 #
-# Deliberately NOT `FROM go-toolchain:latest`: that image's last layer is the harness
-# shim binary, which changes on every harness commit — and a child's layer cache is keyed
+# Deliberately NOT `FROM go-toolchain:latest`: that image's last layer is the factory
+# shim binary, which changes on every factory commit — and a child's layer cache is keyed
 # on its parent image ID, so basing on it would re-download templ/Tailwind/modules and
 # re-warm the build cache on every commit. Basing on the stable `go-toolchain-base` and
 # copying the two volatile files out of `go-toolchain` as the FINAL layers (bottom of
-# this file) means a harness source change rebuilds seconds of COPY here, nothing else.
+# this file) means a factory source change rebuilds seconds of COPY here, nothing else.
 FROM go-toolchain-base:latest
 
 # templ CLI + Tailwind standalone CLI (need network at build; never at run). The base set

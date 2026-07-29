@@ -1,6 +1,6 @@
 # Glossary
 
-Shared vocabulary for the harness. When a spec capitalises a term oddly, it refers
+Shared vocabulary for the factory. When a spec capitalises a term oddly, it refers
 to a definition here.
 
 See also: [architecture.md](architecture.md), [README.md](README.md).
@@ -149,8 +149,8 @@ stays the durable log. Generalizes the original in-flight (in-progress-only) cac
 
 ### Provider adapter
 A thin translator (held by the runner, over the official Go SDK) between the
-harness's canonical model interface and a specific provider's wire format
-(Anthropic, OpenAI-compatible). What makes the harness model-agnostic. See
+factory's canonical model interface and a specific provider's wire format
+(Anthropic, OpenAI-compatible). What makes the factory model-agnostic. See
 [models.md](models.md).
 
 ### Replay
@@ -216,8 +216,8 @@ The observability model for one invocation: epic → issue → invocation → sp
 [observability.md](observability.md).
 
 ### Trusted Computing Base (TCB)
-The components that *enforce* the harness's guarantees — orchestrator, runner/broker,
-sandbox config, the gate harness, the verification stack. An unverified harness
+The components that *enforce* the factory's guarantees — orchestrator, runner/broker,
+sandbox config, the gate harness, the verification stack. An unverified factory
 cannot vouch for its own verifier, so **TCB-touching changes stay human-reviewed
 even after self-hosting** (arguably permanently). The boundary is operationally the
 `policy.tcb_paths` globs that force `human-approved` regardless of profile. See

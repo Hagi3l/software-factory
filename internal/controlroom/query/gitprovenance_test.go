@@ -136,7 +136,7 @@ func TestRecentVerifiesSignaturesWithAllowedSigners(t *testing.T) {
 		}
 		return nil, errors.New("unexpected")
 	})
-	g.allowedSigners = "/etc/harness/allowed_signers"
+	g.allowedSigners = "/etc/factory/allowed_signers"
 
 	got, err := g.Recent(context.Background(), 10)
 	if err != nil {
@@ -158,7 +158,7 @@ func TestRecentVerifiesSignaturesWithAllowedSigners(t *testing.T) {
 	if !strings.Contains(joined, "%G?") {
 		t.Errorf("verified read did not request %%G? column; args = %v", loggedArgs)
 	}
-	if !strings.Contains(joined, "gpg.ssh.allowedSignersFile=/etc/harness/allowed_signers") {
+	if !strings.Contains(joined, "gpg.ssh.allowedSignersFile=/etc/factory/allowed_signers") {
 		t.Errorf("verified read did not pass the allowed-signers file; args = %v", loggedArgs)
 	}
 }
@@ -290,11 +290,11 @@ func TestGitProvenanceIntegration(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 	git("init", "-b", "main")
-	git("config", "user.name", "harness")
-	git("config", "user.email", "harness@localhost")
+	git("config", "user.name", "factory")
+	git("config", "user.email", "factory@localhost")
 
 	prov := core.Provenance{
-		Soul: "implementor-go", Model: "claude-opus", Issue: "harness-42",
+		Soul: "implementor-go", Model: "claude-opus", Issue: "factory-42",
 		PromptSHA: "sha256:abc", Verified: []string{"build@sha256:ev", "test"}, Traceability: "sha256:tm",
 	}
 	git("commit", "--allow-empty", "-m", prov.CommitMessage())
@@ -305,14 +305,14 @@ func TestGitProvenanceIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Recent: %v", err)
 	}
-	if len(recent) != 1 || recent[0].Provenance.Issue != "harness-42" || recent[0].Provenance.Soul != "implementor-go" {
-		t.Fatalf("Recent = %+v, want one harness-42 commit", recent)
+	if len(recent) != 1 || recent[0].Provenance.Issue != "factory-42" || recent[0].Provenance.Soul != "implementor-go" {
+		t.Fatalf("Recent = %+v, want one factory-42 commit", recent)
 	}
 	if recent[0].Commit == "" {
 		t.Error("Recent commit hash is empty")
 	}
 
-	got, found, err := g.ByIssue(context.Background(), "harness-42")
+	got, found, err := g.ByIssue(context.Background(), "factory-42")
 	if err != nil || !found {
 		t.Fatalf("ByIssue: found=%v err=%v", found, err)
 	}
@@ -321,7 +321,7 @@ func TestGitProvenanceIntegration(t *testing.T) {
 	}
 
 	// An unmerged issue is cleanly not-found.
-	if _, found, _ := g.ByIssue(context.Background(), "harness-999"); found {
+	if _, found, _ := g.ByIssue(context.Background(), "factory-999"); found {
 		t.Error("ByIssue found a never-merged issue")
 	}
 }
@@ -342,17 +342,17 @@ func TestDiffByIssueIntegration(t *testing.T) {
 		return strings.TrimSpace(string(out))
 	}
 	git("init", "-b", "main")
-	git("config", "user.name", "harness")
-	git("config", "user.email", "harness@localhost")
+	git("config", "user.name", "factory")
+	git("config", "user.email", "factory@localhost")
 	if err := os.WriteFile(repo+"/widget.go", []byte("package widget\n"), 0o644); err != nil {
 		t.Fatalf("write file: %v", err)
 	}
 	git("add", "widget.go")
-	prov := core.Provenance{Soul: "implementor-go", Model: "claude", Issue: "harness-77", Transcript: "sha256:tx"}
+	prov := core.Provenance{Soul: "implementor-go", Model: "claude", Issue: "factory-77", Transcript: "sha256:tx"}
 	git("commit", "-m", prov.CommitMessage())
 
 	g := NewGitProvenance(repo)
-	diff, found, err := g.DiffByIssue(context.Background(), "harness-77")
+	diff, found, err := g.DiffByIssue(context.Background(), "factory-77")
 	if err != nil || !found {
 		t.Fatalf("DiffByIssue: found=%v err=%v", found, err)
 	}
@@ -360,12 +360,12 @@ func TestDiffByIssueIntegration(t *testing.T) {
 		t.Errorf("diff missing the landed change:\n%s", diff)
 	}
 	// The diff must not carry the commit-message header `--format=` suppresses.
-	if strings.Contains(diff, "harness-77") {
+	if strings.Contains(diff, "factory-77") {
 		t.Errorf("diff leaked the commit message header:\n%s", diff)
 	}
 
 	// An unmerged issue is cleanly not-found, with no diff.
-	if d, found, _ := g.DiffByIssue(context.Background(), "harness-999"); found || d != "" {
+	if d, found, _ := g.DiffByIssue(context.Background(), "factory-999"); found || d != "" {
 		t.Errorf("DiffByIssue found a never-merged issue: %q", d)
 	}
 }

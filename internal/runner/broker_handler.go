@@ -771,7 +771,7 @@ func (r *relay) publishEnveloped(payload []byte) error {
 // then resolves the head — all host-side git, since the sandbox is network-less and the
 // source repo is not reachable from inside it.
 func pushBundleToRepo(ctx context.Context, repo, branch string, bundle []byte) (string, error) {
-	f, err := os.CreateTemp("", "harness-bundle-*.bundle")
+	f, err := os.CreateTemp("", "factory-bundle-*.bundle")
 	if err != nil {
 		return "", fmt.Errorf("git push: temp bundle: %w", err)
 	}

@@ -10,8 +10,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/harness-demo/vault/internal/store"
-	"github.com/harness-demo/vault/internal/web"
+	"github.com/factory-demo/vault/internal/store"
+	"github.com/factory-demo/vault/internal/web"
 )
 
 func main() {

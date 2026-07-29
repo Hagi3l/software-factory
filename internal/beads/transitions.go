@@ -18,7 +18,7 @@ import (
 // holds no critical in-memory state, so a restart re-derives which in_progress
 // issues are stranded by reading this expiry rather than trusting memory (see
 // specs/components/orchestrator.md). beads has its own --claim verb, but it is
-// owner-based with no TTL; the harness needs an expiry it can sweep, so the lease
+// owner-based with no TTL; the factory needs an expiry it can sweep, so the lease
 // is modeled explicitly in metadata.
 const MetadataKeyLease = "lease_until"
 
@@ -545,7 +545,7 @@ func (c *Client) Apply(ctx context.Context, proposals []core.Proposal) ([]core.I
 	}
 
 	// Referential-integrity check: every dependency target that is not a same-batch
-	// sibling key must already exist in the store. The harness verifies this itself
+	// sibling key must already exist in the store. The factory verifies this itself
 	// through the read path rather than trusting `bd dep add` to reject a dangling edge:
 	// bd 1.0.4 validates a same-prefix target but treats a foreign-prefix id as an
 	// unchecked external (federation) reference and silently accepts it, so an untrusted

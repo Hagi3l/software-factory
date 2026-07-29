@@ -525,7 +525,7 @@ func evidenceItem(e query.ArtifactLink) templ.Component {
 }
 
 // IssueDetailMessage renders the detail chrome with a single notice instead of an issue —
-// used when the control room is not attached to a running factory (a standalone `harness
+// used when the control room is not attached to a running factory (a standalone `factory
 // serve` has no beads to read) or when the issue cannot be loaded (an unknown id).
 func IssueDetailMessage(msg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {

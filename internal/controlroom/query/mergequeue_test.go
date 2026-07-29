@@ -13,15 +13,15 @@ import (
 // flags from the step — the read shape the merge-queue view (T4.25) renders.
 func TestMergeQueueEnrichesAndFlags(t *testing.T) {
 	issues := &fakeIssues{all: []core.Issue{
-		{ID: "harness-1", Title: "land me", Role: "integrate", Spec: "specs/a.md"},
-		{ID: "harness-2", Title: "conflict", Role: "integrate", Spec: "specs/b.md"},
+		{ID: "factory-1", Title: "land me", Role: "integrate", Spec: "specs/a.md"},
+		{ID: "factory-2", Title: "conflict", Role: "integrate", Spec: "specs/b.md"},
 	}}
 	r := NewReader(issues, &fakeArts{}, &fakeProv{})
 
 	events := []core.MergeStateEvent{
-		{ID: "harness-2", State: core.MergeStateConflicted, Role: "integrate"},
-		{ID: "harness-1", State: core.MergeStateLanded, Role: "integrate", Commit: "abc123"},
-		{ID: "harness-3", State: core.MergeStateRebasing, Role: "integrate"}, // not in beads
+		{ID: "factory-2", State: core.MergeStateConflicted, Role: "integrate"},
+		{ID: "factory-1", State: core.MergeStateLanded, Role: "integrate", Commit: "abc123"},
+		{ID: "factory-3", State: core.MergeStateRebasing, Role: "integrate"}, // not in beads
 	}
 	rows, err := r.MergeQueue(context.Background(), events)
 	if err != nil {
@@ -32,11 +32,11 @@ func TestMergeQueueEnrichesAndFlags(t *testing.T) {
 	}
 
 	// Order preserved (the buffer holds the train's arrival order).
-	if rows[0].ID != "harness-2" || rows[1].ID != "harness-1" || rows[2].ID != "harness-3" {
-		t.Fatalf("order = %s,%s,%s; want harness-2,harness-1,harness-3", rows[0].ID, rows[1].ID, rows[2].ID)
+	if rows[0].ID != "factory-2" || rows[1].ID != "factory-1" || rows[2].ID != "factory-3" {
+		t.Fatalf("order = %s,%s,%s; want factory-2,factory-1,factory-3", rows[0].ID, rows[1].ID, rows[2].ID)
 	}
 
-	// harness-2: conflicted → terminal + failed, title/spec enriched from beads.
+	// factory-2: conflicted → terminal + failed, title/spec enriched from beads.
 	if !rows[0].Terminal || !rows[0].Failed {
 		t.Fatalf("conflicted row flags: terminal=%v failed=%v, want both true", rows[0].Terminal, rows[0].Failed)
 	}
@@ -44,7 +44,7 @@ func TestMergeQueueEnrichesAndFlags(t *testing.T) {
 		t.Fatalf("conflicted row not enriched: %+v", rows[0])
 	}
 
-	// harness-1: landed → terminal, not failed, carries the commit.
+	// factory-1: landed → terminal, not failed, carries the commit.
 	if !rows[1].Terminal || rows[1].Failed {
 		t.Fatalf("landed row flags: terminal=%v failed=%v, want true/false", rows[1].Terminal, rows[1].Failed)
 	}
@@ -52,7 +52,7 @@ func TestMergeQueueEnrichesAndFlags(t *testing.T) {
 		t.Fatalf("landed row wrong: %+v", rows[1])
 	}
 
-	// harness-3: in-flight rebasing → not terminal; no beads issue, so title empty but the
+	// factory-3: in-flight rebasing → not terminal; no beads issue, so title empty but the
 	// row still renders (the merge step is the point, the title is enrichment).
 	if rows[2].Terminal || rows[2].Failed {
 		t.Fatalf("rebasing row should be non-terminal: %+v", rows[2])
@@ -77,7 +77,7 @@ func TestMergeQueueEmpty(t *testing.T) {
 // TestMergeQueueListAllError surfaces a beads read failure (it cannot enrich without the issues).
 func TestMergeQueueListAllError(t *testing.T) {
 	r := NewReader(&fakeIssues{allErr: errors.New("bd down")}, &fakeArts{}, &fakeProv{})
-	_, err := r.MergeQueue(context.Background(), []core.MergeStateEvent{{ID: "harness-1", State: core.MergeStateQueued}})
+	_, err := r.MergeQueue(context.Background(), []core.MergeStateEvent{{ID: "factory-1", State: core.MergeStateQueued}})
 	if err == nil {
 		t.Fatal("MergeQueue: want error when ListAll fails")
 	}

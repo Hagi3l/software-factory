@@ -1,6 +1,6 @@
 # Third-party notices
 
-Harness itself is licensed under the [MIT License](LICENSE). This file records the
+Software Factory itself is licensed under the [MIT License](LICENSE). This file records the
 third-party components it bundles or depends on, and reproduces the notices their
 licenses require us to carry.
 
@@ -40,7 +40,7 @@ assert a license the project has not stated.
 
 ### Vault demo application (`demo/vault/app/internal/web/static/`)
 
-The demo app is a self-contained Go web application used to exercise the harness. It
+The demo app is a self-contained Go web application used to exercise the factory. It
 vendors its own copies:
 
 | Component | Version | License |
@@ -156,7 +156,7 @@ Each module's authoritative license text ships in its own source, available unde
 
 ## External tools
 
-The harness shells out to or coordinates with these at runtime; it does not bundle or
+The factory shells out to or coordinates with these at runtime; it does not bundle or
 link them, so no notice obligation arises. Listed because a deployment needs them:
 
 - [beads](https://github.com/steveyegge/beads) (`bd`) — the work-item store.

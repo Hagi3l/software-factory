@@ -1,4 +1,4 @@
-// Command harness is the entry point for the autonomous software factory.
+// Command factory is the entry point for the autonomous software factory.
 //
 // It exposes the three operator-facing subcommands that drive the bootstrap kernel
 // (see specs/bootstrap.md, IMPLEMENTATION_PLAN.md T1.21):
@@ -60,27 +60,27 @@ func dispatch(args []string) int {
 	case "sandbox-goproxy":
 		err = cmdSandboxGoproxy(rest)
 	case "version", "-v", "--version":
-		fmt.Fprintf(os.Stdout, "harness %s\n", version)
+		fmt.Fprintf(os.Stdout, "factory %s\n", version)
 		return 0
 	case "help", "-h", "--help":
 		usage(os.Stdout)
 		return 0
 	default:
-		fmt.Fprintf(os.Stderr, "harness: unknown command %q\n\n", cmd)
+		fmt.Fprintf(os.Stderr, "factory: unknown command %q\n\n", cmd)
 		usage(os.Stderr)
 		return 2
 	}
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "harness %s: %v\n", cmd, err)
+		fmt.Fprintf(os.Stderr, "factory %s: %v\n", cmd, err)
 		return 1
 	}
 	return 0
 }
 
 // usage prints the command summary. It goes to stdout for an explicit `help` and to
-// stderr for a usage error, so piping `harness help` stays clean.
+// stderr for a usage error, so piping `factory help` stays clean.
 func usage(w *os.File) {
-	fmt.Fprint(w, `harness — secure, autonomous software factory
+	fmt.Fprint(w, `factory — secure, autonomous software factory
 
 usage:
   software-factory validate [--config DIR] [--env ENV]
@@ -90,10 +90,10 @@ usage:
   software-factory approve  [--nats URL] [--approver WHO] [--repo DIR] [--bd PATH] <issue>
   software-factory reject   [--nats URL] [--approver WHO] [--repo DIR] [--bd PATH] <issue>
   software-factory serve    [--addr HOST:PORT]
-  harness version
+  factory version
 
 internal (run inside the sandbox by the image entrypoint, not by operators):
-  harness sandbox-goproxy [--broker NET:ADDR] [--addr HOST:PORT]
+  software-factory sandbox-goproxy [--broker NET:ADDR] [--addr HOST:PORT]
 
 Run a subcommand with -h for its flags.
 `)

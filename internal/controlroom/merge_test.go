@@ -18,14 +18,14 @@ import (
 func mergeServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	r := query.NewReader(&fakeIssues{all: []core.Issue{
-		{ID: "harness-1", Title: "land me", Role: "integrate", Spec: "specs/a.md"},
-		{ID: "harness-2", Title: "rebasing now", Role: "integrate", Spec: "specs/b.md"},
-		{ID: "harness-3", Title: "broke on merge", Role: "integrate", Spec: "specs/c.md"},
+		{ID: "factory-1", Title: "land me", Role: "integrate", Spec: "specs/a.md"},
+		{ID: "factory-2", Title: "rebasing now", Role: "integrate", Spec: "specs/b.md"},
+		{ID: "factory-3", Title: "broke on merge", Role: "integrate", Spec: "specs/c.md"},
 	}}, fakeArts{}, fakeProv{})
 	mq := live.NewMergeQueue(10)
-	mq.Record(core.MergeStateEvent{ID: "harness-1", State: core.MergeStateLanded, Role: "integrate", Commit: "abc123def456"})
-	mq.Record(core.MergeStateEvent{ID: "harness-2", State: core.MergeStateRebasing, Role: "integrate"})
-	mq.Record(core.MergeStateEvent{ID: "harness-3", State: core.MergeStateConflicted, Role: "integrate"})
+	mq.Record(core.MergeStateEvent{ID: "factory-1", State: core.MergeStateLanded, Role: "integrate", Commit: "abc123def456"})
+	mq.Record(core.MergeStateEvent{ID: "factory-2", State: core.MergeStateRebasing, Role: "integrate"})
+	mq.Record(core.MergeStateEvent{ID: "factory-3", State: core.MergeStateConflicted, Role: "integrate"})
 	s := New(Options{Version: "test", Reader: r, MergeQueue: mq})
 	ts := httptest.NewServer(s.Handler())
 	t.Cleanup(ts.Close)
@@ -45,11 +45,11 @@ func TestMergeRendersTrain(t *testing.T) {
 	}
 	for _, want := range []string{
 		"land me", "rebasing now", "broke on merge", // titles enriched from beads
-		"harness-1", "harness-2", "harness-3", // ids
+		"factory-1", "factory-2", "factory-3", // ids
 		"landed", "rebasing", "conflicted", // the per-candidate steps
 		"abc123def456"[:12],       // the landed commit, short-hashed
 		`href="/provenance"`,      // landed links onward to provenance
-		`href="/issue/harness-3"`, // the failed candidate links to its issue (dead-letter/fix)
+		`href="/issue/factory-3"`, // the failed candidate links to its issue (dead-letter/fix)
 		"Dead-letter / fix →",     // the failure correlation link
 		`sse-connect="/events"`,   // wired to the T4.3 substrate
 		`hx-get="/merge/items"`,   // live fragment refresh target
@@ -74,7 +74,7 @@ func TestMergeItemsFragmentIsBare(t *testing.T) {
 	if strings.Contains(strings.ToLower(r.body), "<!doctype") || strings.Contains(r.body, "<html") {
 		t.Errorf("fragment must not include the page chrome: %q", r.body)
 	}
-	for _, want := range []string{"land me", "landed", `href="/issue/harness-1"`} {
+	for _, want := range []string{"land me", "landed", `href="/issue/factory-1"`} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("fragment missing %q", want)
 		}

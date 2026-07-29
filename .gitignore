@@ -11,7 +11,10 @@
 # Runtime state written by `software-factory run` (embedded JetStream store, artifact store)
 /.software-factory/
 
-# Stray bare `go build ./cmd/software-factory` output (use make build -> /bin/)
+# Stray bare `go build ./cmd/software-factory` output (use make build -> /bin/).
+# Both names: the binary is software-factory, but a pre-rename `harness` build may
+# still be sitting in the tree.
+/software-factory
 /harness
 
 # Local secret (OpenRouter key) — never commit

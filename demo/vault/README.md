@@ -1,6 +1,6 @@
 # Demo: extending an established app, live
 
-This demo shows the harness doing its real job on a **non-trivial, already-built
+This demo shows the factory doing its real job on a **non-trivial, already-built
 codebase**: a human authors a *new feature requirement* in the control-room wizard, and
 sandboxed, independently-verified agents plan it, write failing tests, implement it, pass
 an independent security re-gate, and merge it to `main` — driven by **Anthropic + GLM
@@ -16,7 +16,7 @@ a clean tree.
 
 Why a vault for a security audience: the app is security-sensitive *by construction*, so
 the `qa` stage's **gosec + govulncheck** are re-auditing the agents' crypto and auth code
-on every change. The harness assumes the agents are hostile and sandboxes them with **zero
+on every change. The factory assumes the agents are hostile and sandboxes them with **zero
 network**; demoing that by having untrusted agents extend a *secrets vault* is the thesis
 made concrete — *the producer never grades its own work, and an independent security gate
 re-audits the diff before anything merges.*
@@ -35,7 +35,7 @@ requirements   you draft a feature in the Create-Task wizard (/create) — the o
 This runs in **epic mode** (`integration.mode: epic`): the feature you drafted is the unit of
 integration, so its children integrate onto an `epic/<id>` branch while `main` stays quiescent,
 and the orchestrator's **terminal merge advances `main` exactly once** when the whole subtree
-drains. That single commit is authored by **`harness`** (the trusted layer, never the agent)
+drains. That single commit is authored by **`software-factory`** (the trusted layer, never the agent)
 with its provenance trailer, and its subject is the **feature's** title — so the public repo's
 history reads like an ordinary project's (a machine author, a full audit trail) and the push
 watcher fires **one** deploy per feature, not one per child. See "Push to a public repo +
@@ -57,7 +57,7 @@ demo/vault/
     .github/workflows/deploy.yml  # CI: on push to main, build a static binary and ship it to the VPS
 ```
 
-It is a self-contained config, separate from the harness's own `config/`, so it can't
+It is a self-contained config, separate from the factory's own `config/`, so it can't
 disturb the real pipeline. The target repo is a throwaway created in a temp dir from
 `app/` — nothing is written into this repository.
 
@@ -105,7 +105,7 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
   polling hits a *warm* engine instead of cold-starting Dolt on every `bd` call — a list drops
   from ~0.7s to ~0.2s and stops stampeding under concurrency, which is what prevents `bd list`
   timeouts during a busy run. Nothing leaks into the public repo (`.beads/` stays git-excluded).
-- Go + `make` (to build the `harness` binary).
+- Go + `make` (to build the `software-factory` binary).
 - *(only for `OPENOBSERVE=1`)* **`curl`** on your `PATH` — `run.sh` uses it to health-check
   OpenObserve and POST the dashboard. Not needed for a default or `JAEGER=1` run.
 - *(optional, for the public-repo + deploy story)* a **public GitHub repo** you can push to
@@ -119,8 +119,8 @@ near-instant, so building unconditionally costs almost nothing while guaranteein
 image (one built before its Dockerfile gained the gate tools) is refreshed rather than
 silently reused. Only the first base build is slow — it downloads the Go image + the
 offline vuln DB; the vault layer on top is quick. The base/`-base` split is what keeps a
-*harness source change* cheap too: the vault image bases on the binary-free stable stage
-and copies the harness shim binary in as its last layers, so a new harness commit rebuilds
+*factory source change* cheap too: the vault image bases on the binary-free stable stage
+and copies the factory shim binary in as its last layers, so a new factory commit rebuilds
 seconds of COPY instead of re-downloading toolchains and module caches. One deliberate
 consequence: the baked offline **vuln DB never refreshes on its own** (its layer stays
 cached) — bump it explicitly with `VULNDB_SNAPSHOT=$(date +%F) ./demo/vault/run.sh` when
@@ -165,7 +165,7 @@ entirely and the demo repo stays local.
 - **At startup**, `run.sh` resets the public repo to the green baseline: it force-pushes the
   seed to `main` and to an immutable `seed` ref. Every run starts from an identical pristine
   state, so the demo is repeatable on stage.
-- **On the terminal merge**, a watcher pushes the harness's verified, machine-authored
+- **On the terminal merge**, a watcher pushes the factory's verified, machine-authored
   commit to the public `main`. In epic mode `main` advances exactly once per feature (when the
   epic drains), so the watcher pushes once and the deploy fires once — for the whole feature,
   not each child. This is a *trusted-layer egress* — the sandboxed agents never touch the
@@ -178,13 +178,13 @@ entirely and the demo repo stays local.
   The full loop on stage: **describe → agents build → commit appears on GitHub (machine author
   + provenance) → Actions go green → refresh the live URL → the feature is there.**
 
-The work-store prefix is `vault`, so issue ids read `vault-12` (not `harness-12`) in the
-commit trailer, and the harness work store (`.beads`) is kept out of git via the scratch
+The work-store prefix is `vault`, so issue ids read `vault-12` (not `factory-12`) in the
+commit trailer, and the factory work store (`.beads`) is kept out of git via the scratch
 repo's `.git/info/exclude` — so the public repo only ever shows the vault and the feature.
 
 ### Watch the telemetry land (optional)
 
-The harness emits OpenTelemetry spans at the broker, orchestrator, and runner — every
+The factory emits OpenTelemetry spans at the broker, orchestrator, and runner — every
 invocation is one trace (`invocation → boot → llm-turn ×N → tool-call ×M → gate-run`; see
 `specs/observability.md`). To show that live, run with `JAEGER=1`:
 
@@ -194,14 +194,14 @@ JAEGER=1 ./demo/vault/run.sh
 
 This spins a single **Jaeger all-in-one** container (insecure OTLP/gRPC on `4317`, trace UI
 on `16686`) and points the demo's `otel.endpoint` at it — no change to the tracked config.
-Open <http://127.0.0.1:16686>, pick the **`harness`** service, and each invocation shows up
+Open <http://127.0.0.1:16686>, pick the **`software-factory`** service, and each invocation shows up
 as a trace waterfall as the pipeline runs. The container is torn down on exit. (The default
 run leaves tracing off, as `infra.dev.yaml` ships.)
 
 Two things to expect:
 
-- **`failed to upload metrics: ... unknown service ...MetricsService`** in the harness log is
-  benign. The harness exports both traces and metrics to the one OTLP endpoint; Jaeger is a
+- **`failed to upload metrics: ... unknown service ...MetricsService`** in the factory log is
+  benign. The factory exports both traces and metrics to the one OTLP endpoint; Jaeger is a
   *tracing* backend (its OTLP receiver implements traces only), so the periodic metrics push
   is refused. Traces are unaffected — they still flow and render in the UI.
 - **The Jaeger UI looks wrong in dark mode.** Jaeger v1's UI is light-only with no theme
@@ -211,7 +211,7 @@ Two things to expect:
 
 ### See the WHOLE record — all three signals (optional)
 
-Jaeger shows traces. But the harness ships **three** OTel signals off one endpoint — traces,
+Jaeger shows traces. But the factory ships **three** OTel signals off one endpoint — traces,
 **logs** (the trusted side's `slog`, trace-correlated), and **metrics** (token spend, gate
 pass/fail, invocations) — and for a security audience the point is that the *complete,
 tamper-evident record* lands in a real backend, authenticated. Jaeger is trace-only and refuses
@@ -235,7 +235,7 @@ exit, by design. `JAEGER=1` and `OPENOBSERVE=1` are mutually exclusive (one `ote
 
 How the auth stays clean: OpenObserve's ingestion token is just `base64(email:password)`;
 `run.sh` derives it locally and exports it as `OTEL_OTLP_AUTH`, which the materialized overlay
-references as `authorization: ${OTEL_OTLP_AUTH}` — the harness expands it host-side at export
+references as `authorization: ${OTEL_OTLP_AUTH}` — the factory expands it host-side at export
 time, so the credential lives in the environment, never in config (the same discipline as the
 model API key, and what `software-factory validate`'s credential-header rule enforces). The dashboard
 JSON and provisioning details live in [`observe/`](observe/); it is pinned to OpenObserve's
@@ -278,7 +278,7 @@ the same merge queue per feature):
 | `trusted-dev` profile + `human-approved` + `tcb_paths` | `autonomous`, no TCB globs | the diff is ordinary app code in a throwaway repo, so integrate merges hands-free — flip to `trusted-dev` (+ a `human-approved` postcondition on integrate) to demo the approval gate |
 | per-item integration (no `integration` block) | `integration.mode: epic` | the operator drafts a *feature*, so the whole thing lands as **one** commit on `main` — children integrate onto an `epic/<id>` branch and the terminal merge advances `main` once when the subtree drains, so the public-repo push + VPS deploy fires once per feature, not per child. v1 runs one epic at a time |
 | `author-tests` postcondition `[tests-red]` only | `[tests-red, compiles]` (+ a `compiles: make compile` check) | Go is compiled and statically typed, so a test referencing a not-yet-defined symbol fails to *compile* — also a nonzero exit, so `tests-red` (tests-pass must FAIL) alone would pass on a suite that never ran an assertion (a *vacuous* red). Pairing it with `compiles` (`go build ./... && go test -run='^$' ./...` — builds the test binaries, runs nothing) makes "red" mean **compiles AND tests-fail**, and forces the test author to commit the minimal compiling API skeleton the implementor inherits as a compiler-checked contract. The shipped `config/factory.yaml` leaves `tests-red` unpaired (language-neutral kernel; a compiled target opts in). See specs/verification.md "Tests-red proof" |
-| no `ambient_specs` (the harness has no `specs/conventions.md`) | `ambient_specs: [specs/README.md, specs/conventions.md]` | the vault's engineering conventions (parameterized-SQL-only, `crypto/rand`, encryption-non-negotiable, `make generate` after a `.templ` edit, **no new modules** under the zero-network sandbox) are the same for every change and live in [`app/specs/conventions.md`](app/specs/conventions.md), so they ride in **every** agent's Brief — the agent never has to rediscover them or trip one and dead-letter. `app/specs/README.md` is a thin index the agent `read_file`s the rest from |
+| no `ambient_specs` (the factory has no `specs/conventions.md`) | `ambient_specs: [specs/README.md, specs/conventions.md]` | the vault's engineering conventions (parameterized-SQL-only, `crypto/rand`, encryption-non-negotiable, `make generate` after a `.templ` edit, **no new modules** under the zero-network sandbox) are the same for every change and live in [`app/specs/conventions.md`](app/specs/conventions.md), so they ride in **every** agent's Brief — the agent never has to rediscover them or trip one and dead-letter. `app/specs/README.md` is a thin index the agent `read_file`s the rest from |
 | no `explore` (shipped config sets no `policy.explore_budget`) | `explore_budget: { tokens: 100_000, turns: 12 }` + a `vault-explorer` soul on cheap Haiku, `explore` enabled on the planner + test-author + implementor + security | the `explore` tool delegates broad *search→read→refine* localization to a nested read-only sub-loop on a **cheap** model in the same warm sandbox, handing the frontier producer back distilled `file:line` anchors instead of making it navigate in its own (Opus/Sonnet) context — the planner (finding the seams to decompose), the test-author (finding the seams its tests must pin — the demo's proven raw-navigation token hog, ~1.3M tokens in one live run), and the implementor (finding where the store/web/view layers hook up) all benefit. The **verify path (`qa`/`security`) shares the same explorer** — a deliberate, spec-recorded choice (specs/verification.md): explore is additive and never load-bearing, so a shared explorer can degrade the reviewer's *search*, never the gate's *grade* (scanners + re-run postconditions are deterministic); drop `explore` from the security soul's tools to read raw instead. The explorer runs on `anthropic/claude-haiku-4.5` — its output is *checkable* anchors an independently-gated parent re-reads, so a weak model there costs at worst a re-search, never a bad merge (specs/models.md "Helper souls") |
 
 Everything else — the zero-network sandbox, broker-mediated model calls, decomposition,

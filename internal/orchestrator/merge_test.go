@@ -103,12 +103,12 @@ func TestGitMergerWritesProvenanceCommit(t *testing.T) {
 		t.Fatalf("no commit-tree call; calls = %v", *calls)
 	}
 	// The commit must carry the candidate tree, the candidate tip as parent, and the
-	// provenance trailer in its message; and be authored by the harness identity.
+	// provenance trailer in its message; and be authored by the factory identity.
 	if !hasArg(commitTree, "tree123") || !hasSeq(commitTree, "-p", "abc123") {
 		t.Errorf("commit-tree missing tree/parent; got %v", commitTree)
 	}
 	if !hasSeq(commitTree, "-c", "user.name="+provenanceCommitterName) {
-		t.Errorf("commit-tree not authored by harness identity; got %v", commitTree)
+		t.Errorf("commit-tree not authored by factory identity; got %v", commitTree)
 	}
 	msg := argAfter(commitTree, "-m")
 	if !strings.Contains(msg, "Soul: implementor-go | Model: claude-opus-4-7") ||

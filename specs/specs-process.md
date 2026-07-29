@@ -9,7 +9,7 @@ See also: [verification.md](verification.md), [workflow.md](workflow.md),
 
 > The product specs the factory builds from live in a `specs/` tree **in the target
 > project**. This document describes the format and process for those specs. (The
-> specs in *this* directory describe the harness itself and follow the same
+> specs in *this* directory describe the factory itself and follow the same
 > conventions.)
 
 ---

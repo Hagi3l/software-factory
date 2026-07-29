@@ -41,7 +41,7 @@ func TestAgentEventPump(t *testing.T) {
 	// inner event being the opaque token payload.
 	inner := `{"type":"token","delta":"hi"}`
 	env, err := json.Marshal(core.AgentEventEnvelope{
-		IssueID: "harness-7",
+		IssueID: "factory-7",
 		Role:    "implementor",
 		Payload: json.RawMessage(inner),
 	})
@@ -66,8 +66,8 @@ func TestAgentEventPump(t *testing.T) {
 	// AgentID is recovered from the subject; IssueID + Role are carried through from the
 	// envelope so a view can scope a feed to one live invocation (plan T4.20). The broadcast
 	// payload is the unwrapped inner event, not the envelope.
-	if got.AgentID != "inv-1" || got.IssueID != "harness-7" || got.Role != "implementor" {
-		t.Fatalf("AgentEvent = %+v, want inv-1 / harness-7 / implementor", got)
+	if got.AgentID != "inv-1" || got.IssueID != "factory-7" || got.Role != "implementor" {
+		t.Fatalf("AgentEvent = %+v, want inv-1 / factory-7 / implementor", got)
 	}
 	if string(got.Payload) != inner {
 		t.Fatalf("Payload = %q, want %q", string(got.Payload), inner)
@@ -80,9 +80,9 @@ func TestAgentEventPump(t *testing.T) {
 	if len(rec) != 1 {
 		t.Fatalf("activity entries = %d, want 1", len(rec))
 	}
-	if rec[0].AgentID != "inv-1" || rec[0].IssueID != "harness-7" || rec[0].Role != "implementor" ||
+	if rec[0].AgentID != "inv-1" || rec[0].IssueID != "factory-7" || rec[0].Role != "implementor" ||
 		rec[0].Kind != "token" || rec[0].Detail != "hi" {
-		t.Fatalf("activity entry = %+v, want inv-1 / harness-7 / implementor token 'hi'", rec[0])
+		t.Fatalf("activity entry = %+v, want inv-1 / factory-7 / implementor token 'hi'", rec[0])
 	}
 }
 
@@ -151,10 +151,10 @@ func TestIssueStatePump(t *testing.T) {
 	defer cancel()
 
 	want := core.IssueStateEvent{
-		ID:     "harness-7",
+		ID:     "factory-7",
 		Status: "in_progress",
 		Role:   "implementor",
-		Epic:   "harness-1",
+		Epic:   "factory-1",
 		TS:     time.Unix(1700000000, 0).UTC(),
 	}
 	payload, err := json.Marshal(want)
@@ -209,19 +209,19 @@ func TestIssueStatePumpDropsMalformed(t *testing.T) {
 	defer cancel()
 
 	// Not JSON at all — dropped.
-	if err := nc.Publish(messaging.IssueStateSubject("harness-1"), []byte("not json")); err != nil {
+	if err := nc.Publish(messaging.IssueStateSubject("factory-1"), []byte("not json")); err != nil {
 		t.Fatalf("Publish malformed: %v", err)
 	}
 	// Well-formed JSON but no id — dropped (the id is the one field a consumer cannot act without).
-	if err := nc.Publish(messaging.IssueStateSubject("harness-2"), []byte(`{"status":"open"}`)); err != nil {
+	if err := nc.Publish(messaging.IssueStateSubject("factory-2"), []byte(`{"status":"open"}`)); err != nil {
 		t.Fatalf("Publish id-less: %v", err)
 	}
 	// The valid trailer — the only event that should reach the hub.
-	valid, err := json.Marshal(core.IssueStateEvent{ID: "harness-3", Status: "closed"})
+	valid, err := json.Marshal(core.IssueStateEvent{ID: "factory-3", Status: "closed"})
 	if err != nil {
 		t.Fatalf("marshal valid: %v", err)
 	}
-	if err := nc.Publish(messaging.IssueStateSubject("harness-3"), valid); err != nil {
+	if err := nc.Publish(messaging.IssueStateSubject("factory-3"), valid); err != nil {
 		t.Fatalf("Publish valid: %v", err)
 	}
 	if err := nc.Flush(); err != nil {
@@ -233,8 +233,8 @@ func TestIssueStatePumpDropsMalformed(t *testing.T) {
 	if err := json.Unmarshal([]byte(ev.Data), &got); err != nil {
 		t.Fatalf("unmarshal: %v (data=%q)", err, ev.Data)
 	}
-	if got.ID != "harness-3" {
-		t.Fatalf("first event id = %q, want harness-3 (malformed events should have been dropped)", got.ID)
+	if got.ID != "factory-3" {
+		t.Fatalf("first event id = %q, want factory-3 (malformed events should have been dropped)", got.ID)
 	}
 }
 
@@ -262,11 +262,11 @@ func TestIssueStatePumpStopUnsubscribes(t *testing.T) {
 	ch, cancel := hub.Subscribe()
 	defer cancel()
 
-	payload, err := json.Marshal(core.IssueStateEvent{ID: "harness-9", Status: "open"})
+	payload, err := json.Marshal(core.IssueStateEvent{ID: "factory-9", Status: "open"})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if err := nc.Publish(messaging.IssueStateSubject("harness-9"), payload); err != nil {
+	if err := nc.Publish(messaging.IssueStateSubject("factory-9"), payload); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if err := nc.Flush(); err != nil {
@@ -307,7 +307,7 @@ func TestDLQPump(t *testing.T) {
 	ch, cancel := hub.Subscribe()
 	defer cancel()
 
-	want := core.DLQAlert{IssueID: "harness-7", Role: "implementor", Attempt: 3, Reason: "budget exhausted"}
+	want := core.DLQAlert{IssueID: "factory-7", Role: "implementor", Attempt: 3, Reason: "budget exhausted"}
 	payload, err := json.Marshal(want)
 	if err != nil {
 		t.Fatalf("marshal DLQAlert: %v", err)
@@ -367,7 +367,7 @@ func TestDLQPumpDropsMalformed(t *testing.T) {
 		t.Fatalf("Publish id-less: %v", err)
 	}
 	// The valid trailer — the only alert that should reach the hub.
-	valid, err := json.Marshal(core.DLQAlert{IssueID: "harness-3", Reason: "retries exhausted"})
+	valid, err := json.Marshal(core.DLQAlert{IssueID: "factory-3", Reason: "retries exhausted"})
 	if err != nil {
 		t.Fatalf("marshal valid: %v", err)
 	}
@@ -383,8 +383,8 @@ func TestDLQPumpDropsMalformed(t *testing.T) {
 	if err := json.Unmarshal([]byte(ev.Data), &got); err != nil {
 		t.Fatalf("unmarshal: %v (data=%q)", err, ev.Data)
 	}
-	if got.IssueID != "harness-3" {
-		t.Fatalf("first alert id = %q, want harness-3 (malformed alerts should have been dropped)", got.IssueID)
+	if got.IssueID != "factory-3" {
+		t.Fatalf("first alert id = %q, want factory-3 (malformed alerts should have been dropped)", got.IssueID)
 	}
 }
 
@@ -412,7 +412,7 @@ func TestDLQPumpStopUnsubscribes(t *testing.T) {
 	ch, cancel := hub.Subscribe()
 	defer cancel()
 
-	payload, err := json.Marshal(core.DLQAlert{IssueID: "harness-9", Reason: "x"})
+	payload, err := json.Marshal(core.DLQAlert{IssueID: "factory-9", Reason: "x"})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
@@ -459,10 +459,10 @@ func TestMergeStatePump(t *testing.T) {
 	defer cancel()
 
 	want := core.MergeStateEvent{
-		ID:    "harness-7",
+		ID:    "factory-7",
 		State: core.MergeStateReGating,
 		Role:  "integrate",
-		Epic:  "harness-1",
+		Epic:  "factory-1",
 		TS:    time.Unix(1700000000, 0).UTC(),
 	}
 	payload, err := json.Marshal(want)
@@ -491,7 +491,7 @@ func TestMergeStatePump(t *testing.T) {
 	// The pump also fed the buffer the view reads.
 	snap := mq.Snapshot()
 	if len(snap) != 1 || snap[0].ID != want.ID || snap[0].State != want.State {
-		t.Fatalf("buffer snapshot = %+v, want one harness-7 re-gating row", snap)
+		t.Fatalf("buffer snapshot = %+v, want one factory-7 re-gating row", snap)
 	}
 }
 
@@ -523,19 +523,19 @@ func TestMergeStatePumpDropsMalformed(t *testing.T) {
 	defer cancel()
 
 	// Not JSON at all — dropped.
-	if err := nc.Publish(messaging.MergeStateSubject("harness-1"), []byte("not json")); err != nil {
+	if err := nc.Publish(messaging.MergeStateSubject("factory-1"), []byte("not json")); err != nil {
 		t.Fatalf("Publish malformed: %v", err)
 	}
 	// Well-formed JSON but no id — dropped (the id is the one field the view cannot act without).
-	if err := nc.Publish(messaging.MergeStateSubject("harness-2"), []byte(`{"state":"queued"}`)); err != nil {
+	if err := nc.Publish(messaging.MergeStateSubject("factory-2"), []byte(`{"state":"queued"}`)); err != nil {
 		t.Fatalf("Publish id-less: %v", err)
 	}
 	// The valid trailer — the only event that should reach the hub.
-	valid, err := json.Marshal(core.MergeStateEvent{ID: "harness-3", State: core.MergeStateLanded})
+	valid, err := json.Marshal(core.MergeStateEvent{ID: "factory-3", State: core.MergeStateLanded})
 	if err != nil {
 		t.Fatalf("marshal valid: %v", err)
 	}
-	if err := nc.Publish(messaging.MergeStateSubject("harness-3"), valid); err != nil {
+	if err := nc.Publish(messaging.MergeStateSubject("factory-3"), valid); err != nil {
 		t.Fatalf("Publish valid: %v", err)
 	}
 	if err := nc.Flush(); err != nil {
@@ -547,12 +547,12 @@ func TestMergeStatePumpDropsMalformed(t *testing.T) {
 	if err := json.Unmarshal([]byte(ev.Data), &got); err != nil {
 		t.Fatalf("unmarshal: %v (data=%q)", err, ev.Data)
 	}
-	if got.ID != "harness-3" {
-		t.Fatalf("first event id = %q, want harness-3 (malformed events should have been dropped)", got.ID)
+	if got.ID != "factory-3" {
+		t.Fatalf("first event id = %q, want factory-3 (malformed events should have been dropped)", got.ID)
 	}
 	// Only the valid event reached the buffer too.
-	if snap := mq.Snapshot(); len(snap) != 1 || snap[0].ID != "harness-3" {
-		t.Fatalf("buffer = %+v, want only harness-3", snap)
+	if snap := mq.Snapshot(); len(snap) != 1 || snap[0].ID != "factory-3" {
+		t.Fatalf("buffer = %+v, want only factory-3", snap)
 	}
 }
 
@@ -580,11 +580,11 @@ func TestMergeStatePumpStopUnsubscribes(t *testing.T) {
 	ch, cancel := hub.Subscribe()
 	defer cancel()
 
-	payload, err := json.Marshal(core.MergeStateEvent{ID: "harness-9", State: core.MergeStateQueued})
+	payload, err := json.Marshal(core.MergeStateEvent{ID: "factory-9", State: core.MergeStateQueued})
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	if err := nc.Publish(messaging.MergeStateSubject("harness-9"), payload); err != nil {
+	if err := nc.Publish(messaging.MergeStateSubject("factory-9"), payload); err != nil {
 		t.Fatalf("Publish: %v", err)
 	}
 	if err := nc.Flush(); err != nil {

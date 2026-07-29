@@ -52,7 +52,7 @@ func validConfig() *Config {
 			},
 			Sandbox: SandboxConfig{
 				Backend:  BackendDocker,
-				Profiles: map[string]SandboxProfile{"go-toolchain": {Image: "harness/go-toolchain:dev"}},
+				Profiles: map[string]SandboxProfile{"go-toolchain": {Image: "factory/go-toolchain:dev"}},
 			},
 		},
 	}
@@ -785,9 +785,9 @@ func TestValidateArtifactsRejectsMisconfigured(t *testing.T) {
 func TestValidateSigningValidForms(t *testing.T) {
 	cases := []SigningConfig{
 		{},                                     // unset → off, the default
-		{Enabled: false, Key: "/keys/harness"}, // key present but disabled → off, fine
-		{Enabled: true, Key: "/keys/harness"},  // signing on with a key
-		{Enabled: true, Key: "/keys/harness", AllowedSigners: "/a"}, // sign + verify-on-read
+		{Enabled: false, Key: "/keys/factory"}, // key present but disabled → off, fine
+		{Enabled: true, Key: "/keys/factory"},  // signing on with a key
+		{Enabled: true, Key: "/keys/factory", AllowedSigners: "/a"}, // sign + verify-on-read
 		{AllowedSigners: "/allowed_signers"},                        // verify-only host (no signing)
 	}
 	for _, s := range cases {
@@ -988,7 +988,7 @@ func TestValidateEmptyDAG(t *testing.T) {
 func TestValidateMissingHarnessAndInfra(t *testing.T) {
 	c := &Config{}
 	probs := problems(t, c)
-	mustContain(t, probs, "harness configuration is missing")
+	mustContain(t, probs, "factory configuration is missing")
 	mustContain(t, probs, "infra configuration is missing")
 }
 

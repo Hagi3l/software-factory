@@ -1,4 +1,4 @@
-# Demo infrastructure overlay (env: dev) — points the harness at a REMOTE model served by
+# Demo infrastructure overlay (env: dev) — points the factory at a REMOTE model served by
 # OpenRouter through its OpenAI-compatible endpoint. See demo/README.md.
 #
 # The model call is made by the runner on the HOST (the trusted side holds the adapter +
@@ -16,7 +16,7 @@ sandbox:
   # profiles resolves the logical profile a soul names (soul.sandbox: go-toolchain) to the
   # concrete image the docker backend boots. The demo reuses the kernel go-toolchain image
   # (bash + grep + git is all the static-HTML gate needs); run.sh builds it locally tagged
-  # `go-toolchain`, so the profile maps to that bare tag rather than harness/go-toolchain:dev.
+  # `go-toolchain`, so the profile maps to that bare tag rather than factory/go-toolchain:dev.
   profiles:
     go-toolchain:
       image: go-toolchain

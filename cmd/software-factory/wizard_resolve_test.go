@@ -58,7 +58,7 @@ func TestResolveCommitsAndReopens(t *testing.T) {
 	}
 	repo := t.TempDir()
 	gitInit(t, repo)
-	runCmd(t, repo, "bd", "init", "--prefix", "harness")
+	runCmd(t, repo, "bd", "init", "--prefix", "factory")
 
 	store, err := artifact.NewFilesStore(filepath.Join(repo, ".artifacts"))
 	if err != nil {
@@ -127,7 +127,7 @@ func TestResolveEpicCommitsOntoEpicBranch(t *testing.T) {
 	requireGitBd(t)
 	repo := t.TempDir()
 	gitInitWithMain(t, repo)
-	runCmd(t, repo, "bd", "init", "--prefix", "harness")
+	runCmd(t, repo, "bd", "init", "--prefix", "factory")
 
 	store, err := artifact.NewFilesStore(filepath.Join(repo, ".artifacts"))
 	if err != nil {

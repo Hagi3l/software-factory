@@ -1,6 +1,6 @@
 # Models
 
-The harness is **model-agnostic**: any tool-calling-capable model can power any
+The factory is **model-agnostic**: any tool-calling-capable model can power any
 [soul](components/agent.md), chosen per soul by config. The agent loop is built in
 Go and calls model APIs **directly** — it never shells out to an existing agentic
 CLI.

@@ -12,7 +12,7 @@ sensitive action. Go + templ + htmx + Tailwind + SQLite, no JavaScript build ste
 > LLM agents then plans it, writes failing tests, implements it, passes an independent
 > security re-gate, and merges it — with **no human reviewing the code**.
 >
-> So when you browse the history, the feature commits are authored by **`harness`**, not a
+> So when you browse the history, the feature commits are authored by **`software-factory`**, not a
 > person, and each carries a **provenance trailer** recording the model, the implementing
 > soul, the *independent* test-authoring soul, and the gate checks (gosec, govulncheck,
 > license-scan, red→green proof) that verified it — each citing a content-addressed evidence
@@ -23,7 +23,7 @@ sensitive action. Go + templ + htmx + Tailwind + SQLite, no JavaScript build ste
 > baseline plus whatever was just built on stage.
 >
 > The factory that does this lives in this repository: the vault app is the demo subject of
-> the harness it ships inside (`demo/vault/app`). A demo run copies the app into a scratch
+> the factory it ships inside (`demo/vault/app`). A demo run copies the app into a scratch
 > repo, so the demo's target only ever contains the vault and the features the agents add
 > to it.
 
@@ -82,7 +82,7 @@ specs/                what the vault is and must do (source of truth)
 
 ## Verification
 
-Every change is independently verified — the same commands the harness `qa` stage runs in a
+Every change is independently verified — the same commands the factory `qa` stage runs in a
 clean, zero-network sandbox:
 
 ```bash

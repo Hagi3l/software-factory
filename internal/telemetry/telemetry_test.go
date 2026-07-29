@@ -60,7 +60,7 @@ func TestSetupEmptyEndpointIsOff(t *testing.T) {
 }
 
 func TestSetupStdoutBuildsAndShutsDown(t *testing.T) {
-	p, err := Setup(context.Background(), Config{Endpoint: EndpointStdout, ServiceName: "harness-test"})
+	p, err := Setup(context.Background(), Config{Endpoint: EndpointStdout, ServiceName: "factory-test"})
 	if err != nil {
 		t.Fatalf("Setup stdout: %v", err)
 	}

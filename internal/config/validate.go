@@ -32,7 +32,7 @@ func (e *ValidationError) Error() string {
 	return b.String()
 }
 
-// knownPreconditions are the precondition identifiers the harness currently
+// knownPreconditions are the precondition identifiers the factory currently
 // understands. The condition-expression language is still OPEN (shell exit-code vs.
 // CEL — see specs/configuration.md), so until it is fixed the validator gates
 // against this registry: an unrecognized guard is a typo that would otherwise pass
@@ -85,7 +85,7 @@ func (c *Config) Validate() error {
 	}
 
 	if c.Harness == nil {
-		add("harness configuration is missing")
+		add("factory configuration is missing")
 	} else {
 		c.validateDAG(add)
 		c.validatePolicy(add)
@@ -1086,7 +1086,7 @@ func knownCondition(s string, bare map[string]bool) bool {
 }
 
 // knownPostcondition reports whether a postcondition reference resolves to something
-// the harness can evaluate: a reserved built-in proof, a command check defined in the
+// the factory can evaluate: a reserved built-in proof, a command check defined in the
 // `checks` registry, or a comparison against a known metric. This is the
 // configuration-time half of bridging declared postconditions to gate checks; the
 // gate resolves the command checks against the same registry at run time.
@@ -1105,7 +1105,7 @@ func (c *Config) knownPostcondition(pc string) bool {
 // isMetricComparison reports whether s is a comparison of a known metric against a
 // numeric threshold, e.g. "mutation>=0.8". The parse (what a comparison looks like) is
 // shared with the gate via core; this layer adds the policy that the metric must be one
-// the harness knows how to gate on.
+// the factory knows how to gate on.
 func isMetricComparison(s string) bool {
 	metric, _, _, ok := core.ParseMetricComparison(s)
 	return ok && knownMetrics[metric]

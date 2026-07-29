@@ -6,7 +6,7 @@
 //
 // It is a server-driven hypermedia app: templ renders typed HTML server-side, htmx swaps
 // fragments over the wire, Alpine handles small client state, and Tailwind supplies the
-// CSS — all three front-end assets embedded so a deployed harness is a single binary with
+// CSS — all three front-end assets embedded so a deployed factory is a single binary with
 // no runtime toolchain. The server holds no factory state itself; it is a rendering shell
 // that later tasks wire to beads, the artifact store, and NATS.
 package controlroom
@@ -799,7 +799,7 @@ func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 
 // prefillText loads the optional prepared requirement (requirements_planner.prefill) the
 // composer's insert button offers. Read per page load — not cached — so the operator can
-// refine the prepared text while the harness runs and a reload picks it up. A read failure
+// refine the prepared text while the factory runs and a reload picks it up. A read failure
 // degrades to no button (validate checked existence at startup; a file deleted since is an
 // operator choice, not worth breaking the wizard over) with a log line for the why. A nil
 // cfg (a server built without a declared config, as some tests do) also means no button.

@@ -707,7 +707,7 @@ func failingFindings(report gate.Report) core.Findings {
 // issue's body. bodyWithGateFeedback strips any existing section before appending the current
 // one, so a candidate that fails repeatedly carries only the LATEST gate's findings — never a
 // growing pile of stale ones across attempts.
-const gateFeedbackMarker = "\n\n<!-- harness:gate-feedback -->\n"
+const gateFeedbackMarker = "\n\n<!-- factory:gate-feedback -->\n"
 
 // bodyWithGateFeedback threads a failed gate's findings into the fix issue's body, so the
 // retry attempt sees exactly the checks it must fix instead of re-deriving blind from the

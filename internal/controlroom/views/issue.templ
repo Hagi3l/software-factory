@@ -146,7 +146,7 @@ templ evidenceItem(e query.ArtifactLink) {
 }
 
 // IssueDetailMessage renders the detail chrome with a single notice instead of an issue —
-// used when the control room is not attached to a running factory (a standalone `harness
+// used when the control room is not attached to a running factory (a standalone `factory
 // serve` has no beads to read) or when the issue cannot be loaded (an unknown id).
 templ IssueDetailMessage(msg string) {
 	@Layout("Harness — Issue", "") {

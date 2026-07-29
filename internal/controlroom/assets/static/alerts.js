@@ -53,7 +53,7 @@
     var body = reason || "An issue needs a human in the dead-letter queue.";
     try {
       // tag dedups repeated notifications for the same issue into one.
-      new Notification(title, { body: body, tag: issue || "harness-dlq" });
+      new Notification(title, { body: body, tag: issue || "factory-dlq" });
     } catch (e) {
       // Notification construction can throw on some platforms; ignore.
     }

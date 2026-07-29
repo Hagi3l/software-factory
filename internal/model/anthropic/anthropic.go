@@ -1,5 +1,5 @@
 // Package anthropic is the Anthropic provider adapter: a thin translation layer
-// between the harness's canonical model types and the official Anthropic Go SDK. It
+// between the factory's canonical model types and the official Anthropic Go SDK. It
 // implements model.Adapter. The package is named anthropic and imports the SDK as
 // sdk to avoid the name collision; nothing outside this package sees SDK types.
 package anthropic

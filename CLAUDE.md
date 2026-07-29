@@ -5,7 +5,7 @@ LLM agents plan/test/implement/verify/integrate; terminal state is merged to `ma
 A CI/CD pipeline whose build steps are hostile-by-assumption agents.
 
 ## Source of truth
-- `specs/` is authoritative for *what the harness is*. Start at `specs/README.md`
+- `specs/` is authoritative for *what the factory is*. Start at `specs/README.md`
   (index); follow links, don't read top-to-bottom. `specs/glossary.md` defines terms.
 - `IMPLEMENTATION_PLAN.md` is the build order (kernel-first).
 - If the design needs to change, **update the spec** — don't just change code.
@@ -48,7 +48,7 @@ model). See `IMPLEMENTATION_PLAN.md` for the per-task detail.
 - Go. NATS for all inter-process comms (always). beads (`bd`) as work store —
   install on macOS with `brew install beads` (currently v1.0.4, Dolt backend; a
   major bump from 0.62.0 — `bd dep add` treats a foreign-prefix dep id as an
-  unvalidated external ref, so tests pin the db prefix via `bd init --prefix harness`).
+  unvalidated external ref, so tests pin the db prefix via `bd init --prefix factory`).
   The Linux dev sandbox here also runs **v1.0.4** (matching brew), so its `dep add`
   silently accepts a nonexistent foreign-prefix target as an external ref — `beads.Apply`'s
   own existence check is what holds against this, not `dep add` strictness. (Earlier

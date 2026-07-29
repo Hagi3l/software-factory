@@ -1,6 +1,6 @@
 # Messaging
 
-All inter-process communication is **NATS**. This is what makes the harness
+All inter-process communication is **NATS**. This is what makes the factory
 distributable: agents and runners may be co-located in one process or spread across
 hosts with no code change (location transparency).
 
@@ -136,7 +136,7 @@ properties intact: the only NATS citizens are trusted (orchestrator, runners).
 ## Stream definitions
 
 The four JetStream streams. Their **subjects and retention *policy*** are fixed by the
-harness's semantics; the **replication factor** and the **result retention window** are
+factory's semantics; the **replication factor** and the **result retention window** are
 the only knobs that vary by deployment, surfaced on the infra overlay as
 `nats.jetstream.replicas` / `nats.jetstream.max_age` (see
 [configuration.md](configuration.md)). Every component that ensures the streams threads

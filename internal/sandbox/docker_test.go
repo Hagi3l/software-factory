@@ -126,7 +126,7 @@ func TestProvisionArgShapes(t *testing.T) {
 		"--memory " + // 2Gi in bytes
 			"2147483648",
 		"-w /workspace",
-		"-v " + spec.Broker.Address + ":/run/harness/broker.sock",
+		"-v " + spec.Broker.Address + ":/run/factory/broker.sock",
 		"busybox:latest sleep " + keepAliveSeconds,
 	} {
 		if !strings.Contains(run, frag) {
@@ -517,7 +517,7 @@ func TestDockerSandboxIntegration(t *testing.T) {
 	mustExec(t, sb, "the worktree is writable", Command{Path: "sh", Args: []string{"-c", "echo x > newfile && cat newfile"}}, "x")
 
 	// The broker socket is the one wired channel.
-	mustExec(t, sb, "the broker socket is mounted", Command{Path: "sh", Args: []string{"-c", "test -S /run/harness/broker.sock && echo ok"}}, "ok")
+	mustExec(t, sb, "the broker socket is mounted", Command{Path: "sh", Args: []string{"-c", "test -S /run/factory/broker.sock && echo ok"}}, "ok")
 
 	// Zero direct network: `--network none` attaches no usable interface. The invariant
 	// is "no non-loopback interface is UP", not "only lo exists": on some hosts the

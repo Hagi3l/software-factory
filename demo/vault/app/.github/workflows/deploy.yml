@@ -1,6 +1,6 @@
 # Continuous deployment for the vault demo.
 #
-# Fires when the harness pushes a verified, merged commit to `main` (see the harness
+# Fires when the factory pushes a verified, merged commit to `main` (see the factory
 # project's demo/vault/run.sh). Builds a single static binary and ships it to the VPS.
 #
 # The app is self-contained: pure-Go SQLite (modernc.org/sqlite, no cgo), templ views
@@ -33,7 +33,7 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    # Only deploy when something that actually affects the binary changes. The harness lands
+    # Only deploy when something that actually affects the binary changes. The factory lands
     # each feature as the candidate's own content commit PLUS a machine-authored integrate
     # commit that carries the provenance trailer but an empty diff (the content already landed
     # on the candidate). A push of only that empty commit — or a specs-/docs-only change —

@@ -105,7 +105,7 @@ templ deadLetterRow(dl query.DeadLetter) {
 }
 
 // DeadLetterMessage renders the DLQ chrome with a single notice instead of the queue —
-// used when the control room is not attached to a running factory (a standalone `harness
+// used when the control room is not attached to a running factory (a standalone `factory
 // serve` has no beads to read) or when the queue read fails.
 templ DeadLetterMessage(msg string) {
 	@Layout("Harness — Dead-letter", "dlq") {

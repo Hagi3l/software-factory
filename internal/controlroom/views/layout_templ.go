@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 // Layout is the base HTML shell every control-room page renders into. It wires the
 // three embedded front-end assets — the compiled Tailwind stylesheet, htmx (for
 // server-rendered swaps), and Alpine (for small client-side state) — all served from
-// the binary's own embed.FS under /static, so a deployed harness needs no runtime
+// the binary's own embed.FS under /static, so a deployed factory needs no runtime
 // asset toolchain (see specs/control-room.md, "Stack"). The htmx SSE extension is
 // loaded here too so the live views (T4.3+) can attach without a second round trip.
 //
@@ -52,7 +52,7 @@ func Layout(title string, active string) templ.Component {
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><link rel=\"stylesheet\" href=\"/static/app.css\"><script src=\"/static/htmx.min.js\" defer></script><script src=\"/static/htmx-ext-sse.min.js\" defer></script><script src=\"/static/alerts.js\" defer></script></head><body class=\"flex h-full flex-col font-sans antialiased\"><header class=\"flex items-center gap-6 border-b border-border bg-surface px-6 py-3\"><a href=\"/\" class=\"text-sm font-semibold tracking-tight text-fg\">harness <span class=\"text-faint\">control room</span></a><nav class=\"flex flex-wrap gap-1 text-sm\">")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</title><link rel=\"stylesheet\" href=\"/static/app.css\"><script src=\"/static/htmx.min.js\" defer></script><script src=\"/static/htmx-ext-sse.min.js\" defer></script><script src=\"/static/alerts.js\" defer></script></head><body class=\"flex h-full flex-col font-sans antialiased\"><header class=\"flex items-center gap-6 border-b border-border bg-surface px-6 py-3\"><a href=\"/\" class=\"text-sm font-semibold tracking-tight text-fg\">factory <span class=\"text-faint\">control room</span></a><nav class=\"flex flex-wrap gap-1 text-sm\">")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

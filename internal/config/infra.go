@@ -279,9 +279,9 @@ func (o OTelConfig) ResolveHeaders() map[string]string {
 
 // SigningConfig configures provenance-commit signing and verification (T5.10,
 // specs/security.md). The trusted layer authors a provenance commit on top of every
-// verified candidate (specs/integration.md); signing it with the harness's own SSH
+// verified candidate (specs/integration.md); signing it with the factory's own SSH
 // identity is what makes "the audit trail is the accountability" cryptographic rather
-// than a forgeable plaintext trailer — main's tip becomes a commit only the harness
+// than a forgeable plaintext trailer — main's tip becomes a commit only the factory
 // could have produced.
 //
 // The scheme is git-native SSH signing (gpg.format=ssh): no GPG keyring or external
@@ -299,7 +299,7 @@ func (o OTelConfig) ResolveHeaders() map[string]string {
 // configures AllowedSigners alone to verify without ever signing.
 type SigningConfig struct {
 	Enabled        bool   `yaml:"enabled,omitempty"`         // turn provenance signing on (requires Key)
-	Key            string `yaml:"key,omitempty"`             // path to the SSH private signing key (the harness identity)
+	Key            string `yaml:"key,omitempty"`             // path to the SSH private signing key (the factory identity)
 	AllowedSigners string `yaml:"allowed_signers,omitempty"` // path to the allowed-signers file (principal -> public key) used to verify on read
 }
 

@@ -31,7 +31,7 @@ func fakeClient(out string, err error) (*Client, *[]string) {
 // a JSON array of issue objects, role carried in the metadata object.
 const readyJSON = `[
   {
-    "id": "harness-abc",
+    "id": "factory-abc",
     "title": "implement the loader",
     "description": "make the tests pass",
     "status": "open",
@@ -40,7 +40,7 @@ const readyJSON = `[
     "metadata": {"role": "implement"}
   },
   {
-    "id": "harness-def",
+    "id": "factory-def",
     "title": "no role set",
     "description": "",
     "status": "open"
@@ -60,7 +60,7 @@ func TestReadyMapsFields(t *testing.T) {
 		t.Fatalf("got %d issues, want 2", len(issues))
 	}
 	got := issues[0]
-	if got.ID != "harness-abc" || got.Title != "implement the loader" || got.Body != "make the tests pass" {
+	if got.ID != "factory-abc" || got.Title != "implement the loader" || got.Body != "make the tests pass" {
 		t.Errorf("issue[0] = %+v", got)
 	}
 	if got.Role != "implement" {
@@ -88,17 +88,17 @@ func TestReadyMapsFields(t *testing.T) {
 func TestDecodesDependencies(t *testing.T) {
 	const listJSON = `[
 	  {
-	    "id": "harness-child",
+	    "id": "factory-child",
 	    "title": "blocked work",
 	    "status": "open",
 	    "dependencies": [
-	      {"issue_id": "harness-child", "depends_on_id": "harness-parent", "type": "blocks"},
-	      {"issue_id": "harness-child", "depends_on_id": "harness-other", "type": "blocks"},
-	      {"issue_id": "harness-child", "depends_on_id": "", "type": "blocks"}
+	      {"issue_id": "factory-child", "depends_on_id": "factory-parent", "type": "blocks"},
+	      {"issue_id": "factory-child", "depends_on_id": "factory-other", "type": "blocks"},
+	      {"issue_id": "factory-child", "depends_on_id": "", "type": "blocks"}
 	    ]
 	  },
 	  {
-	    "id": "harness-parent",
+	    "id": "factory-parent",
 	    "title": "no blockers",
 	    "status": "open"
 	  }
@@ -111,7 +111,7 @@ func TestDecodesDependencies(t *testing.T) {
 	if len(issues) != 2 {
 		t.Fatalf("got %d issues, want 2", len(issues))
 	}
-	if want := []string{"harness-parent", "harness-other"}; strings.Join(issues[0].DependsOn, ",") != strings.Join(want, ",") {
+	if want := []string{"factory-parent", "factory-other"}; strings.Join(issues[0].DependsOn, ",") != strings.Join(want, ",") {
 		t.Errorf("issue[0].DependsOn = %v, want %v (empty depends_on_id dropped)", issues[0].DependsOn, want)
 	}
 	if issues[1].DependsOn != nil {
@@ -121,13 +121,13 @@ func TestDecodesDependencies(t *testing.T) {
 
 // TestDecodesCreatedAt proves the read path decodes beads' top-level created_at timestamp
 // into core.Issue.CreatedAt — the board's per-card "total time" anchor (T4.18). It is beads'
-// own field (not harness metadata), parsed RFC3339→UTC; an absent or malformed value reads as
+// own field (not factory metadata), parsed RFC3339→UTC; an absent or malformed value reads as
 // the zero time rather than failing the read (lenient, like the metadata decoders).
 func TestDecodesCreatedAt(t *testing.T) {
 	const listJSON = `[
-	  {"id": "harness-1", "title": "with ts", "status": "open", "created_at": "2026-06-02T07:41:23Z"},
-	  {"id": "harness-2", "title": "no ts", "status": "open"},
-	  {"id": "harness-3", "title": "bad ts", "status": "open", "created_at": "not-a-time"}
+	  {"id": "factory-1", "title": "with ts", "status": "open", "created_at": "2026-06-02T07:41:23Z"},
+	  {"id": "factory-2", "title": "no ts", "status": "open"},
+	  {"id": "factory-3", "title": "bad ts", "status": "open", "created_at": "not-a-time"}
 	]`
 	c, _ := fakeClient(listJSON, nil)
 	issues, err := c.List(context.Background(), "open")
@@ -219,15 +219,15 @@ func TestReadyMalformedJSON(t *testing.T) {
 }
 
 func TestGetMapsSingleIssue(t *testing.T) {
-	c, args := fakeClient(`[{"id":"harness-abc","title":"t","description":"b","metadata":{"role":"qa"}}]`, nil)
-	got, err := c.Get(context.Background(), "harness-abc")
+	c, args := fakeClient(`[{"id":"factory-abc","title":"t","description":"b","metadata":{"role":"qa"}}]`, nil)
+	got, err := c.Get(context.Background(), "factory-abc")
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if want := []string{"show", "harness-abc", "--json"}; strings.Join(*args, " ") != strings.Join(want, " ") {
+	if want := []string{"show", "factory-abc", "--json"}; strings.Join(*args, " ") != strings.Join(want, " ") {
 		t.Errorf("args = %v, want %v", *args, want)
 	}
-	if got.ID != "harness-abc" || got.Role != "qa" {
+	if got.ID != "factory-abc" || got.Role != "qa" {
 		t.Errorf("issue = %+v", got)
 	}
 }
@@ -260,7 +260,7 @@ func TestListPassesStatusAndDecodes(t *testing.T) {
 	if want := []string{"list", "--status", "blocked", "--json", "--flat", "--limit", "0"}; strings.Join(*args, " ") != strings.Join(want, " ") {
 		t.Errorf("args = %v, want %v", *args, want)
 	}
-	if len(issues) != 2 || issues[0].ID != "harness-abc" {
+	if len(issues) != 2 || issues[0].ID != "factory-abc" {
 		t.Errorf("decoded %d issues = %+v", len(issues), issues)
 	}
 }
@@ -304,7 +304,7 @@ func TestListAllRunError(t *testing.T) {
 // --- Integration tests: drive the real bd binary ---
 
 // bdAvailable skips the test if the real bd CLI is not installed. bd is a hard
-// dependency of the harness, but the unit tests above cover the mapping without it;
+// dependency of the factory, but the unit tests above cover the mapping without it;
 // these integration tests prove the wrapper speaks the real CLI's contract.
 func bdAvailable(t *testing.T) {
 	t.Helper()
@@ -314,16 +314,16 @@ func bdAvailable(t *testing.T) {
 }
 
 // bdInit creates a fresh beads database in a temp dir and returns the dir. It pins
-// the issue prefix to "harness" so id strings are deterministic across tests: bd
+// the issue prefix to "factory" so id strings are deterministic across tests: bd
 // 1.0.4 resolves a dependency id whose prefix differs from the db's as an external
 // (federation) reference and does NOT check it exists, whereas a same-prefix id is
-// validated. A stable prefix keeps TestApplyRollbackIntegration's "harness-nonexistent"
+// validated. A stable prefix keeps TestApplyRollbackIntegration's "factory-nonexistent"
 // a genuinely-nonexistent local id (so the rollback path is exercised), rather than a
 // silently-accepted foreign ref. (See IMPLEMENTATION_PLAN.md bd-version findings.)
 func bdInit(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	runBD(t, dir, "init", "--prefix", "harness")
+	runBD(t, dir, "init", "--prefix", "factory")
 	return dir
 }
 
@@ -395,7 +395,7 @@ func TestGetNotFoundIntegration(t *testing.T) {
 	bdAvailable(t)
 	dir := bdInit(t)
 	c := New(WithDir(dir))
-	if _, err := c.Get(context.Background(), "harness-nonexistent"); err == nil {
+	if _, err := c.Get(context.Background(), "factory-nonexistent"); err == nil {
 		t.Fatal("Get accepted a nonexistent id, want error")
 	}
 }
@@ -468,7 +468,7 @@ func TestListIntegration(t *testing.T) {
 // store lock a close could be clobbered and the dependent sibling stranded forever (see Client.mu,
 // specs/components/orchestrator.md "Durable-write loss").
 func TestClientSerializesInvocationsPerStore(t *testing.T) {
-	const dir = "/tmp/harness-beads-serialize-test"
+	const dir = "/tmp/factory-beads-serialize-test"
 	var inFlight, maxSeen int32
 	seam := func(_ context.Context, _ []string) ([]byte, error) {
 		n := atomic.AddInt32(&inFlight, 1)
@@ -505,8 +505,8 @@ func TestClientSerializesInvocationsPerStore(t *testing.T) {
 // TestClientDistinctStoresDoNotShareLock confirms the serialization is scoped per store, so
 // unrelated stores are not needlessly serialized against one another.
 func TestClientDistinctStoresDoNotShareLock(t *testing.T) {
-	a := New(WithDir("/tmp/harness-beads-distinct-A"))
-	b := New(WithDir("/tmp/harness-beads-distinct-B"))
+	a := New(WithDir("/tmp/factory-beads-distinct-A"))
+	b := New(WithDir("/tmp/factory-beads-distinct-B"))
 	if a.mu == b.mu {
 		t.Fatalf("clients on different store dirs must not share a lock")
 	}

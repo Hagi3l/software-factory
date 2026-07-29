@@ -35,7 +35,7 @@ func TestSubjectHelpers(t *testing.T) {
 func TestIssueIDFromStateSubject(t *testing.T) {
 	cases := []struct{ subj, want string }{
 		{IssueStateSubject("abc123"), "abc123"},
-		{"factory.issue.harness-7.state", "harness-7"},
+		{"factory.issue.factory-7.state", "factory-7"},
 		{"factory.agent.abc.events", ""},
 		{"factory.issue..state", ""},
 		{IssueStateWildcard, ""}, // the literal "*" carries no id
@@ -62,7 +62,7 @@ func TestMergeStateSubject(t *testing.T) {
 	}
 	cases := []struct{ subj, want string }{
 		{MergeStateSubject("iss-7"), "iss-7"},
-		{"factory.merge.harness-2.state", "harness-2"},
+		{"factory.merge.factory-2.state", "factory-2"},
 		{"factory.issue.abc.state", ""}, // issue-state subject, not merge
 		{"factory.merge..state", ""},
 		{MergeStateWildcard, ""}, // the literal "*" carries no id

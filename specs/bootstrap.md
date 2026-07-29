@@ -1,7 +1,7 @@
 # Bootstrap
 
-How the harness comes to build itself. This is the one spec about *building* the
-harness rather than *running* it.
+How the factory comes to build itself. This is the one spec about *building* the
+factory rather than *running* it.
 
 See also: [architecture.md](architecture.md),
 [components/orchestrator.md](components/orchestrator.md),
@@ -11,12 +11,12 @@ See also: [architecture.md](architecture.md),
 
 ## Two thresholds, not one
 
-"When can the harness build itself?" has two distinct answers, and conflating them
+"When can the factory build itself?" has two distinct answers, and conflating them
 is a mistake:
 
 - **(a) Build itself as a trusted developer's tool** — *early*. As soon as a
   minimal kernel exists, the remaining specs can be filed as beads issues and the
-  harness implements them, **with a human reviewing the diffs**. The verification
+  factory implements them, **with a human reviewing the diffs**. The verification
   machinery isn't trustworthy yet, so a human stays in the loop — but the agent is
   already doing the work.
 - **(b) Build itself under its own adversarial guarantees** — *much later*. No
@@ -25,7 +25,7 @@ is a mistake:
   — a genuine chicken-and-egg, since the thing that justifies no-human-review must
   exist and be trusted before it can justify anything.
 
-The harness can *start* building itself long before it can *securely* build itself.
+The factory can *start* building itself long before it can *securely* build itself.
 
 ---
 
@@ -61,7 +61,7 @@ The full pipeline collapses for bootstrap:
 - Docker stands in for Firecracker.
 - No [control room](control-room.md) yet — drive it from the CLI.
 
-The harness then builds the deferred pieces — the independent `author-tests` stage,
+The factory then builds the deferred pieces — the independent `author-tests` stage,
 mutation testing, the rebase/re-gate merge queue, Firecracker, distributed NATS,
 more souls, the DLQ, the control room, provenance — each as its own beads issue.
 
@@ -78,7 +78,7 @@ pins the control-flow and tool contracts as a fast regression guard; a second,
 Docker-backed run covers the isolation properties the local backend gives up.
 
 This is orthogonal to the two thresholds above. It proves the *plumbing* is correct —
-not whether the harness produces *correct* software autonomously, which is threshold
+not whether the factory produces *correct* software autonomously, which is threshold
 (b) and needs model judgement a fake cannot supply. Verifying the spine cheaply this
 way is exactly what keeps the hand-built (a) phase honest while (b) is still out of
 reach.
@@ -89,7 +89,7 @@ reach.
 
 The components that *enforce* the guarantees — orchestrator, runner/broker, sandbox
 config, the gate harness, the verification stack — are the **Trusted Computing
-Base (TCB)**. An unverified harness cannot vouch for the security of its own
+Base (TCB)**. An unverified factory cannot vouch for the security of its own
 verifier; "who verifies the verifier" has no autonomous answer. Therefore:
 
 - **TCB-touching changes stay human-reviewed**, even after self-hosting — arguably
@@ -97,9 +97,9 @@ verifier; "who verifies the verifier" has no autonomous answer. Therefore:
 - **Everything above the TCB** (new souls, new stages, product features, the
   control room) is where full autonomy is safe once the stack is solid.
 
-So "the harness builds itself" should mean *it builds features and souls*, not *it
+So "the factory builds itself" should mean *it builds features and souls*, not *it
 silently rewrites its own root of trust*. The eventual no-human-review promise
-applies to **product work the harness does for others**; it is earned for harness
+applies to **product work the factory does for others**; it is earned for factory
 work only incrementally, and the TCB is the part never fully handed over.
 
 ---
@@ -109,7 +109,7 @@ work only incrementally, and the TCB is the part never fully handed over.
 ```
 hand-build kernel (TCB seed)         human writes all the code
         │
-self-host in trusted mode            harness writes code, human reviews diffs
+self-host in trusted mode            factory writes code, human reviews diffs
         │
 verification stack built + trusted   no-human-review earned for non-TCB work
         │
@@ -129,4 +129,4 @@ full product factory                 no-human-review for others' work; TCB still
   `policy.tcb_paths` globs (orchestrator, runner/broker, sandbox config, gate harness) that
   force `human-approved` regardless of profile — so "which modules are in the TCB" is
   answered by that list. It must still be reviewed and pinned before autonomy is switched on
-  for harness work.
+  for factory work.

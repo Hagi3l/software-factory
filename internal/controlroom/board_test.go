@@ -15,7 +15,7 @@ import (
 	"github.com/Loxstomper/software-factory/internal/core"
 )
 
-// cardEntered is harness-1's fixed state-entry anchor; the timer test asserts it renders as a
+// cardEntered is factory-1's fixed state-entry anchor; the timer test asserts it renders as a
 // Unix-epoch data attribute the client-side ticker advances.
 var cardEntered = time.Date(2026, 6, 2, 8, 0, 0, 0, time.UTC)
 
@@ -62,9 +62,9 @@ func (fakeProv) Recent(context.Context, int) ([]query.MergedCommit, error) { ret
 // reused by the board and live-invocation (T4.21) server tests.
 func boardIssues() []core.Issue {
 	return []core.Issue{
-		{ID: "harness-1", Title: "Build the thing", Status: "in_progress", Role: "implementor", Attempt: 1, Spec: "specs/x.md", StateEnteredAt: cardEntered, CreatedAt: cardEntered.Add(-24 * time.Hour)},
-		{ID: "harness-2", Title: "Write the tests", Status: "blocked", Role: "test-author", Attempt: 2},
-		{ID: "harness-3", Title: "Plan the epic", Status: "closed", Role: "planner", StateEnteredAt: cardEntered, CreatedAt: cardEntered.Add(-2 * time.Hour)},
+		{ID: "factory-1", Title: "Build the thing", Status: "in_progress", Role: "implementor", Attempt: 1, Spec: "specs/x.md", StateEnteredAt: cardEntered, CreatedAt: cardEntered.Add(-24 * time.Hour)},
+		{ID: "factory-2", Title: "Write the tests", Status: "blocked", Role: "test-author", Attempt: 2},
+		{ID: "factory-3", Title: "Plan the epic", Status: "closed", Role: "planner", StateEnteredAt: cardEntered, CreatedAt: cardEntered.Add(-2 * time.Hour)},
 	}
 }
 
@@ -109,7 +109,7 @@ func TestBoardRendersColumnsInPipelineOrder(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Build the thing", "Write the tests", "Plan the epic", // every card
-		"harness-1", "harness-2", "harness-3", // ids
+		"factory-1", "factory-2", "factory-3", // ids
 		"planner", "test-author", "implementor", "security", // role column headers — every declared stage
 		"attempt 2",              // the retried card surfaces its generation
 		`sse-connect="/events"`,  // wired to the T4.3 substrate
@@ -144,7 +144,7 @@ func TestBoardCardsFragmentIsBare(t *testing.T) {
 	if strings.Contains(strings.ToLower(r.body), "<!doctype") || strings.Contains(r.body, "<html") {
 		t.Errorf("fragment must not include the page chrome: %q", r.body)
 	}
-	for _, want := range []string{"Build the thing", "implementor", "harness-1"} {
+	for _, want := range []string{"Build the thing", "implementor", "factory-1"} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("fragment missing %q", want)
 		}
@@ -180,9 +180,9 @@ func TestBoardCardsLinkToInvocation(t *testing.T) {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
-		`href="/invocation/harness-1"`,
-		`href="/invocation/harness-2"`,
-		`href="/invocation/harness-3"`,
+		`href="/invocation/factory-1"`,
+		`href="/invocation/factory-2"`,
+		`href="/invocation/factory-3"`,
 	} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("board card missing invocation link %q", want)
@@ -240,8 +240,8 @@ func TestBoardInMotion(t *testing.T) {
 	for _, want := range []string{
 		`hx-trigger="sse:issue-state throttle:2s, every 15s"`, // crisp refresh off the typed event
 		"transition:true",                      // View Transitions opt-in for animated moves
-		`id="card-harness-1"`,                  // stable identity per card
-		"view-transition-name: card-harness-1", // the pairing key the browser tweens on
+		`id="card-factory-1"`,                  // stable identity per card
+		"view-transition-name: card-factory-1", // the pairing key the browser tweens on
 		`x-data="cardTicker()"`,                // the client-ticked timer
 		`data-state-since="` + since + `"`,     // time-in-state anchor (StateEnteredAt)
 		`data-created="` + created + `"`,       // total-time anchor (CreatedAt)
@@ -276,7 +276,7 @@ func TestBoardInMotion(t *testing.T) {
 // live clock (the work is done, so a ticking counter would only inflate meaninglessly). It
 // renders a single static lead time — how long it took, StateEnteredAt − CreatedAt — and carries
 // neither the Alpine ticker nor the timer anchors that would make it tick. The closed fixture
-// (harness-3) was created 2h before it closed.
+// (factory-3) was created 2h before it closed.
 func TestClosedCardShowsStaticLeadTime(t *testing.T) {
 	ts := boardServer(t)
 	r := get(t, ts, "/board/cards")
@@ -285,13 +285,13 @@ func TestClosedCardShowsStaticLeadTime(t *testing.T) {
 	}
 	// Isolate the closed card so the live in_progress card's ticker/anchors don't false-pass
 	// the negative assertions below.
-	i := strings.Index(r.body, `id="card-harness-3"`)
+	i := strings.Index(r.body, `id="card-factory-3"`)
 	if i < 0 {
-		t.Fatalf("closed card harness-3 not rendered")
+		t.Fatalf("closed card factory-3 not rendered")
 	}
 	card := r.body[i:]
-	if j := strings.Index(card[len(`id="card-harness-3"`):], `id="card-harness-`); j >= 0 {
-		card = card[:len(`id="card-harness-3"`)+j] // stop before the next card, if any follows
+	if j := strings.Index(card[len(`id="card-factory-3"`):], `id="card-factory-`); j >= 0 {
+		card = card[:len(`id="card-factory-3"`)+j] // stop before the next card, if any follows
 	}
 	if !strings.Contains(card, "took") || !strings.Contains(card, "2h00m") {
 		t.Errorf("closed card should show static lead time 'took 2h00m', got: %q", card)

@@ -1,6 +1,6 @@
 # Security
 
-The harness is a **secure software factory**: it must produce trustworthy software
+The factory is a **secure software factory**: it must produce trustworthy software
 while assuming its own workers are hostile. Security is not a feature here, it is
 the premise.
 
@@ -228,7 +228,7 @@ invocation whose transcript could not be harvested carries `Transcript: (none)`)
 self-describing, like a missing `Prompt-SHA`, never a dropped verdict.
 
 So the trailer can be vouched for by the trusted layer, the tip of `main` is always
-a **harness-authored provenance commit** sitting on top of the verified candidate,
+a **factory-authored provenance commit** sitting on top of the verified candidate,
 never the agent's own commit fast-forwarded into place. See
 [integration.md](integration.md).
 
@@ -236,16 +236,16 @@ never the agent's own commit fast-forwarded into place. See
 
 The trailer is only as trustworthy as the commit carrying it: a plaintext trailer on an
 unsigned commit is forgeable by anyone with write access to the integration repo. So the
-harness-authored provenance commit is **cryptographically signed with the harness's own
+factory-authored provenance commit is **cryptographically signed with the factory's own
 identity**, and **verified on read**. This is what makes "the audit trail is the
-accountability" real rather than aspirational — `main`'s tip is a commit only the harness
+accountability" real rather than aspirational — `main`'s tip is a commit only the factory
 could have produced.
 
 - **Scheme: git-native SSH signing** (`gpg.format=ssh`). No GPG keyring or external daemon;
-  verification is a public-key check against an **allowed-signers file** (principal → harness
+  verification is a public-key check against an **allowed-signers file** (principal → factory
   public key) that anyone may hold. Only the trusted provenance commit is signed — the
   agent's own candidate commits beneath it are untrusted by construction and never signed.
-- **Key custody.** The private signing key is the harness identity; it follows the same
+- **Key custody.** The private signing key is the factory identity; it follows the same
   posture as model API keys — a **runtime-provisioned secret**, referenced by path in config,
   **never committed to the repo or baked into a sandbox image**. In single-host/dev it is an
   operator-supplied key file; in production it is delivered by a secret manager / ssh-agent to
@@ -267,7 +267,7 @@ could have produced.
 ## OPEN questions
 
 - ~~Signing scheme / key custody for provenance trailers — TBD.~~ **Decided:** git-native
-  **SSH signing** of the harness-authored provenance commit, verified on read against an
+  **SSH signing** of the factory-authored provenance commit, verified on read against an
   allowed-signers file; the private key is a runtime-provisioned secret on the trusted
   orchestrator (never committed/baked), production custody via secret-manager/ssh-agent is
   the deployment remainder. See "Signing the provenance commit" above.

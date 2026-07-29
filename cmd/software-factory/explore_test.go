@@ -40,7 +40,7 @@ func TestExploreToolFor(t *testing.T) {
 			Broker:    client,
 			Completer: client,
 			Brief: core.Brief{
-				Issue:         core.Issue{ID: "harness-1", Role: "implementor"},
+				Issue:         core.Issue{ID: "factory-1", Role: "implementor"},
 				Soul:          core.Soul{Name: "implementor", Role: "implementor", Tools: soulTools},
 				Explorer:      explorer,
 				ExploreBudget: core.ExploreBudget{Tokens: 1000, Turns: 5},
@@ -78,7 +78,7 @@ func TestExploreToolForBuildFailureDegrades(t *testing.T) {
 		// A fake completer (not *broker.Client) fails the guarded type assertion in buildExploreTool.
 		Completer: fakeCompleter{},
 		Brief: core.Brief{
-			Issue:    core.Issue{ID: "harness-2", Role: "implementor"},
+			Issue:    core.Issue{ID: "factory-2", Role: "implementor"},
 			Soul:     core.Soul{Name: "implementor", Role: "implementor", Tools: []string{"explore"}},
 			Explorer: explorer,
 		},

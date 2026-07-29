@@ -128,11 +128,11 @@ func TestWrapLogHandlerOffIsPassthrough(t *testing.T) {
 	// handler unchanged — no otelslog sink, no allocation. This is what lets the run wiring
 	// call WrapLogHandler unconditionally.
 	base := &capturingHandler{messages: &[]string{}}
-	if got := Noop().WrapLogHandler(base, "harness"); got != slog.Handler(base) {
+	if got := Noop().WrapLogHandler(base, "factory"); got != slog.Handler(base) {
 		t.Errorf("off provider must return base unchanged, got %T", got)
 	}
 	var nilProvider *Provider
-	if got := nilProvider.WrapLogHandler(base, "harness"); got != slog.Handler(base) {
+	if got := nilProvider.WrapLogHandler(base, "factory"); got != slog.Handler(base) {
 		t.Errorf("nil provider must return base unchanged, got %T", got)
 	}
 }
@@ -149,7 +149,7 @@ func TestWrapLogHandlerOnFansOutKeepingBase(t *testing.T) {
 
 	var msgs []string
 	base := &capturingHandler{messages: &msgs}
-	wrapped := p.WrapLogHandler(base, "harness")
+	wrapped := p.WrapLogHandler(base, "factory")
 	if wrapped == slog.Handler(base) {
 		t.Fatal("an exporting provider must wrap base, not return it unchanged")
 	}

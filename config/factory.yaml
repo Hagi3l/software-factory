@@ -61,7 +61,7 @@ spec_depth: 1
 # issue-scoped slice does not reliably carry. Prepended ahead of the bounded slice (a stable,
 # cache-friendly prefix), de-duplicated against it, and covered by the spec content hash (so a
 # conventions edit is pinned and re-derives work like a contract edit). Opt-in (empty default);
-# keep them LEAN — they ride in every invocation. Conventional pair shown below. This harness's
+# keep them LEAN — they ride in every invocation. Conventional pair shown below. This factory's
 # own conventions live in CLAUDE.md (invisible to agents); a specs/conventions.md would be needed
 # to self-host, so the shipped config leaves this empty. See specs/specs-process.md "Ambient specs".
 # ambient_specs: [specs/README.md, specs/conventions.md]
@@ -111,8 +111,8 @@ dag:
     kind: trusted-merge
     # The human-approval gate (T2.10): under policy.profile trusted-dev (below) every
     # integrate must be approved by a human before it lands — the self-hosting transition
-    # where the harness writes code and a person reviews every diff. The orchestrator (not
-    # the sandbox gate) evaluates it: a verified candidate is PARKED awaiting `harness
+    # where the factory writes code and a person reviews every diff. The orchestrator (not
+    # the sandbox gate) evaluates it: a verified candidate is PARKED awaiting `factory
     # approve <issue>` (denied by `software-factory reject <issue>`), bound to the candidate sha so a
     # stale approval is invalidated. See specs/configuration.md, specs/bootstrap.md.
     postcondition: [human-approved]
@@ -139,8 +139,8 @@ dag:
 
 # The check registry: each command-check postcondition resolves to the shell command the
 # gate runs in the clean verification sandbox (exit 0 = pass; non-zero = findings or a
-# tool error => fail, closed). These are the harness's own make targets, so "how the
-# harness runs its QA" lives in one reviewable place (the Makefile) — `make test-unit`
+# tool error => fail, closed). These are the factory's own make targets, so "how the
+# factory runs its QA" lives in one reviewable place (the Makefile) — `make test-unit`
 # compiles every package (a build break also fails the gate) and runs the unit suite;
 # `make lint` runs golangci-lint (configured by .golangci.yml, which travels in the
 # worktree); `make gosec`/`govulncheck`/`license-scan` are the spec-independent scanners;
@@ -194,7 +194,7 @@ policy:
   # tokens/USD apply at epic scope; wall is per-issue above.
   epic_budget: { usd: 200 }
   dead_letter: factory.dlq
-  # Autonomy profile (T2.10). The bootstrap self-hosts in TRUSTED-DEV: the harness writes
+  # Autonomy profile (T2.10). The bootstrap self-hosts in TRUSTED-DEV: the factory writes
   # code and a human reviews every diff, so a human-approved gate holds every integrate
   # (the `postcondition: [human-approved]` on the integrate stage above). Switching to
   # `autonomous` later would require approval only for TCB-touching diffs — the tcb_paths

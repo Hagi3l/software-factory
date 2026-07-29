@@ -1,8 +1,8 @@
 #!/bin/sh
-# harness-sandbox-init — the sandbox container's PID 1 wrapper (T5.6).
+# factory-sandbox-init — the sandbox container's PID 1 wrapper (T5.6).
 #
 # It starts the in-sandbox GOPROXY shim, then execs the container's main command. The shim
-# (`harness sandbox-goproxy`) bridges `go`'s module-proxy requests to the runner's broker
+# (`software-factory sandbox-goproxy`) bridges `go`'s module-proxy requests to the runner's broker
 # over the bind-mounted broker socket — the one egress chokepoint a zero-network sandbox
 # has — so `go mod download` of a not-yet-cached dependency is mediated and logged by the
 # runner instead of needing direct network. The image sets GOPROXY to this shim.
@@ -18,9 +18,9 @@
 # `docker exec`s); we background the shim and exec that so it remains PID 1.
 set -e
 
-harness sandbox-goproxy \
-  --broker "unix:${SOFTWARE_FACTORY_BROKER_SOCK:-/run/harness/broker.sock}" \
+software-factory sandbox-goproxy \
+  --broker "unix:${SOFTWARE_FACTORY_BROKER_SOCK:-/run/factory/broker.sock}" \
   --addr "${SOFTWARE_FACTORY_GOPROXY_ADDR:-127.0.0.1:8123}" \
-  >/tmp/harness-goproxy.log 2>&1 &
+  >/tmp/factory-goproxy.log 2>&1 &
 
 exec "$@"

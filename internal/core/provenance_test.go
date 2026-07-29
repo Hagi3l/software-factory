@@ -16,7 +16,7 @@ func TestProvenanceRoundTrip(t *testing.T) {
 			Soul:         "implementor-go",
 			TestsSoul:    "test-author-go",
 			Model:        "claude-opus-4-7",
-			Issue:        "harness-1",
+			Issue:        "factory-1",
 			PromptSHA:    "sha256:9af",
 			Verified:     []string{"build@sha256:aa", "test@sha256:bb"},
 			Traceability: "sha256:cc",
@@ -25,20 +25,20 @@ func TestProvenanceRoundTrip(t *testing.T) {
 		"no tests-soul (no author-tests stage in lineage)": {
 			Soul:     "implementor-go",
 			Model:    "claude-opus-4-7",
-			Issue:    "harness-3",
+			Issue:    "factory-3",
 			Verified: []string{"build"},
 			// TestsSoul empty → renders Tests-Soul: (none), parses back to "".
 		},
 		"no traceability or prompt": {
 			Soul:     "implementor-go",
 			Model:    "claude-opus-4-7",
-			Issue:    "harness-2",
+			Issue:    "factory-2",
 			Verified: []string{"build"},
 		},
 		"with explore sub-loop (both explorer fields recorded)": {
 			Soul:              "implementor-go",
 			Model:             "claude-opus-4-7",
-			Issue:             "harness-4",
+			Issue:             "factory-4",
 			Verified:          []string{"build"},
 			ExploreModel:      "claude-haiku",
 			ExploreTranscript: "sha256:ee",
@@ -46,7 +46,7 @@ func TestProvenanceRoundTrip(t *testing.T) {
 		"explore ran but its transcript failed to persist (model still recorded)": {
 			Soul:         "implementor-go",
 			Model:        "claude-opus-4-7",
-			Issue:        "harness-5",
+			Issue:        "factory-5",
 			ExploreModel: "claude-haiku",
 			// ExploreTranscript empty → renders Explore-Transcript: (none) but the line is
 			// still emitted because the model is set — the degrade-loudly path.
@@ -202,9 +202,9 @@ func TestParseCommitMessageRejectsNonProvenance(t *testing.T) {
 // TestParseTrailerToleratesExtraLines proves a real integration commit (subject + blank +
 // trailer, possibly with trailing body) parses to just the provenance fields.
 func TestParseTrailerToleratesExtraLines(t *testing.T) {
-	msg := "Integrate harness-7\n\n" +
+	msg := "Integrate factory-7\n\n" +
 		"Soul: qa-soul | Model: claude-haiku\n" +
-		"Issue: harness-7 | Prompt-SHA: sha256:dead | Verified: gosec@sha256:ev | Traceability: (none)\n" +
+		"Issue: factory-7 | Prompt-SHA: sha256:dead | Verified: gosec@sha256:ev | Traceability: (none)\n" +
 		"\nSigned-off-by: someone\n"
 	got, ok := ParseCommitMessage(msg)
 	if !ok {
@@ -213,7 +213,7 @@ func TestParseTrailerToleratesExtraLines(t *testing.T) {
 	want := Provenance{
 		Soul:      "qa-soul",
 		Model:     "claude-haiku",
-		Issue:     "harness-7",
+		Issue:     "factory-7",
 		PromptSHA: "sha256:dead",
 		Verified:  []string{"gosec@sha256:ev"},
 		// Traceability is (none) → empty.

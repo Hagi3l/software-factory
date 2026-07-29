@@ -13,7 +13,7 @@ import (
 // (exit 0). The split from Validate is deliberate — Validate gates startup on faults
 // that would break at run time (an unreachable role, an undefined target), whereas a
 // warning is the operator's call to heed or ignore. Model assignment is exactly such a
-// call: config is the pipeline, so the harness *recommends* N-version producer/verifier
+// call: config is the pipeline, so the factory *recommends* N-version producer/verifier
 // diversity but never forces it (see specs/verification.md, "Model diversity is
 // configured, not mandated"). The list is sorted and de-duplicated for deterministic
 // output; nil when there is nothing to advise.

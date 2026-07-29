@@ -148,7 +148,7 @@ func TestShippedQAStageWired(t *testing.T) {
 
 // TestShippedTrustedDevGateWired pins T2.10: the bootstrap self-hosts under the trusted-dev
 // profile, so the human-approved gate holds every integrate and the TCB boundary is declared.
-// A refactor that drops the profile or the gate would silently let the harness merge its own
+// A refactor that drops the profile or the gate would silently let the factory merge its own
 // code with no human review — exactly what trusted-dev exists to prevent — so catch it here.
 func TestShippedTrustedDevGateWired(t *testing.T) {
 	cfg := loadTestConfig(t)

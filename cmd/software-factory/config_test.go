@@ -125,7 +125,7 @@ func TestPipelineRoles(t *testing.T) {
 	}
 
 	if r := pipelineRoles(&config.Config{}); r != nil {
-		t.Fatalf("pipelineRoles(no harness) = %v, want nil", r)
+		t.Fatalf("pipelineRoles(no factory) = %v, want nil", r)
 	}
 }
 

@@ -6,7 +6,7 @@ IP, and everything below is already in place.
 
 This file is a **template runbook** for deploying *your own* instance: it uses
 `vault.example.com` / `example.com` throughout — substitute your domain (and your provider's
-equivalents, if not DigitalOcean) as you go. It stays harness-side and is **not** part of the
+equivalents, if not DigitalOcean) as you go. It stays factory-side and is **not** part of the
 public vault repo — that repo only ever contains the app and the features the agents add.
 
 Target: `https://vault.example.com`, deployed by `app/.github/workflows/deploy.yml` on every

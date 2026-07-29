@@ -100,7 +100,7 @@ func TestGitMergerIntegration(t *testing.T) {
 		t.Errorf("A provenance parent = %s, want candidate tip %s", parent, aTip)
 	}
 	if author := git("log", "-1", "--format=%an", cA); author != provenanceCommitterName {
-		t.Errorf("A provenance author = %q, want harness identity %q", author, provenanceCommitterName)
+		t.Errorf("A provenance author = %q, want factory identity %q", author, provenanceCommitterName)
 	}
 	if msg := git("log", "-1", "--format=%B", cA); !strings.Contains(msg, "Issue: iss-1 | Prompt-SHA: sha256:9af | Verified: build,test") {
 		t.Errorf("A trailer missing from commit message; got:\n%s", msg)
@@ -453,9 +453,9 @@ func TestGitMergerEpicTerminalMergeIntegration(t *testing.T) {
 // TestGitMergerSignsProvenanceCommitIntegration drives the real git binary + ssh-keygen to
 // prove the end-to-end signing path (T5.10): a merger built WithSigningKey produces an
 // integration commit that git verifies (%G? = G) against an allowed-signers file mapping the
-// harness principal to its public key, while a merger with no key leaves an unsigned commit
+// factory principal to its public key, while a merger with no key leaves an unsigned commit
 // (%G? = N). This is the cryptographic half of "the audit trail is the accountability" — main's
-// tip is provably the harness's, not merely labeled with its name (specs/security.md).
+// tip is provably the factory's, not merely labeled with its name (specs/security.md).
 func TestGitMergerSignsProvenanceCommitIntegration(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git not on PATH; skipping signing integration test")
@@ -497,10 +497,10 @@ func TestGitMergerSignsProvenanceCommitIntegration(t *testing.T) {
 	mkCandidate("candidate/iss-2", "b.txt")
 	git("checkout", "-q", "--detach", base)
 
-	// Generate the harness SSH signing identity. The key comment is irrelevant; the
+	// Generate the factory SSH signing identity. The key comment is irrelevant; the
 	// allowed-signers principal must match the committer email the merger stamps.
 	keyPath := filepath.Join(keyDir, "factory_ed25519")
-	if out, err := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "harness", "-f", keyPath, "-q").CombinedOutput(); err != nil {
+	if out, err := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "factory", "-f", keyPath, "-q").CombinedOutput(); err != nil {
 		t.Fatalf("ssh-keygen: %v\n%s", err, out)
 	}
 	pub, err := os.ReadFile(keyPath + ".pub")

@@ -165,7 +165,7 @@ func (h *Harness) CommandCheckCommands() map[string]string {
 // message box for the operator to review and send — a canned opening for a rehearsed or
 // scripted kickoff (e.g. a live demo). It only fills the composer; the operator still sends
 // it, and the conversation proceeds normally. The file is read per page load, so it can be
-// edited while the harness runs. Absent, the composer is unchanged.
+// edited while the factory runs. Absent, the composer is unchanged.
 type RequirementsPlanner struct {
 	Model          string   `yaml:"model"`
 	Persona        string   `yaml:"persona"`
@@ -227,7 +227,7 @@ type Stage struct {
 // specs/bootstrap.md.
 const (
 	// ProfileTrustedDev requires human approval on EVERY integrate — the self-hosting
-	// transition where the harness writes code and a human reviews every diff before it
+	// transition where the factory writes code and a human reviews every diff before it
 	// lands. It is the bootstrap's own profile.
 	ProfileTrustedDev = "trusted-dev"
 	// ProfileAutonomous requires human approval only when a candidate's diff touches the
@@ -325,11 +325,11 @@ type ExploreBudget = core.ExploreBudget
 func LoadHarness(path string) (*Harness, error) {
 	data, err := os.ReadFile(path) // #nosec G304 -- path is an operator-supplied config location, not untrusted agent input.
 	if err != nil {
-		return nil, fmt.Errorf("config: read harness file %s: %w", path, err)
+		return nil, fmt.Errorf("config: read factory file %s: %w", path, err)
 	}
 	var h Harness
 	if err := unmarshalStrict(data, &h); err != nil {
-		return nil, fmt.Errorf("config: parse harness file %s: %w", path, err)
+		return nil, fmt.Errorf("config: parse factory file %s: %w", path, err)
 	}
 	return &h, nil
 }

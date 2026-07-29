@@ -48,7 +48,7 @@ the whole factory. See [../security.md](../security.md).
 
 **Package fetch crosses the boundary via an in-sandbox GOPROXY shim.** A zero-network
 sandbox can't dial a proxy, and `go`'s `GOPROXY` speaks HTTP, not the broker's framed RPC —
-so the toolchain image runs a tiny loopback HTTP server (`harness sandbox-goproxy`) that
+so the toolchain image runs a tiny loopback HTTP server (`software-factory sandbox-goproxy`) that
 forwards each module-proxy request over the broker to the runner, which performs the real
 fetch and logs it. The shim holds no policy: the allowlist and the proxy base live on the
 runner, so a destination the operator hasn't allowed is refused there (deny-by-default) and

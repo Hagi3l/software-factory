@@ -2,7 +2,7 @@
 //
 // Everything served under /static lives here: the vendored runtime JS (htmx, the htmx
 // SSE extension, Alpine) and the Tailwind-compiled stylesheet (app.css, produced from
-// app.tw.css by `go generate`). Embedding them is what makes a deployed harness a single
+// app.tw.css by `go generate`). Embedding them is what makes a deployed factory a single
 // self-contained binary with no runtime asset toolchain (specs/control-room.md, "Stack").
 //
 // app.tw.css is the Tailwind *input* and is intentionally not embedded — it is a build

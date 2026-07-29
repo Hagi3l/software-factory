@@ -679,7 +679,7 @@ func (r *Reader) link(ctx context.Context, label, kind, hash string) ArtifactLin
 // MergedCommit is one integration commit with its parsed provenance, for the provenance
 // view's "trace a merged commit back to issue→soul→model→prompt→evidence" timeline.
 // Signature is the verify-on-read verdict (T5.10): whether main's tip commit carries a
-// valid harness signature, so the human auditing provenance sees not just what produced a
+// valid factory signature, so the human auditing provenance sees not just what produced a
 // change but that the trusted layer cryptographically vouches for the record.
 type MergedCommit struct {
 	Commit     string
@@ -697,7 +697,7 @@ const (
 	// configured on the reader). The default — signing is an opt-in deployment posture.
 	SignatureUnchecked SignatureStatus = ""
 	// SignatureVerified: git %G? = G — a good signature by a key present in the
-	// allowed-signers file (the harness identity). The trusted, attributable state.
+	// allowed-signers file (the factory identity). The trusted, attributable state.
 	SignatureVerified SignatureStatus = "verified"
 	// SignatureUnsigned: git %G? = N — the commit carries no signature (an unsigned
 	// deployment, or a pre-signing commit in history).

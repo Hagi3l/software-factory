@@ -72,7 +72,7 @@ artifacts:
   backend: files          # files | s3
   path: ./.software-factory/artifacts        # files backend
   # backend: s3                      # s3/minio backend:
-  # bucket: harness-artifacts        #   the shared object bucket (must already exist)
+  # bucket: factory-artifacts        #   the shared object bucket (must already exist)
   # endpoint: minio.internal:9000    #   MinIO/non-AWS host[:port] (http:// = plaintext dev)
   # region: us-east-1                #   required when endpoint is empty (derives the AWS endpoint)
 ```

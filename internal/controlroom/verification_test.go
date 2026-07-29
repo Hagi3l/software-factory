@@ -9,16 +9,16 @@ import (
 // TestVerificationPageRenders is T4.23's core contract: the trust argument for a gated issue
 // renders forensically — the producer≠verifier soul split, the red→green proof, the mutation
 // metric vs threshold, the scanner, the traceability map, and the raw-verdict link — off the
-// shared detailServer fixture (harness-1 carries the soul stamps + a passing gate-verdict).
+// shared detailServer fixture (factory-1 carries the soul stamps + a passing gate-verdict).
 func TestVerificationPageRenders(t *testing.T) {
 	ts := detailServer(t)
-	r := get(t, ts, "/verification/harness-1")
+	r := get(t, ts, "/verification/factory-1")
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
 	for _, want := range []string{
 		"Verification — Merged work",   // header (issue title)
-		"harness-1",                    // id
+		"factory-1",                    // id
 		"gate passed",                  // the overall verdict badge
 		"Producer ≠ verifier",          // the soul-split section
 		"go-test-author",               // the author-tests producing soul
@@ -33,7 +33,7 @@ func TestVerificationPageRenders(t *testing.T) {
 		"/artifact/" + mergedTraceHash, // …a resolvable click-through
 		"/artifact/" + verdictHash,     // the raw gate-verdict bytes link
 		"/artifact/" + gateHash,        // a check's own captured-output evidence
-		"/issue/harness-1",             // drill-back to the detail page
+		"/issue/factory-1",             // drill-back to the detail page
 		`href="/static/app.css"`,       // inside the base layout chrome
 	} {
 		if !strings.Contains(r.body, want) {
@@ -45,11 +45,11 @@ func TestVerificationPageRenders(t *testing.T) {
 // TestVerificationRendersTransformLog is the T6.3 follow-up's contract: a gated issue that ran
 // semantic write tools surfaces its transformation log — each transformation with its mechanism
 // (semantic vs text fallback), a header count of the text fallbacks (the imprecise ones), the
-// fallback's precision note, and the raw-bytes link to the canonical record. harness-1 carries one
+// fallback's precision note, and the raw-bytes link to the canonical record. factory-1 carries one
 // semantic and one text-fallback rename.
 func TestVerificationRendersTransformLog(t *testing.T) {
 	ts := detailServer(t)
-	r := get(t, ts, "/verification/harness-1")
+	r := get(t, ts, "/verification/factory-1")
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
@@ -73,7 +73,7 @@ func TestVerificationRendersTransformLog(t *testing.T) {
 // transform log) renders no Transformations section at all — the common case stays uncluttered.
 func TestVerificationNoTransformSection(t *testing.T) {
 	ts := detailServer(t)
-	r := get(t, ts, "/verification/harness-2") // in flight, no TransformLog stamp
+	r := get(t, ts, "/verification/factory-2") // in flight, no TransformLog stamp
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
@@ -83,12 +83,12 @@ func TestVerificationNoTransformSection(t *testing.T) {
 }
 
 // TestVerificationNoVerdictNotice covers a known issue whose candidate has not been gated
-// (harness-2 is in flight, no stamped verdict): the page still renders the issue header and
+// (factory-2 is in flight, no stamped verdict): the page still renders the issue header and
 // the soul split, but shows the "no verdict recorded" notice instead of a check list, and
 // never errors — the best-effort posture the detail and replay pages share.
 func TestVerificationNoVerdictNotice(t *testing.T) {
 	ts := detailServer(t)
-	r := get(t, ts, "/verification/harness-2")
+	r := get(t, ts, "/verification/factory-2")
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
@@ -107,7 +107,7 @@ func TestVerificationNoVerdictNotice(t *testing.T) {
 // the not-attached notice (200, in chrome), mirroring the issue-detail and replay pages.
 func TestVerificationWithoutReader(t *testing.T) {
 	ts := newTestServer(t) // no Options.Reader
-	r := get(t, ts, "/verification/harness-1")
+	r := get(t, ts, "/verification/factory-1")
 	if r.status != http.StatusOK {
 		t.Fatalf("status = %d, want 200", r.status)
 	}
@@ -133,8 +133,8 @@ func TestVerificationUnknown(t *testing.T) {
 // surfaces the verification link, and the dead-letter row offers it for triage.
 func TestIssueAndDLQLinkToVerification(t *testing.T) {
 	ts := detailServer(t)
-	detail := get(t, ts, "/issue/harness-1")
-	if !strings.Contains(detail.body, "/verification/harness-1") || !strings.Contains(detail.body, "▸ Verification") {
+	detail := get(t, ts, "/issue/factory-1")
+	if !strings.Contains(detail.body, "/verification/factory-1") || !strings.Contains(detail.body, "▸ Verification") {
 		t.Errorf("gated issue detail missing the verification drill-through link")
 	}
 }

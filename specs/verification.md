@@ -59,7 +59,7 @@ advances**: the `author-tests` soul and the `implement` soul are recorded (threa
 forward exactly like the [traceability map](#traceability-map) hash and preserved
 across `on_failure` retries) and cited together on the merge trailer
 (`Tests-Soul:` alongside `Soul:`, see [security.md](security.md)). This turns
-producer ≠ verifier from an invariant the harness merely *upholds* into one a human
+producer ≠ verifier from an invariant the factory merely *upholds* into one a human
 can *see* — both at the merge commit and, live, in the
 [verification view](control-room.md). There is no separate "verifier soul" to record:
 the `qa` [gate](glossary.md#gate) is orchestrator-controlled and runs in a clean
@@ -85,14 +85,14 @@ the *one* host-side fetcher, so what they permit can never drift.
 
 ### Model diversity is configured, not mandated
 
-Soul independence (above) is enforced by the harness. *Model* independence —
+Soul independence (above) is enforced by the factory. *Model* independence —
 running the verifier on a different model **family** than the producer, so the two
 don't share correlated blind spots (N-version diversity) — is a **configuration
 capability**, not a built-in mechanism. The pieces already exist: a role maps to a
 set of souls (`selector`, see [configuration.md](configuration.md)) and each soul
 names its own model/tier (per-role model tiers), so a user who wants a
 different-family reviewer simply points the `qa` soul at one. This is consistent
-with the config-is-the-pipeline principle: the harness *enables and recommends*
+with the config-is-the-pipeline principle: the factory *enables and recommends*
 diversity but leaves the model assignment to the user who configures the pipeline.
 
 Because same-family producer/verifier is weaker independence, config validation
@@ -106,7 +106,7 @@ the model slug, so the family is derived from the slug's `vendor/` prefix
 bare-slug model with no inferable vendor, and overridable by an explicit `family:` on
 the registry entry ([configuration.md](configuration.md)). Keying on the gateway alone
 would both miss genuine same-family overlap and falsely flag a deepseek-vs-anthropic
-split that happens to share one gateway. The warning's natural home is `harness
+split that happens to share one gateway. The warning's natural home is `factory
 validate` (so yaml-only users see it); a control-room tooltip is a complementary
 surface once a souls/config view exists.
 
@@ -121,7 +121,7 @@ deterministic checks, which have no attention to steer; the verifier keeps every
 comprehension tool and the candidate is re-graded in a fresh sandbox regardless; a weak or
 blinkered explore answer costs a wasted search, never a false pass. Mandating family
 diversity for the *helper* would buy a second-order independence gain at the price of a
-second cheap-model entry plus stage-scoped selector routing the harness has no other use
+second cheap-model entry plus stage-scoped selector routing the factory has no other use
 for. Deployments wanting a stricter posture have two config-only options: a second
 `explorer` soul on a different family with a distinguishing selector, or **no explore on
 the verify path at all** (the verifier reads raw — fully independent). `software-factory validate`
@@ -221,7 +221,7 @@ the tree, *including the test binaries*, builds (for Go: `go build ./... && go t
 -run='^$' ./...`) and lists **both** on the `author-tests` postcondition. The conjunction
 "**compiles ∧ tests-fail**" is the genuine executing red: the suite built and an assertion
 failed. This keeps the kernel language-neutral — `compiles` is a normal exit-0-pass command
-and the target's build system, not the harness, defines what "compiles" means, so a compiled
+and the target's build system, not the factory, defines what "compiles" means, so a compiled
 target opts in and a dynamic one does not. It also forces the test author to commit the
 minimal compiling **API skeleton** (signatures and types, no logic), which the implementor
 inherits via base threading as a precise, compiler-checked contract; and it strengthens

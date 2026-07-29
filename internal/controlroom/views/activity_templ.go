@@ -609,7 +609,7 @@ func activityBadge(kind string) templ.Component {
 }
 
 // ActivityMessage renders the activity chrome with a single notice instead of the feed —
-// used when the control room is not attached to a running factory (a standalone `harness
+// used when the control room is not attached to a running factory (a standalone `factory
 // serve` has no NATS to tail, so there is no live source).
 func ActivityMessage(msg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {

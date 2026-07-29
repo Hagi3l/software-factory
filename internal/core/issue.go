@@ -279,7 +279,7 @@ type Issue struct {
 
 	// CreatedAt is when beads first created the issue — the anchor the control-room board's
 	// per-card "total time" timer ticks from (client-side, like StateEnteredAt). Unlike the
-	// other facets it is not harness-written metadata: it is beads' own top-level `created_at`
+	// other facets it is not factory-written metadata: it is beads' own top-level `created_at`
 	// timestamp, decoded straight off the read (every issue bd returns carries one), so it is
 	// always populated for a real issue and zero only for a not-yet-created proposal. It is the
 	// fallback the board uses for "time in current state" when StateEnteredAt is unstamped (an

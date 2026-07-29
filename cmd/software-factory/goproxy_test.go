@@ -6,7 +6,7 @@ import "testing"
 // a unix path both survive intact, and rejects unknown transports and malformed forms.
 func TestParseBrokerEndpoint(t *testing.T) {
 	ok := []struct{ in, net, addr string }{
-		{"unix:/run/harness/broker.sock", "unix", "/run/harness/broker.sock"},
+		{"unix:/run/factory/broker.sock", "unix", "/run/factory/broker.sock"},
 		{"vsock:2:1024", "vsock", "2:1024"},
 	}
 	for _, tc := range ok {

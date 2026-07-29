@@ -41,7 +41,7 @@ const (
 // token, the credential is injected via an inline credential helper reading it from the
 // environment (never argv), so the secret never leaks into process listings or reflogs.
 func pushBundleToRemote(ctx context.Context, remote string, cred secret.GitCredential, branch string, bundle []byte) (string, error) {
-	dir, err := os.MkdirTemp("", "harness-push-*")
+	dir, err := os.MkdirTemp("", "factory-push-*")
 	if err != nil {
 		return "", fmt.Errorf("git push: temp dir: %w", err)
 	}

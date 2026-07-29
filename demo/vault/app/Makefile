@@ -1,6 +1,6 @@
 # Vault demo app — build/test/gate targets.
 #
-# The harness `qa` stage postconditions (the demo config's `checks:`) resolve to the
+# The factory `qa` stage postconditions (the demo config's `checks:`) resolve to the
 # targets below; the gate runs them in a clean, zero-network verification sandbox (exit 0
 # = pass; non-zero = findings or tool error => fail closed). The gate tools
 # (templ, tailwind, golangci-lint, gosec, govulncheck + offline vuln DB, go-licenses) are
@@ -70,7 +70,7 @@ govulncheck:
 ## fails to recognize; it is verified-permissive, so it is ignored rather than failing closed.
 license-scan:
 	go-licenses check \
-		--ignore github.com/harness-demo/vault \
+		--ignore github.com/factory-demo/vault \
 		--ignore modernc.org/mathutil \
 		./...
 

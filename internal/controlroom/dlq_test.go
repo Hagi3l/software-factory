@@ -16,10 +16,10 @@ import (
 func dlqServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	r := query.NewReader(&fakeIssues{all: []core.Issue{
-		{ID: "harness-7", Title: "Cannot satisfy spec", Status: "blocked", Role: "implementor",
+		{ID: "factory-7", Title: "Cannot satisfy spec", Status: "blocked", Role: "implementor",
 			Spec: "specs/orders.md", Attempt: 3, SpentTokens: 120_000, SpentUSD: 1.2345},
-		{ID: "harness-2", Title: "Ambiguous acceptance", Status: "blocked", Role: "test-author", Attempt: 1},
-		{ID: "harness-1", Title: "In flight", Status: "in_progress", Role: "implementor"}, // not a dead letter
+		{ID: "factory-2", Title: "Ambiguous acceptance", Status: "blocked", Role: "test-author", Attempt: 1},
+		{ID: "factory-1", Title: "In flight", Status: "in_progress", Role: "implementor"}, // not a dead letter
 	}}, fakeArts{}, fakeProv{})
 	s := New(Options{Version: "test", Reader: r})
 	ts := httptest.NewServer(s.Handler())
@@ -39,13 +39,13 @@ func TestDLQRendersEscalations(t *testing.T) {
 	}
 	for _, want := range []string{
 		"Cannot satisfy spec", "Ambiguous acceptance", // both blocked issues
-		"harness-7", "harness-2", // their ids
+		"factory-7", "factory-2", // their ids
 		"specs/orders.md",                // the spec to refine
 		"attempt 3",                      // the retry generation
 		"120000 tokens",                  // the budget burn surfaced at a glance
 		"$1.2345",                        // priced spend
-		`href="/issue/harness-7"`,        // drill-through into the detail view
-		`href="/verification/harness-7"`, // T4.23 — verification drill for triage
+		`href="/issue/factory-7"`,        // drill-through into the detail view
+		`href="/verification/factory-7"`, // T4.23 — verification drill for triage
 		`sse-connect="/events"`,          // wired to the T4.3 substrate
 		`hx-get="/dlq/items"`,            // live fragment refresh target
 		`sse:issue-state`,                // crisp refresh off the typed event (T4.18)
@@ -56,7 +56,7 @@ func TestDLQRendersEscalations(t *testing.T) {
 		}
 	}
 	// The in-flight issue is not an escalation and must not appear.
-	if strings.Contains(r.body, "In flight") || strings.Contains(r.body, "harness-1") {
+	if strings.Contains(r.body, "In flight") || strings.Contains(r.body, "factory-1") {
 		t.Errorf("dlq must list only blocked issues, leaked an in-flight one: %q", r.body)
 	}
 }
@@ -73,7 +73,7 @@ func TestDLQItemsFragmentIsBare(t *testing.T) {
 	if strings.Contains(strings.ToLower(r.body), "<!doctype") || strings.Contains(r.body, "<html") {
 		t.Errorf("fragment must not include the page chrome: %q", r.body)
 	}
-	for _, want := range []string{"Cannot satisfy spec", `href="/issue/harness-7"`} {
+	for _, want := range []string{"Cannot satisfy spec", `href="/issue/factory-7"`} {
 		if !strings.Contains(r.body, want) {
 			t.Errorf("fragment missing %q", want)
 		}
@@ -84,8 +84,8 @@ func TestDLQItemsFragmentIsBare(t *testing.T) {
 // "nothing needs a human" notice inside the chrome, not an error.
 func TestDLQEmptyIsReassurance(t *testing.T) {
 	r := query.NewReader(&fakeIssues{all: []core.Issue{
-		{ID: "harness-1", Status: "in_progress"},
-		{ID: "harness-2", Status: "closed"},
+		{ID: "factory-1", Status: "in_progress"},
+		{ID: "factory-2", Status: "closed"},
 	}}, fakeArts{}, fakeProv{})
 	s := New(Options{Reader: r})
 	ts := httptest.NewServer(s.Handler())

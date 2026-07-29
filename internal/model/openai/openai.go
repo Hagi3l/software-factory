@@ -1,5 +1,5 @@
 // Package openai is the OpenAI-compatible provider adapter: a thin translation
-// layer between the harness's canonical model types and the official OpenAI Go
+// layer between the factory's canonical model types and the official OpenAI Go
 // SDK's Chat Completions API. It implements model.Adapter for OpenAI itself and
 // for any server speaking the same wire protocol — Ollama, vLLM, Together, etc. —
 // selected by pointing the SDK at a custom base URL (option.WithBaseURL). One

@@ -137,7 +137,7 @@ func TestSeedCommitsAndCreates(t *testing.T) {
 	}
 	repo := t.TempDir()
 	gitInit(t, repo)
-	runCmd(t, repo, "bd", "init", "--prefix", "harness")
+	runCmd(t, repo, "bd", "init", "--prefix", "factory")
 
 	store, err := artifact.NewFilesStore(filepath.Join(repo, ".artifacts"))
 	if err != nil {
@@ -240,7 +240,7 @@ func TestSeedEpicCommitsSpecOntoEpicBranch(t *testing.T) {
 	requireGitBd(t)
 	repo := t.TempDir()
 	gitInitWithMain(t, repo)
-	runCmd(t, repo, "bd", "init", "--prefix", "harness")
+	runCmd(t, repo, "bd", "init", "--prefix", "factory")
 
 	store, err := artifact.NewFilesStore(filepath.Join(repo, ".artifacts"))
 	if err != nil {
@@ -316,7 +316,7 @@ func TestSeedEpicRefusesSecondInFlight(t *testing.T) {
 	requireGitBd(t)
 	repo := t.TempDir()
 	gitInitWithMain(t, repo)
-	runCmd(t, repo, "bd", "init", "--prefix", "harness")
+	runCmd(t, repo, "bd", "init", "--prefix", "factory")
 	store, err := artifact.NewFilesStore(filepath.Join(repo, ".artifacts"))
 	if err != nil {
 		t.Fatalf("artifact store: %v", err)
@@ -340,7 +340,7 @@ func TestSeedEpicGateTracksLanding(t *testing.T) {
 	requireGitBd(t)
 	repo := t.TempDir()
 	gitInitWithMain(t, repo)
-	runCmd(t, repo, "bd", "init", "--prefix", "harness")
+	runCmd(t, repo, "bd", "init", "--prefix", "factory")
 	store, err := artifact.NewFilesStore(filepath.Join(repo, ".artifacts"))
 	if err != nil {
 		t.Fatalf("artifact store: %v", err)
@@ -385,8 +385,8 @@ func mustWrite(t *testing.T, path, content string) {
 func gitInit(t *testing.T, repo string) {
 	t.Helper()
 	runCmd(t, repo, "git", "init", "-q", "-b", "main")
-	runCmd(t, repo, "git", "config", "user.name", "harness")
-	runCmd(t, repo, "git", "config", "user.email", "harness@localhost")
+	runCmd(t, repo, "git", "config", "user.name", "factory")
+	runCmd(t, repo, "git", "config", "user.email", "factory@localhost")
 }
 
 func runCmd(t *testing.T, dir, name string, args ...string) string {

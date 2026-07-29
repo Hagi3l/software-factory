@@ -19,7 +19,7 @@ sandbox:
   # soul.sandbox has no entry here for the active backend. See specs/components/sandbox.md.
   profiles:
     go-toolchain:
-      image: harness/go-toolchain:dev
+      image: factory/go-toolchain:dev
 nats:
   # url empty -> the in-process embedded NATS server (the bootstrap/dev shape; expose it on a
   # TCP listener for `software-factory approve` with `software-factory run --nats-addr host:port`). Point url at
@@ -65,14 +65,14 @@ artifacts:
 otel:
   endpoint: localhost:4317
 # signing: provenance-commit signing (T5.10). Disabled in dev — commits land unsigned, as
-# they always have. To turn it on, supply the harness's SSH signing key (a runtime secret,
+# they always have. To turn it on, supply the factory's SSH signing key (a runtime secret,
 # NEVER committed or baked into an image) and an allowed-signers file for verify-on-read; the
 # control room's provenance view then shows each merged commit's signature verdict. The same
 # code signs in production by pointing `key` at a secret-manager/ssh-agent-delivered key.
 # signing:
 #   enabled: true
 #   key: /run/secrets/factory_ed25519
-#   allowed_signers: /etc/harness/allowed_signers
+#   allowed_signers: /etc/factory/allowed_signers
 models:
   # Per-role model tiers (T3.4): a soul names its model here; the runner resolves it per
   # invocation, so cheaper models can serve roles whose output is independently re-gated.

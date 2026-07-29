@@ -230,7 +230,7 @@ func New(opts Options, bd Beads, g Gate, merger Merger, nc *nats.Conn, js jetstr
 	if opts.Config == nil {
 		add("config is required")
 	} else if opts.Config.Harness == nil {
-		add("config has no harness (DAG/policy) loaded")
+		add("config has no factory (DAG/policy) loaded")
 	}
 	if opts.Repo == "" {
 		add("repo is required (the integration repo candidates are merged in)")
@@ -415,7 +415,7 @@ func (o *Orchestrator) Snapshot(_ context.Context) ([]core.Issue, error) {
 }
 
 // Track records externally-written issues into the work-graph projection, keeping it consistent
-// with the harness's two discrete human-approved write paths that intentionally bypass the
+// with the factory's two discrete human-approved write paths that intentionally bypass the
 // reconcile loop (like `software-factory seed`): the Create-Task wizard's seed (new open issues) and the
 // Resolve wizard's reopen of a dead-letter (Reissue, blocked→open). Both write beads directly, so
 // without this the projection — which is now both the scheduler's dispatch oracle (T8.2) and the

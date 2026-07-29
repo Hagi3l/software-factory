@@ -28,7 +28,7 @@ func cmdApprove(args []string) error { return runApprovalDecision("approve", arg
 func cmdReject(args []string) error  { return runApprovalDecision("reject", args, false) }
 
 // runApprovalDecision is the shared body: read the parked issue's candidate ref, then publish
-// an ApprovalRequest. It connects to a RUNNING harness's NATS (the run must expose a client
+// an ApprovalRequest. It connects to a RUNNING factory's NATS (the run must expose a client
 // address via `software-factory run --nats-addr`; the default in-process server is unreachable from a
 // separate process — see specs/messaging.md, T5.8), so a failed connect is the common "is the
 // factory running and listening?" error and is surfaced plainly.
@@ -36,14 +36,14 @@ func runApprovalDecision(name string, args []string, approved bool) error {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	repo := fs.String("repo", ".", "repository holding the beads store (.beads)")
 	bdBin := fs.String("bd", "bd", "path to the beads CLI")
-	natsURL := fs.String("nats", "nats://127.0.0.1:4222", "URL of the running harness's NATS client listener (software-factory run --nats-addr)")
+	natsURL := fs.String("nats", "nats://127.0.0.1:4222", "URL of the running factory's NATS client listener (software-factory run --nats-addr)")
 	approver := fs.String("approver", "", "who is deciding (default: the OS user); recorded on the issue for audit")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
 	issueID := fs.Arg(0)
 	if issueID == "" {
-		return fmt.Errorf("usage: harness %s [--nats URL] [--approver WHO] <issue>", name)
+		return fmt.Errorf("usage: factory %s [--nats URL] [--approver WHO] <issue>", name)
 	}
 
 	absRepo, err := filepath.Abs(*repo)
@@ -80,12 +80,12 @@ func runApprovalDecision(name string, args []string, approved bool) error {
 	return nil
 }
 
-// publishApproval connects to the running harness's NATS and publishes the decision onto the
+// publishApproval connects to the running factory's NATS and publishes the decision onto the
 // durable approvals stream, so it survives until the orchestrator consumes it (at-least-once).
 func publishApproval(url string, req core.ApprovalRequest) error {
 	nc, err := nats.Connect(url)
 	if err != nil {
-		return fmt.Errorf("connect to harness NATS at %s (is `software-factory run --nats-addr %s` running?): %w", url, addrOf(url), err)
+		return fmt.Errorf("connect to factory NATS at %s (is `software-factory run --nats-addr %s` running?): %w", url, addrOf(url), err)
 	}
 	defer nc.Close()
 

@@ -10,7 +10,7 @@ See also: [workflow.md](workflow.md), [security.md](security.md),
 
 ## The shape
 
-The harness is a **CI/CD pipeline whose build steps happen to be LLM agents, and
+The factory is a **CI/CD pipeline whose build steps happen to be LLM agents, and
 whose threat model assumes those build steps are hostile.** That framing drives
 every decision: it is not "a multi-agent system" with security bolted on, it is a
 verification pipeline that uses agents as untrusted producers.

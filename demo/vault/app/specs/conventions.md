@@ -1,6 +1,6 @@
 # Vault — engineering conventions (binding on every change)
 
-These conventions are **the same for every work item**, so the harness injects this file
+These conventions are **the same for every work item**, so the factory injects this file
 (and the [spec index](README.md)) into every agent's Brief as an *ambient spec* — you carry
 them no matter which feature spec your issue points at. They are not optional style notes: a
 change that breaks one fails the gate or the review. The feature contracts live in the
@@ -71,7 +71,7 @@ specs/                the specs (this directory)
 
 ## Gate
 
-Every change is independently verified by these commands (the harness `qa` stage runs them
+Every change is independently verified by these commands (the factory `qa` stage runs them
 in a clean, zero-network sandbox; locally `make check` runs the fast subset):
 
 - `make test-unit` — unit + httptest suite (a build break also fails here)

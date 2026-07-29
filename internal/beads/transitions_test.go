@@ -28,7 +28,7 @@ func recordingClient(reply func(args []string) ([]byte, error)) (*Client, *[][]s
 func TestClaimWritesStatusAndLease(t *testing.T) {
 	c, calls := recordingClient(func([]string) ([]byte, error) { return nil, nil })
 	before := time.Now().UTC()
-	until, err := c.Claim(context.Background(), "harness-1", 30*time.Minute)
+	until, err := c.Claim(context.Background(), "factory-1", 30*time.Minute)
 	if err != nil {
 		t.Fatalf("Claim: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestClaimWritesStatusAndLease(t *testing.T) {
 		t.Errorf("lease until = %v, want ~now+30m", until)
 	}
 	got := strings.Join((*calls)[0], " ")
-	if !strings.Contains(got, "update harness-1 --status in_progress") {
+	if !strings.Contains(got, "update factory-1 --status in_progress") {
 		t.Errorf("claim args = %q, want status in_progress", got)
 	}
 	if !strings.Contains(got, "--set-metadata lease_until=") {
@@ -377,7 +377,7 @@ func TestApplyCreateNoID(t *testing.T) {
 // child is created. This closes the bd-1.0.4 foreign-prefix gap: `dep add` validates a
 // same-prefix target but silently accepts a foreign-prefix id as an unchecked external
 // reference, so an untrusted proposal could otherwise plant a dangling edge to a
-// fabricated id. The harness verifies existence itself via the read path, prefix-blind
+// fabricated id. The factory verifies existence itself via the read path, prefix-blind
 // (see specs/architecture.md, T3.2).
 func TestApplyRejectsUnknownDependency(t *testing.T) {
 	c, calls := recordingClient(func(args []string) ([]byte, error) {
@@ -550,7 +550,7 @@ func TestApplyRejectsUnknownDependencyIntegration(t *testing.T) {
 
 	before := len(allIssues(t, dir))
 	_, err := c.Apply(context.Background(), []core.Proposal{
-		{Issue: core.Issue{Title: "orphan", Role: "implement"}, DependsOn: []string{"harness-nonexistent"}},
+		{Issue: core.Issue{Title: "orphan", Role: "implement"}, DependsOn: []string{"factory-nonexistent"}},
 	})
 	if err == nil {
 		t.Fatal("Apply accepted a dependency on a nonexistent issue")
@@ -720,7 +720,7 @@ func TestBaseRoundTripIntegration(t *testing.T) {
 	c := New(WithDir(dir))
 
 	created, err := c.Apply(context.Background(), []core.Proposal{
-		{Issue: core.Issue{Title: "build on the candidate", Role: "implement", Attempt: 2, Base: "candidate/harness-1"}},
+		{Issue: core.Issue{Title: "build on the candidate", Role: "implement", Attempt: 2, Base: "candidate/factory-1"}},
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -729,8 +729,8 @@ func TestBaseRoundTripIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.Base != "candidate/harness-1" {
-		t.Errorf("Base = %q, want candidate/harness-1 (round-tripped via metadata)", got.Base)
+	if got.Base != "candidate/factory-1" {
+		t.Errorf("Base = %q, want candidate/factory-1 (round-tripped via metadata)", got.Base)
 	}
 	if got.Role != "implement" || got.Attempt != 2 {
 		t.Errorf("Role/Attempt = %q/%d, want implement/2 (must survive alongside base)", got.Role, got.Attempt)
@@ -749,7 +749,7 @@ func TestTraceMapRoundTripIntegration(t *testing.T) {
 
 	created, err := c.Apply(context.Background(), []core.Proposal{
 		{Issue: core.Issue{Title: "implement against traced tests", Role: "implement", Attempt: 1,
-			Base: "candidate/harness-1", TraceMap: "sha256:abc123"}},
+			Base: "candidate/factory-1", TraceMap: "sha256:abc123"}},
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -761,8 +761,8 @@ func TestTraceMapRoundTripIntegration(t *testing.T) {
 	if got.TraceMap != "sha256:abc123" {
 		t.Errorf("TraceMap = %q, want sha256:abc123 (round-tripped via metadata)", got.TraceMap)
 	}
-	if got.Base != "candidate/harness-1" || got.Role != "implement" || got.Attempt != 1 {
-		t.Errorf("Base/Role/Attempt = %q/%q/%d, want candidate/harness-1/implement/1 (must survive alongside trace map)",
+	if got.Base != "candidate/factory-1" || got.Role != "implement" || got.Attempt != 1 {
+		t.Errorf("Base/Role/Attempt = %q/%q/%d, want candidate/factory-1/implement/1 (must survive alongside trace map)",
 			got.Base, got.Role, got.Attempt)
 	}
 }
@@ -811,7 +811,7 @@ func TestSpecRoundTripIntegration(t *testing.T) {
 
 	created, err := c.Apply(context.Background(), []core.Proposal{
 		{Issue: core.Issue{Title: "implement orders", Role: "implement",
-			Base: "candidate/harness-1", Spec: "specs/orders.md"}},
+			Base: "candidate/factory-1", Spec: "specs/orders.md"}},
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -823,8 +823,8 @@ func TestSpecRoundTripIntegration(t *testing.T) {
 	if got.Spec != "specs/orders.md" {
 		t.Errorf("Spec = %q, want specs/orders.md (round-tripped via metadata)", got.Spec)
 	}
-	if got.Base != "candidate/harness-1" || got.Role != "implement" {
-		t.Errorf("Base/Role = %q/%q, want candidate/harness-1/implement (must survive alongside spec)", got.Base, got.Role)
+	if got.Base != "candidate/factory-1" || got.Role != "implement" {
+		t.Errorf("Base/Role = %q/%q, want candidate/factory-1/implement (must survive alongside spec)", got.Base, got.Role)
 	}
 }
 
@@ -883,7 +883,7 @@ func TestEpicAndWallRoundTripIntegration(t *testing.T) {
 	spent := core.Usage{InputTokens: 5_000, OutputTokens: 800, CacheReadTokens: 600, CacheCreationTokens: 0}
 	created, err := c.Apply(ctx, []core.Proposal{
 		{Issue: core.Issue{Title: "fix", Role: "implement", Attempt: 1,
-			EpicID: "harness-1", SpentWall: 90 * time.Second,
+			EpicID: "factory-1", SpentWall: 90 * time.Second,
 			SpentTokens: spent.TotalTokens(), SpentUsage: spent}},
 	})
 	if err != nil {
@@ -895,8 +895,8 @@ func TestEpicAndWallRoundTripIntegration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Get: %v", err)
 	}
-	if got.EpicID != "harness-1" {
-		t.Errorf("EpicID = %q, want harness-1 (round-tripped via metadata)", got.EpicID)
+	if got.EpicID != "factory-1" {
+		t.Errorf("EpicID = %q, want factory-1 (round-tripped via metadata)", got.EpicID)
 	}
 	if got.SpentWall != 90*time.Second {
 		t.Errorf("SpentWall = %s, want 1m30s (round-tripped as a duration string)", got.SpentWall)
@@ -932,8 +932,8 @@ func TestEpicAndWallRoundTripIntegration(t *testing.T) {
 		t.Errorf("ClosingUsage total %d != ClosingTokens %d (breakdown must reconcile to scalar)", got.ClosingUsage.TotalTokens(), got.ClosingTokens)
 	}
 	// The stamp must not disturb the values written at creation.
-	if got.EpicID != "harness-1" || got.SpentWall != 90*time.Second || got.Attempt != 1 {
-		t.Errorf("EpicID/SpentWall/Attempt = %q/%s/%d, want harness-1/1m30s/1 (stamp must not disturb them)", got.EpicID, got.SpentWall, got.Attempt)
+	if got.EpicID != "factory-1" || got.SpentWall != 90*time.Second || got.Attempt != 1 {
+		t.Errorf("EpicID/SpentWall/Attempt = %q/%s/%d, want factory-1/1m30s/1 (stamp must not disturb them)", got.EpicID, got.SpentWall, got.Attempt)
 	}
 }
 
@@ -950,7 +950,7 @@ func TestStampIntegratedRoundTripIntegration(t *testing.T) {
 	ctx := context.Background()
 
 	created, err := c.Apply(ctx, []core.Proposal{
-		{Issue: core.Issue{Title: "ship", Role: "implement", EpicID: "harness-1"}},
+		{Issue: core.Issue{Title: "ship", Role: "implement", EpicID: "factory-1"}},
 	})
 	if err != nil {
 		t.Fatalf("Apply: %v", err)
@@ -980,8 +980,8 @@ func TestStampIntegratedRoundTripIntegration(t *testing.T) {
 		t.Error("Integrated = false after StampIntegrated, want true (metadata round-trip)")
 	}
 	// The stamp must not disturb the values written at creation.
-	if got.EpicID != "harness-1" || got.Role != "implement" {
-		t.Errorf("EpicID/Role = %q/%q, want harness-1/implement (stamp must not disturb them)", got.EpicID, got.Role)
+	if got.EpicID != "factory-1" || got.Role != "implement" {
+		t.Errorf("EpicID/Role = %q/%q, want factory-1/implement (stamp must not disturb them)", got.EpicID, got.Role)
 	}
 }
 

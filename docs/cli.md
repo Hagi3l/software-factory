@@ -1,6 +1,6 @@
 # CLI reference
 
-`harness` is the single binary. It is the composition root — it wires the internal
+`software-factory` is the single binary. It is the composition root — it wires the internal
 packages together — and nothing in it enforces a guarantee; the components it
 assembles (orchestrator, runner/broker, sandbox, gate) do.
 
@@ -11,8 +11,8 @@ software-factory run        run the in-process orchestrator + runner: the spec �
 software-factory approve    approve a parked integrate candidate (trusted-dev / TCB review gate)
 software-factory reject     reject a parked integrate candidate
 software-factory serve      start the control-room web server (no pipeline; static + read views)
-harness version    print the build version
-harness help       print usage
+factory version    print the build version
+factory help       print usage
 ```
 
 Exit codes: `0` success · `1` command error (failed validation, bad config, crashed
@@ -83,7 +83,7 @@ with `--nats-addr`, a separate `approve`/`reject` process can publish decisions 
 
 ## `software-factory approve` / `software-factory reject`
 
-Decide a parked integrate candidate — the trusted-dev / TCB-review gate (the harness
+Decide a parked integrate candidate — the trusted-dev / TCB-review gate (the factory
 writes code, a human reviews the diff). The decision is published over NATS to the
 single-writer orchestrator, which applies it idempotently and is bound to the
 candidate sha (a stale approval against a since-changed candidate is ignored).
@@ -96,7 +96,7 @@ software-factory reject  [flags] <issue>
 | Flag | Default | Meaning |
 |------|---------|---------|
 | `<issue>` | *(required, positional)* | the parked issue id |
-| `--nats URL` | `nats://127.0.0.1:4222` | URL of the running harness's NATS listener (`software-factory run --nats-addr`) |
+| `--nats URL` | `nats://127.0.0.1:4222` | URL of the running factory's NATS listener (`software-factory run --nats-addr`) |
 | `--approver WHO` | the OS user | who is deciding; recorded on the issue for audit |
 | `--repo DIR` | `.` | repository holding the beads store (`.beads`) |
 | `--bd PATH` | `bd` | path to the beads CLI |
@@ -123,7 +123,7 @@ read-only views; the live feed (`/events`) returns 503 and data-backed views sho
 
 See [the control room](control-room.md) for the views.
 
-## `harness sandbox-goproxy` (internal)
+## `software-factory sandbox-goproxy` (internal)
 
 Not run by operators — the `go-toolchain` sandbox image's entrypoint starts it inside the
 sandbox. It is the in-sandbox GOPROXY shim: an HTTP server `go`'s `GOPROXY` points
@@ -136,5 +136,5 @@ policy; the allowlist and proxy base live on the runner. See [configuration.md](
 
 | Flag | Default | Meaning |
 |------|---------|---------|
-| `--broker NET:ADDR` | `unix:/run/harness/broker.sock` | runner broker endpoint (`unix:<path>` or `vsock:<cid>:<port>`) |
+| `--broker NET:ADDR` | `unix:/run/factory/broker.sock` | runner broker endpoint (`unix:<path>` or `vsock:<cid>:<port>`) |
 | `--addr HOST:PORT` | `127.0.0.1:8123` | loopback address to serve the GOPROXY on |

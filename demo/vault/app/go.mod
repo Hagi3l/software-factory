@@ -1,4 +1,4 @@
-module github.com/harness-demo/vault
+module github.com/factory-demo/vault
 
 go 1.25.0
 

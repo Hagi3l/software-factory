@@ -29,7 +29,7 @@ const (
 	// containerBrokerSock is where the runner's broker socket is mounted inside the
 	// container. This single mount is the deliberate, only route out of the sandbox —
 	// the Docker analog of the Firecracker vsock — not a casual bind mount.
-	containerBrokerSock = "/run/harness/broker.sock"
+	containerBrokerSock = "/run/factory/broker.sock"
 
 	// keepAliveSeconds keeps the container alive between Exec calls. The container's
 	// entrypoint is `sleep <this>`; a fresh `docker exec` runs each Command against
@@ -247,7 +247,7 @@ func (b *DockerBackend) Provision(ctx context.Context, spec Spec) (Sandbox, erro
 	}
 
 	// `docker cp` preserves the host uid/gid on the copied tree, so the seeded worktree
-	// (and its .git) is owned by whoever ran the harness, not by the container's exec
+	// (and its .git) is owned by whoever ran the factory, not by the container's exec
 	// user. git's dubious-ownership guard then refuses to operate on it, silently
 	// breaking `go build`'s VCS stamping and the in-sandbox candidate commit. Chowning
 	// the tree to the container user fixes the owner mismatch at its cause, so the image
@@ -543,7 +543,7 @@ func (b *cappedBuffer) String() string {
 // runner later pushes via the broker. --no-hardlinks keeps the temp copy independent
 // of a local source repo so removing it never touches the original's objects.
 func defaultPrepareWorktree(ctx context.Context, ws Workspace) (string, func(), error) {
-	dir, err := os.MkdirTemp("", "harness-seed-")
+	dir, err := os.MkdirTemp("", "factory-seed-")
 	if err != nil {
 		return "", nil, err
 	}
@@ -578,7 +578,7 @@ func containerName() (string, error) {
 	if _, err := rand.Read(b[:]); err != nil {
 		return "", fmt.Errorf("sandbox: generate container name: %w", err)
 	}
-	return "harness-sbx-" + hex.EncodeToString(b[:]), nil
+	return "factory-sbx-" + hex.EncodeToString(b[:]), nil
 }
 
 // parseQuantity converts a k8s-style memory quantity (the form config uses, e.g.

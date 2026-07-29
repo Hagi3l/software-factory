@@ -150,7 +150,7 @@ templ activityBadge(kind string) {
 }
 
 // ActivityMessage renders the activity chrome with a single notice instead of the feed —
-// used when the control room is not attached to a running factory (a standalone `harness
+// used when the control room is not attached to a running factory (a standalone `factory
 // serve` has no NATS to tail, so there is no live source).
 templ ActivityMessage(msg string) {
 	@Layout("Harness — Activity", "activity") {

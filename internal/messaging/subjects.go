@@ -2,7 +2,7 @@ package messaging
 
 import "strings"
 
-// Subject taxonomy for all harness NATS traffic. Subjects are built through these
+// Subject taxonomy for all factory NATS traffic. Subjects are built through these
 // helpers and constants so the taxonomy lives in exactly one place and is never
 // hand-typed at call sites; see specs/messaging.md for the contract.
 //
