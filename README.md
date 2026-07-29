@@ -45,6 +45,13 @@ invariants:
 Every merged commit carries a provenance trailer: issue → soul → model → prompt →
 evidence.
 
+The pipeline is configuration, not code: stages, souls, gate checks, budgets, and
+sandbox images are all declared in `config/` — a check is any command with an exit
+code, so the machinery itself is language-agnostic. The shipped configs target Go
+(a `go-toolchain` sandbox image, structured findings for `go test`/gosec/
+govulncheck/golangci-lint); another ecosystem is a new image and check set, not a
+fork.
+
 ## Quick start
 
 Requires Go (see `go.mod` for the version). The binary is self-contained — the web UI
@@ -83,8 +90,9 @@ the right fix is to update the spec.
 
 ## Status
 
-**It works, end to end.** The vault demo ([`demo/vault`](demo/vault/README.md)) has
-run the whole loop live: agents planned a feature, authored its tests, implemented
+**It works, end to end.** The vault demo ([`demo/vault`](demo/vault/README.md)) —
+one configuration of the harness, not its purpose — has run the whole loop live:
+agents planned a feature, authored its tests, implemented
 against them, passed an independent security/QA gate in a fresh sandbox, and the
 trusted layer merged the result into a real Go web app — with every commit carrying
 its full provenance trail.

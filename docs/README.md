@@ -37,6 +37,10 @@ specs are the truth — and term definitions live in
 - **Budgets + retry caps** are the termination guarantee. Work that exhausts them, or
   that an agent escalates, **dead-letters** for a human — who responds by refining the
   spec, never by editing code.
+- **The pipeline is configuration, not code.** Stages, souls, checks, budgets, and
+  sandbox images are all declared in [`config/`](configuration.md); a check is any
+  command with an exit code. The shipped configs target Go — supporting another
+  ecosystem means a new sandbox image and check set, not a fork.
 
 ## What you can do today
 
