@@ -7,10 +7,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/checkfindings"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/model"
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/checkfindings"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/model"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // run_gate is the implementor's *full* pre-submit self-check — the producer self-check

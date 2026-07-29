@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // Method names a brokered call. The set is closed and deny-by-default: the server

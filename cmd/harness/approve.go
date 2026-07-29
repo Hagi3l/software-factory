@@ -11,9 +11,9 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/Loxstomper/harness/internal/beads"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/messaging"
+	"github.com/Loxstomper/software-factory/internal/beads"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/messaging"
 )
 
 // cmdApprove and cmdReject are the human's approval levers for the trusted-dev / TCB-review

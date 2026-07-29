@@ -10,7 +10,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // ValidationError is the result of a failed Validate: the complete list of problems

@@ -8,7 +8,7 @@ package views
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "github.com/Loxstomper/harness/internal/controlroom/live"
+import "github.com/Loxstomper/software-factory/internal/controlroom/live"
 
 // ActivityPage renders the live activity feed inside the standard layout. The feed is
 // "what the agents and the factory are doing right now" (specs/control-room.md, T4.5):

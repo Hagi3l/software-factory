@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/broker"
 )
 
 // DefaultTimeout bounds one package-proxy egress round-trip; together with MaxBytes it

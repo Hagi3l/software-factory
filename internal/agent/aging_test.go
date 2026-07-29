@@ -7,7 +7,7 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // agingHistory synthesizes a loop-shaped conversation: the Brief as the opening user

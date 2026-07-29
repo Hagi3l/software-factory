@@ -15,7 +15,7 @@ import (
 	"github.com/anthropics/anthropic-sdk-go/option"
 	"github.com/anthropics/anthropic-sdk-go/shared"
 
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // defaultMaxTokens is used when a Request leaves MaxTokens unset. The Anthropic API

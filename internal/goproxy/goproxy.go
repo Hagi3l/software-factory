@@ -21,7 +21,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/Loxstomper/harness/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/broker"
 )
 
 // Fetcher is the single broker call the shim makes for each module-proxy request.

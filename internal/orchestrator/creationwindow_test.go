@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // windowBeads models bd.Apply's NON-ATOMIC two-phase write so a test can drive the creation window

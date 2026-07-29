@@ -10,9 +10,9 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/gate"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/gate"
 )
 
 // statusInProgress is the beads status an issue holds while a runner owns it. The

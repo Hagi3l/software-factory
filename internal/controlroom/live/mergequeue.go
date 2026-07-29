@@ -3,7 +3,7 @@ package live
 import (
 	"sync"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // MergeQueue is a bounded, concurrent-safe record of the serialized merge train's current

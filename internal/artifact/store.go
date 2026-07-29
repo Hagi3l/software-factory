@@ -9,8 +9,8 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // HashAlgorithm is the content-address digest. SHA-256 is the single algorithm

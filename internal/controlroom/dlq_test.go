@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/controlroom/query"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // dlqServer fronts a Server whose read model holds a mix of blocked and non-blocked issues,

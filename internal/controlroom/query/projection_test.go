@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // fakeGraph is a fake WorkGraphSnapshot — the orchestrator's work-graph projection seam.

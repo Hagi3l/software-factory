@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // --- fakes for the three ports ---

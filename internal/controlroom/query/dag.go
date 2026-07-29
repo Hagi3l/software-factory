@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/Loxstomper/harness/internal/controlroom/dag"
+	"github.com/Loxstomper/software-factory/internal/controlroom/dag"
 )
 
 // DAG builds the issue-dependency-graph projection for the control room's DAG view

@@ -12,12 +12,12 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/artifact"
-	"github.com/Loxstomper/harness/internal/beads"
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/controlroom/wizard"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/spec"
+	"github.com/Loxstomper/software-factory/internal/artifact"
+	"github.com/Loxstomper/software-factory/internal/beads"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/controlroom/wizard"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/spec"
 )
 
 // wizardSeeder is the composition-root implementation of wizard.Seeder (T4.14): the consent-gated

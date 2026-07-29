@@ -14,8 +14,8 @@ import (
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 
-	"github.com/Loxstomper/harness/internal/artifact"
-	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/software-factory/internal/artifact"
+	"github.com/Loxstomper/software-factory/internal/config"
 )
 
 // --- Integration test: real MinIO in Docker, skipped when unavailable ---

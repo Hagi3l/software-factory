@@ -113,7 +113,7 @@ govulncheck:
 ## only mean a dependency's licence, never a finding about the repo itself.
 ## THIRD_PARTY_NOTICES.md records those dependencies and their licences for humans.
 license-scan:
-	go-licenses check --ignore github.com/Loxstomper/harness ./...
+	go-licenses check --ignore github.com/Loxstomper/software-factory ./...
 
 ## mutation: print the mutation score (0..1) the `mutation>=0.8` gate grades. The gate
 ## reads the trailing numeric token of stdout, so emit only the score last and fail

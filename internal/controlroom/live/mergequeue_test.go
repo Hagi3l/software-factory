@@ -4,7 +4,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // TestMergeQueueLatestWinsKeepsPosition proves a candidate advancing through steps updates in

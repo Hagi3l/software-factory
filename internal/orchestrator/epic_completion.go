@@ -4,7 +4,7 @@ import (
 	"context"
 	"sort"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // sweepEpicCompletion detects drained epics and lands each one atomically (T7.4,

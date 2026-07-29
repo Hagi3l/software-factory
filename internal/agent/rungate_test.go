@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // gosecJSON is a canned `gosec -fmt=json` report with one finding — the scanner output whose

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // testConfigDir is the shipped bootstrap config, relative to this package dir.

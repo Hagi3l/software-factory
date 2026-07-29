@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/controlroom/wizard"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/controlroom/wizard"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // Resolve commits a Resolve-mode draft (T4.15, specs/control-room.md "Create and Resolve are the

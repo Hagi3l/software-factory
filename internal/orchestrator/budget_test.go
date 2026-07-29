@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/gate"
-	"github.com/Loxstomper/harness/internal/messaging"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/gate"
+	"github.com/Loxstomper/software-factory/internal/messaging"
 )
 
 // costedConfig is kernelConfig wired with a priced model so a failure-routing test can

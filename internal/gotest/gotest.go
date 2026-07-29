@@ -32,7 +32,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // testEvent mirrors the `go test -json` (cmd/test2json) event shape. Only the fields we

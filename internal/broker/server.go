@@ -8,7 +8,7 @@ import (
 	"net"
 	"os"
 
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // Handler performs the brokered calls. The broker package owns the protocol — the

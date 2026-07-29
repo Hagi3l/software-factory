@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 func TestMatchGlob(t *testing.T) {

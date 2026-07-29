@@ -3,9 +3,9 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/gate"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/gate"
 )
 
 // TestModelTierResolvedPerIssue is the T3.4 contract guard: the model an invocation runs

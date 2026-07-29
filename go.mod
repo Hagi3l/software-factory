@@ -1,4 +1,4 @@
-module github.com/Loxstomper/harness
+module github.com/Loxstomper/software-factory
 
 go 1.26
 

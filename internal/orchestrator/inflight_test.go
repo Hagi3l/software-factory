@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/gate"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/gate"
 )
 
 // testLease returns a far-future lease for seeding the in-flight projection directly in tests.

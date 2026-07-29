@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/spec"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/spec"
 )
 
 // recompileSpecDelta is the orchestrator's response to a spec edit — "the factory recompiles

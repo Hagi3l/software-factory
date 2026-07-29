@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // validConfig returns a sound configuration mirroring the canonical specs example,

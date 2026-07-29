@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/gate"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/gate"
 )
 
 func TestFailingFindings(t *testing.T) {

@@ -1,6 +1,6 @@
 package agent
 
-import "github.com/Loxstomper/harness/internal/config"
+import "github.com/Loxstomper/software-factory/internal/config"
 
 // BudgetFromPolicy derives a per-invocation Budget from the operator's termination
 // policy (harness.yaml). It is the single source of truth for translating config

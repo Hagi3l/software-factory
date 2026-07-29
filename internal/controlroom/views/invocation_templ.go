@@ -11,8 +11,8 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"strconv"
 
-	"github.com/Loxstomper/harness/internal/controlroom/live"
-	"github.com/Loxstomper/harness/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/controlroom/live"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
 )
 
 // InvocationPage is the live-invocation view (T4.21): a scoped activity feed for one

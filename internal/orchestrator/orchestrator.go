@@ -11,11 +11,11 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/gate"
-	"github.com/Loxstomper/harness/internal/messaging"
-	"github.com/Loxstomper/harness/internal/telemetry"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/gate"
+	"github.com/Loxstomper/software-factory/internal/messaging"
+	"github.com/Loxstomper/software-factory/internal/telemetry"
 )
 
 // defaultTick is how often the orchestrator runs a schedule + sweep pass when no

@@ -17,8 +17,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // IssueReader is the beads read surface the control room needs (a subset of

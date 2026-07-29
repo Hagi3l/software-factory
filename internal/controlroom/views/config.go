@@ -3,7 +3,7 @@ package views
 import (
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/controlroom/configview"
+	"github.com/Loxstomper/software-factory/internal/controlroom/configview"
 )
 
 // joinList renders a string slice as a comma-separated line for a table cell. It is a plain

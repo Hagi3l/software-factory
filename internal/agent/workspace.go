@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/model"
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/model"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // maxToolOutput caps the bytes a workspace tool feeds back to the model. A `run` of a

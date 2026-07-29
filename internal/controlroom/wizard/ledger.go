@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // The alignment ledger (T4.13/T4.27, specs/control-room.md "The alignment ledger") is a

@@ -5,10 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/checkfindings"
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/checkfindings"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // A failing test, in go test -json form on stdout — the machine-readable output the gate's

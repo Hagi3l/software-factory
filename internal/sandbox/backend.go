@@ -3,7 +3,7 @@ package sandbox
 import (
 	"fmt"
 
-	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/software-factory/internal/config"
 )
 
 // gvisorRuntime is the OCI runtime name gVisor registers with Docker/containerd

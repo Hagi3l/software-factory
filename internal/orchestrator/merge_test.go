@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // testProvenance is a representative provenance record for merger tests.

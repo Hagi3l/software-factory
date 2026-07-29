@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/software-factory/internal/config"
 )
 
 // BudgetFromPolicy maps only the per-issue token budget onto the per-invocation cap;

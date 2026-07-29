@@ -11,7 +11,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // errRebaseConflict signals that a verified candidate could not be cleanly rebased onto

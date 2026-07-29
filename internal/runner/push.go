@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/secret"
+	"github.com/Loxstomper/software-factory/internal/secret"
 )
 
 // revokeTimeout bounds the best-effort revoke of a push token after the push completes. It

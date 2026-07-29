@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // setRoleModel points every soul fulfilling a role at a model, by role rather than slice

@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/messaging"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/messaging"
 )
 
 // TestTransitionAnnouncesEachKind proves the single transition choke point publishes a typed

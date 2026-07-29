@@ -34,10 +34,10 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/controlroom/live"
-	"github.com/Loxstomper/harness/internal/model"
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/controlroom/live"
+	"github.com/Loxstomper/software-factory/internal/model"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // SSE event names the wizard broadcasts on a session's hub. The view binds to both: a

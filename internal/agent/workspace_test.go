@@ -8,7 +8,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // scriptedSandbox routes each Exec to a responder keyed off the command, recording every

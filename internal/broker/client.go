@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"net"
 
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // Client is the agent side of the broker, used from inside the sandbox. It dials the

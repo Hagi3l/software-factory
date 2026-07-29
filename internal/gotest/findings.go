@@ -5,7 +5,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // locRE matches the `foo_test.go:42:` location prefix Go prints on a t.Error/t.Fatal line

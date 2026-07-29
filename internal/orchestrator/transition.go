@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/messaging"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/messaging"
 )
 
 // statusOpen is the beads status of a ready (dispatchable) issue. It is the target of the two

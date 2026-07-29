@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // sampleConfig is a representative validated config: the shipped-style role-flow DAG, a check

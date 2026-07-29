@@ -11,9 +11,9 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/sandbox"
-	"github.com/Loxstomper/harness/internal/telemetry"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/telemetry"
 )
 
 // A reached verdict must emit exactly one gate-run span (carrying the pass/fail outcome,

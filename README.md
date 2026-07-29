@@ -1,6 +1,6 @@
-# Harness
+# Software Factory
 
-**A secure, autonomous software factory.** Humans author specifications; a fleet of
+**Secure and autonomous.** Humans author specifications; a fleet of
 ephemeral, sandboxed LLM agents plans, writes tests, implements, verifies, and
 integrates the change; the terminal state is code **merged to `main`**. Humans never
 read or write the code — when work fails, they refine the spec.

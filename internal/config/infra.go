@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // Infra is infra.<env>.yaml: the environment-specific overlay — sandbox backend,

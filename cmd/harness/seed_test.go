@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/beads"
+	"github.com/Loxstomper/software-factory/internal/beads"
 )
 
 // TestEnsureSpec covers the spec-authoring half of seed: it writes a starter from

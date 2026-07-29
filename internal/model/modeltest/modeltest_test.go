@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/model"
-	"github.com/Loxstomper/harness/internal/model/modeltest"
-	"github.com/Loxstomper/harness/internal/model/registry"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/model"
+	"github.com/Loxstomper/software-factory/internal/model/modeltest"
+	"github.com/Loxstomper/software-factory/internal/model/registry"
 )
 
 // TestServerDrivesRealAdapter is the wire-contract check: the fake server is consumed

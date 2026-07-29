@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"strconv"
 
-	"github.com/Loxstomper/harness/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
 )
 
 // ReplayPage is the invocation replay view (specs/observability.md, "Replayability — the

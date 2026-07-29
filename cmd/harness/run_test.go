@@ -9,7 +9,7 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/Loxstomper/harness/internal/messaging"
+	"github.com/Loxstomper/software-factory/internal/messaging"
 )
 
 // TestBuildRunComponents exercises the composition root: it assembles the full

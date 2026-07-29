@@ -8,9 +8,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // TestGateIntegration drives the gate against a real docker sandbox + git checkout.

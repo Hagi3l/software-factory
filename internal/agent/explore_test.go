@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/broker"
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // TestReadOnlyToolsMatchConfigNames is the anti-drift guard between the runtime read-only tool

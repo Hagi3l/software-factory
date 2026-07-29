@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // TestCommandCheckCommands proves the self-check command set resolves the gate's command

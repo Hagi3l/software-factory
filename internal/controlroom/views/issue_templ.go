@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"strconv"
 
-	"github.com/Loxstomper/harness/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
 )
 
 // IssueDetailPage is the issue / invocation detail view (specs/control-room.md, T4.7): the

@@ -8,7 +8,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/Loxstomper/harness/internal/controlroom"
+	"github.com/Loxstomper/software-factory/internal/controlroom"
 )
 
 // cmdServe starts the control room web server (specs/control-room.md) — the human's

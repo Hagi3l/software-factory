@@ -7,7 +7,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // The draft (T4.14, specs/control-room.md "The wizard") is the second structured artifact

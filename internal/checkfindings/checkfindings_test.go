@@ -3,7 +3,7 @@ package checkfindings
 import (
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 const goTestJSONFail = `{"Action":"run","Package":"x","Test":"TestAdd"}

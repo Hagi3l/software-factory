@@ -3,7 +3,7 @@ package scanners
 import (
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // license-scan is `go-licenses check` (the kernel's configured command). Unlike the other

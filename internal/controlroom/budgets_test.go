@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/controlroom/query"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // recentProv is a query.ProvenanceReader that returns a fixed merged-commit history, so the

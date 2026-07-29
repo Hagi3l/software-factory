@@ -1,8 +1,8 @@
 package gate
 
 import (
-	"github.com/Loxstomper/harness/internal/checkfindings"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/checkfindings"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // adapterFor returns the per-tool finding parser for a check, or nil when no kernel adapter

@@ -13,7 +13,7 @@ import (
 	"os/exec"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // e2eDockerImage is the sandbox profile (image) the Docker variant boots. It must have

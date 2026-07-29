@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/sandbox"
-	"github.com/Loxstomper/harness/internal/sandbox/lsmanifest"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/sandbox/lsmanifest"
 )
 
 const goManifest = `{"version":1,"servers":[{"languageId":"go","extensions":[".go"],"command":["gopls","serve"],"rootMarkers":["go.mod"]}]}`

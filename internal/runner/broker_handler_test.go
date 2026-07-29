@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/broker"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/model"
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/model"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // --- relay fakes -------------------------------------------------------------

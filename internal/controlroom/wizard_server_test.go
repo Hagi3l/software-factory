@@ -14,9 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/controlroom/wizard"
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/controlroom/wizard"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // scriptedAdapter is a trivial model.Adapter for the wizard server tests: it streams one fixed

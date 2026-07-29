@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/controlroom/live"
-	"github.com/Loxstomper/harness/internal/controlroom/query"
-	"github.com/Loxstomper/harness/internal/controlroom/views"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/controlroom/live"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/controlroom/views"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // newTestServer builds a Server fronted by httptest, exercising the real routed handler

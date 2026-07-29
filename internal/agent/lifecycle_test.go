@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/broker"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // recordingBroker captures GitPush calls and returns a configured result/error.

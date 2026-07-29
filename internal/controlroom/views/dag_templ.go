@@ -9,7 +9,7 @@ import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
 import (
-	"github.com/Loxstomper/harness/internal/controlroom/dag"
+	"github.com/Loxstomper/software-factory/internal/controlroom/dag"
 )
 
 // DAGPage is the issue-dependency-graph view (specs/control-room.md, "DAG", T4.6): the

@@ -3,7 +3,7 @@ package agent
 import (
 	"sync"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // TransformLedger accumulates the transformation records the semantic write tools emit

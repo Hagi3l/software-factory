@@ -16,10 +16,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/model"
-	"github.com/Loxstomper/harness/internal/model/anthropic"
-	"github.com/Loxstomper/harness/internal/model/openai"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/model"
+	"github.com/Loxstomper/software-factory/internal/model/anthropic"
+	"github.com/Loxstomper/software-factory/internal/model/openai"
 
 	anthropicopt "github.com/anthropics/anthropic-sdk-go/option"
 	openaiopt "github.com/openai/openai-go/v3/option"

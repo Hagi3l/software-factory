@@ -3,8 +3,8 @@ package orchestrator
 import (
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/gate"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/gate"
 )
 
 // A passed check whose evidence was persisted is cited as name@<hash> in the trailer,

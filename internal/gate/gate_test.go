@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/artifact"
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/artifact"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // testStore is a real content-addressed files store rooted in a temp dir, so the gate

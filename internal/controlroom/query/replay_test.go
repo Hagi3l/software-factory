@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // mustTranscript marshals turns the way the runner's relay harvests them, so the test feeds

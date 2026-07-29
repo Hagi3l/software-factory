@@ -10,9 +10,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/lsp"
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/lsp"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // TestSessionsRealGopls drives the session manager against a REAL gopls inside the

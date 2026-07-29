@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/controlroom/wizard"
+	"github.com/Loxstomper/software-factory/internal/controlroom/wizard"
 )
 
 // TestNewResolveGroundsAndOpens proves Resolve mode (T4.15): NewResolve records the dead-lettered

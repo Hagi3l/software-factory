@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 func mustJSON(t *testing.T, v any) string {

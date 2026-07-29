@@ -8,9 +8,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/broker"
-	"github.com/Loxstomper/harness/internal/sandbox"
-	"github.com/Loxstomper/harness/internal/secret"
+	"github.com/Loxstomper/software-factory/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/secret"
 )
 
 // execOK builds a successful bundle-extraction ExecResult carrying the given stdout bytes.

@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/controlroom/dag"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/controlroom/dag"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 func TestDAGMapsDependsOnToEdges(t *testing.T) {

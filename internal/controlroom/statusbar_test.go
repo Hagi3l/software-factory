@@ -6,9 +6,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/controlroom/live"
-	"github.com/Loxstomper/harness/internal/controlroom/query"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/controlroom/live"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // TestStatusBarFragment renders the live status-bar fragment off a read model: the bare fragment

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // semanticToolByName builds the semantic read tools over the given Sessions and returns the

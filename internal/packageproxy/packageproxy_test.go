@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/broker"
 )
 
 func TestFetchProxiesPathAndEchoesBody(t *testing.T) {

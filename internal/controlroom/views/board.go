@@ -8,7 +8,7 @@ import (
 
 	"github.com/a-h/templ"
 
-	"github.com/Loxstomper/harness/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
 )
 
 // cardVTName builds the per-card view-transition-name (T4.18, control-room.md "The board, in

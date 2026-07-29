@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // TestMergeQueueEnrichesAndFlags proves MergeQueue joins each merge-state event to its beads

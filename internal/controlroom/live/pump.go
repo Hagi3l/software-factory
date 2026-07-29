@@ -5,8 +5,8 @@ import (
 
 	"github.com/nats-io/nats.go"
 
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/messaging"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/messaging"
 )
 
 // AgentEvent is the activity-feed datum a tailed agent event becomes: which invocation

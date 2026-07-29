@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // --- Unit tests: argument shape and control flow via the run seam ---

@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // closedEpicIssue is a closed issue of feat-1 (the root folds in via EpicID == "" → its own id).

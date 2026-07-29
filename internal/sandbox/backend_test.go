@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/software-factory/internal/config"
 )
 
 // The gVisor backend boots the container under the runsc runtime: the `docker run` argv

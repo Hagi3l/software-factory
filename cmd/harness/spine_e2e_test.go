@@ -19,10 +19,10 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/Loxstomper/harness/internal/beads"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/model/modeltest"
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/beads"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/model/modeltest"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // TestSpineE2ELocal drives the whole kernel — spec → implement → gate → merge — in one

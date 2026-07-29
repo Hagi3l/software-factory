@@ -1,8 +1,8 @@
 package orchestrator
 
 import (
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // epicBranch is the short branch name an epic's children integrate onto: epic/<epic_id>. It is

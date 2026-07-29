@@ -1,8 +1,8 @@
 package orchestrator
 
 import (
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/gate"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/gate"
 )
 
 // harness identity stamped on the trusted provenance commit. Generated code is authored

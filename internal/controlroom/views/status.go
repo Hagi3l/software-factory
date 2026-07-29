@@ -1,6 +1,6 @@
 package views
 
-import "github.com/Loxstomper/harness/internal/controlroom/query"
+import "github.com/Loxstomper/software-factory/internal/controlroom/query"
 
 // healthTitle is the budget-health dot's tooltip — kept in plain Go (not the .templ) because it
 // is text, never a class literal: only the tint classes need to live in the .templ for the

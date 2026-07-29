@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // TestGitMergerIntegration drives the real git binary through the serialized merge queue:

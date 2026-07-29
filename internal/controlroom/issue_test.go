@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/controlroom/query"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // The detail view stitches all three stores, so its fakes are richer than the board's:

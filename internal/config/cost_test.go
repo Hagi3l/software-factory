@@ -3,7 +3,7 @@ package config
 import (
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // TestModelCostUSD pins the tokens→USD conversion the orchestrator enforces the dollar

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/controlroom/live"
+	"github.com/Loxstomper/software-factory/internal/controlroom/live"
 )
 
 // bridgeLogger wires a LogBridge over a buffer-backed base handler and returns the

@@ -26,13 +26,13 @@ import (
 
 	"github.com/a-h/templ"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/controlroom/assets"
-	"github.com/Loxstomper/harness/internal/controlroom/configview"
-	"github.com/Loxstomper/harness/internal/controlroom/live"
-	"github.com/Loxstomper/harness/internal/controlroom/query"
-	"github.com/Loxstomper/harness/internal/controlroom/views"
-	"github.com/Loxstomper/harness/internal/controlroom/wizard"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/controlroom/assets"
+	"github.com/Loxstomper/software-factory/internal/controlroom/configview"
+	"github.com/Loxstomper/software-factory/internal/controlroom/live"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/controlroom/views"
+	"github.com/Loxstomper/software-factory/internal/controlroom/wizard"
 )
 
 // sseHeartbeat is the idle interval at which an open SSE stream gets a comment line, to

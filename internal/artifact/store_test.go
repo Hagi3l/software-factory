@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/artifact"
-	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/software-factory/internal/artifact"
+	"github.com/Loxstomper/software-factory/internal/config"
 )
 
 func TestOpen(t *testing.T) {

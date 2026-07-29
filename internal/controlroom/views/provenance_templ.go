@@ -8,7 +8,7 @@ package views
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-import "github.com/Loxstomper/harness/internal/controlroom/query"
+import "github.com/Loxstomper/software-factory/internal/controlroom/query"
 
 // ProvenancePage is the provenance view (specs/control-room.md, T4.10): every merged
 // integration commit traced back along its chain — commit → issue → soul → model → prompt →

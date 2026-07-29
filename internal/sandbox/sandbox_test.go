@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/software-factory/internal/config"
 )
 
 func validSpec() Spec {

@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // inflightProjection is the orchestrator's volatile, in-memory **work-graph projection**: the

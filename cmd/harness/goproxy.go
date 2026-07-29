@@ -13,8 +13,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/broker"
-	"github.com/Loxstomper/harness/internal/goproxy"
+	"github.com/Loxstomper/software-factory/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/goproxy"
 )
 
 // cmdSandboxGoproxy runs the in-sandbox GOPROXY shim (T5.6). Unlike the operator-facing

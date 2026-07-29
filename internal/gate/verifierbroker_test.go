@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/broker"
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // serveVerifier binds a temp unix socket, serves r.verifierBroker() on it, and returns a

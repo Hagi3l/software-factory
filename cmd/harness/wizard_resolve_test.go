@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/artifact"
-	"github.com/Loxstomper/harness/internal/beads"
-	"github.com/Loxstomper/harness/internal/controlroom/wizard"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/artifact"
+	"github.com/Loxstomper/software-factory/internal/beads"
+	"github.com/Loxstomper/software-factory/internal/controlroom/wizard"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // validResolveRequest is a well-formed Resolve draft: one refined spec, no broken links, no seed

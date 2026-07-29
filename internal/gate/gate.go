@@ -16,14 +16,14 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/Loxstomper/harness/internal/artifact"
-	"github.com/Loxstomper/harness/internal/broker"
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/model"
-	"github.com/Loxstomper/harness/internal/packageproxy"
-	"github.com/Loxstomper/harness/internal/sandbox"
-	"github.com/Loxstomper/harness/internal/telemetry"
+	"github.com/Loxstomper/software-factory/internal/artifact"
+	"github.com/Loxstomper/software-factory/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/model"
+	"github.com/Loxstomper/software-factory/internal/packageproxy"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/telemetry"
 )
 
 // teardownTimeout bounds the reap of the verification sandbox. Teardown runs on a

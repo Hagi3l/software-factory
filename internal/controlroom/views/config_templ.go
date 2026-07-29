@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"strconv"
 
-	"github.com/Loxstomper/harness/internal/controlroom/configview"
+	"github.com/Loxstomper/software-factory/internal/controlroom/configview"
 )
 
 // ConfigPage is the Config view (specs/control-room.md, "The config view", T4.26): the

@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/artifact"
+	"github.com/Loxstomper/software-factory/internal/artifact"
 )
 
 func newStore(t *testing.T) (*artifact.FilesStore, string) {

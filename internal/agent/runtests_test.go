@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
 )
 
 // failJSON is a canned `go test -json` stream for one failing test, with the jitter

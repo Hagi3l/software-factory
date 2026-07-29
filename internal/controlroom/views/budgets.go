@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
 )
 
 // These are text helpers for the budgets view — number/duration/cap formatting only, never

@@ -3,7 +3,7 @@ package views
 import (
 	"strconv"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // checkKindLabel renders a gate-check kind as a human phrase. The serialized kinds

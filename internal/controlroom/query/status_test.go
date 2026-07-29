@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // Status derives the layout bar from a single Budgets read: queue depth (issues neither

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // Harness is harness.yaml: the workflow DAG plus the termination policy. It changes

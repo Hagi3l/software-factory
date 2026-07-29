@@ -7,7 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/broker"
 )
 
 // fakeFetcher records the forwarded request and returns a canned broker result/error,

@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // MetadataKeyRole is the beads metadata key under which an issue's harness role

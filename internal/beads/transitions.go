@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // MetadataKeyLease is the beads metadata key holding an in_progress issue's lease

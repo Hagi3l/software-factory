@@ -9,9 +9,9 @@
 package checkfindings
 
 import (
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/gotest"
-	"github.com/Loxstomper/harness/internal/scanners"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/gotest"
+	"github.com/Loxstomper/software-factory/internal/scanners"
 )
 
 // The kernel's canonical scanner check names — the registry keys whose commands the kernel

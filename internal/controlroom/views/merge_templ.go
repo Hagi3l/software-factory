@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"strconv"
 
-	"github.com/Loxstomper/harness/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
 )
 
 // MergeQueuePage is the merge-queue view (specs/control-room.md "The merge-queue view", T4.25):

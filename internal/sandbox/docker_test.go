@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/software-factory/internal/config"
 )
 
 // --- Unit tests: arg shapes and control flow via injected seams (no docker/git) ---

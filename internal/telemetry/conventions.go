@@ -12,7 +12,7 @@ package telemetry
 
 // ScopeName is the instrumentation scope every harness span and metric is emitted
 // under, so a trace backend can attribute them to this codebase.
-const ScopeName = "github.com/Loxstomper/harness"
+const ScopeName = "github.com/Loxstomper/software-factory"
 
 // Span names. An invocation is one trace (specs/observability.md, "an invocation is a
 // trace"): the runner opens SpanInvocation as the root, SpanBoot covers sandbox

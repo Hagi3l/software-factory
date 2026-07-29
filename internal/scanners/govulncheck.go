@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // govulncheck `-json` is not one document but a stream of concatenated JSON messages, each

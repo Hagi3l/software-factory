@@ -9,12 +9,12 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/broker"
-	"github.com/Loxstomper/harness/internal/core"
-	"github.com/Loxstomper/harness/internal/model"
-	"github.com/Loxstomper/harness/internal/runner"
-	"github.com/Loxstomper/harness/internal/sandbox"
-	"github.com/Loxstomper/harness/internal/telemetry"
+	"github.com/Loxstomper/software-factory/internal/broker"
+	"github.com/Loxstomper/software-factory/internal/core"
+	"github.com/Loxstomper/software-factory/internal/model"
+	"github.com/Loxstomper/software-factory/internal/runner"
+	"github.com/Loxstomper/software-factory/internal/sandbox"
+	"github.com/Loxstomper/software-factory/internal/telemetry"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 )

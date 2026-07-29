@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/config"
+	"github.com/Loxstomper/software-factory/internal/config"
 )
 
 // Backend creates sandboxes. Which backend is used is config, not code

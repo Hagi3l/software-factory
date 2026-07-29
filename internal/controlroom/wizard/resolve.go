@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/controlroom/live"
+	"github.com/Loxstomper/software-factory/internal/controlroom/live"
 )
 
 // ResolveSeed is the grounding the control room hands the wizard when a human opens Resolve

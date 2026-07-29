@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // --- Unit tests: decode/mapping against canned bd output via the run seam ---

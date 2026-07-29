@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // These fixtures mirror the example configs in specs/configuration.md verbatim

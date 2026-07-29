@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/controlroom/live"
+	"github.com/Loxstomper/software-factory/internal/controlroom/live"
 )
 
 // TestActiveAgents_CountsDistinctRecentAgents proves the status bar's "active agents" figure:

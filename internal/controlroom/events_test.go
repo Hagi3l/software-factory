@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/controlroom/live"
+	"github.com/Loxstomper/software-factory/internal/controlroom/live"
 )
 
 // waitFor polls cond until it holds or the deadline passes, failing with msg otherwise.

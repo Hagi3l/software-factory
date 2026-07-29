@@ -11,7 +11,7 @@ import templruntime "github.com/a-h/templ/runtime"
 import (
 	"fmt"
 
-	"github.com/Loxstomper/harness/internal/controlroom/wizard"
+	"github.com/Loxstomper/software-factory/internal/controlroom/wizard"
 )
 
 // CreatePage is the Create-Task wizard (specs/control-room.md "The wizard"): a steered

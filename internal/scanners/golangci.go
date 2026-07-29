@@ -26,7 +26,7 @@ import (
 	"encoding/json"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // golangciReport is the subset of golangci-lint's `--output.json.path stdout` document we

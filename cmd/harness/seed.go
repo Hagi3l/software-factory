@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/Loxstomper/harness/internal/beads"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/beads"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // Errors entryRole returns when the entry stage cannot be inferred. They steer the

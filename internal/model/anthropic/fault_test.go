@@ -9,7 +9,7 @@ import (
 
 	"github.com/anthropics/anthropic-sdk-go/option"
 
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/model"
 )
 
 // Fault classification (T14.2, specs/models.md "Transient provider faults are absorbed

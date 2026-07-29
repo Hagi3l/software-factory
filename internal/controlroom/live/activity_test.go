@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/controlroom/live"
+	"github.com/Loxstomper/software-factory/internal/controlroom/live"
 )
 
 func token(delta string) []byte {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Loxstomper/harness/internal/model"
+	"github.com/Loxstomper/software-factory/internal/model"
 	"github.com/mdlayher/vsock"
 )
 

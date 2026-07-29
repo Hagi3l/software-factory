@@ -4,10 +4,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/config"
-	"github.com/Loxstomper/harness/internal/model/anthropic"
-	"github.com/Loxstomper/harness/internal/model/openai"
-	"github.com/Loxstomper/harness/internal/model/registry"
+	"github.com/Loxstomper/software-factory/internal/config"
+	"github.com/Loxstomper/software-factory/internal/model/anthropic"
+	"github.com/Loxstomper/software-factory/internal/model/openai"
+	"github.com/Loxstomper/software-factory/internal/model/registry"
 )
 
 // TestNewResolvesProviderToAdapterType is the core of the registry: each provider

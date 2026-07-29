@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Loxstomper/harness/internal/controlroom/query"
-	"github.com/Loxstomper/harness/internal/controlroom/wizard"
-	"github.com/Loxstomper/harness/internal/core"
+	"github.com/Loxstomper/software-factory/internal/controlroom/query"
+	"github.com/Loxstomper/software-factory/internal/controlroom/wizard"
+	"github.com/Loxstomper/software-factory/internal/core"
 )
 
 // fakeResolver is a wizard.Resolver stub for the resolve-handler tests: it records the request it
