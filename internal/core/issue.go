@@ -158,7 +158,7 @@ type Issue struct {
 	// CandidateRef is the candidate branch/sha an issue is parked on while awaiting human
 	// approval (the human-approved postcondition; see core.PostconditionHumanApproved). It
 	// is empty for every issue that is not parked, and set by the orchestrator when an
-	// integrate is held for approval: it is the exact candidate a `harness approve` must
+	// integrate is held for approval: it is the exact candidate a `software-factory approve` must
 	// name, and the binding the orchestrator re-checks so a stale approval (the candidate
 	// changed) is invalidated. Like Base it rides in beads metadata; unlike Base it is
 	// written by a status transition (AwaitApproval), not at issue creation, so a fresh or

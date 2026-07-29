@@ -25,7 +25,7 @@
 # safety for real cost savings. Tune per deployment (see specs/models.md, configuration.md).
 #
 # N-version diversity (T2.13): this verifier still resolves to the same *provider*
-# (anthropic) as the implementor, just a cheaper tier — so `harness validate` emits a
+# (anthropic) as the implementor, just a cheaper tier — so `software-factory validate` emits a
 # non-fatal advisory that producer and verifier share a model family (correlated blind
 # spots). The bootstrap accepts this knowingly: anthropic is the only provider wired in
 # dev. Pointing this soul at a different-family model (e.g. an openai-compat local model)

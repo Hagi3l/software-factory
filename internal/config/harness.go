@@ -7,7 +7,7 @@ import (
 	"github.com/Loxstomper/software-factory/internal/core"
 )
 
-// Harness is harness.yaml: the workflow DAG plus the termination policy. It changes
+// Harness is factory.yaml: the workflow DAG plus the termination policy. It changes
 // rarely and is environment-independent — the per-environment knobs live in the
 // infra overlay (see Infra). See specs/configuration.md and specs/workflow.md.
 type Harness struct {
@@ -200,7 +200,7 @@ const (
 	// conflicting candidate onto main and resolves the conflicts, producing a new candidate
 	// that the orchestrator re-verifies in a clean sandbox (producer != verifier) before it
 	// can land. It is entered only on a conflict — never reached through a produces edge —
-	// so it is excluded from the pipeline-entry computation (see cmd/harness entryRole). It
+	// so it is excluded from the pipeline-entry computation (see cmd/software-factory entryRole). It
 	// must declare a postcondition (the suite re-verifying the resolved tree) and produce
 	// the integrate stage to loop back into the merge queue.
 	StageKindResolve = "resolve"
@@ -251,7 +251,7 @@ type Policy struct {
 	MaxRetries int    `yaml:"max_retries"` // max on_failure cycles before dead-lettering
 	Budget     Budget `yaml:"budget"`      // per-issue cumulative cap (tokens/USD/wall across the on_failure loop)
 	EpicBudget Budget `yaml:"epic_budget"` // cumulative tokens/USD cap across a whole epic, enforced as an aggregate read over every issue sharing an epic_id (T3.8b; the wall dimension is per-issue only)
-	DeadLetter string `yaml:"dead_letter"` // subject breached work is dead-lettered to, e.g. "harness.dlq"
+	DeadLetter string `yaml:"dead_letter"` // subject breached work is dead-lettered to, e.g. "factory.dlq"
 
 	// Profile is the autonomy profile: "trusted-dev" (human approval on every integrate) or
 	// "autonomous" (approval only for TCB-touching diffs). Empty defaults to "autonomous",
@@ -319,8 +319,8 @@ type Budget struct {
 // specs/configuration.md `policy.explore_budget`, specs/models.md "Helper souls".
 type ExploreBudget = core.ExploreBudget
 
-// LoadHarness reads and unmarshals harness.yaml. It parses strictly (unknown keys
-// are errors) but does not check DAG legality — that is harness validate's job (see
+// LoadHarness reads and unmarshals factory.yaml. It parses strictly (unknown keys
+// are errors) but does not check DAG legality — that is software-factory validate's job (see
 // specs/configuration.md). A missing file, malformed YAML, or unknown key fails here.
 func LoadHarness(path string) (*Harness, error) {
 	data, err := os.ReadFile(path) // #nosec G304 -- path is an operator-supplied config location, not untrusted agent input.

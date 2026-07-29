@@ -529,7 +529,7 @@ func (o *Orchestrator) advance(ctx context.Context, issue core.Issue, srcStage c
 		// The human-approval gate (T2.10): under trusted-dev every integrate, or under
 		// autonomous a TCB-touching diff, must be approved by a human before it lands. When
 		// approval is required the candidate is PARKED awaiting it (burning no retry) rather
-		// than merged here; a later `harness approve` resumes the merge through the approvals
+		// than merged here; a later `software-factory approve` resumes the merge through the approvals
 		// consumer. An approval cannot already exist for an in_progress issue, so a required
 		// gate always parks on this first pass (see specs/configuration.md, specs/bootstrap.md).
 		required, transient, err := o.approvalRequired(ctx, issue, tstage, res.Branch.Ref)
@@ -1101,4 +1101,4 @@ func (o *Orchestrator) applyTracked(ctx context.Context, proposals []core.Propos
 }
 
 // The dead-letter payload is core.DLQAlert — a single source shared by this write side and
-// the control-room DLQ pump that tails harness.dlq to fire the browser escalation alert (T4.19).
+// the control-room DLQ pump that tails factory.dlq to fire the browser escalation alert (T4.19).

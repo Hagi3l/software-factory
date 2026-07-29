@@ -15,14 +15,14 @@ sandbox:
   # firecracker. The producer and its independent verifier resolve the *same* profile, so
   # the gate grades on the producer's toolchain (producer != verifier, same toolchain). Pin
   # by digest in production so provenance records the exact toolchain bytes; the dev tag here
-  # is built by `deploy/go-toolchain.Dockerfile` (T5.3/T5.6). harness validate fails if any
+  # is built by `deploy/go-toolchain.Dockerfile` (T5.3/T5.6). software-factory validate fails if any
   # soul.sandbox has no entry here for the active backend. See specs/components/sandbox.md.
   profiles:
     go-toolchain:
       image: harness/go-toolchain:dev
 nats:
   # url empty -> the in-process embedded NATS server (the bootstrap/dev shape; expose it on a
-  # TCP listener for `harness approve` with `harness run --nats-addr host:port`). Point url at
+  # TCP listener for `software-factory approve` with `software-factory run --nats-addr host:port`). Point url at
   # an external cluster (e.g. nats://nats-1:4222,nats://nats-2:4222) to run distributed (T5.8)
   # — same code, no rebuild (location transparency). When url is set the embedded server is
   # NOT started and --nats-addr is ignored.
@@ -58,10 +58,10 @@ broker:
 #     app_id: "123456"
 #     installation_id: "7891011"
 #     repository: acme/widgets
-#     private_key: /run/secrets/harness_github_app.pem
+#     private_key: /run/secrets/factory_github_app.pem
 artifacts:
   backend: files
-  path: ./.harness/artifacts
+  path: ./.software-factory/artifacts
 otel:
   endpoint: localhost:4317
 # signing: provenance-commit signing (T5.10). Disabled in dev — commits land unsigned, as
@@ -71,7 +71,7 @@ otel:
 # code signs in production by pointing `key` at a secret-manager/ssh-agent-delivered key.
 # signing:
 #   enabled: true
-#   key: /run/secrets/harness_ed25519
+#   key: /run/secrets/factory_ed25519
 #   allowed_signers: /etc/harness/allowed_signers
 models:
   # Per-role model tiers (T3.4): a soul names its model here; the runner resolves it per

@@ -19,8 +19,8 @@
 set -e
 
 harness sandbox-goproxy \
-  --broker "unix:${HARNESS_BROKER_SOCK:-/run/harness/broker.sock}" \
-  --addr "${HARNESS_GOPROXY_ADDR:-127.0.0.1:8123}" \
+  --broker "unix:${SOFTWARE_FACTORY_BROKER_SOCK:-/run/harness/broker.sock}" \
+  --addr "${SOFTWARE_FACTORY_GOPROXY_ADDR:-127.0.0.1:8123}" \
   >/tmp/harness-goproxy.log 2>&1 &
 
 exec "$@"

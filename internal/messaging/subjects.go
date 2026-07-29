@@ -13,52 +13,52 @@ import "strings"
 const (
 	// SubjectDLQ carries dead-lettered work for human triage. JetStream-backed and
 	// retained until a human handles it (see specs/workflow.md).
-	SubjectDLQ = "harness.dlq"
+	SubjectDLQ = "factory.dlq"
 
-	// SubjectApprovals carries human approve/reject decisions published by `harness approve`
-	// / `harness reject` for the single-writer orchestrator to consume and record. It is
+	// SubjectApprovals carries human approve/reject decisions published by `software-factory approve`
+	// / `software-factory reject` for the single-writer orchestrator to consume and record. It is
 	// JetStream-backed (durable, at-least-once) so a decision survives an orchestrator
 	// restart and is redelivered until acked — the orchestrator's status-gated handling is
 	// idempotent under that redelivery (see specs/configuration.md "human-approval", T2.10).
-	SubjectApprovals = "harness.approvals"
+	SubjectApprovals = "factory.approvals"
 
 	// WorkStreamSubjects matches every per-role work subject; it is the subject
 	// filter for the work stream.
-	WorkStreamSubjects = "harness.work.>"
+	WorkStreamSubjects = "factory.work.>"
 	// ResultStreamSubjects matches every per-role result subject; the subject filter
 	// for the result stream.
-	ResultStreamSubjects = "harness.result.>"
+	ResultStreamSubjects = "factory.result.>"
 
 	// ControlSubjects matches orchestrator control/health subjects (core NATS).
-	ControlSubjects = "harness.control.*"
+	ControlSubjects = "factory.control.*"
 )
 
 // WorkSubject is the JetStream work-queue subject for a role. Runners across hosts
 // compete to pull from the role's consumer, which gives load balancing and
 // horizontal scale by adding runners (see specs/messaging.md).
-func WorkSubject(role string) string { return "harness.work." + role }
+func WorkSubject(role string) string { return "factory.work." + role }
 
 // ResultSubject is the subject an agent's Result envelope for a role flows back on,
 // consumed and validated by the orchestrator.
-func ResultSubject(role string) string { return "harness.result." + role }
+func ResultSubject(role string) string { return "factory.result." + role }
 
 // AgentEventsSubject is the core-NATS subject one invocation publishes progress and
 // log events to; the control room tails it and pushes to browsers over SSE.
 // Best-effort — losing one event is harmless.
-func AgentEventsSubject(agentID string) string { return "harness.agent." + agentID + ".events" }
+func AgentEventsSubject(agentID string) string { return "factory.agent." + agentID + ".events" }
 
 // AgentEventsWildcard matches the event subject of every invocation. The control
 // room subscribes to it once to tail the live activity feed across all agents,
 // rather than per-invocation subscriptions it would have to add and drop as work
 // comes and goes (see specs/control-room.md "Activity feed", specs/messaging.md).
-const AgentEventsWildcard = "harness.agent.*.events"
+const AgentEventsWildcard = "factory.agent.*.events"
 
 // AgentIDFromEventSubject recovers the invocation id from an agent-events subject
 // (the inverse of AgentEventsSubject), returning "" if subj is not a well-formed
 // agent-events subject. The control room uses it to label each tailed event with the
 // agent that emitted it without the publisher having to repeat the id in the payload.
 func AgentIDFromEventSubject(subj string) string {
-	const prefix = "harness.agent."
+	const prefix = "factory.agent."
 	const suffix = ".events"
 	if !strings.HasPrefix(subj, prefix) || !strings.HasSuffix(subj, suffix) {
 		return ""
@@ -79,12 +79,12 @@ func AgentIDFromEventSubject(subj string) string {
 // polling around agent activity. Best-effort core NATS like agent events: losing one is
 // harmless because the views keep a slow periodic backstop that reconverges them (see
 // specs/messaging.md "Issue-state events").
-func IssueStateSubject(issueID string) string { return "harness.issue." + issueID + ".state" }
+func IssueStateSubject(issueID string) string { return "factory.issue." + issueID + ".state" }
 
 // IssueStateWildcard matches the state subject of every issue. The control room subscribes
 // to it once to tail all issue-state transitions, mirroring AgentEventsWildcard, rather than
 // per-issue subscriptions it would have to add and drop as work comes and goes.
-const IssueStateWildcard = "harness.issue.*.state"
+const IssueStateWildcard = "factory.issue.*.state"
 
 // IssueIDFromStateSubject recovers the issue id from an issue-state subject (the inverse of
 // IssueStateSubject), returning "" if subj is not a well-formed issue-state subject. The
@@ -93,7 +93,7 @@ const IssueStateWildcard = "harness.issue.*.state"
 // token in the id position, so an empty id, an embedded separator, or a wildcard token is
 // rejected.
 func IssueIDFromStateSubject(subj string) string {
-	const prefix = "harness.issue."
+	const prefix = "factory.issue."
 	const suffix = ".state"
 	if !strings.HasPrefix(subj, prefix) || !strings.HasSuffix(subj, suffix) {
 		return ""
@@ -113,18 +113,18 @@ func IssueIDFromStateSubject(subj string) string {
 // queue is a separate lifecycle layered over the integrate stage (specs/integration.md "The
 // queue announces itself"). Best-effort core NATS like issue-state: losing one is harmless
 // because the view keeps a periodic backstop that reconverges it.
-func MergeStateSubject(issueID string) string { return "harness.merge." + issueID + ".state" }
+func MergeStateSubject(issueID string) string { return "factory.merge." + issueID + ".state" }
 
 // MergeStateWildcard matches the merge-state subject of every candidate. The control room
 // subscribes to it once to tail all merge-queue transitions, mirroring IssueStateWildcard.
-const MergeStateWildcard = "harness.merge.*.state"
+const MergeStateWildcard = "factory.merge.*.state"
 
 // IssueIDFromMergeSubject recovers the issue id from a merge-state subject (the inverse of
 // MergeStateSubject), returning "" if subj is not a well-formed merge-state subject. It mirrors
 // IssueIDFromStateSubject exactly: a concrete delivered subject has one non-wildcard token in
 // the id position, so an empty id, an embedded separator, or a wildcard token is rejected.
 func IssueIDFromMergeSubject(subj string) string {
-	const prefix = "harness.merge."
+	const prefix = "factory.merge."
 	const suffix = ".state"
 	if !strings.HasPrefix(subj, prefix) || !strings.HasSuffix(subj, suffix) {
 		return ""
@@ -137,5 +137,5 @@ func IssueIDFromMergeSubject(subj string) string {
 }
 
 // ControlSubject is a specific orchestrator control/health subject under
-// harness.control.*.
-func ControlSubject(name string) string { return "harness.control." + name }
+// factory.control.*.
+func ControlSubject(name string) string { return "factory.control." + name }

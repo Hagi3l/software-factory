@@ -12,23 +12,23 @@ import (
 	"github.com/Loxstomper/software-factory/internal/core"
 )
 
-// Config is the fully-loaded configuration: the workflow (harness.yaml), the souls
+// Config is the fully-loaded configuration: the workflow (factory.yaml), the souls
 // (souls/*.yaml), and the environment overlay (infra.<env>.yaml), plus the root
 // directory they were loaded from so persona paths can be resolved. Loading only
-// parses; the startup gate that rejects an illegal DAG is harness validate.
+// parses; the startup gate that rejects an illegal DAG is software-factory validate.
 type Config struct {
 	Root    string      // directory the config was loaded from
-	Harness *Harness    // harness.yaml
+	Harness *Harness    // factory.yaml
 	Souls   []core.Soul // souls/*.yaml, sorted by Name
 	Infra   *Infra      // infra.<env>.yaml
 }
 
 // Load reads the full configuration rooted at dir for the named environment,
-// expecting <dir>/harness.yaml, <dir>/souls/*.yaml, and <dir>/infra.<env>.yaml. It
-// parses but does not validate cross-file references — that is harness validate's
+// expecting <dir>/factory.yaml, <dir>/souls/*.yaml, and <dir>/infra.<env>.yaml. It
+// parses but does not validate cross-file references — that is software-factory validate's
 // job (see specs/configuration.md).
 func Load(dir, env string) (*Config, error) {
-	harness, err := LoadHarness(filepath.Join(dir, "harness.yaml"))
+	harness, err := LoadHarness(filepath.Join(dir, "factory.yaml"))
 	if err != nil {
 		return nil, err
 	}
@@ -45,7 +45,7 @@ func Load(dir, env string) (*Config, error) {
 
 // PersonaPath resolves a soul's declared persona path against the config root.
 // Absolute paths are returned unchanged. The result is the markdown file the agent
-// boots its persona from; harness validate checks it exists.
+// boots its persona from; software-factory validate checks it exists.
 func (c *Config) PersonaPath(s core.Soul) string {
 	if filepath.IsAbs(s.Persona) {
 		return s.Persona

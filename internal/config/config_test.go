@@ -40,7 +40,7 @@ policy:
   max_retries: 3
   budget:      { tokens: 2_000_000, usd: 20, wall: 2h }
   epic_budget: { usd: 200 }
-  dead_letter: harness.dlq
+  dead_letter: factory.dlq
 `
 
 const soulYAML = `
@@ -68,7 +68,7 @@ broker:
   allowlist: [llm-api, nats, package-mirror, git]
 artifacts:
   backend: files
-  path: ./.harness/artifacts
+  path: ./.software-factory/artifacts
 otel:
   endpoint: localhost:4317
 models:
@@ -88,7 +88,7 @@ func writeTree(t *testing.T) string {
 			t.Fatalf("write %s: %v", rel, err)
 		}
 	}
-	write("harness.yaml", harnessYAML)
+	write("factory.yaml", harnessYAML)
 	write(filepath.Join("souls", "implementor-go.yaml"), soulYAML)
 	write(filepath.Join("souls", "prompts", "implementor-go.md"), "# persona\n")
 	write("infra.dev.yaml", infraYAML)
@@ -97,7 +97,7 @@ func writeTree(t *testing.T) string {
 
 func TestLoadHarness(t *testing.T) {
 	dir := writeTree(t)
-	h, err := LoadHarness(filepath.Join(dir, "harness.yaml"))
+	h, err := LoadHarness(filepath.Join(dir, "factory.yaml"))
 	if err != nil {
 		t.Fatalf("LoadHarness: %v", err)
 	}
@@ -173,8 +173,8 @@ func TestLoadHarness(t *testing.T) {
 	if p.EpicBudget.USD != 200 {
 		t.Errorf("epic_budget usd = %v, want 200", p.EpicBudget.USD)
 	}
-	if p.DeadLetter != "harness.dlq" {
-		t.Errorf("dead_letter = %q, want harness.dlq", p.DeadLetter)
+	if p.DeadLetter != "factory.dlq" {
+		t.Errorf("dead_letter = %q, want factory.dlq", p.DeadLetter)
 	}
 }
 
@@ -255,7 +255,7 @@ func TestLoadInfra(t *testing.T) {
 	if want := []string{"llm-api", "nats", "package-mirror", "git"}; !reflect.DeepEqual(in.Broker.Allowlist, want) {
 		t.Errorf("broker allowlist = %v, want %v", in.Broker.Allowlist, want)
 	}
-	if in.Artifacts.Backend != "files" || in.Artifacts.Path != "./.harness/artifacts" {
+	if in.Artifacts.Backend != "files" || in.Artifacts.Path != "./.software-factory/artifacts" {
 		t.Errorf("artifacts = %+v", in.Artifacts)
 	}
 	if in.OTel.Endpoint != "localhost:4317" {
@@ -324,7 +324,7 @@ func TestPersonaPathAbsolute(t *testing.T) {
 // zero-value, which in an autonomous pipeline would fail badly mid-run.
 func TestStrictUnknownKey(t *testing.T) {
 	dir := t.TempDir()
-	bad := filepath.Join(dir, "harness.yaml")
+	bad := filepath.Join(dir, "factory.yaml")
 	if err := os.WriteFile(bad, []byte("dag: {}\npolcy: {}\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -343,10 +343,10 @@ func TestLoadMissingFile(t *testing.T) {
 }
 
 // An empty document is parsed to the zero value without error; completeness checks
-// (e.g. a missing DAG) belong to harness validate, not the loader.
+// (e.g. a missing DAG) belong to software-factory validate, not the loader.
 func TestEmptyDocument(t *testing.T) {
 	dir := t.TempDir()
-	empty := filepath.Join(dir, "harness.yaml")
+	empty := filepath.Join(dir, "factory.yaml")
 	if err := os.WriteFile(empty, []byte(""), 0o644); err != nil {
 		t.Fatal(err)
 	}

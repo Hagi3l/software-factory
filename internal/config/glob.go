@@ -54,7 +54,7 @@ func compileGlob(pattern string) (*regexp.Regexp, error) {
 }
 
 // validateGlob reports whether pattern is a well-formed glob (it compiles). A non-empty
-// pattern that cannot compile is a config fault caught at `harness validate` time.
+// pattern that cannot compile is a config fault caught at `software-factory validate` time.
 func validateGlob(pattern string) bool {
 	_, err := compileGlob(pattern)
 	return err == nil

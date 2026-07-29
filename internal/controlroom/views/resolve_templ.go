@@ -515,7 +515,7 @@ func ResolvePanel(session string, draft wizard.Draft, specs []wizard.SpecFileDif
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<p class=\"border-t border-border pt-3 text-xs text-muted\">Resolve is unavailable here — run the wizard under <code>harness run --serve-addr</code> to refine specs and reopen work.</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 41, "<p class=\"border-t border-border pt-3 text-xs text-muted\">Resolve is unavailable here — run the wizard under <code>software-factory run --serve-addr</code> to refine specs and reopen work.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}

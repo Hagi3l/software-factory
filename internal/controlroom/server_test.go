@@ -102,7 +102,7 @@ func TestNavRoutesResolve(t *testing.T) {
 }
 
 // TestActivityNotAttached proves the activity view degrades gracefully with no live
-// source (standalone `harness serve`): the page renders a notice (200, inside the
+// source (standalone `software-factory serve`): the page renders a notice (200, inside the
 // chrome) and the data fragment answers 503 — never a blank page or a hang.
 func TestActivityNotAttached(t *testing.T) {
 	s := New(Options{})
@@ -161,7 +161,7 @@ func TestActivityRendersFeed(t *testing.T) {
 }
 
 // TestDAGNotAttached proves the DAG view degrades gracefully with no read model (standalone
-// `harness serve`): the page renders a notice (200, inside the chrome) and the SVG fragment
+// `software-factory serve`): the page renders a notice (200, inside the chrome) and the SVG fragment
 // answers 503 — never a blank page or a hang.
 func TestDAGNotAttached(t *testing.T) {
 	s := New(Options{})
@@ -279,7 +279,7 @@ func TestUnknownRoute(t *testing.T) {
 
 // TestListenAndServeGracefulShutdown drives the real socket path: bind an ephemeral port,
 // serve a request, then cancel the context and require a clean (nil) return. This is the
-// `harness serve` lifecycle contract — Ctrl-C is a clean stop.
+// `software-factory serve` lifecycle contract — Ctrl-C is a clean stop.
 func TestListenAndServeGracefulShutdown(t *testing.T) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

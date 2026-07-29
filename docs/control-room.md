@@ -13,10 +13,10 @@ Two ways, with one important difference — **whether there's a live pipeline to
 
 ```bash
 # Co-located with a run — full live data (recommended):
-harness run --serve-addr 127.0.0.1:8080 ...
+software-factory run --serve-addr 127.0.0.1:8080 ...
 
 # Standalone — static + read views only, no live feed:
-harness serve --addr 127.0.0.1:8080
+software-factory serve --addr 127.0.0.1:8080
 ```
 
 Standalone `serve` has no NATS, so the live feed (`GET /events`) returns 503 and the
@@ -36,7 +36,7 @@ Top navigation:
 | **Dead-letter** | `/dlq` | The escalations awaiting a human — the primary *action* surface. Each row shows the triage signals (cumulative spend, retry generation, spec) and the dead-letter reason, and links to the detail page, the verification view, and Resolve mode. An empty queue reads as reassurance, not an error. |
 | **Budgets** | `/budgets` | Per-epic and per-issue burn vs. cap (tokens, USD, wall-clock), tinted by how close to the cap, breaches first. Read off the exact numbers the orchestrator enforces on. Each token total carries a secondary **in/out/cached breakdown** (input · output · prompt-cache tokens) so an operator can see *why* a burn is high — input dominating with no cached tokens is the signature of uncached context re-transmission. The breakdown is display-only and always reconciles to the single token figure the budget meter enforces against. |
 | **Provenance** | `/provenance` | Recent merged commits, each tracing commit → issue → soul → model → prompt → evidence, with the prompt and each passing gate check linking to its raw artifact. When [signing](../specs/security.md) is configured, each commit also carries a **signature verdict** badge — `signed` (verified against the allowed-signers file), `unsigned`, or `unverified` (signed by an unrecognized key) — so the chain's cryptographic integrity is visible at a glance, not just its content. |
-| **Config** | `/config` | The declared factory at rest, **read-only**: the identity strip (config root · active infra overlay · autonomy profile · validated), an **advisories** section (shown only when the config trips one) carrying the same non-fatal warnings [`harness validate`](cli.md) prints at startup — chiefly producer/verifier **model-family overlap** (a same-family producer and verifier share blind spots, weakening the N-version independence [verification.md](../specs/verification.md) recommends), plus a package-proxy / git-remote named but not allowlisted — so the safety signal is visible where the operator inspects the running factory, not only in the launch logs; a clean config shows no section, the **role-flow pipeline** rendered server-side to SVG (stages as nodes — `produces` solid, `on_failure` dashed amber — the *shape* work flows through, distinct from the issue DAG which is the work itself; cross-linked each way), the stages table, the check registry (each check tagged **independent** when the gate keeps running it past a failure to aggregate scanner findings, or **fail-fast** otherwise), the **resolved** soul roster (model→provider+cost, sandbox→concrete digest, ordered by selector specificity with the catch-all marked, plus the trusted non-sandboxed requirements planner), policy (budgets/retries/TCB paths), and **redacted** infra. Each soul (and the requirements planner) carries a lazy **persona** fold — expand it to fetch and view that soul's verbatim system prompt as inert escaped text (the literal prompt the model receives), served from `GET /config/souls/{name}/persona`. Each section also has a "raw" fold showing the *effective config re-serialized with the same redactions applied* (never the file bytes, so raw can't leak what rendered masks). It is the in-process validated config the running factory holds (zero staleness), so it is a plain snapshot — **not** a live feed. A standalone `harness serve` shows the not-attached notice. |
+| **Config** | `/config` | The declared factory at rest, **read-only**: the identity strip (config root · active infra overlay · autonomy profile · validated), an **advisories** section (shown only when the config trips one) carrying the same non-fatal warnings [`software-factory validate`](cli.md) prints at startup — chiefly producer/verifier **model-family overlap** (a same-family producer and verifier share blind spots, weakening the N-version independence [verification.md](../specs/verification.md) recommends), plus a package-proxy / git-remote named but not allowlisted — so the safety signal is visible where the operator inspects the running factory, not only in the launch logs; a clean config shows no section, the **role-flow pipeline** rendered server-side to SVG (stages as nodes — `produces` solid, `on_failure` dashed amber — the *shape* work flows through, distinct from the issue DAG which is the work itself; cross-linked each way), the stages table, the check registry (each check tagged **independent** when the gate keeps running it past a failure to aggregate scanner findings, or **fail-fast** otherwise), the **resolved** soul roster (model→provider+cost, sandbox→concrete digest, ordered by selector specificity with the catch-all marked, plus the trusted non-sandboxed requirements planner), policy (budgets/retries/TCB paths), and **redacted** infra. Each soul (and the requirements planner) carries a lazy **persona** fold — expand it to fetch and view that soul's verbatim system prompt as inert escaped text (the literal prompt the model receives), served from `GET /config/souls/{name}/persona`. Each section also has a "raw" fold showing the *effective config re-serialized with the same redactions applied* (never the file bytes, so raw can't leak what rendered masks). It is the in-process validated config the running factory holds (zero staleness), so it is a plain snapshot — **not** a live feed. A standalone `software-factory serve` shows the not-attached notice. |
 | **Create Task** | `/create` | The wizard — author a new spec and seed work. See below. |
 
 Drill-through pages (not in the nav):
@@ -104,11 +104,11 @@ when co-located, beads when standalone — and the same burn math the Budgets vi
 it agrees with them by construction; it refreshes live off the existing `issue-state` and
 `agent-event` streams (no new stream), with a periodic backstop. *Active agents* is derived
 from the distinct agent ids seen on the live activity buffer within a recent window — no new
-registry. With no read model wired (standalone `harness serve`) it degrades to a neutral
+registry. With no read model wired (standalone `software-factory serve`) it degrades to a neutral
 static bar.
 
 The open-escalation count is also a **push**: the control room tails the durable
-[`harness.dlq`](../specs/messaging.md) subject and fires a **browser notification** when a
+[`factory.dlq`](../specs/messaging.md) subject and fires a **browser notification** when a
 new dead-letter arrives. The dead-letter queue is the human's only action surface, so an
 arrival is the one factory event that should reach an operator who isn't looking —
 everything else is pull. The durable queue stays the source of truth; the alert is only
@@ -179,7 +179,7 @@ is autonomous. It's a guided conversation, not a form:
    is that root's id.
 
 If the wizard isn't configured (no `requirements_planner` block, or standalone
-`harness serve`), `/create` shows a "wizard disabled" notice.
+`software-factory serve`), `/create` shows a "wizard disabled" notice.
 
 ### Reopening a session (embedding the wizard in an iframe)
 
@@ -233,7 +233,7 @@ still converges. The **Board, DAG, DLQ, and status bar** read the orchestrator's
 [work-graph projection](../specs/observability.md#the-live-read-model) — the single
 writer's own in-memory view of every issue, consistent the instant a status is written —
 instead of polling beads, so a card never lags as `open` while its agent runs and the page
-adds no `bd list` load (co-located only; standalone `harness serve` has no projection and
+adds no `bd list` load (co-located only; standalone `software-factory serve` has no projection and
 reads beads). beads stays the durable source the forensic pages render from. The **Board,
 DAG, and DLQ** refetch on the orchestrator's typed
 [issue-state event](../specs/messaging.md) — they care about *transitions*, so they

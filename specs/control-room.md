@@ -331,7 +331,7 @@ The factory is **config-driven** ([configuration.md](configuration.md)) — the 
 the souls, the gates, and the infrastructure are all declarative — yet none of it was
 *readable* anywhere. The board renders the stage columns, the budgets view the policy
 caps, and verification/provenance the souls *per issue*; but the **declared factory as a
-whole** — the thing in `harness.yaml` + `souls/` — could be run and not inspected. This
+whole** — the thing in `factory.yaml` + `souls/` — could be run and not inspected. This
 view is that missing window: **the declarative pipeline at rest**, read-only.
 
 It is the natural complement to the [DAG view](#the-views): the two are the *two graphs*
@@ -349,12 +349,12 @@ edit it would invent a third write surface the architecture deliberately omits. 
 view *shows*, never mutates.
 
 **It reflects the running factory by construction.** The control room is
-[co-located](observability.md) in the `harness run` process, so the config it renders is
+[co-located](observability.md) in the `software-factory run` process, so the config it renders is
 the very validated object that process is running — not a re-read of files that may have
 since moved. There is therefore no staleness and no "reload" affordance, and the page is a
 plain server-rendered snapshot: config is restart-static, so it is deliberately *not* a
 feed (see [Rendering](#rendering) — nothing that cannot change while you watch is rendered
-live). Under a standalone `harness serve` with no attached factory there is no config to
+live). Under a standalone `software-factory serve` with no attached factory there is no config to
 show, so the view shows the same not-attached notice as the other live views.
 
 What it renders, in flow order:
@@ -362,7 +362,7 @@ What it renders, in flow order:
 - **Identity strip** — the config root, the active infra overlay (the `infra.<env>.yaml`
   in force), the `policy.profile` (`trusted-dev`/`autonomous`), and that the config passed
   startup validation. *Which* factory is this.
-- **Advisories** — the non-fatal warnings `harness validate` surfaces (the
+- **Advisories** — the non-fatal warnings `software-factory validate` surfaces (the
   [`Warnings`](configuration.md) channel, distinct from validation faults that fail startup):
   chiefly producer/verifier **model-family overlap** (a same-family producer and verifier share
   correlated blind spots, weakening the N-version independence
@@ -426,7 +426,7 @@ dead-letter, and budget views, and nudged live off the existing `issue-state` /
 agent ids seen on the live event buffer within a recent window — no new registry.
 
 The escalation count is also a **push**: the control room tails the durable
-[`harness.dlq`](messaging.md) subject and fires a browser notification when a new
+[`factory.dlq`](messaging.md) subject and fires a browser notification when a new
 dead-letter arrives. The [dead-letter queue is the human's only action surface](#create-and-resolve-are-the-same-component),
 so an arrival is the one factory event that should reach an operator who isn't looking —
 everything else is pull. The durable queue remains the source of truth; the alert is only

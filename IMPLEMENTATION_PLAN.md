@@ -13,7 +13,7 @@ that history lives in git (this file's own log), the code, and the specs each ta
 updated as it landed. What shipped, in build order:
 
 - **Phases 0–1 — the kernel.** `spec → implement → gate → merge` for one issue
-  end-to-end: `cmd/harness` (`validate`/`seed`/`run`), in-process orchestrator +
+  end-to-end: `cmd/software-factory` (`validate`/`seed`/`run`), in-process orchestrator +
   runner, Docker sandboxes, provenance trailer on the merge. Verified against a
   real model (local Ollama via `openai-compat`).
 - **Phase 2 — independent verification.** Postcondition-driven gates, red→green

@@ -74,7 +74,7 @@ func StartAgentEventPump(nc *nats.Conn, h *Hub, act *Activity) (func(), error) {
 }
 
 // StartIssueStatePump bridges the single-writer orchestrator's issue-state transitions to
-// the browser: it subscribes once to harness.issue.*.state (the wildcard) and broadcasts
+// the browser: it subscribes once to factory.issue.*.state (the wildcard) and broadcasts
 // each transition into the hub as an "issue-state" SSE event, which the board/DAG/DLQ views
 // consume as an hx-trigger nudge (server-render-a-fragment, not sse-swap) so a card moves the
 // moment the orchestrator advances the issue — crisper than the agent-event firehose those
@@ -107,7 +107,7 @@ func StartIssueStatePump(nc *nats.Conn, h *Hub) (func(), error) {
 }
 
 // StartDLQPump bridges the durable dead-letter queue to the browser: it subscribes once to the
-// fixed harness.dlq subject (messaging.SubjectDLQ) and broadcasts each escalation into the hub as
+// fixed factory.dlq subject (messaging.SubjectDLQ) and broadcasts each escalation into the hub as
 // a "dlq-arrival" SSE event. The dead-letter queue is the human's only action surface, so an
 // arrival is the one factory event worth a *push* — the layout's alerts.js fires a browser
 // Notification on it, and the status bar bumps its escalation count — while everything else stays
@@ -137,7 +137,7 @@ func StartDLQPump(nc *nats.Conn, h *Hub) (func(), error) {
 }
 
 // StartMergeStatePump bridges the single-writer orchestrator's merge-queue step transitions to
-// the browser: it subscribes once to harness.merge.*.state (the wildcard) and broadcasts each
+// the browser: it subscribes once to factory.merge.*.state (the wildcard) and broadcasts each
 // step into the hub as a "merge-state" SSE event, which the merge-queue view (plan T4.25)
 // consumes as an hx-trigger nudge to refetch the train. When mq is non-nil it also records the
 // step into the merge-queue buffer (the view reads that buffer to render the rows; the hub

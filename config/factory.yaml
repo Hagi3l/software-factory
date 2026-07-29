@@ -72,8 +72,8 @@ spec_depth: 1
 # no untrusted code, so it sits correctly outside the sandbox and reuses the canonical model
 # layer directly, not the runner/broker. Its model resolves through infra.<env>.yaml's
 # `models` registry like a soul's; the API key comes from the environment, never config. The
-# wizard is co-located in `harness run --serve-addr` (it shares no NATS — the model call is a
-# direct trusted adapter call), so a standalone `harness serve` shows it disabled. Omitting
+# wizard is co-located in `software-factory run --serve-addr` (it shares no NATS — the model call is a
+# direct trusted adapter call), so a standalone `software-factory serve` shows it disabled. Omitting
 # this whole block disables the wizard. See specs/control-room.md, specs/workflow.md.
 requirements_planner:
   model:      claude-opus-4-8
@@ -113,7 +113,7 @@ dag:
     # integrate must be approved by a human before it lands — the self-hosting transition
     # where the harness writes code and a person reviews every diff. The orchestrator (not
     # the sandbox gate) evaluates it: a verified candidate is PARKED awaiting `harness
-    # approve <issue>` (denied by `harness reject <issue>`), bound to the candidate sha so a
+    # approve <issue>` (denied by `software-factory reject <issue>`), bound to the candidate sha so a
     # stale approval is invalidated. See specs/configuration.md, specs/bootstrap.md.
     postcondition: [human-approved]
   # `resolve` is the merge-conflict-resolution stage (kind: resolve), run by the
@@ -159,7 +159,7 @@ dag:
 # zero-network invariant, so they are baked into the go-toolchain sandbox image (T5.3,
 # deploy/go-toolchain.Dockerfile): golangci-lint, gosec, go-licenses, and gremlins are
 # binary-only static analysers / test drivers; govulncheck additionally reads an offline
-# copy of the Go vulnerability database baked under /opt/harness/vulndb (the image sets
+# copy of the Go vulnerability database baked under /opt/software-factory/vulndb (the image sets
 # GOVULNDB, which `make govulncheck` passes via `-db`). The image digest pinned in
 # provenance therefore also pins the gate-tool and vuln-DB versions a verdict was graded
 # against. The qa gate is fully live once that image is the resolved profile artifact.
@@ -193,7 +193,7 @@ policy:
   # orchestrator sums each issue's own-invocation spend instead (T3.8b, specs/workflow.md). Only
   # tokens/USD apply at epic scope; wall is per-issue above.
   epic_budget: { usd: 200 }
-  dead_letter: harness.dlq
+  dead_letter: factory.dlq
   # Autonomy profile (T2.10). The bootstrap self-hosts in TRUSTED-DEV: the harness writes
   # code and a human reviews every diff, so a human-approved gate holds every integrate
   # (the `postcondition: [human-approved]` on the integrate stage above). Switching to

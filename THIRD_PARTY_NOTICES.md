@@ -146,7 +146,7 @@ To enumerate every module and license actually linked into a build:
 
 ```sh
 go install github.com/google/go-licenses@latest
-go-licenses report ./cmd/harness
+go-licenses report ./cmd/software-factory
 ```
 
 Each module's authoritative license text ships in its own source, available under

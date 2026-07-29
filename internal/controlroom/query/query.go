@@ -64,7 +64,7 @@ type Reader struct {
 }
 
 // NewReader wires the read model to its stores with a single issue reader serving both the live and
-// the forensic reads. It is the standalone shape (harness serve) and the default for tests: with no
+// the forensic reads. It is the standalone shape (software-factory serve) and the default for tests: with no
 // attached orchestrator there is no projection, so the live views read beads too — the same way the
 // live SSE feed degrades there (specs/observability.md "The live read model").
 func NewReader(issues IssueReader, arts ArtifactReader, prov ProvenanceReader) *Reader {
@@ -73,7 +73,7 @@ func NewReader(issues IssueReader, arts ArtifactReader, prov ProvenanceReader) *
 
 // NewReaderWithLive wires the read model with a distinct LIVE reader for the work-state views (the
 // projection-backed reader, NewProjectionIssueReader) and a durable beads reader for the forensic
-// pages. It is the co-located shape (harness run --serve-addr), where the orchestrator's work-graph
+// pages. It is the co-located shape (software-factory run --serve-addr), where the orchestrator's work-graph
 // projection is the live read model (T8.4).
 func NewReaderWithLive(live, issues IssueReader, arts ArtifactReader, prov ProvenanceReader) *Reader {
 	return &Reader{live: live, issues: issues, arts: arts, prov: prov}

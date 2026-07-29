@@ -65,6 +65,6 @@ RUN go build ./... && go test -run='^$' ./...
 
 # The volatile layers, deliberately LAST (see the header): the in-sandbox GOPROXY shim
 # binary + the entrypoint that starts it, taken from the fully-built go-toolchain image.
-COPY --from=go-toolchain:latest /usr/local/bin/harness /usr/local/bin/harness
-COPY --from=go-toolchain:latest /usr/local/bin/harness-sandbox-init /usr/local/bin/harness-sandbox-init
-ENTRYPOINT ["/usr/local/bin/harness-sandbox-init"]
+COPY --from=go-toolchain:latest /usr/local/bin/software-factory /usr/local/bin/software-factory
+COPY --from=go-toolchain:latest /usr/local/bin/software-factory-sandbox-init /usr/local/bin/software-factory-sandbox-init
+ENTRYPOINT ["/usr/local/bin/software-factory-sandbox-init"]

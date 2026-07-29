@@ -15,7 +15,7 @@ Three concerns change at different speeds and by different people, so they live 
 separate files:
 
 ```
-harness.yaml          # the workflow + policy — changes rarely
+factory.yaml          # the workflow + policy — changes rarely
 souls/*.yaml          # one file per soul — added/tuned constantly
 souls/prompts/*.md    # personas as markdown, not inline YAML
 infra.<env>.yaml      # sandbox/NATS/broker — differs per environment
@@ -23,7 +23,7 @@ infra.<env>.yaml      # sandbox/NATS/broker — differs per environment
 
 ---
 
-## `harness.yaml` — workflow + policy
+## `factory.yaml` — workflow + policy
 
 ```yaml
 dag:
@@ -60,7 +60,7 @@ policy:
   budget:      { tokens: 2_000_000, usd: 20, wall: 2h }   # per issue
   epic_budget: { usd: 200 }
   explore_budget: { tokens: 100_000, turns: 12 }          # per explore call (see below)
-  dead_letter: harness.dlq
+  dead_letter: factory.dlq
 ```
 
 - `spec_depth` bounds the **spec context horizon**: the orchestrator hands each agent
@@ -167,7 +167,7 @@ policy:
 - **Human-approval** (`human-approved`) is a postcondition kind evaluated by the
   **orchestrator**, not a `checks` command — it reads orchestrator/beads state, not the
   repository, so it carries no `checks` entry. It holds only when a human has explicitly
-  approved the issue's *current candidate* via `harness approve <issue>` (`harness reject
+  approved the issue's *current candidate* via `software-factory approve <issue>` (`software-factory reject
   <issue>` denies); the approval is **bound to the candidate sha** — like an evidence hash
   pins to bytes — so any re-gate after a change invalidates a stale approval. It fails
   **closed**, and its failure does **not** route `on_failure` (it burns no retry): the issue
@@ -308,7 +308,7 @@ broker:
   allowlist: [llm-api, nats, package-mirror, git]
 artifacts:
   backend: files           # files (dev) | s3 (distributed) — see artifact-store
-  path: ./.harness/artifacts
+  path: ./.software-factory/artifacts
 otel:
   endpoint: ...            # OTLP export of traces + metrics + logs; "" off, "stdout" dev; see observability.md
   headers:                 # sent with every export (auth for backends like OpenObserve)
@@ -446,7 +446,7 @@ The known advisories are:
 - **A git remote named but not allowlisted** — the candidate-branch push to that remote
   would be denied ([security.md](security.md) Control 3).
 
-Both surfaces read the same channel: `harness validate` prints these to stderr (exit
+Both surfaces read the same channel: `software-factory validate` prints these to stderr (exit
 `0`), and the control-room [config view](control-room.md) renders them as an
 **Advisories** section, putting the same signal where the operator inspects the running
 factory. A clean config produces no advisories.
@@ -470,5 +470,5 @@ factory. A clean config produces no advisories.
   **Decided:** the **shell-exit-code form** (shipped). Command-check postconditions
   resolve to commands via the `checks:` registry above; the gate runs them with
   `sh -c` (exit 0 = pass). Bare identifiers (reserved proofs, metric comparisons like
-  `mutation>=0.8`) are validated against explicit registries at `harness validate`
+  `mutation>=0.8`) are validated against explicit registries at `software-factory validate`
   time. CEL is not used.

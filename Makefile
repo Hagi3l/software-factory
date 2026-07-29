@@ -7,7 +7,7 @@
 
 GO      ?= go
 BIN_DIR := bin
-BIN     := $(BIN_DIR)/harness
+BIN     := $(BIN_DIR)/software-factory
 PKG     := ./...
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -X main.version=$(VERSION)
@@ -35,7 +35,7 @@ check: vet lint test-unit
 
 ## build: compile the harness binary into bin/ with the version stamped in.
 build:
-	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/harness
+	$(GO) build -ldflags "$(LDFLAGS)" -o $(BIN) ./cmd/software-factory
 
 ## generate: run all code/asset generators (control-room templ + Tailwind). The
 ## generated *_templ.go and compiled CSS are committed, so this is only needed after
@@ -78,16 +78,16 @@ test-unit:
 
 ## test-e2e-docker: run the Docker-backed spine e2e (build tag docker_e2e). Needs a
 ## running Docker daemon and the `go-toolchain` image (build it from
-## deploy/go-toolchain.Dockerfile, or set HARNESS_E2E_IMAGE); the test skips if absent.
+## deploy/go-toolchain.Dockerfile, or set SOFTWARE_FACTORY_E2E_IMAGE); the test skips if absent.
 ## Excluded from `check` because it is slow and infrastructure-dependent.
 test-e2e-docker:
 	@mkdir -p $(RESULTS)
-	$(GO) test -json -tags docker_e2e -run TestSpineE2EDocker ./cmd/harness/ \
+	$(GO) test -json -tags docker_e2e -run TestSpineE2EDocker ./cmd/software-factory/ \
 		>$(RESULTS)/test-e2e-docker.json 2>$(RESULTS)/test-e2e-docker.stderr \
 		|| (cat $(RESULTS)/test-e2e-docker.stderr; exit 1)
 
 # --- qa-gate checks ---------------------------------------------------------------
-# The `qa` stage's postconditions (config/harness.yaml) resolve to these targets; the
+# The `qa` stage's postconditions (config/factory.yaml) resolve to these targets; the
 # gate runs them in a clean verification sandbox (exit 0 = pass; non-zero = findings or
 # a tool error => fail, closed). They are NOT part of `make check` — they need tools
 # (golangci-lint, gosec, govulncheck, go-licenses, gremlins) and reference data (the
@@ -101,7 +101,7 @@ gosec:
 
 ## govulncheck: known-vulnerability scan (qa gate). In-sandbox this reads an offline
 ## vulnerability database baked into the role image (no network): the go-toolchain
-## image sets GOVULNDB=file:///opt/harness/vulndb (T5.3), which this target passes via
+## image sets GOVULNDB=file:///opt/software-factory/vulndb (T5.3), which this target passes via
 ## `-db`. On a host with GOVULNDB unset it falls back to govulncheck's online default.
 govulncheck:
 	govulncheck $(if $(strip $(GOVULNDB)),-db $(GOVULNDB),) ./...

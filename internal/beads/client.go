@@ -57,10 +57,10 @@ type runFunc func(ctx context.Context, args []string) ([]byte, error)
 
 // storeLocks holds one mutex per store directory, so EVERY Client pointing at the same
 // .beads store — the orchestrator's long-lived writer, the wizard seeder, and the control
-// room's reader are three separate Clients over one repo (cmd/harness/run.go) — serializes
+// room's reader are three separate Clients over one repo (cmd/software-factory/run.go) — serializes
 // its bd invocations against the others. A per-Client mutex would miss that cross-Client race;
 // keying the lock on the directory makes serialization a structural property no construction
-// site can forget. Separate OS processes (harness approve/seed) get their own registry and are
+// site can forget. Separate OS processes (software-factory approve/seed) get their own registry and are
 // not concurrent writers within their own process, so in-process serialization suffices for the
 // races BUG-1 documents (cross-process serialization is the warm server's job).
 var (

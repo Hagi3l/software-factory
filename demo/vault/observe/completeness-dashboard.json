@@ -2,7 +2,7 @@
   "version": 5,
   "dashboardId": "harness-completeness-overview",
   "title": "Harness — completeness overview",
-  "description": "The whole telemetry record in one place: all three OTel signals the harness ships (traces + logs + metrics) arriving from service 'harness'. Traces and logs land in the 'default' stream; metrics arrive as Prometheus-named streams (dots become underscores, e.g. harness.invocations -> harness_invocations). Provisioned by demo/vault/run.sh under OPENOBSERVE=1; pinned to the OpenObserve dashboard v5 schema — bump it with the image (OPENOBSERVE_IMAGE).",
+  "description": "The whole telemetry record in one place: all three OTel signals the harness ships (traces + logs + metrics) arriving from service 'harness'. Traces and logs land in the 'default' stream; metrics arrive as Prometheus-named streams (dots become underscores, e.g. factory.invocations -> factory_invocations). Provisioned by demo/vault/run.sh under OPENOBSERVE=1; pinned to the OpenObserve dashboard v5 schema — bump it with the image (OPENOBSERVE_IMAGE).",
   "role": "",
   "owner": "harness-demo",
   "created": "2026-01-01T00:00:00.000Z",
@@ -126,8 +126,8 @@
         {
           "id": "panel-metrics",
           "type": "line",
-          "title": "Metrics — invocations (harness_invocations)",
-          "description": "OTLP metrics queried by PromQL. harness.invocations is exported as the metric stream harness_invocations (OTel dotted names map to Prometheus underscores). Other streams: harness_cost_usd, harness_tokens, harness_gate_runs, harness_llm_turns.",
+          "title": "Metrics — invocations (factory_invocations)",
+          "description": "OTLP metrics queried by PromQL. factory.invocations is exported as the metric stream factory_invocations (OTel dotted names map to Prometheus underscores). Other streams: factory_cost_usd, factory_tokens, factory_gate_runs, factory_llm_turns.",
           "config": {
             "show_legends": true,
             "legends_position": null,
@@ -138,11 +138,11 @@
           "queryType": "promql",
           "queries": [
             {
-              "query": "harness_invocations",
+              "query": "factory_invocations",
               "vrlFunctionQuery": "",
               "customQuery": true,
               "fields": {
-                "stream": "harness_invocations",
+                "stream": "factory_invocations",
                 "stream_type": "metrics",
                 "x": [],
                 "y": [],
@@ -154,7 +154,7 @@
                 }
               },
               "config": {
-                "promql_legend": "{{harness_issue_role}}",
+                "promql_legend": "{{factory_issue_role}}",
                 "layer_type": "scatter",
                 "weight_fixed": 1
               }
@@ -166,7 +166,7 @@
           "id": "panel-pipeline-log",
           "type": "table",
           "title": "Pipeline — log records (issue / role / event)",
-          "description": "Every trusted-side slog record as columns, newest first — no filtering, all records. issue/role COALESCE the harness's two logging conventions (lifecycle logs from the orchestrator/agent use issue/role; broker + instrumented logs use harness_issue_id/harness_issue_role) so the column is populated on every row.",
+          "description": "Every trusted-side slog record as columns, newest first — no filtering, all records. issue/role COALESCE the harness's two logging conventions (lifecycle logs from the orchestrator/agent use issue/role; broker + instrumented logs use factory_issue_id/factory_issue_role) so the column is populated on every row.",
           "config": {
             "show_legends": false,
             "legends_position": null,
@@ -177,7 +177,7 @@
           "queryType": "sql",
           "queries": [
             {
-              "query": "SELECT _timestamp, COALESCE(harness_issue_id, issue) AS issue, COALESCE(harness_issue_role, role) AS role, harness_soul AS soul, harness_attempt AS attempt, body AS event, output_tokens FROM \"default\" ORDER BY _timestamp DESC",
+              "query": "SELECT _timestamp, COALESCE(factory_issue_id, issue) AS issue, COALESCE(factory_issue_role, role) AS role, factory_soul AS soul, factory_attempt AS attempt, body AS event, output_tokens FROM \"default\" ORDER BY _timestamp DESC",
               "vrlFunctionQuery": "",
               "customQuery": true,
               "fields": {

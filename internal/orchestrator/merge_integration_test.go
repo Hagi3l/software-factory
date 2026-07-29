@@ -499,7 +499,7 @@ func TestGitMergerSignsProvenanceCommitIntegration(t *testing.T) {
 
 	// Generate the harness SSH signing identity. The key comment is irrelevant; the
 	// allowed-signers principal must match the committer email the merger stamps.
-	keyPath := filepath.Join(keyDir, "harness_ed25519")
+	keyPath := filepath.Join(keyDir, "factory_ed25519")
 	if out, err := exec.Command("ssh-keygen", "-t", "ed25519", "-N", "", "-C", "harness", "-f", keyPath, "-q").CombinedOutput(); err != nil {
 		t.Fatalf("ssh-keygen: %v\n%s", err, out)
 	}

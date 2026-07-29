@@ -21,8 +21,8 @@ const revokeTimeout = 15 * time.Second
 // config, or git's reflog. The empty `-c credential.helper=` that precedes it resets any
 // system/global helper so only this one runs.
 const (
-	credHelperUserEnv  = "HARNESS_GIT_USER"
-	credHelperTokenEnv = "HARNESS_GIT_TOKEN"
+	credHelperUserEnv  = "SOFTWARE_FACTORY_GIT_USER"
+	credHelperTokenEnv = "SOFTWARE_FACTORY_GIT_TOKEN"
 	// inlineCredHelper answers git's "get" credential query with the user/token from the
 	// environment and ignores "store"/"erase". The leading ! makes git run it as a shell
 	// command (see gitcredentials(7)).

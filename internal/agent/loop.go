@@ -256,7 +256,7 @@ func (l *Loop) Invoke(ctx context.Context, sb sandbox.Sandbox, brief core.Brief,
 }
 
 // bootSoul resolves the soul's persona into the system prompt. The persona is the soul's
-// only behavioral input; an empty path is a config gap (harness validate guarantees
+// only behavioral input; an empty path is a config gap (software-factory validate guarantees
 // persona files exist), so the loop treats a missing path as a hard error rather than
 // running a personaless agent.
 func (l *Loop) bootSoul(soul core.Soul) (string, error) {

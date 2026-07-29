@@ -64,7 +64,7 @@ or a clear error where unavailable; any other value → a configuration error. g
 not a distinct provisioning path but the Docker backend with the runtime pinned, so
 zero-network, worktree seeding, and teardown are identical across the two.
 
-This is a startup contract, not just validation: [`harness validate`](../configuration.md)
+This is a startup contract, not just validation: [`software-factory validate`](../configuration.md)
 checks the value is *well-formed*, but whether the selected backend is *available on
 this host* can only be known when the runtime binds it, so the fail-closed check lives
 there.
@@ -127,7 +127,7 @@ Resolution happens where the orchestrator/runner **build the sandbox spec**, not
 the backend: the backend contract stays "boot this concrete artifact", which is what
 keeps the Docker→Firecracker move a swap rather than a rewrite. The logical profile name
 rides in provenance/telemetry; the resolved digest rides alongside it.
-[`harness validate`](../configuration.md) gates startup on every `soul.sandbox`
+[`software-factory validate`](../configuration.md) gates startup on every `soul.sandbox`
 resolving to a `profiles` entry that carries the field the active backend needs.
 
 **Producer and verifier resolve the same profile.** The gate grades a candidate in the

@@ -55,7 +55,7 @@ func wizardServer(t *testing.T, a scriptedAdapter) (*httptest.Server, *wizard.Pl
 }
 
 // TestCreateNotConfigured proves the wizard degrades gracefully with no planner wired (a
-// standalone `harness serve`, or a config without requirements_planner): the page renders a
+// standalone `software-factory serve`, or a config without requirements_planner): the page renders a
 // notice inside the chrome (200, never a dead form) and the data endpoints answer 503/4xx
 // rather than hanging or 500ing.
 func TestCreateNotConfigured(t *testing.T) {

@@ -18,7 +18,7 @@ anyway — a CI/CD pipeline whose build steps are hostile-by-assumption agents.
        human writes a spec                      agents run, sandboxed + untrusted
    ┌──────────────────────┐        ┌──────────────────────────────────────────────────┐
    │  Create-Task wizard  │        │  plan → author-tests → implement → qa → integrate  │
-   │  or `harness seed`   │ ─────► │     ▲          (each stage a fresh sandbox)        │ ─► main
+   │  or the CLI `seed`   │ ─────► │     ▲          (each stage a fresh sandbox)        │ ─► main
    └──────────────────────┘        │     └────────── on_failure (bounded retries) ─────┘
                                     └──────────────────────────────────────────────────┘
                                        gates run producer ≠ verifier, in a clean sandbox
@@ -58,9 +58,9 @@ Requires Go (see `go.mod` for the version). The binary is self-contained — the
 is generated and committed, so a plain build needs no other toolchain.
 
 ```bash
-make build                      # compile ./bin/harness
-./bin/harness validate --config config   # load + validate the shipped config
-./bin/harness serve             # browse the control room at http://127.0.0.1:8080
+make build                      # compile ./bin/software-factory
+./bin/software-factory validate --config config   # load + validate the shipped config
+./bin/software-factory serve             # browse the control room at http://127.0.0.1:8080
 ```
 
 Running the full `spec → merged commit` loop additionally needs:

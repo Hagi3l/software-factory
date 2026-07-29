@@ -8,7 +8,7 @@
 # (the `requirements` human stage), and the autonomous stages take it to a single atomic
 # merge on `main` (epic mode — see `integration` below).
 #
-# Differences from the shipped config/harness.yaml, and why:
+# Differences from the shipped config/factory.yaml, and why:
 #   - qa drops `mutation>=0.8`. Gremlins mutation testing is slow and flaky for a live demo
 #     and is not baked into the vault-toolchain image; the security-relevant scanners
 #     (gosec/govulncheck/license-scan) plus lint and the red->green proof stay, which is the
@@ -218,7 +218,7 @@ policy:
   # independent option in specs/verification.md "verify-path diversity" (and explore's own benefit
   # is producer-side localization, not gate re-grading). See specs/configuration.md.
   explore_budget: { tokens: 100_000, turns: 12 }
-  dead_letter: harness.dlq
+  dead_letter: factory.dlq
   # Autonomous: integrate merges hands-free (no human-approved gate, no TCB globs) since the
   # candidate is ordinary app code in a throwaway repo.
   profile: autonomous

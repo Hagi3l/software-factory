@@ -23,14 +23,14 @@ host) with zero code change. Location transparency is a first principle.
 ## Subject taxonomy
 
 ```
-harness.work.<role>          JetStream work queue — assignments (pull consumers)
-harness.result.<role>        JetStream — agent Result envelopes
-harness.agent.<id>.events    core NATS — progress/log events (fire-and-forget)
-harness.issue.<id>.state     core NATS — issue state transitions (fire-and-forget)
-harness.merge.<id>.state     core NATS — merge-queue lifecycle transitions (fire-and-forget)
-harness.dlq                  JetStream — dead-lettered work for human triage
-harness.approvals            JetStream — human approve/reject of parked integrates
-harness.control.*            core NATS — orchestrator control/health
+factory.work.<role>          JetStream work queue — assignments (pull consumers)
+factory.result.<role>        JetStream — agent Result envelopes
+factory.agent.<id>.events    core NATS — progress/log events (fire-and-forget)
+factory.issue.<id>.state     core NATS — issue state transitions (fire-and-forget)
+factory.merge.<id>.state     core NATS — merge-queue lifecycle transitions (fire-and-forget)
+factory.dlq                  JetStream — dead-lettered work for human triage
+factory.approvals            JetStream — human approve/reject of parked integrates
+factory.control.*            core NATS — orchestrator control/health
 ```
 
 - **Work queues** (`work.<role>`) are JetStream pull consumers: runners across
@@ -44,11 +44,11 @@ harness.control.*            core NATS — orchestrator control/health
   only by the single-writer orchestrator, which records the decision against the issue's
   current candidate — a human never writes beads directly during a run, so an approval is
   a *proposal* validated and applied exactly like an agent Result. The embedded in-process
-  NATS (empty `nats.url`) is the single-process default; a separate `harness approve`
-  process reaches it via the opt-in local TCP listener `harness run --nats-addr
+  NATS (empty `nats.url`) is the single-process default; a separate `software-factory approve`
+  process reaches it via the opt-in local TCP listener `software-factory run --nats-addr
   <host:port>` opens. Pointing `nats.url` at an external cluster instead is the
   distributed deployment — the orchestrator and runners take the same connection
-  unchanged (location transparency), and `harness approve` connects to that cluster
+  unchanged (location transparency), and `software-factory approve` connects to that cluster
   directly.
 - **Agent events** (`agent.<id>.events`) are best-effort observability: the
   [control room](control-room.md) tails them and pushes to browsers over SSE, and
@@ -145,10 +145,10 @@ config it is handed.
 
 | Stream | Subjects | Retention | Age bound |
 |--------|----------|-----------|-----------|
-| `HARNESS_WORK` | `harness.work.>` | **WorkQueue** — each assignment consumed exactly once; the consumer ack is the lease | none (consume-once) |
-| `HARNESS_RESULT` | `harness.result.>` | **Limits** — durable for the orchestrator to consume + replay | `max_age` (default 7d) |
-| `HARNESS_DLQ` | `harness.dlq` | **Limits** — durable until a human triages | **none** (must survive) |
-| `HARNESS_APPROVALS` | `harness.approvals` | **Limits** — durable until the orchestrator consumes | **none** (must survive) |
+| `SOFTWARE_FACTORY_WORK` | `factory.work.>` | **WorkQueue** — each assignment consumed exactly once; the consumer ack is the lease | none (consume-once) |
+| `SOFTWARE_FACTORY_RESULT` | `factory.result.>` | **Limits** — durable for the orchestrator to consume + replay | `max_age` (default 7d) |
+| `SOFTWARE_FACTORY_DLQ` | `factory.dlq` | **Limits** — durable until a human triages | **none** (must survive) |
+| `SOFTWARE_FACTORY_APPROVALS` | `factory.approvals` | **Limits** — durable until the orchestrator consumes | **none** (must survive) |
 
 - **Replicas** apply uniformly to every stream: 1 on the single in-process embedded
   server (the dev/bootstrap default), `>1` only on an external cluster of at least that

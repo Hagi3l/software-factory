@@ -183,10 +183,10 @@ hot read path.
 
 This binds the projection's two consumers to the deployment topology:
 
-- **Co-located** (`harness run` with the control room in-process — the default): the
+- **Co-located** (`software-factory run` with the control room in-process — the default): the
   control room reads the in-process projection directly and streams transitions over
   SSE. This is the live, consistent surface.
-- **Standalone** (`harness serve` with no attached orchestrator): there is no live
+- **Standalone** (`software-factory serve` with no attached orchestrator): there is no live
   projection, so the control room **degrades to a beads snapshot** — static, no live
   updates — exactly as `/events` already 503s with no in-process NATS. Distributed
   (cross-host) live reads are a later concern (see OPEN questions); v1 live reads are

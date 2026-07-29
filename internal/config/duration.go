@@ -8,7 +8,7 @@ import (
 )
 
 // Duration is a time.Duration that unmarshals from a YAML Go-duration string such
-// as "2h" or "30m". Budgets (harness.yaml) and sandbox limits (infra.<env>.yaml)
+// as "2h" or "30m". Budgets (factory.yaml) and sandbox limits (infra.<env>.yaml)
 // are written this way; YAML has no native duration scalar, so the config package
 // owns the canonical parse rather than scattering time.ParseDuration at use sites.
 type Duration time.Duration

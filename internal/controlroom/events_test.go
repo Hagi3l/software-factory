@@ -97,7 +97,7 @@ func TestEventsStreamsBroadcasts(t *testing.T) {
 }
 
 // TestEventsUnavailableWithoutHub confirms the standalone path: with no hub wired (a
-// plain `harness serve`, no running factory) the endpoint answers 503 instead of
+// plain `software-factory serve`, no running factory) the endpoint answers 503 instead of
 // holding open a stream that would never emit.
 func TestEventsUnavailableWithoutHub(t *testing.T) {
 	ts := newTestServer(t) // built without Options.Events

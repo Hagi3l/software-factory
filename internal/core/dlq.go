@@ -7,7 +7,7 @@ package core
 // lives in the artifact store keyed by the issue (see specs/observability.md).
 //
 // It lives in core because both ends must agree on one schema: the orchestrator (the write
-// side) marshals it onto the durable harness.dlq subject, and the control-room DLQ pump (the
+// side) marshals it onto the durable factory.dlq subject, and the control-room DLQ pump (the
 // read side, T4.19) unmarshals it to fire a browser escalation alert — the same single-source
 // discipline core.IssueStateEvent and core.ApprovalRequest use. The durable JetStream queue
 // stays the source of truth; the SSE tail is only the nudge to come look (specs/messaging.md).

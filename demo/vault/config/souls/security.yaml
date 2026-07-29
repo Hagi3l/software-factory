@@ -11,7 +11,7 @@
 # N-version note: this soul runs on z-ai/glm-5.2 (Zhipu GLM) — a different model FAMILY than every
 # Anthropic producer — so the producer≠verifier independence verification.md recommends is
 # real: a bug must slip past two independently-trained judgments. This was the config edit
-# the old advisory asked for; `harness validate` is now family-clean. Also the cheap slot:
+# the old advisory asked for; `software-factory validate` is now family-clean. Also the cheap slot:
 # the soul's value-add is scanner-driven remediation whose output is re-gated
 # deterministically, so a cheaper model degrades polish, never the gate's floor.
 #

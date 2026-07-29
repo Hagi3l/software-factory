@@ -59,7 +59,7 @@ gosec:
 	gosec ./...
 
 ## govulncheck: known-vulnerability scan (qa gate). In-sandbox this reads the offline DB
-## the image sets via GOVULNDB=file:///opt/harness/vulndb; on a host with GOVULNDB unset
+## the image sets via GOVULNDB=file:///opt/software-factory/vulndb; on a host with GOVULNDB unset
 ## it falls back to govulncheck's online default.
 govulncheck:
 	govulncheck $(if $(strip $(GOVULNDB)),-db $(GOVULNDB),) ./...

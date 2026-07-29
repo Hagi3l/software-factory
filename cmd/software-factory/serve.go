@@ -15,7 +15,7 @@ import (
 // read-only window into the factory and, via the wizard (later Phase 4 tasks), their only
 // action surface. This is the T4.1 scaffold: it serves the base layout and embedded
 // assets; the data-backed views attach in T4.2+. It runs until interrupted, then drains
-// in-flight requests, mirroring `harness run`'s "Ctrl-C is a clean stop" contract.
+// in-flight requests, mirroring `software-factory run`'s "Ctrl-C is a clean stop" contract.
 func cmdServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	addr := fs.String("addr", "127.0.0.1:8080", "address to listen on")

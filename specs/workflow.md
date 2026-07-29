@@ -255,7 +255,7 @@ policy:
   max_retries: 3
   budget: { tokens: 2_000_000, usd: 20, wall: 2h }   # per issue
   epic_budget: { usd: 200 }
-  dead_letter: harness.dlq
+  dead_letter: factory.dlq
 ```
 
 ---

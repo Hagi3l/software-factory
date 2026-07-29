@@ -1,9 +1,9 @@
 package core
 
-// ApprovalRequest is the message a `harness approve` / `harness reject` invocation
+// ApprovalRequest is the message a `software-factory approve` / `software-factory reject` invocation
 // publishes over NATS for the single-writer orchestrator to consume and record. It
 // lives in core because both ends must agree on one schema: the CLI (the write side,
-// cmd/harness) marshals it and the orchestrator (the read side) unmarshals it, the same
+// cmd/software-factory) marshals it and the orchestrator (the read side) unmarshals it, the same
 // single-source discipline core.Provenance uses for the merge trailer.
 //
 // A human never writes beads directly during a run — only the orchestrator does (the

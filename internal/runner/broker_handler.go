@@ -58,7 +58,7 @@ type relay struct {
 	// sub-loop harvests a partial-budget answer, never failing the parent.
 	exploreBudget core.ExploreBudget
 
-	eventSubject  string // harness.agent.<id>.events — where token/progress events fan out
+	eventSubject  string // factory.agent.<id>.events — where token/progress events fan out
 	issueID       string // the issue this invocation is working — stamped on every published event
 	role          string // the issue's role/stage — stamped alongside issueID (specs/messaging.md)
 	repo          string // source repository the candidate branch is pushed into (local-push fallback)

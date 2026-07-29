@@ -34,13 +34,13 @@
 # the host uid, tripping git's dubious-ownership guard and breaking VCS stamping). The
 # owner matches the process by construction, so the blanket override is gone (T5.4).
 #
-# Gate tooling (T5.3) — the `qa`/`resolve` stages (config/harness.yaml) run these
+# Gate tooling (T5.3) — the `qa`/`resolve` stages (config/factory.yaml) run these
 # offline in this image, so they are baked in (binaries land in /go/bin, on PATH):
 #   - golangci-lint (T2.14 static lint), gosec (SAST), go-licenses (licence policy),
 #     gremlins (mutation). These are pure static analysers / test drivers needing only
 #     their binary, so a `go install` at build time is the whole story.
 #   - govulncheck PLUS an offline copy of the Go vulnerability database under
-#     /opt/harness/vulndb: govulncheck otherwise fetches the DB from vuln.go.dev, which
+#     /opt/software-factory/vulndb: govulncheck otherwise fetches the DB from vuln.go.dev, which
 #     the zero-network sandbox forbids. GOVULNDB points the `make govulncheck` target
 #     (which passes `-db $GOVULNDB`) at the baked file:// copy. The mirror layer is
 #     keyed on VULNDB_SNAPSHOT (below), so refreshing the DB is a deliberate act —
@@ -59,7 +59,7 @@
 # the module files are copied (not .git/docs/specs), so the build is lean and deterministic.
 # The module/build caches are BuildKit cache mounts — they persist across builds on the
 # build host (an incremental recompile, no re-download) and never land in the image
-# (only /out/harness is copied out).
+# (only /out/software-factory is copied out).
 FROM golang:1.26 AS harness-build
 WORKDIR /src
 COPY go.mod go.sum ./
@@ -67,7 +67,7 @@ RUN --mount=type=cache,target=/go/pkg/mod go mod download
 COPY cmd ./cmd
 COPY internal ./internal
 RUN --mount=type=cache,target=/go/pkg/mod --mount=type=cache,target=/root/.cache/go-build \
-    CGO_ENABLED=0 go build -trimpath -o /out/harness ./cmd/harness
+    CGO_ENABLED=0 go build -trimpath -o /out/software-factory ./cmd/software-factory
 
 FROM golang:1.26 AS base
 
@@ -75,7 +75,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends make git ca-certificates jq curl \
  && rm -rf /var/lib/apt/lists/*
 
-RUN git config --global user.email "agent@harness.local" \
+RUN git config --global user.email "agent@factory.local" \
  && git config --global user.name "harness agent" \
  && git config --global init.defaultBranch main
 
@@ -89,7 +89,7 @@ RUN go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.5.0 \
  && go install golang.org/x/tools/gopls@v0.20.0
 
 # Offline Go vulnerability database (v1 layout: index/*.json + ID/<id>.json). Mirrored
-# at build time so `govulncheck -db file:///opt/harness/vulndb` runs under zero-network.
+# at build time so `govulncheck -db file:///opt/software-factory/vulndb` runs under zero-network.
 # The layer is keyed on VULNDB_SNAPSHOT: Docker's cache would otherwise never re-run it
 # (an unchanged Dockerfile prefix means an eternally frozen snapshot, however often the
 # image is "rebuilt"), so refreshing the DB = bumping the arg — either the default below
@@ -100,13 +100,13 @@ ARG VULNDB_SNAPSHOT=2026-07-03
 RUN set -eux; \
     : "vuln DB snapshot: ${VULNDB_SNAPSHOT}"; \
     base=https://vuln.go.dev; \
-    mkdir -p /opt/harness/vulndb/index /opt/harness/vulndb/ID; \
+    mkdir -p /opt/software-factory/vulndb/index /opt/software-factory/vulndb/ID; \
     for f in db modules vulns; do \
-        curl -sSfL --retry 3 "$base/index/$f.json" -o "/opt/harness/vulndb/index/$f.json"; \
+        curl -sSfL --retry 3 "$base/index/$f.json" -o "/opt/software-factory/vulndb/index/$f.json"; \
     done; \
-    jq -r '.[].id' /opt/harness/vulndb/index/vulns.json \
-      | xargs -P 16 -I{} curl -sSfL --retry 3 "$base/ID/{}.json" -o "/opt/harness/vulndb/ID/{}.json"
-ENV GOVULNDB=file:///opt/harness/vulndb
+    jq -r '.[].id' /opt/software-factory/vulndb/index/vulns.json \
+      | xargs -P 16 -I{} curl -sSfL --retry 3 "$base/ID/{}.json" -o "/opt/software-factory/vulndb/ID/{}.json"
+ENV GOVULNDB=file:///opt/software-factory/vulndb
 
 # Language-server manifest at the fixed launch convention. Same file the lsmanifest Go
 # package embeds — one source of truth, copied into the image, never duplicated.
@@ -132,7 +132,7 @@ ENV GOPROXY=http://127.0.0.1:8123 GOFLAGS=-mod=mod
 # Final stage: the volatile layers, deliberately LAST (see the header). The in-sandbox
 # GOPROXY shim (T5.6): the harness binary + the entrypoint that starts it.
 FROM base
-COPY --from=harness-build /out/harness /usr/local/bin/harness
-COPY deploy/harness-sandbox-init.sh /usr/local/bin/harness-sandbox-init
-RUN chmod +x /usr/local/bin/harness-sandbox-init
-ENTRYPOINT ["/usr/local/bin/harness-sandbox-init"]
+COPY --from=harness-build /out/software-factory /usr/local/bin/software-factory
+COPY deploy/harness-sandbox-init.sh /usr/local/bin/software-factory-sandbox-init
+RUN chmod +x /usr/local/bin/software-factory-sandbox-init
+ENTRYPOINT ["/usr/local/bin/software-factory-sandbox-init"]

@@ -11,10 +11,10 @@ import (
 
 // JetStream stream names. By convention they are uppercase and contain no dots.
 const (
-	StreamWork      = "HARNESS_WORK"
-	StreamResult    = "HARNESS_RESULT"
-	StreamDLQ       = "HARNESS_DLQ"
-	StreamApprovals = "HARNESS_APPROVALS"
+	StreamWork      = "SOFTWARE_FACTORY_WORK"
+	StreamResult    = "SOFTWARE_FACTORY_RESULT"
+	StreamDLQ       = "SOFTWARE_FACTORY_DLQ"
+	StreamApprovals = "SOFTWARE_FACTORY_APPROVALS"
 )
 
 // defaultResultMaxAge bounds how long Result envelopes are retained for the

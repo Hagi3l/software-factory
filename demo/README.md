@@ -25,7 +25,7 @@ demo/
   run.sh                       # turnkey: build → scaffold scratch repo → seed → run
   templates/landing-page.md    # the spec the script seeds
   config/
-    harness.yaml               # mini DAG (author-tests → implement → integrate), shell gate
+    factory.yaml               # mini DAG (author-tests → implement → integrate), shell gate
     infra.dev.yaml             # hosted model via OpenRouter; reuses the go-toolchain image
     souls/
       test-author.yaml + prompts/test-author.md    # writes the failing acceptance.sh
@@ -79,7 +79,7 @@ request's model field, so it must be a valid OpenRouter slug.
 
 - **It costs a little.** The run makes real API calls; with `deepseek/deepseek-v4-flash`
   the whole landing-page run is well under a cent. The dollar cap in
-  `config/harness.yaml` (`policy.budget`) and the token/retry caps bound spend; the `cost`
+  `config/factory.yaml` (`policy.budget`) and the token/retry caps bound spend; the `cost`
   block in `config/infra.dev.yaml` is what turns recorded tokens into the USD accounting.
 - **If it flails immediately** — the agent emits prose instead of tool calls, or no
   candidate branch ever appears — that's almost certainly the tool-calling / streaming
@@ -88,7 +88,7 @@ request's model field, so it must be a valid OpenRouter slug.
   terminates safely (it dead-letters) rather than running forever.
 - **If a stage dead-letters with a wall-budget reason** on slow hardware, raise
   `limits.wall` in `config/infra.dev.yaml` (per-invocation) and/or `policy.budget.wall`
-  in `config/harness.yaml` (cumulative).
+  in `config/factory.yaml` (cumulative).
 - **Dead-lettered work** shows up in the control room's Dead-letter view with the reason.
   The intended fix is to refine the spec (`templates/landing-page.md`) and re-run — the
   harness's one human lever is the spec, never the agent's code.
@@ -96,18 +96,18 @@ request's model field, so it must be a valid OpenRouter slug.
 ## Tweaking the demo
 
 - **See the approval gate instead of auto-merge.** Switch `policy.profile` to
-  `trusted-dev` in `config/harness.yaml`, add `postcondition: [human-approved]` to the
+  `trusted-dev` in `config/factory.yaml`, add `postcondition: [human-approved]` to the
   `integrate` stage, and run with `--nats-addr 127.0.0.1:4222`; then approve with
-  `harness approve --nats nats://127.0.0.1:4222 <issue>` in another shell.
+  `software-factory approve --nats nats://127.0.0.1:4222 <issue>` in another shell.
 - **Change the page.** Edit `templates/landing-page.md`. Keep the acceptance criteria
   literal (specific elements/strings) so the grep-based gate stays unambiguous.
 - **Add a qa stage.** Re-introduce a `qa` stage with `postcondition: [tests-pass]` and a
   `security`-style soul to demonstrate an extra independent re-gate (see the shipped
-  `config/harness.yaml` for the shape).
+  `config/factory.yaml` for the shape).
 
 ## How it maps to the real config
 
-This demo drops three things the shipped `config/harness.yaml` has, purely to keep the
+This demo drops three things the shipped `config/factory.yaml` has, purely to keep the
 smallest surface for a first run — none of it changes the architecture:
 
 | Shipped | Demo | Why |

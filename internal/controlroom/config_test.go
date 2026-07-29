@@ -71,7 +71,7 @@ func warningConfigCfg() *config.Config {
 
 // TestConfigSurfacesAdvisories: a config that trips a non-fatal advisory (here producer/verifier
 // model-family overlap, T2.13) renders an advisories section with the warning text — the same
-// signal `harness validate` prints at startup, now visible in the control room where the operator
+// signal `software-factory validate` prints at startup, now visible in the control room where the operator
 // inspects the running factory. A clean config (configTestCfg) renders no such section.
 func TestConfigSurfacesAdvisories(t *testing.T) {
 	s := New(Options{Config: warningConfigCfg(), Env: "dev"})
@@ -105,7 +105,7 @@ func TestConfigSurfacesAdvisories(t *testing.T) {
 	}
 }
 
-// TestConfigNotAttached: with no in-process config (a standalone `harness serve`) the page is a
+// TestConfigNotAttached: with no in-process config (a standalone `software-factory serve`) the page is a
 // notice inside the chrome (200), mirroring the Reader-backed views' graceful degradation.
 func TestConfigNotAttached(t *testing.T) {
 	s := New(Options{})
@@ -254,7 +254,7 @@ func TestPersonaRouteUnknownName(t *testing.T) {
 	}
 }
 
-// TestPersonaRouteNotAttached: standalone `harness serve` (no in-process config) 404s rather
+// TestPersonaRouteNotAttached: standalone `software-factory serve` (no in-process config) 404s rather
 // than reading from a nil config.
 func TestPersonaRouteNotAttached(t *testing.T) {
 	s := New(Options{})

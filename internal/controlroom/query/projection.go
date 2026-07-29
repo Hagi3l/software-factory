@@ -26,7 +26,7 @@ type WorkGraphSnapshot interface {
 // `signal: killed` read overload the demo run hit under polling (specs/observability.md "The live
 // read model"). beads stays the durable truth the forensic pages still
 // render from; this only replaces the *live* issue read, and only when co-located. Under a
-// standalone `harness serve` (no attached orchestrator) the control room keeps the beads-backed
+// standalone `software-factory serve` (no attached orchestrator) the control room keeps the beads-backed
 // reader instead — the same way the live SSE feed degrades there.
 //
 // A single Snapshot backs every read; List filters it by status; Get scans it and falls back to the
@@ -40,7 +40,7 @@ type projectionReader struct {
 
 // NewProjectionIssueReader builds a projection-backed IssueReader over the orchestrator's work-graph
 // snapshot, with a beads reader as the Get fallback for ids the projection does not hold. It is
-// wired only in the co-located run (harness run --serve-addr); standalone serve keeps the
+// wired only in the co-located run (software-factory run --serve-addr); standalone serve keeps the
 // beads-backed reader (see query.NewReader).
 func NewProjectionIssueReader(graph WorkGraphSnapshot, fallback IssueReader) IssueReader {
 	return &projectionReader{graph: graph, fallback: fallback}

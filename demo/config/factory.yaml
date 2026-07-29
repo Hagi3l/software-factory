@@ -1,7 +1,7 @@
 # Demo workflow — a minimal, web-flavored pipeline for the landing-page demo.
 #
 # This is a deliberately stripped-down DAG, separate from the harness's own
-# config/harness.yaml, so the demo has the smallest possible surface to drive while still
+# config/factory.yaml, so the demo has the smallest possible surface to drive while still
 # exercising the harness's signature guarantee — the red→green,
 # producer ≠ verifier gate. See demo/README.md and specs/workflow.md.
 #
@@ -15,7 +15,7 @@
 #     result, so the independent-verification story is intact without qa.
 #   - `profile: autonomous`. The candidate diff is index.html + acceptance.sh in a
 #     throwaway repo, which matches no TCB path, so integrate merges hands-free — no
-#     `harness approve` step. Flip to trusted-dev (and add `tcb_paths` + a
+#     `software-factory approve` step. Flip to trusted-dev (and add `tcb_paths` + a
 #     `human-approved` postcondition on integrate) to demo the approval gate instead.
 #
 # The gate is a single shell command (checks.tests-pass below): the test-author writes a
@@ -68,5 +68,5 @@ policy:
   # headroom while still bounding a runaway loop. The wall here is cumulative across the
   # on_failure loop; the per-invocation sandbox ceiling is in infra.dev.yaml.
   budget: { tokens: 8_000_000, usd: 1.00, wall: 1h }
-  dead_letter: harness.dlq
+  dead_letter: factory.dlq
   profile: autonomous

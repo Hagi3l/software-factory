@@ -144,7 +144,7 @@ type GitPushResult struct {
 }
 
 // PublishRequest is a best-effort progress/log event. The runner maps it onto the
-// agent's harness.agent.<id>.events subject — the agent holds no NATS credentials and
+// agent's factory.agent.<id>.events subject — the agent holds no NATS credentials and
 // does not know its own subject. Delivery is fire-and-forget; losing one is harmless
 // (see specs/messaging.md), so the success response carries no body.
 type PublishRequest struct {

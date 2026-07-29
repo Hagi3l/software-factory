@@ -20,7 +20,7 @@ import (
 // resolving dir to an absolute path first so that config.Config.Root — and every
 // persona path derived from it — is absolute regardless of the process working
 // directory. It does NOT validate; callers that need the startup gate call Validate
-// on the result (harness validate, and run/seed before they wire anything up).
+// on the result (software-factory validate, and run/seed before they wire anything up).
 func loadConfig(dir, env string) (*config.Config, error) {
 	absDir, err := filepath.Abs(dir)
 	if err != nil {

@@ -10,7 +10,7 @@ import (
 
 // TestEmbeddedServerClientAddrAcceptsExternalConn proves the opt-in TCP listener (T2.10): a
 // server started with ClientAddr accepts a connection from a SEPARATE nats.Connect (as
-// `harness approve` would), and a message published there reaches an in-process subscriber.
+// `software-factory approve` would), and a message published there reaches an in-process subscriber.
 // This is what makes the cross-process approval loop work in the single-host bootstrap.
 func TestEmbeddedServerClientAddrAcceptsExternalConn(t *testing.T) {
 	addr := freeAddr(t)
@@ -26,18 +26,18 @@ func TestEmbeddedServerClientAddrAcceptsExternalConn(t *testing.T) {
 		t.Fatalf("in-process connect: %v", err)
 	}
 	defer inproc.Close()
-	sub, err := inproc.SubscribeSync("harness.approvals")
+	sub, err := inproc.SubscribeSync("factory.approvals")
 	if err != nil {
 		t.Fatalf("subscribe: %v", err)
 	}
 
-	// External TCP client (the `harness approve` side) — a separate connection over the addr.
+	// External TCP client (the `software-factory approve` side) — a separate connection over the addr.
 	ext, err := nats.Connect("nats://" + addr)
 	if err != nil {
 		t.Fatalf("external connect to %s: %v", addr, err)
 	}
 	defer ext.Close()
-	if err := ext.Publish("harness.approvals", []byte("ok")); err != nil {
+	if err := ext.Publish("factory.approvals", []byte("ok")); err != nil {
 		t.Fatalf("external publish: %v", err)
 	}
 	if err := ext.Flush(); err != nil {

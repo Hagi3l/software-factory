@@ -109,7 +109,7 @@ func parentCall(req model.Request) broker.CompletionParams {
 
 func testRelay(adapter model.Adapter, pub Publisher, sb sandbox.Sandbox) *relay {
 	return newRelay(adapter, pub, sb, relayConfig{
-		eventSubject:  "harness.agent.inv-1.events",
+		eventSubject:  "factory.agent.inv-1.events",
 		issueID:       "iss-1",
 		role:          "implementor",
 		repo:          "/repo",
@@ -156,8 +156,8 @@ func TestRelayCompleteStreamsDeltasAndTalliesUsage(t *testing.T) {
 	if pub.count() != 2 {
 		t.Fatalf("published events = %d, want 2", pub.count())
 	}
-	if pub.subj[0] != "harness.agent.inv-1.events" {
-		t.Errorf("event subject = %q, want harness.agent.inv-1.events", pub.subj[0])
+	if pub.subj[0] != "factory.agent.inv-1.events" {
+		t.Errorf("event subject = %q, want factory.agent.inv-1.events", pub.subj[0])
 	}
 	_, payload := decodeEvent(t, pub.data[0])
 	var ev tokenEvent
@@ -381,7 +381,7 @@ func TestRelayCompleteRetryStopsOnCancelledContext(t *testing.T) {
 // explorer soul (T12.2).
 func testRelayWithExplore(parent, explore model.Adapter, budget core.ExploreBudget) *relay {
 	return newRelay(parent, &recordingPublisher{}, &bundleSandbox{}, relayConfig{
-		eventSubject:   "harness.agent.inv-1.events",
+		eventSubject:   "factory.agent.inv-1.events",
 		issueID:        "iss-1",
 		role:           "implementor",
 		repo:           "/repo",
@@ -605,7 +605,7 @@ func TestRelayExploreEventsCarrySubContext(t *testing.T) {
 	}
 	pub := &recordingPublisher{}
 	r := newRelay(parent, pub, &bundleSandbox{}, relayConfig{
-		eventSubject:   "harness.agent.inv-1.events",
+		eventSubject:   "factory.agent.inv-1.events",
 		issueID:        "iss-1",
 		role:           "implementor",
 		repo:           "/repo",
@@ -732,7 +732,7 @@ func TestRelayPublishEvent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PublishEvent: %v", err)
 	}
-	if pub.count() != 1 || pub.subj[0] != "harness.agent.inv-1.events" {
+	if pub.count() != 1 || pub.subj[0] != "factory.agent.inv-1.events" {
 		t.Fatalf("published %d events on %v, want 1 on the agent event subject", pub.count(), pub.subj)
 	}
 	_, payload := decodeEvent(t, pub.data[0])
@@ -758,7 +758,7 @@ func TestRelayFetchPackageProxiesAndLogs(t *testing.T) {
 	defer proxy.Close()
 
 	r := newRelay(&recordingAdapter{}, &recordingPublisher{}, &bundleSandbox{}, relayConfig{
-		eventSubject: "harness.agent.inv-1.events", issueID: "iss-1", role: "implementor",
+		eventSubject: "factory.agent.inv-1.events", issueID: "iss-1", role: "implementor",
 		repo: "/repo", allowedBranch: "candidate/iss-1", log: discardLogger(),
 		packageProxy: proxy.URL,
 	})

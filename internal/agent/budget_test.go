@@ -18,7 +18,7 @@ func TestBudgetFromPolicy(t *testing.T) {
 			Wall:   config.Duration(2 * time.Hour),
 		},
 		EpicBudget: config.Budget{USD: 200},
-		DeadLetter: "harness.dlq",
+		DeadLetter: "factory.dlq",
 	})
 
 	if got.MaxTokens != 2_000_000 {

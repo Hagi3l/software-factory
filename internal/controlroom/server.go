@@ -43,7 +43,7 @@ const sseHeartbeat = 25 * time.Second
 // Options configures a Server. All fields are optional: Version is stamped into the
 // landing page for provenance, Logger defaults to a stderr text logger, and Events —
 // when set — turns on the live SSE feed at GET /events. Events is nil for a standalone
-// `harness serve` (no running factory to tail); `harness run --serve-addr` supplies a
+// `software-factory serve` (no running factory to tail); `software-factory run --serve-addr` supplies a
 // hub fed from the run's in-process NATS.
 //
 // Reader is the read model behind the data views (the Board, T4.4, and later DLQ /
@@ -58,7 +58,7 @@ type Options struct {
 	Activity *live.Activity
 	// MergeQueue is the live merge-train buffer behind the merge-queue view (T4.25): the
 	// merge-state pump feeds it each integrate candidate's current step. It is nil for a
-	// standalone `harness serve` (no live merge-state feed), in which case /merge renders the
+	// standalone `software-factory serve` (no live merge-state feed), in which case /merge renders the
 	// not-attached notice and its fragment 503s — mirroring how a nil Activity degrades the feed.
 	MergeQueue *live.MergeQueue
 	Reader     *query.Reader
@@ -68,14 +68,14 @@ type Options struct {
 	// composition root so the read model stays free of a config dependency, like StageOrder.
 	BudgetCaps query.BudgetCaps
 	// Planner is the trusted, non-sandboxed requirements planner behind the Create-Task
-	// wizard (T4.12). It is nil for a standalone `harness serve` or a config that omits the
+	// wizard (T4.12). It is nil for a standalone `software-factory serve` or a config that omits the
 	// requirements_planner block, in which case /create renders a "wizard disabled" notice
 	// and its data endpoints 503 — mirroring how a nil Reader degrades the data views.
 	Planner *wizard.Planner
 	// Seeder commits an approved wizard draft (T4.14): it writes the drafted specs to git,
 	// the decisions sidecar, stores the conversation transcript, and creates the seed issues
 	// through the single-writer beads path. It is the consent-gated write seam — the one place
-	// the wizard touches the durable stores. nil disables APPROVE (a standalone `harness serve`
+	// the wizard touches the durable stores. nil disables APPROVE (a standalone `software-factory serve`
 	// has no repo to write); /create still elicits intent but cannot commit it.
 	Seeder wizard.Seeder
 	// Resolver commits an approved Resolve-mode draft (T4.15): it refines the spec and returns
@@ -91,8 +91,8 @@ type Options struct {
 	SpecDepth int
 	// Config is the validated, in-process factory config behind the read-only Config view
 	// (T4.26). It is the very object the running factory holds (the control room is co-located
-	// in `harness run`), so the view reflects the running factory with zero staleness. nil for a
-	// standalone `harness serve` (no attached factory), in which case /config renders the
+	// in `software-factory run`), so the view reflects the running factory with zero staleness. nil for a
+	// standalone `software-factory serve` (no attached factory), in which case /config renders the
 	// not-attached notice. Env names the active infra overlay (infra.<env>.yaml) for the
 	// identity strip. Threaded here, not into the Reader, because config does not come from the
 	// beads/git/artifact stores — mirroring how StageOrder/BudgetCaps/SpecDepth are threaded.
@@ -102,7 +102,7 @@ type Options struct {
 
 // Server renders the control room. It is an http.Handler (via Handler) so its routes can
 // be exercised with httptest without binding a socket, and it offers ListenAndServe for
-// the `harness serve` command with context-driven graceful shutdown.
+// the `software-factory serve` command with context-driven graceful shutdown.
 type Server struct {
 	mux        *http.ServeMux
 	log        *slog.Logger
@@ -260,7 +260,7 @@ func (s *Server) render(w http.ResponseWriter, r *http.Request, c templ.Componen
 // handleEvents serves the live SSE feed. It subscribes the connecting browser to the
 // hub, then streams every broadcast event until the client disconnects or the server
 // shuts down (both cancel r.Context() — see ListenAndServe's BaseContext). With no hub
-// wired (standalone `harness serve`) there is nothing to tail, so it answers 503 rather
+// wired (standalone `software-factory serve`) there is nothing to tail, so it answers 503 rather
 // than holding open a stream that would never emit.
 func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	if s.events == nil {
@@ -294,12 +294,12 @@ func (s *Server) epicMode() bool {
 }
 
 // handleBoard renders the full kanban page. With no read model wired (standalone
-// `harness serve`) it shows a "not attached" notice rather than an empty board; a board
+// `software-factory serve`) it shows a "not attached" notice rather than an empty board; a board
 // read error renders the same chrome with the error so the page never 500s blank. The
 // live columns refresh themselves from handleBoardCards over SSE.
 func (s *Server) handleBoard(w http.ResponseWriter, r *http.Request) {
 	if s.reader == nil {
-		s.render(w, r, views.BoardMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to see live work."))
+		s.render(w, r, views.BoardMessage("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to see live work."))
 		return
 	}
 	board, err := s.reader.Board(r.Context(), s.stageOrder, s.epicMode(), s.budgetCaps)
@@ -331,12 +331,12 @@ func (s *Server) handleBoardCards(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleDAG renders the full issue-dependency-graph page (T4.6). With no read model wired
-// (standalone `harness serve`) it shows a "not attached" notice rather than an empty graph; a
+// (standalone `software-factory serve`) it shows a "not attached" notice rather than an empty graph; a
 // DAG read error renders the same chrome with the reason so the page never 500s blank,
 // mirroring the board. The graph refreshes itself from handleDAGSVG over SSE.
 func (s *Server) handleDAG(w http.ResponseWriter, r *http.Request) {
 	if s.reader == nil {
-		s.render(w, r, views.DAGMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to see live work."))
+		s.render(w, r, views.DAGMessage("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to see live work."))
 		return
 	}
 	g, err := s.reader.DAG(r.Context())
@@ -368,10 +368,10 @@ func (s *Server) handleDAGSVG(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleActivity renders the full activity-feed page. Answers a friendly notice when
-// no activity buffer is wired (standalone `harness serve` with no live source).
+// no activity buffer is wired (standalone `software-factory serve` with no live source).
 func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
 	if s.activity == nil {
-		s.render(w, r, views.ActivityMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to see live agent activity."))
+		s.render(w, r, views.ActivityMessage("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to see live agent activity."))
 		return
 	}
 	s.render(w, r, views.ActivityPage(s.activity.Recent()))
@@ -392,11 +392,11 @@ func (s *Server) handleActivityItems(w http.ResponseWriter, r *http.Request) {
 // runs, handing off to the forensic Replay of the same invocation on termination. The feed is
 // scoped server-side via the issue id the runner stamps on every agent event (T4.20), so the
 // buffer is the only requirement; with no read model wired the header/meter degrade to the bare
-// id and the feed still renders. With no activity buffer (standalone `harness serve`) it shows
+// id and the feed still renders. With no activity buffer (standalone `software-factory serve`) it shows
 // the not-attached notice.
 func (s *Server) handleInvocation(w http.ResponseWriter, r *http.Request) {
 	if s.activity == nil {
-		s.render(w, r, views.InvocationMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to watch a live invocation."))
+		s.render(w, r, views.InvocationMessage("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to watch a live invocation."))
 		return
 	}
 	id := r.PathValue("id")
@@ -439,13 +439,13 @@ func (s *Server) invocation(ctx context.Context, id string) (query.Invocation, e
 
 // handleIssue renders the issue / invocation detail page (T4.7) — the drill-target the
 // board, dead-letter queue, and provenance views link into. With no read model wired
-// (standalone `harness serve`) it shows the not-attached notice; an unknown id or a read
+// (standalone `software-factory serve`) it shows the not-attached notice; an unknown id or a read
 // fault renders the same chrome with the reason rather than a blank 500, mirroring the
 // board's "never 500 blank" handling. The page is a forensic snapshot, so it is plainly
 // rendered with no live refresh.
 func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 	if s.reader == nil {
-		s.render(w, r, views.IssueDetailMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to inspect issues."))
+		s.render(w, r, views.IssueDetailMessage("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to inspect issues."))
 		return
 	}
 	id := r.PathValue("id")
@@ -460,14 +460,14 @@ func (s *Server) handleIssue(w http.ResponseWriter, r *http.Request) {
 
 // handleReplay renders the invocation replay page (T4.11) — the reconstructed decision
 // trail drilled into from the issue-detail page. It mirrors handleIssue exactly: with no
-// read model wired (standalone `harness serve`) it shows the not-attached notice, and an
+// read model wired (standalone `software-factory serve`) it shows the not-attached notice, and an
 // unknown id or read fault renders the same chrome with the reason rather than a blank 500.
 // A *known* issue with no reachable transcript is not an error — Replay returns Available=
 // false and the page renders an in-chrome notice. Like the detail page it is a forensic
 // snapshot, so it is plainly rendered with no live refresh.
 func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 	if s.reader == nil {
-		s.render(w, r, views.ReplayNotAttached("Not attached to a running factory — start the control room with `harness run --serve-addr` to replay invocations."))
+		s.render(w, r, views.ReplayNotAttached("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to replay invocations."))
 		return
 	}
 	id := r.PathValue("id")
@@ -482,7 +482,7 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 
 // handleVerification renders the verification view (T4.23) — the factory's trust argument
 // for one issue, drilled into from the issue-detail page and the dead-letter queue. It
-// mirrors handleReplay exactly: with no read model wired (standalone `harness serve`) it
+// mirrors handleReplay exactly: with no read model wired (standalone `software-factory serve`) it
 // shows the not-attached notice, and an unknown id or a read fault renders the same chrome
 // with the reason rather than a blank 500. A *known* issue whose candidate has not been gated
 // (no verdict record) is not an error — GateVerdict returns Available=false and the page
@@ -490,7 +490,7 @@ func (s *Server) handleReplay(w http.ResponseWriter, r *http.Request) {
 // detail page it is a forensic snapshot, so it is plainly rendered with no live refresh.
 func (s *Server) handleVerification(w http.ResponseWriter, r *http.Request) {
 	if s.reader == nil {
-		s.render(w, r, views.VerificationNotAttached("Not attached to a running factory — start the control room with `harness run --serve-addr` to inspect verification verdicts."))
+		s.render(w, r, views.VerificationNotAttached("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to inspect verification verdicts."))
 		return
 	}
 	id := r.PathValue("id")
@@ -536,7 +536,7 @@ const activeAgentWindow = 90 * time.Second
 
 // handleStatusBar returns the layout status-bar fragment (T4.19) — the "is the factory healthy?"
 // glance lazy-loaded on every page and refreshed live (see views.StatusBarShell). It is a data
-// endpoint, so with no read model wired (standalone `harness serve`) it answers 503 and htmx
+// endpoint, so with no read model wired (standalone `software-factory serve`) it answers 503 and htmx
 // leaves the neutral placeholder in place — the spec's "degrades to a static bar"; a read error
 // is a 500 so htmx keeps the last good bar rather than swapping in an error. The active-agent
 // count comes from the in-memory activity buffer (0 when none is wired — a hub-less serve still
@@ -560,14 +560,14 @@ func (s *Server) handleStatusBar(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleConfig renders the read-only Config view (T4.26) — the declared factory at rest. With
-// no in-process config wired (a standalone `harness serve` has no attached factory) it shows the
+// no in-process config wired (a standalone `software-factory serve` has no attached factory) it shows the
 // not-attached notice, mirroring the Reader-backed views. It is the one Reader-independent data
 // view: config is the validated in-process object, not a store read, so there is nothing to fault
 // or refresh — the page is a plain server-rendered snapshot (config is restart-static), built once
 // from the threaded config with redaction applied inside configview.Build.
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	if s.cfg == nil {
-		s.render(w, r, views.ConfigMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to inspect the declared config."))
+		s.render(w, r, views.ConfigMessage("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to inspect the declared config."))
 		return
 	}
 	s.render(w, r, views.ConfigPage(configview.Build(s.cfg, s.env)))
@@ -618,12 +618,12 @@ func (s *Server) personaPathFor(name string) (string, bool) {
 
 // handleDLQ renders the full dead-letter queue page (T4.8) — the escalations awaiting a
 // human, the control room's primary action surface. With no read model wired (standalone
-// `harness serve`) it shows a "not attached" notice rather than an empty queue; a read
+// `software-factory serve`) it shows a "not attached" notice rather than an empty queue; a read
 // error renders the same chrome with the reason so the page never 500s blank, mirroring the
 // board. The live list refreshes itself from handleDLQItems over SSE.
 func (s *Server) handleDLQ(w http.ResponseWriter, r *http.Request) {
 	if s.reader == nil {
-		s.render(w, r, views.DeadLetterMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to see escalations."))
+		s.render(w, r, views.DeadLetterMessage("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to see escalations."))
 		return
 	}
 	items, err := s.reader.DeadLetters(r.Context())
@@ -657,13 +657,13 @@ func (s *Server) handleDLQItems(w http.ResponseWriter, r *http.Request) {
 // handleMerge renders the full merge-queue page (T4.25): the serialized merge train in flight,
 // each integrate candidate's current step. It reads the live merge-state buffer (the step, which
 // beads does not hold) and enriches it with the issue title/role/spec via the read model — so it
-// needs both. With neither wired (standalone `harness serve` has no merge-state feed) it shows a
+// needs both. With neither wired (standalone `software-factory serve` has no merge-state feed) it shows a
 // "not attached" notice rather than an empty train; a read error renders the same chrome with the
 // reason so the page never 500s blank, mirroring the board/DLQ. The live list refreshes itself
 // from handleMergeItems on the merge-state nudge.
 func (s *Server) handleMerge(w http.ResponseWriter, r *http.Request) {
 	if s.mergeQueue == nil || s.reader == nil {
-		s.render(w, r, views.MergeQueueMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to watch the merge train."))
+		s.render(w, r, views.MergeQueueMessage("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to watch the merge train."))
 		return
 	}
 	rows, err := s.reader.MergeQueue(r.Context(), s.mergeQueue.Snapshot())
@@ -698,12 +698,12 @@ func (s *Server) handleMergeItems(w http.ResponseWriter, r *http.Request) {
 const provenanceLimit = 50
 
 // handleBudgets renders the full budgets page (T4.10): burn vs caps, per epic and per issue.
-// With no read model wired (standalone `harness serve`) it shows a "not attached" notice; a
+// With no read model wired (standalone `software-factory serve`) it shows a "not attached" notice; a
 // read error renders the same chrome with the reason so the page never 500s blank, mirroring
 // the board/DLQ. The tables refresh themselves from handleBudgetsItems over SSE.
 func (s *Server) handleBudgets(w http.ResponseWriter, r *http.Request) {
 	if s.reader == nil {
-		s.render(w, r, views.BudgetsMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to see budget burn."))
+		s.render(w, r, views.BudgetsMessage("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to see budget burn."))
 		return
 	}
 	b, err := s.reader.Budgets(r.Context(), s.budgetCaps)
@@ -738,7 +738,7 @@ func (s *Server) handleBudgetsItems(w http.ResponseWriter, r *http.Request) {
 // other Reader-backed views; the list refreshes from handleProvenanceItems over SSE.
 func (s *Server) handleProvenance(w http.ResponseWriter, r *http.Request) {
 	if s.reader == nil {
-		s.render(w, r, views.ProvenanceMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to trace merged commits."))
+		s.render(w, r, views.ProvenanceMessage("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to trace merged commits."))
 		return
 	}
 	commits, err := s.reader.RecentProvenance(r.Context(), provenanceLimit)
@@ -767,14 +767,14 @@ func (s *Server) handleProvenanceItems(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleCreate renders the Create-Task wizard page (T4.12). With no planner wired (a
-// standalone `harness serve`, or a config that omits requirements_planner) it shows a notice
+// standalone `software-factory serve`, or a config that omits requirements_planner) it shows a notice
 // that the wizard is disabled rather than a dead form, mirroring how the data views degrade
 // without a Reader. Otherwise it mints a fresh conversation session — each page load starts
 // a blank conversation — and renders it; the session id is embedded so the SSE stream, the
 // message fragment, and the POST all address this conversation.
 func (s *Server) handleCreate(w http.ResponseWriter, r *http.Request) {
 	if s.planner == nil {
-		s.render(w, r, views.CreateMessage("The requirements planner is not configured — the Create-Task wizard is available when the control room runs with `harness run --serve-addr` and a requirements_planner is set in harness.yaml."))
+		s.render(w, r, views.CreateMessage("The requirements planner is not configured — the Create-Task wizard is available when the control room runs with `software-factory run --serve-addr` and a requirements_planner is set in factory.yaml."))
 		return
 	}
 	// ?session=<id> REOPENS a live conversation (or mints one under that id); no argument opens a
@@ -1047,7 +1047,7 @@ func (s *Server) handleCreateApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.seeder == nil {
-		s.render(w, r, views.CreateApproveResult(wizard.SeedResult{}, "Approval is unavailable: the control room is not attached to a repository. Run the wizard under `harness run --serve-addr` to commit specs and seed issues."))
+		s.render(w, r, views.CreateApproveResult(wizard.SeedResult{}, "Approval is unavailable: the control room is not attached to a repository. Run the wizard under `software-factory run --serve-addr` to commit specs and seed issues."))
 		return
 	}
 	if err := r.ParseForm(); err != nil {
@@ -1110,11 +1110,11 @@ func (s *Server) handleCreateApprove(w http.ResponseWriter, r *http.Request) {
 // renders the same chrome with the reason rather than a blank 500, mirroring handleIssue.
 func (s *Server) handleResolve(w http.ResponseWriter, r *http.Request) {
 	if s.planner == nil {
-		s.render(w, r, views.ResolveMessage("The requirements planner is not configured — Resolve is available when the control room runs with `harness run --serve-addr` and a requirements_planner is set in harness.yaml."))
+		s.render(w, r, views.ResolveMessage("The requirements planner is not configured — Resolve is available when the control room runs with `software-factory run --serve-addr` and a requirements_planner is set in factory.yaml."))
 		return
 	}
 	if s.reader == nil {
-		s.render(w, r, views.ResolveMessage("Not attached to a running factory — start the control room with `harness run --serve-addr` to resolve dead-lettered work."))
+		s.render(w, r, views.ResolveMessage("Not attached to a running factory — start the control room with `software-factory run --serve-addr` to resolve dead-lettered work."))
 		return
 	}
 	id := r.PathValue("id")
@@ -1184,7 +1184,7 @@ func (s *Server) handleResolveApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.resolver == nil {
-		s.render(w, r, views.ResolveApproveResult(wizard.ResolveResult{}, "Resolve is unavailable: the control room is not attached to a repository. Run the wizard under `harness run --serve-addr` to refine specs and reopen work."))
+		s.render(w, r, views.ResolveApproveResult(wizard.ResolveResult{}, "Resolve is unavailable: the control room is not attached to a repository. Run the wizard under `software-factory run --serve-addr` to refine specs and reopen work."))
 		return
 	}
 	if err := r.ParseForm(); err != nil {

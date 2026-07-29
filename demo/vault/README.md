@@ -48,7 +48,7 @@ demo/vault/
   run.sh                  # turnkey: build → images → scaffold scratch repo → run (no seed; you use the wizard)
   Dockerfile              # vault-toolchain sandbox image (FROM go-toolchain: + templ + Tailwind + vault module cache)
   config/
-    harness.yaml          # FULL DAG (requirements→plan→author-tests→implement→qa→integrate + resolve), Go/security gate
+    factory.yaml          # FULL DAG (requirements→plan→author-tests→implement→qa→integrate + resolve), Go/security gate
     infra.dev.yaml        # Anthropic models (Opus + Sonnet) via OpenRouter; vault-toolchain sandbox profile
     souls/                # planner, test-author, implementor, security, merge-resolver (+ prompts/)
   app/                    # the ESTABLISHED vault app — its own Go module; copied into the scratch repo
@@ -83,11 +83,11 @@ disturb the real pipeline. The target repo is a throwaway created in a temp dir 
     correctness, by declaration rather than provider default. `MODEL=` swaps this shared Sonnet slug
     across those roles (an OpenRouter slug) without touching the pinned Opus roles or the
     GLM verifier. The wizard's model is `requirements_planner.model` in
-    `config/harness.yaml`.
+    `config/factory.yaml`.
   - **`z-ai/glm-5.2`** for the **security/qa** verifier — a different model
     **family** (Zhipu GLM) than every producer, so the `producer ≠ verifier` invariant holds at the model
     level too (real N-version diversity: a bug must slip past two independently-trained
-    judgments, and `harness validate`'s family-overlap advisory is silenced by *fixing* it).
+    judgments, and `software-factory validate`'s family-overlap advisory is silenced by *fixing* it).
     It is also the cheap slot by design: the qa soul's value-add is scanner-driven remediation
     whose output is re-gated deterministically, so at ~$0.91/$2.86 per Mtok (still well under
     Sonnet) a cheaper model degrades polish, never the gate's floor. Set in
@@ -237,7 +237,7 @@ How the auth stays clean: OpenObserve's ingestion token is just `base64(email:pa
 `run.sh` derives it locally and exports it as `OTEL_OTLP_AUTH`, which the materialized overlay
 references as `authorization: ${OTEL_OTLP_AUTH}` — the harness expands it host-side at export
 time, so the credential lives in the environment, never in config (the same discipline as the
-model API key, and what `harness validate`'s credential-header rule enforces). The dashboard
+model API key, and what `software-factory validate`'s credential-header rule enforces). The dashboard
 JSON and provisioning details live in [`observe/`](observe/); it is pinned to OpenObserve's
 dashboard v5 schema and POSTed **best-effort** — if a bumped `OPENOBSERVE_IMAGE` drifts the
 schema, the demo still runs and you import the JSON from the UI.
@@ -256,7 +256,7 @@ rotation reminders, an audit-log viewer with anomaly flagging, or reused-secret 
 ## What to expect
 
 - **It costs a little.** Real API calls across the full DAG; bound by `policy.budget`
-  (tokens/USD/wall) in `config/harness.yaml` and the `cost` table in
+  (tokens/USD/wall) in `config/factory.yaml` and the `cost` table in
   `config/infra.dev.yaml`. A flailing run dead-letters rather than running forever.
 - **If a stage dead-letters**, the control room's Dead-letter view shows the reason. The
   one human lever is the **spec**: refine the requirement (re-run the wizard) — never the
@@ -268,7 +268,7 @@ rotation reminders, an audit-log viewer with anomaly flagging, or reused-secret 
 
 ## How it maps to the real config
 
-This demo runs the **same full DAG** as the shipped `config/harness.yaml`, with three
+This demo runs the **same full DAG** as the shipped `config/factory.yaml`, with three
 deliberate tunings for a live run (none changes the architecture — epic mode just retargets
 the same merge queue per feature):
 
@@ -277,7 +277,7 @@ the same merge queue per feature):
 | `qa`/`resolve` include `mutation>=0.8` | dropped | gremlins mutation testing is slow and flaky live; the security-relevant scanners (gosec/govulncheck/license-scan) + lint + the red→green proof carry the story |
 | `trusted-dev` profile + `human-approved` + `tcb_paths` | `autonomous`, no TCB globs | the diff is ordinary app code in a throwaway repo, so integrate merges hands-free — flip to `trusted-dev` (+ a `human-approved` postcondition on integrate) to demo the approval gate |
 | per-item integration (no `integration` block) | `integration.mode: epic` | the operator drafts a *feature*, so the whole thing lands as **one** commit on `main` — children integrate onto an `epic/<id>` branch and the terminal merge advances `main` once when the subtree drains, so the public-repo push + VPS deploy fires once per feature, not per child. v1 runs one epic at a time |
-| `author-tests` postcondition `[tests-red]` only | `[tests-red, compiles]` (+ a `compiles: make compile` check) | Go is compiled and statically typed, so a test referencing a not-yet-defined symbol fails to *compile* — also a nonzero exit, so `tests-red` (tests-pass must FAIL) alone would pass on a suite that never ran an assertion (a *vacuous* red). Pairing it with `compiles` (`go build ./... && go test -run='^$' ./...` — builds the test binaries, runs nothing) makes "red" mean **compiles AND tests-fail**, and forces the test author to commit the minimal compiling API skeleton the implementor inherits as a compiler-checked contract. The shipped `config/harness.yaml` leaves `tests-red` unpaired (language-neutral kernel; a compiled target opts in). See specs/verification.md "Tests-red proof" |
+| `author-tests` postcondition `[tests-red]` only | `[tests-red, compiles]` (+ a `compiles: make compile` check) | Go is compiled and statically typed, so a test referencing a not-yet-defined symbol fails to *compile* — also a nonzero exit, so `tests-red` (tests-pass must FAIL) alone would pass on a suite that never ran an assertion (a *vacuous* red). Pairing it with `compiles` (`go build ./... && go test -run='^$' ./...` — builds the test binaries, runs nothing) makes "red" mean **compiles AND tests-fail**, and forces the test author to commit the minimal compiling API skeleton the implementor inherits as a compiler-checked contract. The shipped `config/factory.yaml` leaves `tests-red` unpaired (language-neutral kernel; a compiled target opts in). See specs/verification.md "Tests-red proof" |
 | no `ambient_specs` (the harness has no `specs/conventions.md`) | `ambient_specs: [specs/README.md, specs/conventions.md]` | the vault's engineering conventions (parameterized-SQL-only, `crypto/rand`, encryption-non-negotiable, `make generate` after a `.templ` edit, **no new modules** under the zero-network sandbox) are the same for every change and live in [`app/specs/conventions.md`](app/specs/conventions.md), so they ride in **every** agent's Brief — the agent never has to rediscover them or trip one and dead-letter. `app/specs/README.md` is a thin index the agent `read_file`s the rest from |
 | no `explore` (shipped config sets no `policy.explore_budget`) | `explore_budget: { tokens: 100_000, turns: 12 }` + a `vault-explorer` soul on cheap Haiku, `explore` enabled on the planner + test-author + implementor + security | the `explore` tool delegates broad *search→read→refine* localization to a nested read-only sub-loop on a **cheap** model in the same warm sandbox, handing the frontier producer back distilled `file:line` anchors instead of making it navigate in its own (Opus/Sonnet) context — the planner (finding the seams to decompose), the test-author (finding the seams its tests must pin — the demo's proven raw-navigation token hog, ~1.3M tokens in one live run), and the implementor (finding where the store/web/view layers hook up) all benefit. The **verify path (`qa`/`security`) shares the same explorer** — a deliberate, spec-recorded choice (specs/verification.md): explore is additive and never load-bearing, so a shared explorer can degrade the reviewer's *search*, never the gate's *grade* (scanners + re-run postconditions are deterministic); drop `explore` from the security soul's tools to read raw instead. The explorer runs on `anthropic/claude-haiku-4.5` — its output is *checkable* anchors an independently-gated parent re-reads, so a weak model there costs at worst a re-search, never a bad merge (specs/models.md "Helper souls") |
 

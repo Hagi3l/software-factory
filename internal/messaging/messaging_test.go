@@ -10,17 +10,17 @@ import (
 
 func TestSubjectHelpers(t *testing.T) {
 	cases := []struct{ got, want string }{
-		{WorkSubject("implement"), "harness.work.implement"},
-		{ResultSubject("qa"), "harness.result.qa"},
-		{AgentEventsSubject("abc123"), "harness.agent.abc123.events"},
-		{ControlSubject("health"), "harness.control.health"},
-		{SubjectDLQ, "harness.dlq"},
-		{WorkStreamSubjects, "harness.work.>"},
-		{ResultStreamSubjects, "harness.result.>"},
-		{ControlSubjects, "harness.control.*"},
-		{AgentEventsWildcard, "harness.agent.*.events"},
-		{IssueStateSubject("abc123"), "harness.issue.abc123.state"},
-		{IssueStateWildcard, "harness.issue.*.state"},
+		{WorkSubject("implement"), "factory.work.implement"},
+		{ResultSubject("qa"), "factory.result.qa"},
+		{AgentEventsSubject("abc123"), "factory.agent.abc123.events"},
+		{ControlSubject("health"), "factory.control.health"},
+		{SubjectDLQ, "factory.dlq"},
+		{WorkStreamSubjects, "factory.work.>"},
+		{ResultStreamSubjects, "factory.result.>"},
+		{ControlSubjects, "factory.control.*"},
+		{AgentEventsWildcard, "factory.agent.*.events"},
+		{IssueStateSubject("abc123"), "factory.issue.abc123.state"},
+		{IssueStateWildcard, "factory.issue.*.state"},
 	}
 	for _, c := range cases {
 		if c.got != c.want {
@@ -35,11 +35,11 @@ func TestSubjectHelpers(t *testing.T) {
 func TestIssueIDFromStateSubject(t *testing.T) {
 	cases := []struct{ subj, want string }{
 		{IssueStateSubject("abc123"), "abc123"},
-		{"harness.issue.harness-7.state", "harness-7"},
-		{"harness.agent.abc.events", ""},
-		{"harness.issue..state", ""},
+		{"factory.issue.harness-7.state", "harness-7"},
+		{"factory.agent.abc.events", ""},
+		{"factory.issue..state", ""},
 		{IssueStateWildcard, ""}, // the literal "*" carries no id
-		{"harness.issue.a.b.state", ""},
+		{"factory.issue.a.b.state", ""},
 		{"", ""},
 	}
 	for _, c := range cases {
@@ -54,19 +54,19 @@ func TestIssueIDFromStateSubject(t *testing.T) {
 // shape, the wildcard itself, an embedded separator, an empty id — yields "" so the T4.25 pump
 // drops it rather than attributing a step to a bogus id.
 func TestMergeStateSubject(t *testing.T) {
-	if got := MergeStateSubject("iss-7"); got != "harness.merge.iss-7.state" {
-		t.Errorf("MergeStateSubject = %q, want harness.merge.iss-7.state", got)
+	if got := MergeStateSubject("iss-7"); got != "factory.merge.iss-7.state" {
+		t.Errorf("MergeStateSubject = %q, want factory.merge.iss-7.state", got)
 	}
-	if MergeStateWildcard != "harness.merge.*.state" {
-		t.Errorf("MergeStateWildcard = %q, want harness.merge.*.state", MergeStateWildcard)
+	if MergeStateWildcard != "factory.merge.*.state" {
+		t.Errorf("MergeStateWildcard = %q, want factory.merge.*.state", MergeStateWildcard)
 	}
 	cases := []struct{ subj, want string }{
 		{MergeStateSubject("iss-7"), "iss-7"},
-		{"harness.merge.harness-2.state", "harness-2"},
-		{"harness.issue.abc.state", ""}, // issue-state subject, not merge
-		{"harness.merge..state", ""},
+		{"factory.merge.harness-2.state", "harness-2"},
+		{"factory.issue.abc.state", ""}, // issue-state subject, not merge
+		{"factory.merge..state", ""},
 		{MergeStateWildcard, ""}, // the literal "*" carries no id
-		{"harness.merge.a.b.state", ""},
+		{"factory.merge.a.b.state", ""},
 		{"", ""},
 	}
 	for _, c := range cases {
@@ -82,11 +82,11 @@ func TestMergeStateSubject(t *testing.T) {
 func TestAgentIDFromEventSubject(t *testing.T) {
 	cases := []struct{ subj, want string }{
 		{AgentEventsSubject("abc123"), "abc123"},
-		{"harness.agent.deadbeef.events", "deadbeef"},
-		{"harness.work.implement", ""},
-		{"harness.agent..events", ""},
+		{"factory.agent.deadbeef.events", "deadbeef"},
+		{"factory.work.implement", ""},
+		{"factory.agent..events", ""},
 		{AgentEventsWildcard, ""}, // the literal "*" carries no id
-		{"harness.agent.a.b.events", ""},
+		{"factory.agent.a.b.events", ""},
 		{"", ""},
 	}
 	for _, c := range cases {

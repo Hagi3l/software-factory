@@ -19,7 +19,7 @@ import (
 // policy, and redacted infra — read-only. Config is restart-static, so unlike the board /
 // budgets / DLQ it is deliberately NOT a feed: a plain server-rendered snapshot, no SSE, no
 // refetch. It reflects the running factory by construction (the control room is co-located in
-// `harness run`, so the rendered object is the very validated config that process holds). The
+// `software-factory run`, so the rendered object is the very validated config that process holds). The
 // view shows, never mutates — the control room's only write surfaces are the wizard (spec) and
 // the DLQ (approve/reject); config is the substrate, changed by editing files and restarting.
 //
@@ -105,7 +105,7 @@ func ConfigPage(v configview.ConfigView) templ.Component {
 	})
 }
 
-// configWarnings surfaces config.Warnings() (T2.13) — the non-fatal advisories `harness validate`
+// configWarnings surfaces config.Warnings() (T2.13) — the non-fatal advisories `software-factory validate`
 // prints to stderr at startup, brought into the control room so the same safety signal is visible
 // where an operator inspects the running factory, not only in the launch logs. The chief advisory
 // is producer/verifier model-family overlap, which weakens the N-version independence
@@ -170,7 +170,7 @@ func configWarnings(warnings []string) templ.Component {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</ul><p class=\"mt-3 text-xs text-muted\">Non-fatal — the same advisories <code class=\"font-mono\">harness validate</code> prints at startup. The config is valid; these are recommendations to heed or ignore.</p></section>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "</ul><p class=\"mt-3 text-xs text-muted\">Non-fatal — the same advisories <code class=\"font-mono\">software-factory validate</code> prints at startup. The config is valid; these are recommendations to heed or ignore.</p></section>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -1031,7 +1031,7 @@ func PersonaContent(content string) templ.Component {
 }
 
 // PersonaError is the persona-route fragment when the file cannot be read (a config gap that
-// harness validate would normally catch). It renders the reason inline rather than failing the
+// software-factory validate would normally catch). It renders the reason inline rather than failing the
 // whole page, mirroring the raw-fold marshal-error handling.
 func PersonaError(msg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
@@ -1554,7 +1554,7 @@ func kvXS(label, value string) templ.Component {
 }
 
 // ConfigMessage renders the Config chrome with a single notice instead of the sections — used
-// when the control room is not attached to a running factory (a standalone `harness serve` has
+// when the control room is not attached to a running factory (a standalone `software-factory serve` has
 // no in-process config to show). Mirrors BoardMessage / BudgetsMessage.
 func ConfigMessage(msg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {

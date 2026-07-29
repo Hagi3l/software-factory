@@ -60,7 +60,7 @@ templ DAGGraph(g dag.Graph) {
 }
 
 // DAGMessage renders the DAG chrome with a single notice instead of the graph — used when
-// the control room is not attached to a running factory (a standalone `harness serve` has no
+// the control room is not attached to a running factory (a standalone `software-factory serve` has no
 // beads to read) or when the DAG read fails. Mirrors BoardMessage / DeadLetterMessage.
 templ DAGMessage(msg string) {
 	@Layout("Harness — DAG", "dag") {

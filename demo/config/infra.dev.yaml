@@ -27,7 +27,7 @@ broker:
   allowlist: [llm-api, nats, git]
 artifacts:
   backend: files
-  path: ./.harness/artifacts
+  path: ./.software-factory/artifacts
 otel:
   endpoint: ""        # tracing off for the demo ("stdout" to see spans, host:port for OTLP)
 models:

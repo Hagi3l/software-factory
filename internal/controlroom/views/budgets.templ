@@ -178,7 +178,7 @@ templ budgetPct(pct int, over bool, capped bool) {
 }
 
 // BudgetsMessage renders the budgets chrome with a single notice instead of the tables —
-// used when the control room is not attached to a running factory (standalone `harness serve`
+// used when the control room is not attached to a running factory (standalone `software-factory serve`
 // has no beads to read) or when the read fails.
 templ BudgetsMessage(msg string) {
 	@Layout("Harness — Budgets", "budgets") {

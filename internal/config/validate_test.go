@@ -44,7 +44,7 @@ func validConfig() *Config {
 				"license-scan": "go-licenses check ./...",
 				"mutation":     "gremlins unleash --output /tmp/m.json && jq -r .efficacy /tmp/m.json",
 			},
-			Policy: Policy{MaxRetries: 3, DeadLetter: "harness.dlq"},
+			Policy: Policy{MaxRetries: 3, DeadLetter: "factory.dlq"},
 		},
 		Infra: &Infra{
 			Models: map[string]ModelProvider{
@@ -325,7 +325,7 @@ func TestValidateProducesCycle(t *testing.T) {
 				"a": {Role: "ra", Produces: []string{"b"}},
 				"b": {Role: "rb", Produces: []string{"a"}},
 			},
-			Policy: Policy{DeadLetter: "harness.dlq"},
+			Policy: Policy{DeadLetter: "factory.dlq"},
 		},
 		Infra: &Infra{Models: map[string]ModelProvider{"m": {Provider: "anthropic"}}},
 	}
@@ -741,15 +741,15 @@ func TestValidateRequirementsPlannerPrefillMissing(t *testing.T) {
 }
 
 // The artifact store backend is validated at the startup gate so a distributed (s3)
-// deployment with a missing bucket/endpoint fails loud at `harness validate` rather than
+// deployment with a missing bucket/endpoint fails loud at `software-factory validate` rather than
 // silently dropping every harvested artifact at run time. The files default needs no
 // extra config here (its path is checked when the store opens).
 func TestValidateArtifactsValidForms(t *testing.T) {
 	cases := []ArtifactsConfig{
 		{}, // empty default → files
-		{Backend: "files", Path: "./.harness/artifacts"},     // explicit files
-		{Backend: "s3", Bucket: "b", Region: "us-east-1"},    // AWS via region
-		{Backend: "s3", Bucket: "b", Endpoint: "minio:9000"}, // MinIO via endpoint
+		{Backend: "files", Path: "./.software-factory/artifacts"}, // explicit files
+		{Backend: "s3", Bucket: "b", Region: "us-east-1"},         // AWS via region
+		{Backend: "s3", Bucket: "b", Endpoint: "minio:9000"},      // MinIO via endpoint
 	}
 	for _, a := range cases {
 		c := validConfig()
@@ -833,7 +833,7 @@ func TestSigningConfigActive(t *testing.T) {
 }
 
 // The NATS endpoint + JetStream knobs are validated at the startup gate so a distributed
-// (external-cluster) misconfiguration fails loud at `harness validate` rather than as an
+// (external-cluster) misconfiguration fails loud at `software-factory validate` rather than as an
 // opaque connect/stream error mid-run. Empty url = the embedded in-process server (the
 // dev/bootstrap default); a set url is an external cluster (T5.8). See specs/messaging.md.
 func TestValidateNATSValidForms(t *testing.T) {
@@ -1008,7 +1008,7 @@ func TestValidateReportsAllProblemsSorted(t *testing.T) {
 	}
 }
 
-// writeValidTree writes the canonical harness.yaml and infra.dev.yaml plus a soul
+// writeValidTree writes the canonical factory.yaml and infra.dev.yaml plus a soul
 // (and persona) for every agent role, so the loaded config validates cleanly.
 func writeValidTree(t *testing.T) string {
 	t.Helper()
@@ -1021,7 +1021,7 @@ func writeValidTree(t *testing.T) string {
 			t.Fatalf("write %s: %v", rel, err)
 		}
 	}
-	write("harness.yaml", harnessYAML)
+	write("factory.yaml", harnessYAML)
 	write("infra.dev.yaml", infraYAML)
 	for _, rs := range []struct{ name, role string }{
 		{"planner", "planner"},

@@ -152,7 +152,7 @@ func TestGitMergerSignsProvenanceCommit(t *testing.T) {
 
 	// Signed: the key configured → signing flags present.
 	m, calls := scriptedGit(reply)
-	m.signingKey = "/keys/harness_ed25519"
+	m.signingKey = "/keys/factory_ed25519"
 	if _, err := m.Merge(context.Background(), "/repo", "candidate/iss-1", "refs/heads/main", testProvenance(), nil, nil); err != nil {
 		t.Fatalf("Merge (signed): %v", err)
 	}
@@ -160,7 +160,7 @@ func TestGitMergerSignsProvenanceCommit(t *testing.T) {
 	if !hasSeq(ct, "-c", "gpg.format=ssh") {
 		t.Errorf("signed commit-tree missing gpg.format=ssh; got %v", ct)
 	}
-	if !hasSeq(ct, "-c", "user.signingkey=/keys/harness_ed25519") {
+	if !hasSeq(ct, "-c", "user.signingkey=/keys/factory_ed25519") {
 		t.Errorf("signed commit-tree missing user.signingkey; got %v", ct)
 	}
 	if !hasSeq(ct, "commit-tree", "-S") {

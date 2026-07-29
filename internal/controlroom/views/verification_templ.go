@@ -1021,7 +1021,7 @@ func transformMechanismBadge(mech string) templ.Component {
 
 // VerificationNotAttached renders the verification chrome with a single notice instead of a
 // verdict — used when the control room is not attached to a running factory (a standalone
-// `harness serve` has no stores to read) or when the issue cannot be loaded (an unknown id).
+// `software-factory serve` has no stores to read) or when the issue cannot be loaded (an unknown id).
 // A missing/undecodable verdict for a *known* issue is handled inline by VerificationPage's
 // notice, which still shows the issue header and the soul split.
 func VerificationNotAttached(msg string) templ.Component {

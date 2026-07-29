@@ -1,7 +1,7 @@
 # Configuration
 
 The harness is entirely config-driven: the workflow, the souls, and the infrastructure
-are declarative and validated before anything runs (`harness validate`). This is the
+are declarative and validated before anything runs (`software-factory validate`). This is the
 practical guide; the authoritative contract is
 [`specs/configuration.md`](../specs/configuration.md).
 
@@ -13,7 +13,7 @@ API keys are **never** in config — they come from the environment
 
 ```
 config/
-├── harness.yaml            # the DAG, check registry, and policy — environment-independent
+├── factory.yaml            # the DAG, check registry, and policy — environment-independent
 ├── infra.<env>.yaml        # infrastructure overlay per environment (sandbox, NATS, models, …)
 └── souls/
     ├── <name>.yaml         # one soul: identity + role + model + persona + sandbox + selector
@@ -21,11 +21,11 @@ config/
         └── <name>.md       # the persona prompt a soul boots with
 ```
 
-`harness validate --config config --env dev` loads `harness.yaml`, the souls, and
+`software-factory validate --config config --env dev` loads `factory.yaml`, the souls, and
 `infra.dev.yaml`, and gates startup on any breaking fault. Change `--env` to load a
 different overlay.
 
-## `harness.yaml` — the pipeline
+## `factory.yaml` — the pipeline
 
 This is *what the factory does*, independent of where it runs. Key sections:
 
@@ -89,7 +89,7 @@ the first — the human triaging the dead-letter queue (or the agent re-routed t
 fixes them all in one round-trip rather than bouncing the candidate once per scanner. Only
 spec-independent scanners belong here; the proofs (`tests-pass`) and the metric (`mutation`)
 stay fail-fast — a mutation score on a candidate whose tests are red is meaningless — and
-`harness validate` rejects a reserved proof or a metric command in the list. Each name must be
+`software-factory validate` rejects a reserved proof or a metric command in the list. Each name must be
 a key in `checks:`; omit the list to keep everything fail-fast. Aggregation never changes the
 verdict (a candidate that trips any check still fails the gate), only how much one failing
 pass reports. See [verification.md](../specs/verification.md).
@@ -108,7 +108,7 @@ policy:
   budget:        { tokens: 2_000_000, usd: 20, wall: 2h } # per issue, across the retry loop
   epic_budget:   { usd: 200 }                             # aggregate across an epic
   explore_budget: { tokens: 100_000, turns: 12 }          # per explore call; omit to disable explore
-  dead_letter: harness.dlq
+  dead_letter: factory.dlq
   profile:     trusted-dev                                # or: autonomous
   tcb_paths:                                              # the Trusted Computing Base boundary
     - internal/orchestrator/**
@@ -170,7 +170,7 @@ neighbour is injected once), and **covered by the spec content hash** — so edi
 file is pinned in provenance and re-derives in-flight/merged work exactly like a contract edit.
 Keep them **lean**: they ride in every invocation.
 
-Opt-in (empty by default). `harness validate` rejects an absolute path, a `../` escape outside
+Opt-in (empty by default). `software-factory validate` rejects an absolute path, a `../` escape outside
 the repo, or a duplicate entry; file *existence* is resolved best-effort at dispatch (a missing
 ambient file is logged and omitted, never wedges a run). See
 [specs-process.md](../specs/specs-process.md#ambient-specs).
@@ -191,7 +191,7 @@ integration:
   `epic/<epic_id>` branch and `main` advances exactly once, by the epic's terminal merge, when
   the epic's subtree drains. v1 runs **one epic at a time**.
 
-Omitting the block defaults to `per-item`. `harness validate` rejects any `mode` outside
+Omitting the block defaults to `per-item`. `software-factory validate` rejects any `mode` outside
 `{per-item, epic}`.
 
 ### `requirements_planner` — the wizard's model
@@ -233,7 +233,7 @@ branch. Omit `sandbox_profile` to keep the planner a pure conversation. Explorat
 read-only; the planner still writes nothing but the consent-gated spec + seed issues.
 
 `prefill` (optional) names a text/markdown file (resolved against the config root, like
-`persona`; `harness validate` checks it exists) holding a **prepared requirement**. When set,
+`persona`; `software-factory validate` checks it exists) holding a **prepared requirement**. When set,
 the wizard's composer shows an "Insert prepared requirement" button that drops the file's
 content into the message box — a canned opening for a rehearsed or scripted kickoff (e.g. a
 live demo). Insert only: the operator still reviews and sends it, and the conversation
@@ -274,7 +274,7 @@ sandboxed-soul analog of the wizard's `requirements_planner.max_tool_turns`.
 > `model`, an explore `persona`, a `selector`), but its `tools` must be a subset of the
 > read-only comprehension tools (`find_symbol`, `references`, `definition`, `implementation`,
 > `hover`, `diagnostics`, `read_file`, `list_dir`, `search`) and must **never** include
-> `explore` (no recursion) — `harness validate` rejects a writer or `explore` in an explorer's
+> `explore` (no recursion) — `software-factory validate` rejects a writer or `explore` in an explorer's
 > allowlist. Enable the feature with `policy.explore_budget`; when it is set, at least one
 > `explorer` soul must exist.
 >
@@ -296,7 +296,7 @@ sandboxed-soul analog of the wizard's `requirements_planner.max_tool_turns`.
 > **Model diversity** (`producer ≠ verifier` strengthened): the harness *enables and
 > recommends* running the verifier on a different model family than the producer, but
 > the assignment is yours — it's a config capability, not a built-in mechanism.
-> `harness validate` emits a non-fatal **warning** if a producer and its verifier share
+> `software-factory validate` emits a non-fatal **warning** if a producer and its verifier share
 > a model family. Family is the **trainer org**, not the provider adapter: a model served
 > through an aggregating gateway (e.g. OpenRouter — every model is one `openai-compat`
 > entry) is identified by the `vendor/` prefix of its slug (`deepseek/deepseek-v4-pro` →
@@ -308,7 +308,7 @@ sandboxed-soul analog of the wizard's `requirements_planner.max_tool_turns`.
 ## `infra.<env>.yaml` — the infrastructure overlay
 
 *Where* the factory runs. Swapping environments (dev → prod) is a matter of swapping
-this file — the pipeline in `harness.yaml` is unchanged (location transparency).
+this file — the pipeline in `factory.yaml` is unchanged (location transparency).
 
 ```yaml
 sandbox:
@@ -331,10 +331,10 @@ git:                          # where the candidate branch is pushed + how it's 
   #   app_id: "123456"
   #   installation_id: "7891011"
   #   repository: acme/widgets
-  #   private_key: /run/secrets/harness_github_app.pem   # PATH to the App PEM; a runtime secret
+  #   private_key: /run/secrets/factory_github_app.pem   # PATH to the App PEM; a runtime secret
 artifacts:
   backend: files             # files (single-host dev) | s3 (distributed: S3/MinIO)
-  path: ./.harness/artifacts # files backend root (relative paths resolve against the repo)
+  path: ./.software-factory/artifacts # files backend root (relative paths resolve against the repo)
   # backend: s3              # for s3, set bucket + (endpoint | region); creds come from the env
   # bucket: harness-artifacts
   # endpoint: minio.internal:9000   # MinIO/non-AWS host[:port]; prefix http:// for plaintext dev
@@ -347,7 +347,7 @@ otel:
   #   authorization: ${OTEL_OTLP_AUTH}   # credential — MUST be an ${ENV_VAR} ref, never a literal secret
 signing:                     # provenance-commit signing; omit/disable to leave commits unsigned
   # enabled: true
-  # key: /run/secrets/harness_ed25519        # SSH private signing key (the harness identity); a runtime secret
+  # key: /run/secrets/factory_ed25519        # SSH private signing key (the harness identity); a runtime secret
   # allowed_signers: /etc/harness/allowed_signers   # principal -> harness public key, for verify-on-read
 models:
   claude-opus-4-8:
@@ -381,7 +381,7 @@ models:
   `verbosity` sends the top-level `verbosity` field, which is what Claude 4.6+/5 map to
   `output_config.effort` (their `reasoning.effort` is a silent no-op). Rejected on the other
   providers (native `anthropic` has one wire form; native `openai` is not yet wired). If an
-  Anthropic-family slug sets `effort_param: reasoning`, `harness validate` warns that it will
+  Anthropic-family slug sets `effort_param: reasoning`, `software-factory validate` warns that it will
   silently do nothing — use `verbosity`.
 - **`prompt_caching`** (optional, `true`/`false`) opts the model into prompt caching — the
   adapter marks the re-sent stable prefix (persona + the Brief's spec/ambient context)
@@ -452,11 +452,11 @@ models:
   to the concrete artifact this backend boots — an `image` for docker/gvisor, a `rootfs`
   for firecracker. The soul stays env-agnostic; dev points the name at a local tag, prod
   at a digest-pinned image/rootfs. Pin by digest (`@sha256:…`) so provenance records the
-  exact toolchain bytes. `harness validate` fails if any `soul.sandbox` has no entry here
+  exact toolchain bytes. `software-factory validate` fails if any `soul.sandbox` has no entry here
   for the active backend.
 - **`nats`** points the run at its messaging substrate. An **empty `url`** runs the
   **embedded in-process NATS server** (the dev/bootstrap shape; expose it on a TCP
-  listener for `harness approve` with `harness run --nats-addr host:port`). A **set
+  listener for `software-factory approve` with `software-factory run --nats-addr host:port`). A **set
   `url`** (e.g. `nats://nats-1:4222,nats://nats-2:4222`) connects to that **external
   cluster** instead — the distributed deployment, same code and no rebuild
   (location transparency); the embedded server is not started and `--nats-addr` is
@@ -473,7 +473,7 @@ models:
   Credentials are **never** in config — like model API keys, the s3 backend reads them
   from the environment (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` /
   `AWS_SESSION_TOKEN`). The bucket must already exist; the backend never creates it.
-  `harness validate` fails an `s3` config that names no bucket or no endpoint/region.
+  `software-factory validate` fails an `s3` config that names no bucket or no endpoint/region.
 - **`otel.endpoint`** defaults to off; `stdout` is for offline dev, a `host:port` is
   OTLP/gRPC to an external collector (a Phase 5 deployment step). All **three** OTel
   signals — traces, metrics, and logs — export off this one endpoint, so a single
@@ -488,7 +488,7 @@ models:
   (`authorization`, `*-key`, `*-token`, …) must carry an `${ENV_VAR}` reference, resolved
   from the environment at startup, **never a literal secret** — the same key-handling
   discipline as model API keys. Routing metadata (`organization`, `stream-name`) may be a
-  plain literal. `harness validate` rejects a literal credential or a malformed
+  plain literal. `software-factory validate` rejects a literal credential or a malformed
   `${ENV_VAR}` reference.
 - **`signing`** turns on cryptographic signing of the harness-authored provenance commit
   (SSH signing, `gpg.format=ssh`; see [security.md](../specs/security.md)). With
@@ -496,12 +496,12 @@ models:
   orchestrator signs every integration commit, so `main`'s tip is provably the harness's,
   not just labeled with its name. The key is a **runtime-provisioned secret** like an API
   key — referenced by path, never committed or baked into an image; its existence is *not*
-  checked at `harness validate` (a missing key fails loudly on the first merge).
+  checked at `software-factory validate` (a missing key fails loudly on the first merge).
   `allowed_signers` (a public file mapping the `harness@localhost` principal to the public
   key) drives **verify-on-read**: the control room's provenance view shows each merged
   commit's signature verdict (signed / unsigned / unverified). Omitting the block, or
   leaving `enabled` false, leaves commits unsigned — the unchanged dev default.
-  `harness validate` rejects `enabled: true` with no `key`.
+  `software-factory validate` rejects `enabled: true` with no `key`.
 
 ### Using a local model (no API key)
 

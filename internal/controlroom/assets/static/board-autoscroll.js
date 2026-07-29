@@ -16,7 +16,7 @@
 // human always stays in control of their own viewport. prefers-reduced-motion is honored by
 // dropping the smooth animation (the repositioning still happens, just instantly).
 (function () {
-  const STORAGE_KEY = 'harness.board.autoscroll';
+  const STORAGE_KEY = 'factory.board.autoscroll';
   const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   // Default on; only an explicit "off" (a prior toggle/pause) disables it.

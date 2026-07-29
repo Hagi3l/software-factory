@@ -43,12 +43,12 @@ import (
 // candidates fast-forward onto main with a provenance trailer.
 func cmdRun(args []string) error {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	dir := fs.String("config", "config", "config directory (harness.yaml, souls/, infra.<env>.yaml)")
+	dir := fs.String("config", "config", "config directory (factory.yaml, souls/, infra.<env>.yaml)")
 	env := fs.String("env", "dev", "infra environment overlay to load")
 	repo := fs.String("repo", ".", "integration repository: candidates are pushed and merged here, and worktrees seeded from it")
 	bdBin := fs.String("bd", "bd", "path to the beads CLI")
 	serveAddr := fs.String("serve-addr", "", "if set, also serve the control room on this address (live SSE shares this run's in-process NATS)")
-	natsAddr := fs.String("nats-addr", "", "if set, expose this run's NATS on this address so `harness approve`/`reject` can reach it (default: in-process only)")
+	natsAddr := fs.String("nats-addr", "", "if set, expose this run's NATS on this address so `software-factory approve`/`reject` can reach it (default: in-process only)")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -85,25 +85,25 @@ func cmdRun(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	log.InfoContext(ctx, "harness run: starting", "repo", absRepo, "roles", agentRoles(cfg), "serve", *serveAddr)
+	log.InfoContext(ctx, "software-factory run: starting", "repo", absRepo, "roles", agentRoles(cfg), "serve", *serveAddr)
 	g, ctx := errgroup.WithContext(ctx)
 	g.Go(func() error { return comp.orch.Run(ctx) })
 	g.Go(func() error { return comp.rnr.Run(ctx) })
 	// The control room, when enabled, is co-located in this process so it can tail the
-	// in-process NATS directly (a separate `harness serve` cannot reach a DontListen
+	// in-process NATS directly (a separate `software-factory serve` cannot reach a DontListen
 	// embedded server — that awaits distributed NATS, T5.8). A ctx cancel drains it.
 	if comp.server != nil {
 		addr := *serveAddr
 		g.Go(func() error { return comp.server.ListenAndServe(ctx, addr) })
 	}
 	err = g.Wait()
-	log.InfoContext(ctx, "harness run: stopped", "err", err)
+	log.InfoContext(ctx, "software-factory run: stopped", "err", err)
 	return err
 }
 
 // runOptions carries the run-only knobs that are not in the config file (the beads
 // binary path), so buildRunComponents has a stable signature the wiring test can call
-// directly. The gate check commands live in harness.yaml's `checks` registry, not
+// directly. The gate check commands live in factory.yaml's `checks` registry, not
 // here — config is their single source of truth (see specs/configuration.md).
 type runOptions struct {
 	bdBin string
@@ -117,7 +117,7 @@ type runOptions struct {
 	// in force". A deployment knob of this command like serveAddr, not config.
 	env string
 	// natsAddr, when non-empty (host:port), exposes this run's embedded NATS on a TCP
-	// listener so a separate `harness approve`/`reject` process can publish approvals to it
+	// listener so a separate `software-factory approve`/`reject` process can publish approvals to it
 	// (the trusted-dev gate, T2.10). Empty (the default) keeps NATS in-process only. Like
 	// serveAddr it is a deployment knob of this command, not config.
 	natsAddr string
@@ -173,7 +173,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	// NATS + JetStream. Two deployment shapes, selected by the infra overlay's nats.url:
 	//   - empty → an embedded in-process server (the bootstrap/dev default): this process
 	//     hosts NATS, optionally exposed on a TCP listener via --nats-addr so a separate
-	//     `harness approve` can reach it.
+	//     `software-factory approve` can reach it.
 	//   - set   → connect to that EXTERNAL cluster (distributed, T5.8); no embedded server
 	//     is started, so --nats-addr has nothing to expose and is ignored.
 	// Either way the orchestrator and runner take the same *nats.Conn (location
@@ -182,7 +182,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 	if url := cfg.Infra.NATS.URL; url == "" {
 		// The store dir lives under the repo so JetStream state survives a restart (the
 		// crash-and-resume model), rather than a temp dir.
-		storeDir := filepath.Join(repo, ".harness", "jetstream")
+		storeDir := filepath.Join(repo, ".software-factory", "jetstream")
 		if mkErr := os.MkdirAll(storeDir, 0o750); mkErr != nil {
 			return nil, mkErr
 		}
@@ -197,7 +197,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		}
 	} else {
 		if opts.natsAddr != "" {
-			log.WarnContext(context.Background(), "harness run: --nats-addr ignored because nats.url points at an external cluster", "nats_url", url)
+			log.WarnContext(context.Background(), "software-factory run: --nats-addr ignored because nats.url points at an external cluster", "nats_url", url)
 		}
 		nc, err = messaging.Connect(url, nats.Name("harness"))
 		if err != nil {
@@ -329,7 +329,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			return nil, sperr
 		}
 		releases = append(releases, statePumpStop)
-		// The DLQ pump (T4.19) shares the same hub: it tails the durable harness.dlq subject so a
+		// The DLQ pump (T4.19) shares the same hub: it tails the durable factory.dlq subject so a
 		// dead-letter arrival reaches the operator as a browser notification (the queue is the
 		// human's only action surface) and bumps the status bar's escalation count.
 		dlqPumpStop, dlqErr := live.StartDLQPump(nc, hub)
@@ -337,7 +337,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			return nil, dlqErr
 		}
 		releases = append(releases, dlqPumpStop)
-		// The merge-state pump (T4.25) shares the same hub: it tails harness.merge.*.state so the
+		// The merge-state pump (T4.25) shares the same hub: it tails factory.merge.*.state so the
 		// merge-queue view sees each integrate candidate's step (queued → rebasing → re-gating →
 		// landed, or terminal conflicted / regate-failed) — the rebase-and-re-gate interval beads
 		// does not record — and records the latest step per candidate into the mergeQueue buffer.
@@ -420,7 +420,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 			// One wizardSeeder implements both wizard.Seeder and wizard.Resolver — two consent-gated
 			// write paths sharing the spec-write machinery. It uses a fresh read-only-by-convention
 			// beads client (the orchestrator stays the sole long-lived writer; the wizard write is a
-			// discrete human-approved seed/resolve, like `harness seed`).
+			// discrete human-approved seed/resolve, like `software-factory seed`).
 			wizSeeder = newWizardSeeder(cfg, repo, beads.New(beads.WithBinary(opts.bdBin), beads.WithDir(repo)), store, log)
 			seeder = wizSeeder
 			resolver = wizSeeder
@@ -523,7 +523,7 @@ func buildRunComponents(cfg *config.Config, repo string, opts runOptions, log *s
 		gateOpts = append(gateOpts, gate.WithPackageProxy(cfg.Infra.Broker.PackageProxyURL()))
 	}
 	// Independent scanners keep running past a failure so one qa pass aggregates every finding
-	// (T2.12); empty list is a no-op (pure fail-fast). Validated by harness validate.
+	// (T2.12); empty list is a no-op (pure fail-fast). Validated by software-factory validate.
 	gateOpts = append(gateOpts, gate.WithIndependentChecks(cfg.Harness.IndependentChecks))
 	gateRunner := gate.New(backend, gate.Registry(cfg.Harness.Checks), store, sockDir, log, tel, gateOpts...)
 

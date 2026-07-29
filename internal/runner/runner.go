@@ -645,7 +645,7 @@ func (r *Runner) publishResult(ctx context.Context, role string, res core.Result
 
 // invocationID returns a fresh, unique per-invocation id. It names the broker socket
 // (avoiding collisions between concurrent invocations sharing the socket dir) and the
-// agent's NATS event subject (harness.agent.<id>.events), and tags the invocation's
+// agent's NATS event subject (factory.agent.<id>.events), and tags the invocation's
 // logs. Random hex keeps it safe as a NATS subject token (no '.').
 func (r *Runner) invocationID() (string, error) {
 	var b [8]byte

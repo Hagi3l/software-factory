@@ -12,7 +12,7 @@ import (
 )
 
 // TestTransitionAnnouncesEachKind proves the single transition choke point publishes a typed
-// issue-state event on harness.issue.<id>.state for every status it is driven to (the kinds the
+// issue-state event on factory.issue.<id>.state for every status it is driven to (the kinds the
 // orchestrator transitions issues through: in_progress / closed / blocked / open), carrying the
 // id/status/role/epic and a non-zero timestamp — the payload the T4.17 pump / T4.18 board read.
 // The durable state_entered_at stamp that accompanies it is exercised at the beads layer

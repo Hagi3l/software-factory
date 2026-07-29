@@ -328,7 +328,7 @@ func mergeRow(row query.MergeRow) templ.Component {
 }
 
 // MergeQueueMessage renders the merge-queue chrome with a single notice instead of the train —
-// used when the control room is not attached to a running factory (a standalone `harness serve`
+// used when the control room is not attached to a running factory (a standalone `software-factory serve`
 // has no live merge-state feed) or when the underlying read fails.
 func MergeQueueMessage(msg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {

@@ -50,14 +50,14 @@ sandbox:
       image: vault-toolchain
 nats:
   # empty url -> in-process embedded NATS (the dev shape). The live SSE feed and the wizard
-  # are co-located in `harness run --serve-addr`.
+  # are co-located in `software-factory run --serve-addr`.
   url: ""
   jetstream: { replicas: 1, max_age: 168h }
 broker:
   allowlist: [llm-api, nats, git]
 artifacts:
   backend: files
-  path: ./.harness/artifacts
+  path: ./.software-factory/artifacts
 otel:
   endpoint: ""        # tracing off for the demo ("stdout" to see spans, host:port for OTLP)
 models:

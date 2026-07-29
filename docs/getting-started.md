@@ -22,7 +22,7 @@ into the broker; the sandboxed agent never sees it.
 make build
 ```
 
-This compiles a **self-contained** `./bin/harness` — the control-room templates and
+This compiles a **self-contained** `./bin/software-factory` — the control-room templates and
 CSS are generated and committed, so a plain build needs no web toolchain. The binary
 embeds the entire UI.
 
@@ -42,7 +42,7 @@ make generate       # regenerate templ + Tailwind after editing the UI (needs te
 Everything is config-driven and validated before anything runs. Start here:
 
 ```bash
-./bin/harness validate --config config
+./bin/software-factory validate --config config
 ```
 
 A clean run prints an OK line and exits 0; any startup-breaking fault is a loud error.
@@ -52,7 +52,7 @@ as `warning:` lines but still exit 0. See [configuration.md](configuration.md).
 ## 2. Browse the control room (no model or Docker needed)
 
 ```bash
-./bin/harness serve --addr 127.0.0.1:8080
+./bin/software-factory serve --addr 127.0.0.1:8080
 ```
 
 Open <http://127.0.0.1:8080>. Standalone `serve` renders all the static views, but the
@@ -68,7 +68,7 @@ work graph.
 
 ```bash
 export ANTHROPIC_API_KEY=sk-...            # or configure a local openai-compat model
-./bin/harness run \
+./bin/software-factory run \
   --config config \
   --repo /path/to/integration-repo \
   --serve-addr 127.0.0.1:8080              # co-locate the live control room
@@ -83,7 +83,7 @@ control room is served from the same process and its live SSE feed has a real so
 In another shell, author a spec and create the first work item:
 
 ```bash
-./bin/harness seed \
+./bin/software-factory seed \
   --repo /path/to/integration-repo \
   --title "Add a /healthz endpoint" \
   --description "Return 200 OK with body 'ok'." \
@@ -96,7 +96,7 @@ running orchestrator picks it up and drives it through the DAG. Watch progress i
 control room's Board and Activity views.
 
 > In production this seeding step is the **Create-Task wizard** in the control room;
-> `harness seed` is the CLI stand-in. See [the pipeline](pipeline.md).
+> `software-factory seed` is the CLI stand-in. See [the pipeline](pipeline.md).
 
 ## 4. Approve a candidate (trusted-dev mode)
 
@@ -107,12 +107,12 @@ process can reach it:
 
 ```bash
 # add --nats-addr to the run command:
-./bin/harness run ... --nats-addr 127.0.0.1:4222
+./bin/software-factory run ... --nats-addr 127.0.0.1:4222
 
 # then, in another shell:
-./bin/harness approve --nats nats://127.0.0.1:4222 <issue-id>
+./bin/software-factory approve --nats nats://127.0.0.1:4222 <issue-id>
 # or
-./bin/harness reject  --nats nats://127.0.0.1:4222 <issue-id>
+./bin/software-factory reject  --nats nats://127.0.0.1:4222 <issue-id>
 ```
 
 Approve replays the gate-verified provenance onto the merge and closes the issue;
@@ -125,13 +125,13 @@ reject routes a fresh fix attempt (or dead-letters when retries are spent). See
   (issue → soul → model → prompt → evidence).
 - **Work graph** → the beads store (`.beads/`) in `--repo`.
 - **Evidence** (transcripts, gate output, diffs) → the artifact store (in dev, files
-  under `./.harness/artifacts`, per the infra overlay).
+  under `./.software-factory/artifacts`, per the infra overlay).
 
 ## Troubleshooting
 
 - **`validate` fails** — read the error; it names the offending config key. The startup
   gate refuses to run on a bad config by design.
-- **`/events` returns 503** — you're on a standalone `harness serve`. Use `harness run
+- **`/events` returns 503** — you're on a standalone `software-factory serve`. Use `software-factory run
   --serve-addr` so the feed has a live NATS source.
 - **qa lint/scanner checks fail closed** — the golangci-lint/gosec/govulncheck/license/mutation
   tooling and the offline vuln DB are baked into the `go-toolchain` sandbox image (see

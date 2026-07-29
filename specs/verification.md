@@ -124,7 +124,7 @@ diversity for the *helper* would buy a second-order independence gain at the pri
 second cheap-model entry plus stage-scoped selector routing the harness has no other use
 for. Deployments wanting a stricter posture have two config-only options: a second
 `explorer` soul on a different family with a distinguishing selector, or **no explore on
-the verify path at all** (the verifier reads raw — fully independent). `harness validate`
+the verify path at all** (the verifier reads raw — fully independent). `software-factory validate`
 does **not** advise on explorer family overlap — the family-overlap advisory covers the
 producer/verifier *main* models, where the model *is* the grader's judgment, not a
 recoverable helper.
@@ -284,7 +284,7 @@ bounce once *per* scanner. Instead, the checks named in the config's **`independ
 list (see [configuration.md](configuration.md)) are run **past a failure**: one `qa` pass
 records *every* independent finding at once, so the human triaging the dead-letter queue (or
 the agent re-routed to `implement`) fixes them all in a single round-trip. The signal is
-config, not code: only a command check (a scanner) may be listed, and `harness validate`
+config, not code: only a command check (a scanner) may be listed, and `software-factory validate`
 rejects a reserved proof or a metric's measurement command, so those always stay fail-fast.
 The gate still stops at the first *non-independent* failure, and a candidate that trips any
 check still fails the gate — aggregation changes only *how much* a single failing pass
@@ -418,14 +418,14 @@ a style issue.
   `metric<op>threshold` postcondition with operators `>=`, `<=`, `==`, `>`, `<`, the
   threshold living in config) and the gate check kind is implemented. With the live `qa`
   stage landed, the kernel commits **`mutation>=0.8`** as its default — an 0.8 score
-  with the `>=` operator — declared on the qa stage in `config/harness.yaml`. It remains
+  with the `>=` operator — declared on the qa stage in `config/factory.yaml`. It remains
   config, so it is tunable per role/project; which mutation operators the tool exercises is
   the tool's own configuration, kept out of the gate (which grades only the resulting
   number).
 - N-version diversity via a different-model reviewer soul is **resolved, not open**:
   it is a configuration capability — see "Model diversity is configured, not mandated"
   above — not a built-in mechanism. The non-fatal config-validation warning when a
-  verifier shares a model family with the producer is **implemented** (`harness validate`
+  verifier shares a model family with the producer is **implemented** (`software-factory validate`
   surfaces it via `config.Warnings()`; the producer is the red→green-gated stage and its
   verifiers are the gate stages it produces). The complementary control-room tooltip
   remains a follow-up, pending a souls/config view.

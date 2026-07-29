@@ -77,7 +77,7 @@ type Check struct {
 
 // Registry is the check registry: postcondition identifier -> shell command. It is
 // the bridge from a stage's declared postconditions to the runnable Checks the gate
-// executes, mirroring (at run time) the same `checks` map harness validate gates the
+// executes, mirroring (at run time) the same `checks` map software-factory validate gates the
 // config against (see specs/configuration.md, specs/verification.md). It is built
 // once from config.Harness.Checks and resolves each candidate's postconditions per
 // gate run.
@@ -86,7 +86,7 @@ type Registry map[string]string
 // Resolve turns a stage's declared postconditions into the ordered command checks the
 // gate runs, preserving postcondition order. Every postcondition must have a command
 // in the registry; a postcondition with no entry is unresolvable and returns an error
-// (a configuration fault — harness validate accepts a command-check postcondition only
+// (a configuration fault — software-factory validate accepts a command-check postcondition only
 // when it has a `checks` entry, so a live gap means config and the gate disagree).
 //
 // The reserved red→green proof (core.PostconditionRedGreen) is not a command check: it
@@ -265,7 +265,7 @@ type Runner struct {
 	// packageProxy, when set, gives the verification sandbox a package-proxy egress so a
 	// candidate that adds a brand-new dependency can be re-gated (T5.6a). Empty keeps the
 	// verifier deny-all (the default — see provisionVerifier). It is the same base URL the
-	// runner's relay forwards to (config.BrokerConfig.PackageProxyURL); cmd/harness sets it
+	// runner's relay forwards to (config.BrokerConfig.PackageProxyURL); cmd/software-factory sets it
 	// only when the operator has allowlisted package-proxy, so enabling the producer's
 	// dependency fetch enables the verifier's by the same opt-in.
 	packageProxy string
@@ -300,7 +300,7 @@ func WithPackageProxy(base string) Option {
 // failure of one and keeps running the remaining checks rather than stopping, so a single
 // qa pass surfaces every independent-scanner finding at once (T2.12). Names that are not
 // plain command checks (reserved proofs, metric comparisons) never match a graded check's
-// Name, so they stay fail-fast even if mistakenly listed; harness validate rejects such
+// Name, so they stay fail-fast even if mistakenly listed; software-factory validate rejects such
 // entries up front. An empty list is a no-op (pure fail-fast), so callers may pass it
 // unconditionally.
 func WithIndependentChecks(names []string) Option {

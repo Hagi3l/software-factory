@@ -15,7 +15,7 @@ import (
 // left as declared; resolve them against the config root with Config.PersonaPath.
 //
 // A missing directory is not an error — it yields no souls, leaving the "every role
-// resolves to >=1 soul" check to harness validate, which can report it precisely.
+// resolves to >=1 soul" check to software-factory validate, which can report it precisely.
 func LoadSouls(dir string) ([]core.Soul, error) {
 	matches, err := filepath.Glob(filepath.Join(dir, "*.yaml"))
 	if err != nil {

@@ -8,7 +8,7 @@
 // separate, tiny listener avoids depending on htmx-ext-sse internals for a browser-native capability.
 //
 // Best-effort throughout: if Notifications or EventSource are unsupported, or permission is denied,
-// this is silently inert. The durable harness.dlq queue and the live status bar remain the source
+// this is silently inert. The durable factory.dlq queue and the live status bar remain the source
 // of truth — the notification is only the nudge to come look.
 (function () {
   if (!("Notification" in window) || !("EventSource" in window)) {

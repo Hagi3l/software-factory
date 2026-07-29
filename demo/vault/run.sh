@@ -70,7 +70,7 @@ fi
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$DEMO_DIR/../.." && pwd)"
-HARNESS="$REPO_ROOT/bin/harness"
+HARNESS="$REPO_ROOT/bin/software-factory"
 APP_DIR="$DEMO_DIR/app"
 
 say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
@@ -83,7 +83,7 @@ command -v git    >/dev/null || { echo "error: git not found"; exit 1; }
 docker info >/dev/null 2>&1   || { echo "error: docker daemon not reachable"; exit 1; }
 [ -n "${OPENAI_API_KEY:-}" ] || { echo "error: OPENAI_API_KEY is not set — put your OpenRouter API key in it"; exit 1; }
 # Fail fast if the control-room port is already taken (a leftover harness from a prior run, or
-# any other local server) — otherwise the conflict only surfaces at the very last `harness run`
+# any other local server) — otherwise the conflict only surfaces at the very last `software-factory run`
 # line, after the full (minutes-long) image build + scaffold. bash /dev/tcp suffices; this
 # script already relies on bashisms.
 _sa_host="${SERVE_ADDR%:*}"; _sa_port="${SERVE_ADDR##*:}"
@@ -136,12 +136,12 @@ if [ -n "$MODEL_OVERRIDDEN" ] || [ -n "${JAEGER:-}" ] || [ -n "${OPENOBSERVE:-}"
 fi
 if [ -n "$MODEL_OVERRIDDEN" ]; then
   # The Sonnet slug is its registry key in infra.dev.yaml AND the `model:` field on the wizard
-  # (harness.yaml) + the execution souls (implementor, security, merge-resolver); substitute the
+  # (factory.yaml) + the execution souls (implementor, security, merge-resolver); substitute the
   # slug and the endpoint so they stay consistent (validation cross-checks them). The Opus-pinned
   # souls — the decomposition planner (souls/planner.yaml) and the test-author
   # (souls/test-author.yaml) — name the Opus slug, so this sed leaves them untouched: a MODEL=
   # override is a Sonnet-tier swap that never downgrades the decomposition/test-contract roles.
-  for f in "$CONFIG_DIR/infra.dev.yaml" "$CONFIG_DIR/harness.yaml" "$CONFIG_DIR/souls/"*.yaml; do
+  for f in "$CONFIG_DIR/infra.dev.yaml" "$CONFIG_DIR/factory.yaml" "$CONFIG_DIR/souls/"*.yaml; do
     sed -i.bak -e "s|$DEFAULT_MODEL|$MODEL|g" -e "s|$DEFAULT_ENDPOINT|$MODEL_ENDPOINT|g" "$f"
     rm -f "$f.bak"
   done
@@ -157,7 +157,7 @@ if [ -n "${OPENOBSERVE:-}" ]; then
   # Repoint otel at the OpenObserve container: its OTLP/gRPC port (5081, plaintext h2c -> tls
   # stays false) plus the org/stream routing + auth headers an authenticated multi-signal
   # backend needs (T5.12). The `authorization` value stays an ${ENV_VAR} ref — never a literal
-  # secret — so it passes `harness validate`'s credential-header rule; run.sh exports
+  # secret — so it passes `software-factory validate`'s credential-header rule; run.sh exports
   # OTEL_OTLP_AUTH below once OO is up. `organization`/`stream-name` are routing metadata, so a
   # literal is fine. awk (not sed) because we replace one line with a multi-line block; matches
   # only the 2-space `endpoint: ""` (the model endpoints are deeper-indented + non-empty).
@@ -191,7 +191,7 @@ git -C "$SITE" init -q -b main
 # regardless; this guarantees it stays out of any later commit too.)
 printf '.beads/\n' >> "$SITE/.git/info/exclude"
 git -C "$SITE" add .
-git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
+git -C "$SITE" -c user.email='demo@factory.local' -c user.name='harness demo' \
   commit -qm 'seed: established secrets vault (auth + secrets + audit + dashboard)'
 # --server: run beads against a persistent, per-run `dolt sql-server` (bd auto-starts it and
 # records its pid/port under .beads/) instead of cold-starting the embedded Dolt engine on
@@ -258,7 +258,7 @@ else
   # push triggers fine without it.
   if git -C "$SITE" fetch -q public main 2>/dev/null; then
     grafted="$(git -C "$SITE" log -1 --format=%B |
-      git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
+      git -C "$SITE" -c user.email='demo@factory.local' -c user.name='harness demo' \
         commit-tree 'HEAD^{tree}' -p FETCH_HEAD -F -)" &&
       git -C "$SITE" update-ref refs/heads/main "$grafted"
   fi
@@ -365,7 +365,7 @@ if [ -n "${OPENOBSERVE:-}" ]; then
   fi
 
   # Provision the 'Pipeline' logs Saved View: opens the Logs explorer straight into columns
-  # (issue / harness_issue_id / role / soul / attempt / body) instead of raw JSON. Same
+  # (issue / factory_issue_id / role / soul / attempt / body) instead of raw JSON. Same
   # best-effort discipline as the dashboard — a saved view is an opaque OO frontend-state blob,
   # so a bumped OPENOBSERVE_IMAGE could drift its shape; a mismatch must not abort the demo (you
   # add the columns by hand in Logs -> Saved Views). The dashboard's table panel COALESCEs the

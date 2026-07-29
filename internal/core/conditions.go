@@ -45,7 +45,7 @@ const (
 	// postcondition it is evaluated by the ORCHESTRATOR, not run as a check in the
 	// verification sandbox: it reads orchestrator/beads state (an approval recorded on the
 	// issue, bound to the candidate sha), not the repository, so it carries no `checks`
-	// entry. It is satisfied by `harness approve <issue>` (denied by `harness reject
+	// entry. It is satisfied by `software-factory approve <issue>` (denied by `software-factory reject
 	// <issue>`); the approval is bound to the candidate sha so a re-gate after a change
 	// invalidates a stale one. It fails CLOSED and, unlike a command/proof/metric check,
 	// its failure does NOT route on_failure (it burns no retry) — the issue parks in an

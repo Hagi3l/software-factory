@@ -16,7 +16,7 @@ func TestMatchGlob(t *testing.T) {
 		{"internal/orchestrator/**", "internal/runner/run.go", false},
 		{"internal/*/run.go", "internal/runner/run.go", true},
 		{"internal/*/run.go", "internal/a/b/run.go", false}, // * stays within one segment
-		{"config/**", "config/harness.yaml", true},
+		{"config/**", "config/factory.yaml", true},
 		{"*.go", "main.go", true},
 		{"*.go", "cmd/main.go", false}, // * does not cross the separator
 		{"go.mod", "go.mod", true},
@@ -41,7 +41,7 @@ func TestPolicyApprovalRequired(t *testing.T) {
 		{"trusted-dev always, even empty diff", Policy{Profile: ProfileTrustedDev}, nil, true},
 		{"autonomous non-tcb", Policy{Profile: ProfileAutonomous, TCBPaths: tcb}, []string{"docs/x.md", "internal/agent/a.go"}, false},
 		{"autonomous tcb diff", Policy{Profile: ProfileAutonomous, TCBPaths: tcb}, []string{"docs/x.md", "internal/orchestrator/r.go"}, true},
-		{"autonomous config tcb", Policy{Profile: ProfileAutonomous, TCBPaths: tcb}, []string{"config/harness.yaml"}, true},
+		{"autonomous config tcb", Policy{Profile: ProfileAutonomous, TCBPaths: tcb}, []string{"config/factory.yaml"}, true},
 		{"empty profile defaults autonomous, no tcb globs", Policy{}, []string{"internal/orchestrator/r.go"}, false},
 		{"empty profile, tcb diff", Policy{TCBPaths: tcb}, []string{"internal/orchestrator/r.go"}, true},
 	}

@@ -28,7 +28,7 @@ IMAGE='go-toolchain'   # sandbox profile named by the demo souls; reused for the
 
 DEMO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$DEMO_DIR/.." && pwd)"
-HARNESS="$REPO_ROOT/bin/harness"
+HARNESS="$REPO_ROOT/bin/software-factory"
 
 say() { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
 
@@ -70,7 +70,7 @@ mkdir -p "$SITE/specs"
 cp "$DEMO_DIR/templates/landing-page.md" "$SITE/specs/landing-page.md"
 git -C "$SITE" init -q -b main
 git -C "$SITE" add .
-git -C "$SITE" -c user.email='demo@harness.local' -c user.name='harness demo' \
+git -C "$SITE" -c user.email='demo@factory.local' -c user.name='harness demo' \
   commit -qm 'seed: Acme landing page spec'
 # --non-interactive: bd init drops into a wizard when stdin is a tty (the normal case
 # when you run this script by hand). Its stdout is hidden below, so the prompt would be

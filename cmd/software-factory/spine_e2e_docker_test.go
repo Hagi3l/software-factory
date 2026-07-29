@@ -19,7 +19,7 @@ import (
 // e2eDockerImage is the sandbox profile (image) the Docker variant boots. It must have
 // git + sh and no entrypoint that swallows the `sleep` keep-alive command — the shipped
 // go-toolchain image (deploy/go-toolchain.Dockerfile) satisfies this. Override via the
-// HARNESS_E2E_IMAGE env var for a different prebuilt image.
+// SOFTWARE_FACTORY_E2E_IMAGE env var for a different prebuilt image.
 const e2eDockerImage = "go-toolchain"
 
 // TestSpineE2EDocker runs the full spine against the Docker backend. It skips (rather
@@ -35,7 +35,7 @@ func TestSpineE2EDocker(t *testing.T) {
 }
 
 func dockerImage() string {
-	if v := os.Getenv("HARNESS_E2E_IMAGE"); v != "" {
+	if v := os.Getenv("SOFTWARE_FACTORY_E2E_IMAGE"); v != "" {
 		return v
 	}
 	return e2eDockerImage
@@ -50,6 +50,6 @@ func requireDockerImage(t *testing.T, image string) {
 		t.Skip("docker daemon not reachable; skipping Docker spine e2e")
 	}
 	if err := exec.Command("docker", "image", "inspect", image).Run(); err != nil {
-		t.Skipf("docker image %q not present (build deploy/go-toolchain.Dockerfile or set HARNESS_E2E_IMAGE); skipping", image)
+		t.Skipf("docker image %q not present (build deploy/go-toolchain.Dockerfile or set SOFTWARE_FACTORY_E2E_IMAGE); skipping", image)
 	}
 }

@@ -46,7 +46,7 @@ var knownPreconditions = map[string]bool{
 // built-in check kinds, and human-approved (T2.10), which the ORCHESTRATOR evaluates
 // against beads state rather than running in the sandbox at all. Command-check
 // postconditions (tests-pass, gosec, …) are deliberately NOT listed here — they are
-// defined in harness.yaml's `checks` map and validated against it, so config is the single
+// defined in factory.yaml's `checks` map and validated against it, so config is the single
 // source of truth for what command each one runs (see specs/configuration.md).
 var reservedPostconditions = map[string]bool{
 	core.PostconditionRedGreen:      true,
@@ -406,7 +406,7 @@ func (c *Config) validateIntegration(add func(string, ...any)) {
 // not a surprise mid-run (the resolver also drops an escaping path, but config is the single
 // source of truth and a typo must fail validation). A duplicate is dead config (one entry is
 // redundant). Existence is deliberately NOT checked here: the paths are repo-relative but
-// `harness validate` need not run from the repo root, and the orchestrator resolves them
+// `software-factory validate` need not run from the repo root, and the orchestrator resolves them
 // best-effort at dispatch (a missing ambient file is logged loudly and omitted, like an
 // unreadable spec slice), so a typo degrades context rather than wedging a run — mirroring why
 // validatePolicy checks glob shape but not the files a TCB glob matches.
@@ -954,7 +954,7 @@ func isCredentialHeaderName(name string) bool {
 // (so config cannot import it back without a cycle) — the same posture validateOTel
 // takes with the "stdout" sentinel. The artifact package's Open is the authoritative
 // constructor-time check; this validation catches a misconfigured s3 backend at the
-// startup gate (harness validate) before a store is ever built.
+// startup gate (software-factory validate) before a store is ever built.
 const (
 	artifactBackendFiles = "files"
 	artifactBackendS3    = "s3"

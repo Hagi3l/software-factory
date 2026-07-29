@@ -50,7 +50,7 @@ func TestDispatchExitCodes(t *testing.T) {
 // TestValidateShippedConfig is the regression guard on the bootstrap config itself:
 // the config the kernel ships with must pass the full startup gate. If a future edit
 // breaks role↔soul resolution, a produces target, the model registry, or a persona
-// path, this fails loudly here rather than at `harness run`.
+// path, this fails loudly here rather than at `software-factory run`.
 func TestValidateShippedConfig(t *testing.T) {
 	cfg, err := loadConfig(testConfigDir, "dev")
 	if err != nil {
@@ -65,7 +65,7 @@ func TestValidateShippedConfig(t *testing.T) {
 // config the local-model demo ships with must pass the full startup gate. The demo is a
 // hand-maintained tree separate from the shipped config, so a schema change made against
 // config/ (e.g. the sandbox.profiles registry) can silently rot it — run.sh would fail at
-// `harness validate` only when an operator next runs the demo. This fails loudly in CI
+// `software-factory validate` only when an operator next runs the demo. This fails loudly in CI
 // instead.
 func TestValidateDemoConfig(t *testing.T) {
 	cfg, err := loadConfig(demoConfigDir, "dev")
@@ -108,7 +108,7 @@ func TestWarnShippedConfig(t *testing.T) {
 // metric and the three scanners as its postconditions. It is the contract guard on the
 // live wiring — a refactor that drops a check, re-points implement straight at integrate,
 // or renames the qa role would silently weaken the gate, so catch it here rather than at
-// `harness run`. The check *commands* (their tools) live in the role image (T5.3/T5.6);
+// `software-factory run`. The check *commands* (their tools) live in the role image (T5.3/T5.6);
 // this test asserts only the routing and the registry, which are config.
 func TestShippedQAStageWired(t *testing.T) {
 	cfg := loadTestConfig(t)

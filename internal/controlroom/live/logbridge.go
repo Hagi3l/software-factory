@@ -14,7 +14,7 @@ import (
 // "the broker is already the collector" (specs/observability.md) applied to the host side.
 //
 // It only makes sense in the co-located run (where the control room shares the process
-// that emits these logs); wire it in `harness run --serve-addr ...` and leave the base
+// that emits these logs); wire it in `software-factory run --serve-addr ...` and leave the base
 // handler bare otherwise. Teeing is best-effort and non-blocking (the hub drops slow
 // browsers; Activity is bounded), so it can never stall or fail a log call.
 func NewLogBridge(inner slog.Handler, hub *Hub, act *Activity) slog.Handler {

@@ -21,7 +21,7 @@ import (
 // operator sees the recommendation at the same gate, while model choice stays theirs.
 func cmdValidate(args []string) error {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
-	dir := fs.String("config", "config", "config directory (harness.yaml, souls/, infra.<env>.yaml)")
+	dir := fs.String("config", "config", "config directory (factory.yaml, souls/, infra.<env>.yaml)")
 	env := fs.String("env", "dev", "infra environment overlay to load (infra.<env>.yaml)")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -35,7 +35,7 @@ func cmdValidate(args []string) error {
 		return err
 	}
 	for _, w := range cfg.Warnings() {
-		fmt.Fprintf(os.Stderr, "harness validate: warning: %s\n", w)
+		fmt.Fprintf(os.Stderr, "software-factory validate: warning: %s\n", w)
 	}
 	fmt.Fprintf(os.Stdout, "config %q (env %q): OK — %d stage(s), %d soul(s), %d model(s)\n",
 		*dir, *env, len(cfg.Harness.DAG), len(cfg.Souls), len(cfg.Infra.Models))

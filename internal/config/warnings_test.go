@@ -120,7 +120,7 @@ func TestNoWarnNoProducer(t *testing.T) {
 
 // The advisory is non-fatal by construction: a same-family producer/verifier config is
 // still sound (Validate returns nil) and only Warnings surfaces the concern. This is the
-// contract that lets harness validate print it and still exit 0.
+// contract that lets software-factory validate print it and still exit 0.
 func TestWarnNeverFailsValidate(t *testing.T) {
 	c := validConfig()
 	c.Souls = fullSouls(t) // same-provider producer+verifier

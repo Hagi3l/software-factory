@@ -172,8 +172,8 @@ agrees with the single writer's reality (no "card shows `open` while its agent r
 and why it adds no `bd list` load to the store. The read model is the consistent
 *surface*; beads stays the durable *truth* and the cold-start hydration source.
 
-The model binds to topology: **co-located** (`harness run`, the default) the control
-room reads the in-process projection live; **standalone** (`harness serve`, no attached
+The model binds to topology: **co-located** (`software-factory run`, the default) the control
+room reads the in-process projection live; **standalone** (`software-factory serve`, no attached
 orchestrator) there is no projection, so it degrades to a static **beads snapshot** — the
 same way [`/events`](control-room.md) has no live feed without in-process NATS.
 

@@ -70,7 +70,7 @@ Like the [sandbox](sandbox.md), the backend is an interface chosen by config:
 ```yaml
 artifacts:
   backend: files          # files | s3
-  path: ./.harness/artifacts        # files backend
+  path: ./.software-factory/artifacts        # files backend
   # backend: s3                      # s3/minio backend:
   # bucket: harness-artifacts        #   the shared object bucket (must already exist)
   # endpoint: minio.internal:9000    #   MinIO/non-AWS host[:port] (http:// = plaintext dev)
@@ -95,7 +95,7 @@ distributed, no code change.
 ## OPEN questions
 
 - **Retention tiers** — how long to keep full transcripts vs. compact evidence;
-  likely policy in `harness.yaml` alongside budgets.
+  likely policy in `factory.yaml` alongside budgets.
 - Whether artifacts should be **signed** as part of provenance — see
   [../security.md](../security.md).
 - Garbage collection of artifacts for dead-lettered/abandoned work — TBD.

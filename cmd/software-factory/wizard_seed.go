@@ -62,14 +62,14 @@ type wizardSeeder struct {
 	// projection (orchestrator.Track), so a co-located control room's projection-backed board shows
 	// a seed the instant it lands and the scheduler re-dispatches a reopened dead-letter instead of
 	// skipping it (T8.4). The wizard write bypasses the reconcile loop (it writes beads directly,
-	// like `harness seed`), so without this the projection would not learn of the change until the
+	// like `software-factory seed`), so without this the projection would not learn of the change until the
 	// issue was claimed. nil under standalone serve (no orchestrator) or in tests — then a no-op.
 	track func(issues ...core.Issue)
 }
 
 // newWizardSeeder builds a seeder over the run's repo, beads client, and artifact store. It is
 // constructed only when the requirements planner is configured (so APPROVE has a backing repo);
-// a standalone `harness serve` wires no seeder and the wizard shows APPROVE disabled.
+// a standalone `software-factory serve` wires no seeder and the wizard shows APPROVE disabled.
 func newWizardSeeder(cfg *config.Config, repo string, bd *beads.Client, store artifact.Store, log *slog.Logger) *wizardSeeder {
 	if log == nil {
 		log = slog.New(slog.NewTextHandler(noopWriter{}, nil))

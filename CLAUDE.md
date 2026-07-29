@@ -12,7 +12,7 @@ A CI/CD pipeline whose build steps are hostile-by-assumption agents.
 - `README.md` + `docs/` are the operator guide (the *how to use*, distinct from `specs/`
   = the *what*): build/run, CLI, config, pipeline, control room. **They describe
   observable behavior, so they must track it.** Any change to the CLI surface (commands
-  or flags in `cmd/harness`), the shipped `config/` shape (DAG stages, `checks`,
+  or flags in `cmd/software-factory`), the shipped `config/` shape (DAG stages, `checks`,
   `policy`, soul/infra fields), or the control-room views/routes is **incomplete until
   the matching doc is updated in the same change** — `docs/cli.md` for flags,
   `docs/configuration.md` for config, `docs/control-room.md` for views/routes,
@@ -28,9 +28,9 @@ verification, the full DAG with decomposition and a merge queue, the control roo
 with the Create-Task/Resolve wizard, and most of Phase 5's production substrate
 (gVisor backend, distributed NATS, scoped secrets, S3 artifacts, provenance
 signing). The only open build work is the rest of **Phase 5**: T5.2 Firecracker
-(hardware-blocked — needs KVM) and optional warm pools / HA (T5.11). `cmd/harness` exposes
+(hardware-blocked — needs KVM) and optional warm pools / HA (T5.11). `cmd/software-factory` exposes
 `validate`/`seed`/`run`/`approve`/`reject`/`serve`; bootstrap config lives in
-`config/` (`harness validate --config config`). The autonomous self-hosting loop is
+`config/` (`software-factory validate --config config`). The autonomous self-hosting loop is
 buildable/testable offline but has **not been switched on** (no hosted capable
 model). See `IMPLEMENTATION_PLAN.md` for the per-task detail.
 
@@ -111,7 +111,7 @@ jq -rs '
   test/results/test-unit.json
 ```
 
-**Control room** (`internal/controlroom`, `harness serve`): views are **templ**
+**Control room** (`internal/controlroom`, `software-factory serve`): views are **templ**
 (`go install github.com/a-h/templ/cmd/templ`) compiled to committed
 `*_templ.go`; CSS is the **Tailwind v4 standalone CLI** (`make tailwind` fetches the pinned
 binary into gitignored `bin/`). Run `make generate` after editing any `*.templ` or
@@ -129,8 +129,8 @@ dir; vendored JS (htmx/Alpine) lives in `internal/controlroom/assets/static/` an
 embedded via `//go:embed`.
 
 The live SSE feed (`GET /events`) needs the run's in-process NATS, so it is served
-**co-located**: `harness run --serve-addr 127.0.0.1:8080` runs the factory *and* the
-control room. Standalone `harness serve` has no NATS, so `/events` returns 503 there
+**co-located**: `software-factory run --serve-addr 127.0.0.1:8080` runs the factory *and* the
+control room. Standalone `software-factory serve` has no NATS, so `/events` returns 503 there
 (static views still render). The SSE substrate is `internal/controlroom/live` (`Hub`,
 `Stream`, `StartAgentEventPump`).
 
@@ -140,7 +140,7 @@ the OpenAI streaming wire format, scripted by request count; it drives the *real
 adapter, selected via an `openai-compat` model entry whose endpoint is patched to
 `srv.URL()`. For a full `spec → implement → gate → merge` spine test without Docker, the
 **test-only** non-isolating host-exec sandbox backend (defined in
-`cmd/harness/spine_e2e_test.go`, compiled only under test) is injected through the
+`cmd/software-factory/spine_e2e_test.go`, compiled only under test) is injected through the
 `runOptions.backend` seam in `buildRunComponents`. The Docker e2e variant is behind
 `//go:build docker_e2e` (`make test-e2e-docker`).
 

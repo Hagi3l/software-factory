@@ -275,7 +275,7 @@ type SeededIssue struct {
 // directly). It is implemented by the composition root — the wizard package deliberately does
 // not import git, beads, the artifact store, or config, so the conversation engine stays a
 // self-contained unit; the Seeder is the one interface across that boundary. nil (a standalone
-// `harness serve`, or a control room with no repo to write) disables APPROVE.
+// `software-factory serve`, or a control room with no repo to write) disables APPROVE.
 type Seeder interface {
 	Seed(ctx context.Context, req SeedRequest) (SeedResult, error)
 }

@@ -22,7 +22,7 @@ type ServerConfig struct {
 	// orchestrator's crash recovery) survives restarts.
 	StoreDir string
 	// ClientAddr, when non-empty (host:port), makes the server ALSO listen for external
-	// TCP client connections, so a separate process — `harness approve` / `harness reject`
+	// TCP client connections, so a separate process — `software-factory approve` / `software-factory reject`
 	// — can publish to it. Empty keeps the server in-process only (DontListen), the default
 	// bootstrap transport (in-process connections always work regardless). This is a
 	// single-host convenience for the trusted-dev approval loop, not the distributed-NATS

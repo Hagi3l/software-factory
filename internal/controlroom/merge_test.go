@@ -99,7 +99,7 @@ func TestMergeEmptyIsCalm(t *testing.T) {
 }
 
 // TestMergeWithoutBuffer covers the standalone path: with no live merge-state buffer (a
-// standalone `harness serve` has no NATS feed) the page renders a "not attached" notice (still
+// standalone `software-factory serve` has no NATS feed) the page renders a "not attached" notice (still
 // 200, still in the chrome), and the data fragment 503s.
 func TestMergeWithoutBuffer(t *testing.T) {
 	ts := newTestServer(t) // built without Options.MergeQueue / Reader

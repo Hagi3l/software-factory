@@ -156,11 +156,11 @@
           "default": [
             "_timestamp",
             "issue",
-            "harness_issue_id",
+            "factory_issue_id",
             "role",
-            "harness_issue_role",
-            "harness_soul",
-            "harness_attempt",
+            "factory_issue_role",
+            "factory_soul",
+            "factory_attempt",
             "body"
           ]
         },
@@ -209,18 +209,18 @@
           },
           {
             "enableResizing": true,
-            "header": "harness_issue_id",
-            "id": "harness_issue_id",
+            "header": "factory_issue_id",
+            "id": "factory_issue_id",
             "maxSize": 1745,
             "meta": {
               "closable": true,
               "showWrap": true,
               "wrapContent": false
             },
-            "name": "harness_issue_id",
+            "name": "factory_issue_id",
             "size": 150,
             "sortable": true,
-            "label": "harness_issue_id"
+            "label": "factory_issue_id"
           },
           {
             "enableResizing": true,
@@ -239,48 +239,48 @@
           },
           {
             "enableResizing": true,
-            "header": "harness_issue_role",
-            "id": "harness_issue_role",
+            "header": "factory_issue_role",
+            "id": "factory_issue_role",
             "maxSize": 1745,
             "meta": {
               "closable": true,
               "showWrap": true,
               "wrapContent": false
             },
-            "name": "harness_issue_role",
+            "name": "factory_issue_role",
             "size": 150,
             "sortable": true,
-            "label": "harness_issue_role"
+            "label": "factory_issue_role"
           },
           {
             "enableResizing": true,
-            "header": "harness_soul",
-            "id": "harness_soul",
+            "header": "factory_soul",
+            "id": "factory_soul",
             "maxSize": 1745,
             "meta": {
               "closable": true,
               "showWrap": true,
               "wrapContent": false
             },
-            "name": "harness_soul",
+            "name": "factory_soul",
             "size": 150,
             "sortable": true,
-            "label": "harness_soul"
+            "label": "factory_soul"
           },
           {
             "enableResizing": true,
-            "header": "harness_attempt",
-            "id": "harness_attempt",
+            "header": "factory_attempt",
+            "id": "factory_attempt",
             "maxSize": 1745,
             "meta": {
               "closable": true,
               "showWrap": true,
               "wrapContent": false
             },
-            "name": "harness_attempt",
+            "name": "factory_attempt",
             "size": 150,
             "sortable": true,
-            "label": "harness_attempt"
+            "label": "factory_attempt"
           },
           {
             "enableResizing": true,
@@ -329,11 +329,11 @@
         "pipelineQueryStream": [],
         "selectedFields": [
           "issue",
-          "harness_issue_id",
+          "factory_issue_id",
           "role",
-          "harness_issue_role",
-          "harness_soul",
-          "harness_attempt",
+          "factory_issue_role",
+          "factory_soul",
+          "factory_attempt",
           "body"
         ],
         "selectedStream": [
@@ -587,7 +587,7 @@
             "group": "default",
             "isInterestingField": false,
             "isSchemaField": true,
-            "name": "harness_attempt",
+            "name": "factory_attempt",
             "showValues": true,
             "streams": [
               "default"
@@ -598,7 +598,7 @@
             "group": "default",
             "isInterestingField": false,
             "isSchemaField": true,
-            "name": "harness_epic_id",
+            "name": "factory_epic_id",
             "showValues": true,
             "streams": [
               "default"
@@ -609,7 +609,7 @@
             "group": "default",
             "isInterestingField": false,
             "isSchemaField": true,
-            "name": "harness_invocation_id",
+            "name": "factory_invocation_id",
             "showValues": true,
             "streams": [
               "default"
@@ -620,7 +620,7 @@
             "group": "default",
             "isInterestingField": false,
             "isSchemaField": true,
-            "name": "harness_issue_id",
+            "name": "factory_issue_id",
             "showValues": true,
             "streams": [
               "default"
@@ -631,7 +631,7 @@
             "group": "default",
             "isInterestingField": false,
             "isSchemaField": true,
-            "name": "harness_issue_role",
+            "name": "factory_issue_role",
             "showValues": true,
             "streams": [
               "default"
@@ -642,7 +642,7 @@
             "group": "default",
             "isInterestingField": false,
             "isSchemaField": true,
-            "name": "harness_model",
+            "name": "factory_model",
             "showValues": true,
             "streams": [
               "default"
@@ -653,7 +653,7 @@
             "group": "default",
             "isInterestingField": false,
             "isSchemaField": true,
-            "name": "harness_soul",
+            "name": "factory_soul",
             "showValues": true,
             "streams": [
               "default"

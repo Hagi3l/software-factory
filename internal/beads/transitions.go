@@ -189,7 +189,7 @@ const MetadataKeyDLQReason = "dlq_reason"
 // issue — so a fresh or produced issue never carries them.
 //
 //   - MetadataKeyCandidateRef pins the exact candidate sha the parked issue is awaiting
-//     approval on (core.Issue.CandidateRef): the binding a `harness approve` must name and
+//     approval on (core.Issue.CandidateRef): the binding a `software-factory approve` must name and
 //     the orchestrator re-checks, so a stale approval (the candidate changed) is invalidated.
 //   - MetadataKeyParkedProv holds the JSON-encoded core.Provenance captured at park time
 //     (core.Issue.ParkedProvenance), replayed onto the merge commit on approval so the
@@ -454,7 +454,7 @@ func (c *Client) Block(ctx context.Context, id, reason string) error {
 // AwaitApproval parks an issue awaiting human approval of its integrate candidate (T2.10):
 // it marks the issue blocked (so it surfaces in the escalation/DLQ view like any other work
 // needing a human) and records the candidate ref it is parked on plus the provenance to
-// replay on approval. Unlike a dead-letter this is recoverable: a later `harness approve`
+// replay on approval. Unlike a dead-letter this is recoverable: a later `software-factory approve`
 // for this candidate resumes the merge, a reject routes a fix. candidateRef must be set
 // (there is nothing to approve otherwise); parkedProv may be empty (a degraded provenance
 // record, never a dropped park). See specs/configuration.md "human-approval".

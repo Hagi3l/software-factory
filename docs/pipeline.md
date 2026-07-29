@@ -7,7 +7,7 @@ operator's view; the authoritative contracts are [`specs/workflow.md`](../specs/
 
 ## The stages
 
-The shipped DAG (`config/harness.yaml`) is the full pipeline:
+The shipped DAG (`config/factory.yaml`) is the full pipeline:
 
 ```
 requirements ─► plan ─► author-tests ─► implement ─► qa ─► integrate ─► main
@@ -69,7 +69,7 @@ issue (keeping the graph acyclic). Two caps bound this:
 - **Budgets** — a per-issue cumulative cap (tokens + USD + wall-clock across the retry
   loop) and a per-epic aggregate cap. Breaching either dead-letters the work.
 
-Dead-lettered work goes to the **dead-letter queue** (the `harness.dlq` subject; the
+Dead-lettered work goes to the **dead-letter queue** (the `factory.dlq` subject; the
 control room's Dead-letter view) for a human. Agents *escalate* ambiguity — they never
 invent intent. **The only human lever, including for stuck work, is the spec.** You
 don't edit the agent's code; you refine the requirement and let the pipeline re-derive.
@@ -83,8 +83,8 @@ orchestrator **parks** the candidate (blocked, recording its candidate ref and t
 gate-verified provenance) and publishes an escalation — burning no retry.
 
 ```bash
-harness approve --nats nats://127.0.0.1:4222 <issue>   # land it
-harness reject  --nats nats://127.0.0.1:4222 <issue>   # send back a fix attempt
+software-factory approve --nats nats://127.0.0.1:4222 <issue>   # land it
+software-factory reject  --nats nats://127.0.0.1:4222 <issue>   # send back a fix attempt
 ```
 
 Approval is bound to the candidate sha: if the candidate changed since you looked, a

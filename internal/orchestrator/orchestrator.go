@@ -142,7 +142,7 @@ type Merger interface {
 // from the injected collaborators.
 type Options struct {
 	// Config supplies the workflow DAG, the souls that fulfill roles, and the
-	// termination policy. It is the validated configuration (harness validate has run).
+	// termination policy. It is the validated configuration (software-factory validate has run).
 	Config *config.Config
 	// Repo is the integration repository: candidates are pushed here by runners and
 	// merged to main here on acceptance. The orchestrator and its runners share it.
@@ -181,7 +181,7 @@ type Orchestrator struct {
 	merger Merger
 	js     jetstream.JetStream
 	// nc is the core-NATS connection the orchestrator publishes fire-and-forget issue-state
-	// events on (harness.issue.<id>.state). It is the core conn under js — distinct because
+	// events on (factory.issue.<id>.state). It is the core conn under js — distinct because
 	// issue-state events are core NATS with no stream, not JetStream (see announceState,
 	// specs/messaging.md "Issue-state events").
 	nc  *nats.Conn
@@ -403,7 +403,7 @@ func (o *Orchestrator) rebuildInflight(ctx context.Context) error {
 
 // Snapshot returns the work-graph projection — every issue the orchestrator knows, with its live
 // status and lease stamped on — as the control room's projection-backed live read model (T8.4,
-// specs/observability.md "The live read model"). When co-located (harness run) the control room
+// specs/observability.md "The live read model"). When co-located (software-factory run) the control room
 // reads this in-memory, read-your-writes-consistent surface for its board / DAG / dead-letter /
 // status views instead of polling beads, so they never lag the single writer (no card showing
 // `open` while its agent runs) and add no `bd list` load — the read overload the demo run hit. ctx
@@ -416,7 +416,7 @@ func (o *Orchestrator) Snapshot(_ context.Context) ([]core.Issue, error) {
 
 // Track records externally-written issues into the work-graph projection, keeping it consistent
 // with the harness's two discrete human-approved write paths that intentionally bypass the
-// reconcile loop (like `harness seed`): the Create-Task wizard's seed (new open issues) and the
+// reconcile loop (like `software-factory seed`): the Create-Task wizard's seed (new open issues) and the
 // Resolve wizard's reopen of a dead-letter (Reissue, blocked→open). Both write beads directly, so
 // without this the projection — which is now both the scheduler's dispatch oracle (T8.2) and the
 // control room's board (T8.4) — would not see a seed until it was claimed, and would keep reading a

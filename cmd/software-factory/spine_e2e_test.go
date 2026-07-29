@@ -67,7 +67,7 @@ func runSpineE2E(t *testing.T, backend sandbox.Backend, profile string) {
 	// real agent behavior the spine requires, and it pins the run/submit tool contract.
 	branch := core.CandidateBranch(issueID)
 	commitCmd := fmt.Sprintf(
-		"git config user.email e2e@harness.test && git config user.name e2e-agent && "+
+		"git config user.email e2e@factory.test && git config user.name e2e-agent && "+
 			"git checkout -q -b %s && printf 'e2e change\\n' > E2E.txt && "+
 			"git add -A && git commit -q -m 'e2e: add change' && echo committed",
 		branch)
@@ -143,7 +143,7 @@ func runSpineE2E(t *testing.T, backend sandbox.Backend, profile string) {
 func e2eInitRepo(t *testing.T, repo string) string {
 	t.Helper()
 	gitRun(t, repo, "init", "-q", "-b", "main")
-	gitRun(t, repo, "config", "user.email", "fixture@harness.test")
+	gitRun(t, repo, "config", "user.email", "fixture@factory.test")
 	gitRun(t, repo, "config", "user.name", "fixture")
 	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# e2e fixture\n"), 0o644); err != nil {
 		t.Fatalf("write README: %v", err)
@@ -155,7 +155,7 @@ func e2eInitRepo(t *testing.T, repo string) string {
 
 // e2eSeedIssue initializes a beads store in the repo (prefix "harness", per the bd
 // foreign-prefix caveat in CLAUDE.md) and creates one ready issue at the entry role,
-// exactly as `harness seed` would, going through the single-writer beads.Apply path.
+// exactly as `software-factory seed` would, going through the single-writer beads.Apply path.
 // Returns the assigned issue id.
 func e2eSeedIssue(t *testing.T, repo string) string {
 	t.Helper()
@@ -173,7 +173,7 @@ func e2eSeedIssue(t *testing.T, repo string) string {
 	return created[0].ID
 }
 
-// e2eWriteConfig writes a minimal-but-faithful config tree (harness.yaml, souls/*.yaml,
+// e2eWriteConfig writes a minimal-but-faithful config tree (factory.yaml, souls/*.yaml,
 // infra.dev.yaml, persona) into a temp dir and returns it. The DAG is the kernel's
 // implement → integrate; the single check `tests-pass` resolves to `true` so the gate
 // passes deterministically without a real test suite; the lone soul runs on the `fake`
@@ -181,7 +181,7 @@ func e2eSeedIssue(t *testing.T, repo string) string {
 func e2eWriteConfig(t *testing.T, modelURL, profile string) string {
 	t.Helper()
 	dir := t.TempDir()
-	writeFileE2E(t, filepath.Join(dir, "harness.yaml"), `
+	writeFileE2E(t, filepath.Join(dir, "factory.yaml"), `
 dag:
   implement:
     role: implementor
@@ -196,7 +196,7 @@ checks:
 policy:
   max_retries: 3
   budget: { tokens: 2000000, usd: 20, wall: 2h }
-  dead_letter: harness.dlq
+  dead_letter: factory.dlq
 `)
 	// The host-exec backend injected by this test ignores the resolved image, but
 	// config.Validate still requires every soul.sandbox to resolve to a profile entry for
@@ -212,7 +212,7 @@ broker:
   allowlist: [llm-api, nats, git]
 artifacts:
   backend: files
-  path: ./.harness/artifacts
+  path: ./.software-factory/artifacts
 models:
   fake: { provider: openai-compat, endpoint: %q }
 `, profile, profile, modelURL))

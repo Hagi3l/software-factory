@@ -91,7 +91,7 @@ func (o *Orchestrator) announceState(issue core.Issue, status string) {
 // announceMergeState publishes the best-effort core-NATS merge-state event for a candidate that
 // just entered a merge-queue step (T4.24). It is the merge-train sibling of announceState: same
 // fire-and-forget posture (a marshal/publish failure is logged, never propagated, so an additive
-// observability emit cannot wedge the merge path), distinct subject tree (harness.merge.<id>.state)
+// observability emit cannot wedge the merge path), distinct subject tree (factory.merge.<id>.state)
 // because the merge queue is a separate lifecycle layered over the integrate stage. commit is set
 // only for MergeStateLanded (the new main tip a landed row links to provenance); empty otherwise.
 // The authoritative queue state stays the git refs + beads — these events are never the source of

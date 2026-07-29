@@ -1113,7 +1113,7 @@ func DraftPanel(session string, draft wizard.Draft, specs []wizard.SpecFileDiff,
 					return templ_7745c5c3_Err
 				}
 			} else {
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "<p class=\"border-t border-border pt-3 text-xs text-muted\">Approval is unavailable here — run the wizard under <code>harness run --serve-addr</code> to commit specs and seed issues.</p>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 72, "<p class=\"border-t border-border pt-3 text-xs text-muted\">Approval is unavailable here — run the wizard under <code>software-factory run --serve-addr</code> to commit specs and seed issues.</p>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
@@ -1596,7 +1596,7 @@ func CreateApproveResult(res wizard.SeedResult, err string) templ.Component {
 }
 
 // CreateMessage renders the wizard chrome with a single notice instead of the conversation —
-// shown when no requirements planner is wired (a standalone `harness serve`, or a config that
+// shown when no requirements planner is wired (a standalone `software-factory serve`, or a config that
 // omits the requirements_planner block), so the action surface degrades to an explanation
 // rather than a dead form.
 func CreateMessage(msg string) templ.Component {

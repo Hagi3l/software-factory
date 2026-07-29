@@ -281,7 +281,7 @@ func TestIssueStatePumpStopUnsubscribes(t *testing.T) {
 }
 
 // TestDLQPump proves the dead-letter -> hub bridge end to end over a real in-process server: a
-// marshaled core.DLQAlert published on the durable harness.dlq subject arrives at a hub subscriber
+// marshaled core.DLQAlert published on the durable factory.dlq subject arrives at a hub subscriber
 // as a "dlq-arrival" SSE event carrying the original payload intact. Like the other pumps it is
 // exercised against the actual transport. (The orchestrator publishes via JetStream; a plain core
 // publish on the same subject is sufficient to drive the pump, which tails it with a core sub.)

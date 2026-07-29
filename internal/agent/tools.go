@@ -111,7 +111,7 @@ type brokerConn interface {
 }
 
 // Compile-time proof the real broker client backs an invocation's brokered calls; if
-// the broker API drifts this fails loud here rather than at the wiring in cmd/harness.
+// the broker API drifts this fails loud here rather than at the wiring in cmd/software-factory.
 var _ brokerConn = (*broker.Client)(nil)
 
 // funcTool adapts a definition + closure into a Tool. The concrete workspace (T1.14)

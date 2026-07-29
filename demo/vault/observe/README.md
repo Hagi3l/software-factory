@@ -18,8 +18,8 @@ POSTed to OO's REST API (`POST /api/{org}/dashboards`) by `run.sh` after the con
 |-------|--------|--------|-------|
 | Traces — spans / interval | traces | `default` stream | `count(*)` over `histogram(_timestamp)` |
 | Logs — records / interval | logs | `default` stream | `count(*)` over `histogram(_timestamp)` |
-| Metrics — invocations | metrics | `harness_invocations` stream | PromQL `harness_invocations` |
-| Pipeline — log records | logs | `default` stream | a `table` panel: `SELECT _timestamp, COALESCE(harness_issue_id, issue) AS issue, COALESCE(harness_issue_role, role) AS role, harness_soul, harness_attempt, body … ORDER BY _timestamp DESC` |
+| Metrics — invocations | metrics | `factory_invocations` stream | PromQL `factory_invocations` |
+| Pipeline — log records | logs | `default` stream | a `table` panel: `SELECT _timestamp, COALESCE(factory_issue_id, issue) AS issue, COALESCE(factory_issue_role, role) AS role, factory_soul, factory_attempt, body … ORDER BY _timestamp DESC` |
 
 The **Pipeline** table renders every trusted-side `slog` record as columns (issue / role / soul /
 attempt / event), newest-first, **unfiltered**. The `COALESCE`s exist because the harness emits
@@ -39,22 +39,22 @@ file in lockstep with the image tag.
   disambiguates them), so a count-over-time per stream is the most schema-stable way to show
   arrival without depending on field names that vary across OTLP mappings.
 - **Metrics** are queried via **PromQL**, because OO stores OTLP metrics as Prometheus-named
-  streams: OTel's dotted instrument names map to underscores, so `harness.invocations` (see
-  `internal/telemetry/conventions.go`) becomes the stream/series `harness_invocations`. Sibling
-  series: `harness_cost_usd`, `harness_tokens`, `harness_gate_runs`, `harness_llm_turns`,
-  `harness_invocation_duration`, `harness_llm_turn_duration`, `harness_gate_run_duration`.
+  streams: OTel's dotted instrument names map to underscores, so `factory.invocations` (see
+  `internal/telemetry/conventions.go`) becomes the stream/series `factory_invocations`. Sibling
+  series: `factory_cost_usd`, `factory_tokens`, `factory_gate_runs`, `factory_llm_turns`,
+  `factory_invocation_duration`, `factory_llm_turn_duration`, `factory_gate_run_duration`.
 
 ## `pipeline-savedview.json`
 
 A Logs **Saved View** named **Pipeline**, POSTed to `POST /api/{org}/savedviews` by `run.sh`. It
 opens the Logs explorer (Logs → Saved Views → **Pipeline**) straight into columns — `issue`,
-`harness_issue_id`, `role`, `harness_issue_role`, `harness_soul`, `harness_attempt`, `body` —
+`factory_issue_id`, `role`, `factory_issue_role`, `factory_soul`, `factory_attempt`, `body` —
 instead of the raw JSON source, so the pipeline is legible without hand-picking fields. Same
 **best-effort** discipline as the dashboard (a failed POST logs a note; add the columns by hand).
 
 **Why two `issue`/`role` columns.** The harness emits logs under *two* attribute conventions: the
 orchestrator/agent **lifecycle** logs use plain `slog` keys (`issue`, `role`), while the broker +
-instrumented logs use the telemetry-schema keys (`harness_issue_id`, `harness_issue_role`). They
+instrumented logs use the telemetry-schema keys (`factory_issue_id`, `factory_issue_role`). They
 **never co-occur** on one record. The dashboard's `table` panel can `COALESCE` them into one
 column; the raw Logs explorer can't, so the saved view carries both and each row populates
 whichever its emitter used. (Unifying the lifecycle logs onto the telemetry-schema keys would
@@ -75,4 +75,4 @@ derives the ingestion token as `base64(email:password)` — exactly the string O
 materialized infra overlay references as `authorization: ${OTEL_OTLP_AUTH}`. The harness
 expands it host-side at export time (`config.OTelConfig.ResolveHeaders`), so the credential
 lives in the environment, never in config — the same key discipline as the model API key, and
-what `harness validate`'s credential-header rule enforces.
+what `software-factory validate`'s credential-header rule enforces.

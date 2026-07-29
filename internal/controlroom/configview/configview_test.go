@@ -30,7 +30,7 @@ func sampleConfig() *config.Config {
 				MaxRetries: 3,
 				Budget:     config.Budget{Tokens: 2_000_000, USD: 20},
 				EpicBudget: config.Budget{USD: 200},
-				DeadLetter: "harness.dlq",
+				DeadLetter: "factory.dlq",
 				Profile:    config.ProfileTrustedDev,
 				TCBPaths:   []string{"internal/orchestrator/**", "config/**"},
 			},
@@ -98,7 +98,7 @@ func TestBuildIdentityAndStages(t *testing.T) {
 }
 
 // TestBuildSurfacesWarnings: Build projects config.Warnings() onto the view so the control room
-// can render the same advisories `harness validate` prints. The sample config's implementor
+// can render the same advisories `software-factory validate` prints. The sample config's implementor
 // (anthropic) and its downstream security gate (anthropic) share a model family, so the
 // producer/verifier diversity advisory (T2.13) must appear — the safety signal reaching the UI.
 func TestBuildSurfacesWarnings(t *testing.T) {

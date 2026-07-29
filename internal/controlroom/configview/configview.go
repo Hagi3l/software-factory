@@ -62,7 +62,7 @@ type ConfigView struct {
 	Infra      InfraView
 
 	// Warnings are the non-fatal config advisories config.Warnings() returns (T2.13) — the same
-	// list `harness validate` prints to stderr at startup: producer/verifier model-family overlap
+	// list `software-factory validate` prints to stderr at startup: producer/verifier model-family overlap
 	// weakening N-version independence, or a package-proxy / git-remote named but not allowlisted.
 	// Surfacing them here makes the safety signal visible where an operator inspects the running
 	// factory, not only in the launch logs. nil/empty when the config is clean — the view then

@@ -20,7 +20,7 @@ import (
 // gate (T2.10). An integrate candidate held for approval is parked (blocked) carrying the
 // candidate ref it awaits; these commands read that ref and publish the human's decision over
 // NATS for the single-writer orchestrator to apply — the same propose-don't-write discipline
-// `harness seed` and an agent's Result follow (a human never mutates beads directly during a
+// `software-factory seed` and an agent's Result follow (a human never mutates beads directly during a
 // run; only the orchestrator does). Approve resumes the merge; reject routes a fix (or, with
 // no route/budget left, dead-letters for spec refinement). The decision is bound to the
 // candidate sha, so an approval for a candidate that has since changed is invalidated.
@@ -29,14 +29,14 @@ func cmdReject(args []string) error  { return runApprovalDecision("reject", args
 
 // runApprovalDecision is the shared body: read the parked issue's candidate ref, then publish
 // an ApprovalRequest. It connects to a RUNNING harness's NATS (the run must expose a client
-// address via `harness run --nats-addr`; the default in-process server is unreachable from a
+// address via `software-factory run --nats-addr`; the default in-process server is unreachable from a
 // separate process — see specs/messaging.md, T5.8), so a failed connect is the common "is the
 // factory running and listening?" error and is surfaced plainly.
 func runApprovalDecision(name string, args []string, approved bool) error {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
 	repo := fs.String("repo", ".", "repository holding the beads store (.beads)")
 	bdBin := fs.String("bd", "bd", "path to the beads CLI")
-	natsURL := fs.String("nats", "nats://127.0.0.1:4222", "URL of the running harness's NATS client listener (harness run --nats-addr)")
+	natsURL := fs.String("nats", "nats://127.0.0.1:4222", "URL of the running harness's NATS client listener (software-factory run --nats-addr)")
 	approver := fs.String("approver", "", "who is deciding (default: the OS user); recorded on the issue for audit")
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -85,7 +85,7 @@ func runApprovalDecision(name string, args []string, approved bool) error {
 func publishApproval(url string, req core.ApprovalRequest) error {
 	nc, err := nats.Connect(url)
 	if err != nil {
-		return fmt.Errorf("connect to harness NATS at %s (is `harness run --nats-addr %s` running?): %w", url, addrOf(url), err)
+		return fmt.Errorf("connect to harness NATS at %s (is `software-factory run --nats-addr %s` running?): %w", url, addrOf(url), err)
 	}
 	defer nc.Close()
 

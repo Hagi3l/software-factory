@@ -34,7 +34,7 @@ The harness can *start* building itself long before it can *securely* build itse
 To produce one verified change end-to-end, hand-build the thinnest slice of the
 design, roughly in dependency order:
 
-1. **Config loader + `harness validate`** — see [configuration.md](configuration.md).
+1. **Config loader + `software-factory validate`** — see [configuration.md](configuration.md).
 2. **beads integration** — read ready work, single-writer status transitions —
    see [components/orchestrator.md](components/orchestrator.md).
 3. **Sandbox + Docker backend** — seed a worktree, local-socket I/O — see
@@ -123,7 +123,7 @@ full product factory                 no-human-review for others' work; TCB still
 - ~~Whether early self-hosted changes should be gated by a lighter "trusted-dev"
   policy profile (human-approval postcondition).~~ **Decided:** yes — a
   `policy.profile: trusted-dev` requires a `human-approved` postcondition on *every*
-  `integrate`, satisfied by `harness approve <issue>`; `autonomous` requires it only for
+  `integrate`, satisfied by `software-factory approve <issue>`; `autonomous` requires it only for
   TCB-touching diffs. See [configuration.md](configuration.md).
 - **TCB boundary as config.** The precise module list is operationally the
   `policy.tcb_paths` globs (orchestrator, runner/broker, sandbox config, gate harness) that

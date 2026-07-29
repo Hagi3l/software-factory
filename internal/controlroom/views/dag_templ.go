@@ -127,7 +127,7 @@ func DAGGraph(g dag.Graph) templ.Component {
 }
 
 // DAGMessage renders the DAG chrome with a single notice instead of the graph — used when
-// the control room is not attached to a running factory (a standalone `harness serve` has no
+// the control room is not attached to a running factory (a standalone `software-factory serve` has no
 // beads to read) or when the DAG read fails. Mirrors BoardMessage / DeadLetterMessage.
 func DAGMessage(msg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {

@@ -90,7 +90,7 @@ oddly (Soul, Role, Runner, Brief), it's defined there.
 | [integration.md](integration.md) | The serialized merge queue, rebasing onto `main`, re-gating the merged result, conflict resolution. |
 | [security.md](security.md) | Threat model, trust boundaries, egress allowlist, scoped short-lived secrets, SLSA-style provenance. |
 | [messaging.md](messaging.md) | NATS subject taxonomy, JetStream streams, the broker protocol, single-writer semantics. |
-| [configuration.md](configuration.md) | `harness.yaml`, `souls/*.yaml`, infra overlays, and config validation. |
+| [configuration.md](configuration.md) | `factory.yaml`, `souls/*.yaml`, infra overlays, and config validation. |
 | [models.md](models.md) | Model-agnostic agent loop, the provider abstraction in the runner, canonical types, the adapters. |
 | [specs-process.md](specs-process.md) | How specs are written, the human re-entry invariant, spec-drift handling, spec-version pinning. |
 | [observability.md](observability.md) | Broker-as-collector, the three stores, the OTel signal model (traces/metrics/logs, trusted-side-only), live vs. history, replayability. |

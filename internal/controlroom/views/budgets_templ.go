@@ -699,7 +699,7 @@ func budgetPct(pct int, over bool, capped bool) templ.Component {
 }
 
 // BudgetsMessage renders the budgets chrome with a single notice instead of the tables —
-// used when the control room is not attached to a running factory (standalone `harness serve`
+// used when the control room is not attached to a running factory (standalone `software-factory serve`
 // has no beads to read) or when the read fails.
 func BudgetsMessage(msg string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {

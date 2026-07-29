@@ -9,7 +9,7 @@ import (
 
 // Warnings returns non-fatal advisories about the configuration: properties that are
 // weaker than recommended but not invalid, so a config that trips one is still sound
-// (Validate returns nil) and harness validate surfaces the advisory without failing
+// (Validate returns nil) and software-factory validate surfaces the advisory without failing
 // (exit 0). The split from Validate is deliberate — Validate gates startup on faults
 // that would break at run time (an unreachable role, an undefined target), whereas a
 // warning is the operator's call to heed or ignore. Model assignment is exactly such a

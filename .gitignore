@@ -8,10 +8,10 @@
 *.test
 *.out
 
-# Runtime state written by `harness run` (embedded JetStream store, artifact store)
-/.harness/
+# Runtime state written by `software-factory run` (embedded JetStream store, artifact store)
+/.software-factory/
 
-# Stray bare `go build ./cmd/harness` output (use make build -> /bin/)
+# Stray bare `go build ./cmd/software-factory` output (use make build -> /bin/)
 /harness
 
 # Local secret (OpenRouter key) — never commit

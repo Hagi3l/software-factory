@@ -3,8 +3,8 @@ package agent
 import "github.com/Loxstomper/software-factory/internal/config"
 
 // BudgetFromPolicy derives a per-invocation Budget from the operator's termination
-// policy (harness.yaml). It is the single source of truth for translating config
-// into the loop's caps, so cmd/harness (plan T1.21) wires the loop with
+// policy (factory.yaml). It is the single source of truth for translating config
+// into the loop's caps, so cmd/software-factory (plan T1.21) wires the loop with
 // agent.New(tools, agent.BudgetFromPolicy(cfg.Harness.Policy), log) rather than
 // re-deriving the mapping at the call site.
 //

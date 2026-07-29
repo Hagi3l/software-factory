@@ -67,7 +67,7 @@ func TestStatusBarActiveAgents(t *testing.T) {
 }
 
 // TestStatusBarNoReader503 confirms the data endpoint degrades like the others: with no read model
-// wired (standalone `harness serve`) it answers 503, so htmx leaves the layout's neutral
+// wired (standalone `software-factory serve`) it answers 503, so htmx leaves the layout's neutral
 // placeholder bar in place — the spec's "degrades to a static bar".
 func TestStatusBarNoReader503(t *testing.T) {
 	s := New(Options{})
