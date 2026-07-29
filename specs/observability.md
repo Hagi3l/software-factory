@@ -200,7 +200,7 @@ accountable.
 - **Collector is embedded — decided.** Export is the in-process OTel SDK exporter
   straight to the backend; there is no standalone collector by default. A sidecar
   collector is an *optional* overlay for distributed/multi-host deployments
-  ([T5.8](../IMPLEMENTATION_PLAN.md)/T5.11) — fan-out to several backends or
+  — fan-out to several backends or
   tail-sampling at scale — and is invisible to the harness, which always just speaks
   OTLP to [`otel.endpoint`](configuration.md). Export is a **trusted-layer egress**:
   the sandbox never exports; trusted host components do, with an env-injected

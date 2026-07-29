@@ -417,7 +417,7 @@ a style issue.
 - Minimum mutation score and which mutation operators — the *expression* is decided (a
   `metric<op>threshold` postcondition with operators `>=`, `<=`, `==`, `>`, `<`, the
   threshold living in config) and the gate check kind is implemented. With the live `qa`
-  stage landed (T2.9) the kernel commits **`mutation>=0.8`** as its default — an 0.8 score
+  stage landed, the kernel commits **`mutation>=0.8`** as its default — an 0.8 score
   with the `>=` operator — declared on the qa stage in `config/harness.yaml`. It remains
   config, so it is tunable per role/project; which mutation operators the tool exercises is
   the tool's own configuration, kept out of the gate (which grades only the resulting

@@ -126,7 +126,7 @@ See [the control room](control-room.md) for the views.
 ## `harness sandbox-goproxy` (internal)
 
 Not run by operators — the `go-toolchain` sandbox image's entrypoint starts it inside the
-sandbox. It is the in-sandbox GOPROXY shim (T5.6): an HTTP server `go`'s `GOPROXY` points
+sandbox. It is the in-sandbox GOPROXY shim: an HTTP server `go`'s `GOPROXY` points
 at, which forwards each module-proxy request over the bind-mounted broker socket to the
 runner. The runner fetches from the configured `broker.package_proxy` and logs the pull —
 so a zero-network sandbox can fetch a dependency it doesn't already have cached, mediated at

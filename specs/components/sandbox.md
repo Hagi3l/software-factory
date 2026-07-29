@@ -139,7 +139,7 @@ The package data a zero-network gate needs (the `govulncheck` vulnerability DB, 
 metadata) is **baked into the profile image**, never fetched — the same offline guarantee
 the build relies on. A *fresh* dependency the baked module cache does not hold is fetched
 **through the broker**, not directly: the image runs an in-sandbox GOPROXY shim that
-forwards `go`'s module-proxy requests to the runner's package proxy (T5.6, see
+forwards `go`'s module-proxy requests to the runner's package proxy (see
 [runner.md](runner.md)), so even a brand-new dependency stays on the one logged egress path.
 What stays open is *caching* those fetches across invocations (below).
 
@@ -224,7 +224,7 @@ Note the deliberate separation enforced by **producer ≠ verifier**:
 ## OPEN questions
 
 - **Image publish & digest pinning** — the *composition* of each role image is now
-  defined (T5.3): a per-profile `deploy/*.Dockerfile` bakes the toolchain, the module
+  defined: a per-profile `deploy/*.Dockerfile` bakes the toolchain, the module
   cache (offline build), the gate tooling (golangci-lint, gosec, govulncheck + an
   offline vuln-DB snapshot, go-licenses, gremlins), and the per-language server +
   manifest. What stays is the *publish* half — pushing each built image to a registry

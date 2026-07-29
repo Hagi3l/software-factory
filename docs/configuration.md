@@ -320,12 +320,12 @@ sandbox:
     go-toolchain:
       image: harness/go-toolchain@sha256:…   # docker/gvisor: `image`; firecracker: `rootfs`
 nats:
-  url: ""                    # "" = embedded in-process server (dev); set = external cluster (T5.8)
+  url: ""                    # "" = embedded in-process server (dev); set = external cluster
   jetstream: { replicas: 1, max_age: 168h }   # replicas: per-stream replication; max_age: result retention
 broker:
   allowlist: [llm-api, nats, git, package-proxy]   # the only egress the sandbox is granted
   package_proxy: https://proxy.golang.org           # Go module proxy fetches route to (default)
-git:                          # where the candidate branch is pushed + how it's authed (T5.7)
+git:                          # where the candidate branch is pushed + how it's authed
   # remote: https://github.com/acme/widgets.git     # "" = local-repo apply (dev); set = real remote
   # github_app:                                      # mints a per-task, short-lived scoped push token
   #   app_id: "123456"
@@ -345,7 +345,7 @@ otel:
   # headers:                 # sent with every export — auth + routing for backends like OpenObserve
   #   organization: default          # routing metadata — a literal is fine
   #   authorization: ${OTEL_OTLP_AUTH}   # credential — MUST be an ${ENV_VAR} ref, never a literal secret
-signing:                     # provenance-commit signing (T5.10); omit/disable to leave commits unsigned
+signing:                     # provenance-commit signing; omit/disable to leave commits unsigned
   # enabled: true
   # key: /run/secrets/harness_ed25519        # SSH private signing key (the harness identity); a runtime secret
   # allowed_signers: /etc/harness/allowed_signers   # principal -> harness public key, for verify-on-read
@@ -415,18 +415,18 @@ models:
   sandbox can't reach a proxy directly, so the image runs an in-sandbox GOPROXY shim
   (`harness sandbox-goproxy`) that forwards `go`'s module-proxy requests over the broker to
   the runner, which fetches from **`broker.package_proxy`** (default the public
-  `proxy.golang.org`) and logs every pull (T5.6). Omit `package-proxy` and dependency
+  `proxy.golang.org`) and logs every pull. Omit `package-proxy` and dependency
   fetches are denied — a build then resolves only from the image's baked module cache.
   Integrity is `go.sum` + the public checksum DB (pinning, served through the same shim
   path) plus the `qa` gate's post-fetch `govulncheck`/license scan, so the public proxy is
   the deliberate default and a private vetted mirror is an optional `package_proxy` swap.
   Allowlisting `package-proxy` also grants the **gate verification sandbox** the same egress
-  (T5.6a), so a candidate that adds a brand-new dependency can be re-gated against the
+  so a candidate that adds a brand-new dependency can be re-gated against the
   identical pinned bytes; the verifier is otherwise deny-all. Omitting it keeps both the
   agent sandbox and the verifier on the baked module cache only.
   See [security.md](../specs/security.md) Control 2.
 - **`git`** configures where the candidate branch is pushed and how that push is
-  authenticated (T5.7). An **empty `remote`** (the dev default) keeps the bootstrap
+  authenticated. An **empty `remote`** (the dev default) keeps the bootstrap
   local-repo apply — the runner lands the branch into the local source repo, no token. A
   **set `remote`** routes the push to a real git remote. **`git.github_app`** (optional)
   makes the runner mint a **GitHub App installation token** per task: scoped to the
@@ -458,7 +458,7 @@ models:
   **embedded in-process NATS server** (the dev/bootstrap shape; expose it on a TCP
   listener for `harness approve` with `harness run --nats-addr host:port`). A **set
   `url`** (e.g. `nats://nats-1:4222,nats://nats-2:4222`) connects to that **external
-  cluster** instead — the distributed deployment (T5.8), same code and no rebuild
+  cluster** instead — the distributed deployment, same code and no rebuild
   (location transparency); the embedded server is not started and `--nats-addr` is
   ignored. `jetstream.replicas` is the per-stream replication factor (1 on the single
   embedded server; `>1` needs an external cluster of at least that size — `harness

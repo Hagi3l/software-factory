@@ -258,7 +258,7 @@ Violating either **wedges the issue permanently**: the projection reads `open` w
 beads reads `in_progress`, so the returning Result is discarded as a stale/duplicate
 (see *Result gating* above) **and** `bd.ready()` — which correctly sees `in_progress` —
 never re-surfaces it, so it is never retried or dead-lettered. This is not theoretical:
-it stalled the **2026-06-23 vault-demo run** (the creation-tracking added in T8.4 met
+it stalled the **2026-06-23 vault-demo run** (the creation-tracking added in Phase 8 met
 the non-atomic `bd.Apply` window). The remediation is **Phase 10**.
 
 **Durable-write loss — the backend must actually serialise the single writer.** The

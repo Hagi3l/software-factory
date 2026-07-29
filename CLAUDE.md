@@ -51,7 +51,7 @@ model). See `IMPLEMENTATION_PLAN.md` for the per-task detail.
   unvalidated external ref, so tests pin the db prefix via `bd init --prefix harness`).
   The Linux dev sandbox here also runs **v1.0.4** (matching brew), so its `dep add`
   silently accepts a nonexistent foreign-prefix target as an external ref — `beads.Apply`'s
-  own existence check (T3.2) is what holds against this, not `dep add` strictness. (Earlier
+  own existence check is what holds against this, not `dep add` strictness. (Earlier
   it ran v0.62.0, which still rejected such targets; install Linux builds from the
   `steveyegge/beads` GitHub releases — `beads_<ver>_linux_amd64.tar.gz`.) Note `bd
   list` **hides closed issues** by default — surfacing them (e.g. a board/DAG over

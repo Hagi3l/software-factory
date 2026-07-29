@@ -6,8 +6,7 @@ the harness exports (traces + logs + metrics), authenticated, on one OTLP/gRPC e
 
 This exists because the vault demo targets a *security* audience: the point isn't a trace
 waterfall (Jaeger already does that) but proving that the **complete, tamper-evident record**
-of agent behaviour ships — including the trusted-side `slog` (as trace-correlated OTel logs,
-T5.13) and the cost/token/gate metrics (T5.12) — to a real, authenticated backend. Jaeger is
+of agent behaviour ships — including the trusted-side `slog` (as trace-correlated OTel logs) and the cost/token/gate metrics — to a real, authenticated backend. Jaeger is
 trace-only and refuses metrics/logs; OpenObserve is a single binary that ingests all three.
 
 ## `completeness-dashboard.json`

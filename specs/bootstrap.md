@@ -121,7 +121,7 @@ full product factory                 no-human-review for others' work; TCB still
 ## OPEN questions
 
 - ~~Whether early self-hosted changes should be gated by a lighter "trusted-dev"
-  policy profile (human-approval postcondition).~~ **Decided (T2.10):** yes — a
+  policy profile (human-approval postcondition).~~ **Decided:** yes — a
   `policy.profile: trusted-dev` requires a `human-approved` postcondition on *every*
   `integrate`, satisfied by `harness approve <issue>`; `autonomous` requires it only for
   TCB-touching diffs. See [configuration.md](configuration.md).
