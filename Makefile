@@ -108,9 +108,10 @@ govulncheck:
 
 ## license-scan: dependency/licence policy (qa gate). Rejects disallowed licences.
 ## --ignore the harness's own module: go-licenses classifies the local packages too,
-## but this internal repo carries no LICENSE file, so without the ignore it fails on
-## its own "Unknown license type" rather than on a dependency's licence (the policy
-## the gate actually enforces). Scoping to third-party deps keeps the check meaningful.
+## but the policy this gate enforces is about what we *depend on*, not our own licence
+## (MIT, see LICENSE). Scoping to third-party deps keeps a failure meaningful — it can
+## only mean a dependency's licence, never a finding about the repo itself.
+## THIRD_PARTY_NOTICES.md records those dependencies and their licences for humans.
 license-scan:
 	go-licenses check --ignore github.com/Loxstomper/harness ./...
 

@@ -139,8 +139,10 @@ binary, the Apache-2.0 and BSD terms below require you to carry their license te
 | `golang.org/x/sync` | BSD-3-Clause — Copyright 2009 The Go Authors |
 | `gopkg.in/yaml.v3` | MIT and Apache-2.0 (dual) |
 
-Indirect dependencies are pinned in [`go.sum`](go.sum). To enumerate every module and
-license actually linked into a build:
+Indirect dependencies are pinned in [`go.sum`](go.sum). The repository already gates on
+dependency licenses — `make license-scan` runs `go-licenses check` as one of the qa
+stage's postconditions (it needs `go-licenses` on PATH; the sandbox image bakes it in).
+To enumerate every module and license actually linked into a build:
 
 ```sh
 go install github.com/google/go-licenses@latest
