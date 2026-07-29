@@ -118,10 +118,16 @@ make test-unit      # unit tests only (go test -json into test/results/)
 make generate       # regenerate templ views + Tailwind CSS after UI edits
 ```
 
-Stack: Go · NATS for all inter-process comms · beads (`bd`) as the work store · a
-model layer of canonical types + thin per-provider adapters over official SDKs (no
-agent framework) · control room in templ + htmx + Alpine + Tailwind, embedded into
-the binary via `embed.FS`.
+Stack:
+
+- **Go** — one static binary, everything embedded.
+- **NATS** — all inter-process comms, embedded in-process for dev or an external
+  cluster for distributed runs.
+- **[beads](https://github.com/steveyegge/beads)** (`bd`) — the work-item store.
+- **Model layer** — canonical types + thin per-provider adapters over official
+  SDKs; no agent framework.
+- **Control room** — templ + htmx + Alpine + Tailwind, compiled and embedded into
+  the binary via `embed.FS`.
 
 ## License
 
