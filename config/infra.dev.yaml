@@ -84,9 +84,27 @@ models:
   # config), so they sit here in the model registry; they track the published vendor sheet and
   # are tuned per deployment. A model with no `cost` block contributes $0 (its spend is still
   # bounded by the token and retry caps). See specs/workflow.md, specs/models.md.
+  #
+  # === Provider / subscription selection ===
+  # Anthropic: set ANTHROPIC_API_KEY; souls use claude-* models (default).
+  # Grok/xAI: set OPENAI_API_KEY (or XAI_API_KEY) to your xAI key; change soul model: fields
+  # to grok-4.5 / grok-4-fast. Endpoint is already set for openai-compat.
+  # See docs/selecting-provider.md for details.
   claude-opus-4-8:   # frontier — planner, test-author, implementor
     provider: anthropic
     cost: { input_per_mtok: 5, output_per_mtok: 25, cache_write_per_mtok: 6.25, cache_read_per_mtok: 0.5 }
   claude-sonnet-4-6: # mid tier — security/qa (candidate re-gated)
     provider: anthropic
     cost: { input_per_mtok: 3, output_per_mtok: 15, cache_write_per_mtok: 3.75, cache_read_per_mtok: 0.3 }
+  # Grok / xAI models (OpenAI-compatible). Switch soul model: to these for Grok.
+  # Costs are approximate — update from https://x.ai/api pricing.
+  grok-4.5:          # frontier — planner, test-author, implementor
+    provider: openai-compat
+    endpoint: https://api.x.ai/v1
+    family: xai
+    cost: { input_per_mtok: 0.20, output_per_mtok: 0.50 }
+  grok-4-fast:       # mid/fast tier — security/qa or cost-sensitive
+    provider: openai-compat
+    endpoint: https://api.x.ai/v1
+    family: xai
+    cost: { input_per_mtok: 0.20, output_per_mtok: 0.50 }
