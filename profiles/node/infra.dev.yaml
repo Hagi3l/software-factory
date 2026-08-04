@@ -21,7 +21,7 @@ artifacts:
   backend: files
   path: ./.software-factory/artifacts
 otel:
-  endpoint: localhost:4317
+  endpoint: ""  # off — no local collector; avoids export spam
 models:
   claude-opus-4-8:
     provider: anthropic
