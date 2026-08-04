@@ -37,6 +37,11 @@ func TestDispatchExitCodes(t *testing.T) {
 		{"seed without title", []string{"seed", "--config", testConfigDir}, 1},
 		{"approve without issue", []string{"approve"}, 1},
 		{"reject without issue", []string{"reject"}, 1},
+		{"login help", []string{"login", "-h"}, 0},
+		{"logout help", []string{"logout", "-h"}, 0},
+		{"auth help", []string{"auth", "-h"}, 0},
+		{"auth missing subcommand", []string{"auth"}, 1},
+		{"login claude missing proxy", []string{"login", "claude"}, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

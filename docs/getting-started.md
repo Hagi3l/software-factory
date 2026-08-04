@@ -9,12 +9,23 @@ This walks you from a fresh checkout to a running `spec → merged commit` loop.
 | Building the binary                   | Go (see `go.mod` for the version) |
 | The full local gate (`make check`)    | `golangci-lint` v2 (`brew install golangci-lint`) |
 | Running the autonomous pipeline       | A **Docker daemon** (the bootstrap sandbox backend) |
-| Model calls                           | `ANTHROPIC_API_KEY` in the environment, **or** a local OpenAI-compatible endpoint (e.g. Ollama) |
+| Model calls                           | Grok sub (`software-factory login`), Claude sub proxy (`login claude --proxy`), API keys, or any OpenAI-compatible endpoint — see [selecting-provider.md](selecting-provider.md) |
 | The work store                        | the **beads** CLI (`bd`) — `brew install beads` on macOS, or the Linux release from the [beads GitHub releases](https://github.com/steveyegge/beads/releases) |
 | Editing the control-room UI           | `templ` and the Tailwind standalone CLI (only to *regenerate*; a plain build needs neither) |
 
-API keys come **from the environment, never from config**. The runner injects the key
-into the broker; the sandboxed agent never sees it.
+API keys and OAuth tokens come **from the environment or `software-factory login`, never from config**. The runner injects credentials; the sandboxed agent never sees them.
+
+### Auth (subscriptions)
+
+```bash
+# Grok / SuperGrok / X Premium+
+./bin/software-factory login
+./bin/software-factory auth status
+# then point soul model: fields at grok-4.5 / grok-4-fast
+
+# Claude Pro/Max — start your local subscription proxy first, then:
+./bin/software-factory login claude --proxy http://127.0.0.1:PORT/v1
+```
 
 ## Build
 

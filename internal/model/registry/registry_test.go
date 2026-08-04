@@ -1,14 +1,24 @@
 package registry_test
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Loxstomper/software-factory/internal/auth"
 	"github.com/Loxstomper/software-factory/internal/config"
 	"github.com/Loxstomper/software-factory/internal/model/anthropic"
 	"github.com/Loxstomper/software-factory/internal/model/openai"
 	"github.com/Loxstomper/software-factory/internal/model/registry"
 )
+
+func withTempAuth(t *testing.T) {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "auth.json")
+	auth.SetPathForTest(p)
+	t.Cleanup(func() { auth.SetPathForTest("") })
+}
 
 // TestNewResolvesProviderToAdapterType is the core of the registry: each provider
 // string must build the matching concrete adapter. We assert the dynamic type
@@ -92,5 +102,77 @@ func TestNewEmptyRegistryResolvesNothing(t *testing.T) {
 	}
 	if _, err := reg.Adapter("anything"); err == nil {
 		t.Fatal("Adapter on empty registry: want error, got nil")
+	}
+}
+
+// TestNewGrokWithOAuthBuildsAdapter ensures xAI/Grok models resolve when only
+// software-factory login tokens are present (no API key env vars).
+func TestNewGrokWithOAuthBuildsAdapter(t *testing.T) {
+	withTempAuth(t)
+	t.Setenv(registry.EnvOpenAIKey, "")
+	t.Setenv(registry.EnvXAIKey, "")
+	if err := auth.Save(&auth.Store{XAI: &auth.Token{
+		AccessToken: "oauth-token",
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := registry.New(map[string]config.ModelProvider{
+		"grok-4.5": {
+			Provider: config.ProviderOpenAICompat,
+			Endpoint: "https://cli-chat-proxy.grok.com/v1",
+			Family:   "xai",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a, err := reg.Adapter("grok-4.5")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := a.(*openai.Adapter); !ok {
+		t.Fatalf("got %T", a)
+	}
+}
+
+// TestNewClaudeProxyBuildsAdapter covers Claude subscription proxy registration.
+func TestNewClaudeProxyBuildsAdapter(t *testing.T) {
+	withTempAuth(t)
+	t.Setenv(registry.EnvOpenAIKey, "")
+	t.Setenv(registry.EnvAnthropicKey, "")
+	if err := auth.RegisterClaudeProxy("http://127.0.0.1:8585/v1", "proxy-tok", auth.ClaudeModeOpenAICompat); err != nil {
+		t.Fatal(err)
+	}
+	reg, err := registry.New(map[string]config.ModelProvider{
+		"claude-via-proxy": {
+			Provider: config.ProviderOpenAICompat,
+			Endpoint: "http://127.0.0.1:8585/v1",
+			Family:   "anthropic",
+		},
+	})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	a, err := reg.Adapter("claude-via-proxy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := a.(*openai.Adapter); !ok {
+		t.Fatalf("got %T", a)
+	}
+}
+
+func TestNewAnthropicStillBuildsWithoutKeys(t *testing.T) {
+	// Keyless construction is allowed (SDK may fail later on first call).
+	t.Setenv(registry.EnvAnthropicKey, "")
+	reg, err := registry.New(map[string]config.ModelProvider{
+		"claude-opus-4-8": {Provider: config.ProviderAnthropic},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Adapter("claude-opus-4-8"); err != nil {
+		t.Fatal(err)
 	}
 }

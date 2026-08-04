@@ -66,8 +66,9 @@ make build                      # compile ./bin/software-factory
 Running the full `spec → merged commit` loop additionally needs:
 
 - a **Docker daemon** (the sandbox backend),
-- a model — `ANTHROPIC_API_KEY` in the environment, or any OpenAI-compatible
-  endpoint (a local Ollama works),
+- a model — `software-factory login` (Grok sub), `login claude --proxy …`
+  (Claude sub), an API key, or any OpenAI-compatible endpoint (see
+  [`docs/selecting-provider.md`](docs/selecting-provider.md)),
 - the **beads** CLI (`bd`) — `brew install beads` on macOS, or a
   [Linux release](https://github.com/steveyegge/beads/releases).
 

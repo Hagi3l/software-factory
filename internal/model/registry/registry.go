@@ -2,20 +2,35 @@
 // model.Adapter. It is the runner-side mapping described in specs/models.md and
 // specs/configuration.md: the infra model registry (model name → provider, plus an
 // endpoint for OpenAI-compatible backends) is turned into one ready-to-call adapter
-// per entry, with API keys read from the environment — never from config.
+// per entry, with API keys read from the environment or from software-factory login
+// credentials — never from config.
 //
-// The registry lives in its own package (not internal/model) because it constructs
-// the concrete anthropic/openai adapters, which themselves import internal/model;
-// placing it here keeps the canonical model package dependency-free and avoids an
-// import cycle. The runner holds a Registry and calls Adapter(soul.Model) per
-// invocation.
+// Credential priority (first non-empty wins):
+//
+//	openai-compat (xAI / Grok family or known xAI hosts):
+//	  OPENAI_API_KEY → XAI_API_KEY → auth.AccessToken() (OAuth, refresh on request)
+//	openai-compat (other, including Claude subscription proxies):
+//	  OPENAI_API_KEY → Claude store bearer if endpoint matches registered proxy
+//	anthropic:
+//	  ANTHROPIC_API_KEY → Claude store bearer; optional base URL from Claude proxy
+//	  when provider_mode is anthropic
+//	openai (native):
+//	  OPENAI_API_KEY
+//
+// OAuth-sourced keys are injected per HTTP request via SDK middleware so long-running
+// `software-factory run` processes refresh tokens instead of baking an expired Bearer
+// at construction time.
 package registry
 
 import (
 	"fmt"
+	"net/http"
+	"net/url"
 	"os"
+	"strings"
 	"time"
 
+	"github.com/Loxstomper/software-factory/internal/auth"
 	"github.com/Loxstomper/software-factory/internal/config"
 	"github.com/Loxstomper/software-factory/internal/model"
 	"github.com/Loxstomper/software-factory/internal/model/anthropic"
@@ -26,12 +41,13 @@ import (
 )
 
 // Environment variables the registry reads API keys from. Keys live only in the
-// runner's environment, never in config (specs/models.md, specs/security.md). A key
-// is passed to the adapter only when present, so keyless local backends (Ollama,
-// vLLM) still resolve.
+// runner's environment or the auth store, never in config (specs/models.md,
+// specs/security.md). A key is passed to the adapter only when present, so keyless
+// local backends (Ollama, vLLM) still resolve.
 const (
 	EnvAnthropicKey = "ANTHROPIC_API_KEY"
 	EnvOpenAIKey    = "OPENAI_API_KEY"
+	EnvXAIKey       = "XAI_API_KEY"
 )
 
 // Registry maps model names to pre-built adapters. Adapters are constructed eagerly
@@ -69,15 +85,32 @@ func (r *Registry) Adapter(modelName string) (model.Adapter, error) {
 }
 
 // build constructs the adapter for one registry entry, selecting the provider
-// adapter and injecting the API key from the environment (and, for openai-compat,
-// the base URL). The two SDKs have distinct option packages, so each branch builds
-// its own option slice.
+// adapter and injecting credentials (env first, then software-factory login store).
 func build(name string, mp config.ModelProvider) (model.Adapter, error) {
 	switch mp.Provider {
 	case config.ProviderAnthropic:
 		var opts []anthropicopt.RequestOption
 		if key := os.Getenv(EnvAnthropicKey); key != "" {
 			opts = append(opts, anthropicopt.WithAPIKey(key))
+		} else if c, err := auth.ClaudeCredentials(); err != nil {
+			return nil, err
+		} else if c != nil {
+			if c.ProviderMode == auth.ClaudeModeAnthropic && c.Endpoint != "" {
+				opts = append(opts, anthropicopt.WithBaseURL(c.Endpoint))
+			}
+			if c.AccessToken != "" {
+				// Refresh-safe if token is ever rotated in-store mid-run.
+				tok := c.AccessToken
+				opts = append(opts, anthropicopt.WithMiddleware(func(req *http.Request, next anthropicopt.MiddlewareNext) (*http.Response, error) {
+					// Re-read store so a re-login mid-process is picked up.
+					if cur, err := auth.ClaudeCredentials(); err == nil && cur != nil && cur.AccessToken != "" {
+						tok = cur.AccessToken
+					}
+					req.Header.Set("x-api-key", tok)
+					req.Header.Set("Authorization", "Bearer "+tok)
+					return next(req)
+				}))
+			}
 		}
 		// Effort (output_config.effort) is honored only on the native Anthropic adapter;
 		// config.Validate guarantees it is unset for the other providers. WithEffort("") is
@@ -96,8 +129,8 @@ func build(name string, mp config.ModelProvider) (model.Adapter, error) {
 			return nil, fmt.Errorf("registry: model %q uses provider %s but has no endpoint", name, config.ProviderOpenAICompat)
 		}
 		opts := []openaiopt.RequestOption{openaiopt.WithBaseURL(mp.Endpoint)}
-		if key := os.Getenv(EnvOpenAIKey); key != "" {
-			opts = append(opts, openaiopt.WithAPIKey(key))
+		if err := appendOpenAICompatAuth(&opts, name, mp); err != nil {
+			return nil, err
 		}
 		// prompt_caching and effort are honored only on this openai-compat adapter (config.Validate
 		// restricts them here); WithPromptCaching(false) and WithEffort("", "") are no-ops, so both
@@ -111,4 +144,82 @@ func build(name string, mp config.ModelProvider) (model.Adapter, error) {
 	default:
 		return nil, fmt.Errorf("registry: model %q has unknown provider %q", name, mp.Provider)
 	}
+}
+
+// appendOpenAICompatAuth injects credentials for an openai-compat model.
+// Static env keys use WithAPIKey; OAuth / store tokens use per-request middleware
+// so refresh works across a long run.
+func appendOpenAICompatAuth(opts *[]openaiopt.RequestOption, name string, mp config.ModelProvider) error {
+	if key := os.Getenv(EnvOpenAIKey); key != "" {
+		*opts = append(*opts, openaiopt.WithAPIKey(key))
+		return nil
+	}
+	if isXAIModel(name, mp) {
+		if key := os.Getenv(EnvXAIKey); key != "" {
+			*opts = append(*opts, openaiopt.WithAPIKey(key))
+			return nil
+		}
+		// OAuth: inject Bearer on every request (refresh via auth.AccessToken).
+		*opts = append(*opts, openaiopt.WithMiddleware(func(req *http.Request, next openaiopt.MiddlewareNext) (*http.Response, error) {
+			tok, err := auth.AccessToken()
+			if err != nil {
+				return nil, err
+			}
+			if tok != "" {
+				req.Header.Set("Authorization", "Bearer "+tok)
+			}
+			return next(req)
+		}))
+		return nil
+	}
+	// Claude subscription proxy: match registered endpoint, optional bearer.
+	c, err := auth.ClaudeCredentials()
+	if err != nil {
+		return err
+	}
+	if c != nil && endpointsMatch(mp.Endpoint, c.Endpoint) {
+		if c.AccessToken != "" {
+			*opts = append(*opts, openaiopt.WithMiddleware(func(req *http.Request, next openaiopt.MiddlewareNext) (*http.Response, error) {
+				tok := c.AccessToken
+				if cur, err := auth.ClaudeCredentials(); err == nil && cur != nil && cur.AccessToken != "" {
+					tok = cur.AccessToken
+				}
+				if tok != "" {
+					req.Header.Set("Authorization", "Bearer "+tok)
+				}
+				return next(req)
+			}))
+		}
+		// Keyless local proxies: no Authorization header.
+		return nil
+	}
+	return nil
+}
+
+// isXAIModel reports whether this registry entry should use Grok/xAI OAuth credentials.
+func isXAIModel(name string, mp config.ModelProvider) bool {
+	if fam := strings.ToLower(strings.TrimSpace(mp.Family)); fam == "xai" || fam == "grok" {
+		return true
+	}
+	// Explicit family wins in ModelFamily; here we also check endpoint host.
+	if hostContains(mp.Endpoint, "api.x.ai") || hostContains(mp.Endpoint, "cli-chat-proxy.grok.com") || hostContains(mp.Endpoint, "x.ai") {
+		return true
+	}
+	// Bare model names used in the shipped config.
+	n := strings.ToLower(name)
+	return strings.HasPrefix(n, "grok-") || strings.HasPrefix(n, "xai/")
+}
+
+func hostContains(endpoint, needle string) bool {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return strings.Contains(strings.ToLower(endpoint), needle)
+	}
+	return strings.Contains(strings.ToLower(u.Host), needle)
+}
+
+func endpointsMatch(a, b string) bool {
+	na := strings.TrimRight(strings.TrimSpace(a), "/")
+	nb := strings.TrimRight(strings.TrimSpace(b), "/")
+	return strings.EqualFold(na, nb)
 }

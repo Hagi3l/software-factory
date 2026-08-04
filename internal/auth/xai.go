@@ -1,7 +1,3 @@
-// Package auth implements subscription OAuth for xAI Grok (SuperGrok / X Premium+).
-// Device-code flow against auth.x.ai; tokens stored at ~/.software-factory/auth.json (0600).
-// When logged in, the model registry can use the access token as Bearer for openai-compat
-// Grok models without an API key.
 package auth
 
 import (
@@ -12,15 +8,15 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
 
 const (
-	ClientID       = "b1a00492-073a-47ea-816f-4c329264a828"
-	DeviceCodeURL  = "https://auth.x.ai/oauth2/device/code"
-	TokenURL       = "https://auth.x.ai/oauth2/token"
+	defaultClientID = "b1a00492-073a-47ea-816f-4c329264a828"
+	// EnvClientID overrides the OAuth client_id (advanced / rotated clients).
+	EnvClientID = "XAI_OAUTH_CLIENT_ID"
+
 	Scope          = "openid profile email offline_access grok-cli:access api:access"
 	DeviceGrant    = "urn:ietf:params:oauth:grant-type:device_code"
 	RefreshGrant   = "refresh_token"
@@ -29,90 +25,20 @@ const (
 	HTTPTimeout    = 30 * time.Second
 )
 
-// Token holds the OAuth credentials for one provider.
-type Token struct {
-	AccessToken  string    `json:"access_token"`
-	RefreshToken string    `json:"refresh_token,omitempty"`
-	ExpiresAt    time.Time `json:"expires_at"`
-	TokenType    string    `json:"token_type,omitempty"`
+// Overridable endpoints for tests (httptest). Production defaults point at auth.x.ai.
+var (
+	DeviceCodeURL = "https://auth.x.ai/oauth2/device/code"
+	TokenURL      = "https://auth.x.ai/oauth2/token"
+)
+
+func clientID() string {
+	if id := os.Getenv(EnvClientID); id != "" {
+		return id
+	}
+	return defaultClientID
 }
 
-// Store is the on-disk auth file (~/.software-factory/auth.json).
-type Store struct {
-	XAI *Token `json:"xai,omitempty"`
-}
-
-func authPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, ".software-factory", "auth.json"), nil
-}
-
-// Load reads the auth store. Missing file is not an error (empty store).
-func Load() (*Store, error) {
-	p, err := authPath()
-	if err != nil {
-		return nil, err
-	}
-	b, err := os.ReadFile(p)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return &Store{}, nil
-		}
-		return nil, err
-	}
-	var s Store
-	if err := json.Unmarshal(b, &s); err != nil {
-		return nil, fmt.Errorf("auth: corrupt auth.json: %w", err)
-	}
-	return &s, nil
-}
-
-// Save writes the store with mode 0600.
-func Save(s *Store) error {
-	p, err := authPath()
-	if err != nil {
-		return err
-	}
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return err
-	}
-	b, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(p, b, 0o600)
-}
-
-// Clear removes the xAI entry (logout).
-func Clear() error {
-	s, err := Load()
-	if err != nil {
-		return err
-	}
-	s.XAI = nil
-	return Save(s)
-}
-
-// Status returns a human-readable summary of current auth.
-func Status() (string, error) {
-	s, err := Load()
-	if err != nil {
-		return "", err
-	}
-	if s.XAI == nil || s.XAI.AccessToken == "" {
-		return "not logged in (no xAI / Grok subscription token)", nil
-	}
-	now := time.Now()
-	if s.XAI.ExpiresAt.Before(now) {
-		return fmt.Sprintf("logged in (xAI) — access token expired at %s (will refresh on next use)", s.XAI.ExpiresAt.Format(time.RFC3339)), nil
-	}
-	return fmt.Sprintf("logged in (xAI / Grok) — expires %s", s.XAI.ExpiresAt.Format(time.RFC3339)), nil
-}
-
-// AccessToken returns a valid access token, refreshing if needed.
+// AccessToken returns a valid xAI access token, refreshing if needed.
 // Returns ("", nil) when not logged in.
 func AccessToken() (string, error) {
 	s, err := Load()
@@ -122,16 +48,23 @@ func AccessToken() (string, error) {
 	if s.XAI == nil || s.XAI.AccessToken == "" {
 		return "", nil
 	}
-	if time.Until(s.XAI.ExpiresAt) > RefreshSkew {
+	// Fresh enough (or no expiry recorded): return as-is.
+	if s.XAI.ExpiresAt.IsZero() || time.Until(s.XAI.ExpiresAt) > RefreshSkew {
 		return s.XAI.AccessToken, nil
 	}
 	if s.XAI.RefreshToken == "" {
+		// No refresh path — return current token and let the API fail if expired.
 		return s.XAI.AccessToken, nil
 	}
 	tok, err := refresh(s.XAI.RefreshToken)
 	if err != nil {
+		if isPermanentRefreshErr(err) {
+			_ = Clear(ProviderXAI)
+			return "", fmt.Errorf("%w — run software-factory login again", err)
+		}
 		return "", err
 	}
+	// Retain previous refresh_token when the response omits a new one.
 	if tok.RefreshToken == "" {
 		tok.RefreshToken = s.XAI.RefreshToken
 	}
@@ -187,7 +120,7 @@ func postForm(endpoint string, vals url.Values) (*tokenResp, int, error) {
 func refresh(refreshToken string) (*Token, error) {
 	vals := url.Values{}
 	vals.Set("grant_type", RefreshGrant)
-	vals.Set("client_id", ClientID)
+	vals.Set("client_id", clientID())
 	vals.Set("refresh_token", refreshToken)
 	tr, status, err := postForm(TokenURL, vals)
 	if err != nil {
@@ -215,12 +148,63 @@ func refresh(refreshToken string) (*Token, error) {
 	}, nil
 }
 
-// Login runs the device-code flow, prints the verification URL/code, polls until
-// approved, and saves tokens. Returns the saved Token on success.
+// isPermanentRefreshErr reports errors that mean the refresh token is dead.
+func isPermanentRefreshErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"invalid_grant",
+		"invalid_token",
+		"unauthorized",
+		"access_denied",
+		"expired",
+		"revoked",
+	} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	// HTTP 400/401/403 without transient markers
+	if strings.Contains(msg, "http 400") || strings.Contains(msg, "http 401") || strings.Contains(msg, "http 403") {
+		return true
+	}
+	return false
+}
+
+// HardenVerificationURI ensures the user-facing approve URL is HTTPS
+// (or http://localhost / http://127.0.0.1 for local test servers).
+func HardenVerificationURI(uri string) (string, error) {
+	if uri == "" {
+		return "", errors.New("auth: empty verification URI")
+	}
+	u, err := url.Parse(uri)
+	if err != nil {
+		return "", fmt.Errorf("auth: invalid verification URI: %w", err)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return uri, nil
+	case "http":
+		host := strings.ToLower(u.Hostname())
+		if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+			return uri, nil
+		}
+		// Upgrade plain http host to https rather than opening an insecure approve page.
+		u.Scheme = "https"
+		return u.String(), nil
+	default:
+		return "", fmt.Errorf("auth: verification URI must be https (got %q)", u.Scheme)
+	}
+}
+
+// Login runs the xAI device-code flow, prints the verification URL/code, polls
+// until approved, and saves tokens. Returns the saved Token on success.
 func Login(out io.Writer) (*Token, error) {
 	client := &http.Client{Timeout: HTTPTimeout}
 	vals := url.Values{}
-	vals.Set("client_id", ClientID)
+	vals.Set("client_id", clientID())
 	vals.Set("scope", Scope)
 	req, err := http.NewRequest(http.MethodPost, DeviceCodeURL, strings.NewReader(vals.Encode()))
 	if err != nil {
@@ -255,6 +239,10 @@ func Login(out io.Writer) (*Token, error) {
 	if uri == "" {
 		uri = "https://accounts.x.ai"
 	}
+	uri, err = HardenVerificationURI(uri)
+	if err != nil {
+		return nil, err
+	}
 	fmt.Fprintf(out, "Open this URL in a browser and approve access:\n\n  %s\n\n", uri)
 	if dc.VerificationURIComplete == "" {
 		fmt.Fprintf(out, "User code: %s\n\n", dc.UserCode)
@@ -280,7 +268,7 @@ func Login(out io.Writer) (*Token, error) {
 
 		tvals := url.Values{}
 		tvals.Set("grant_type", DeviceGrant)
-		tvals.Set("client_id", ClientID)
+		tvals.Set("client_id", clientID())
 		tvals.Set("device_code", dc.DeviceCode)
 		tr, status, err := postForm(TokenURL, tvals)
 		if err != nil {
@@ -308,7 +296,8 @@ func Login(out io.Writer) (*Token, error) {
 			if err := Save(s); err != nil {
 				return nil, err
 			}
-			fmt.Fprintf(out, "Logged in. Token stored at ~/.software-factory/auth.json\n")
+			path, _ := authPath()
+			fmt.Fprintf(out, "Logged in (Grok / xAI). Token stored at %s\n", path)
 			return tok, nil
 		case tr.Error == "authorization_pending":
 			continue

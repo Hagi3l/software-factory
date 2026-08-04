@@ -1,7 +1,6 @@
 // Command factory is the entry point for the autonomous software factory.
 //
-// It exposes the three operator-facing subcommands that drive the bootstrap kernel
-// (see specs/bootstrap.md, IMPLEMENTATION_PLAN.md T1.21):
+// Operator-facing subcommands (see specs/bootstrap.md, docs/cli.md):
 //
 //	software-factory validate  — load + validate the config (the startup gate)
 //	software-factory seed       — author a spec and create a seed issue (CLI stand-in for the
@@ -13,6 +12,9 @@
 //	                     single-writer orchestrator. Needs `software-factory run --nats-addr`.
 //	software-factory serve      — start the control-room web server (the human's window); serves
 //	                     the embedded UI until interrupted
+//	software-factory login      — Grok OAuth or Claude subscription-proxy registration
+//	software-factory logout     — clear stored subscription credentials
+//	software-factory auth       — auth status (subscription credentials)
 //
 // This is the composition root: it is the one place that wires every internal
 // package together. Nothing here enforces a guarantee — the components it assembles
@@ -57,6 +59,12 @@ func dispatch(args []string) int {
 		err = cmdReject(rest)
 	case "serve":
 		err = cmdServe(rest)
+	case "login":
+		err = cmdLogin(rest)
+	case "logout":
+		err = cmdLogout(rest)
+	case "auth":
+		err = cmdAuth(rest)
 	case "sandbox-goproxy":
 		err = cmdSandboxGoproxy(rest)
 	case "version", "-v", "--version":
@@ -90,6 +98,9 @@ usage:
   software-factory approve  [--nats URL] [--approver WHO] [--repo DIR] [--bd PATH] <issue>
   software-factory reject   [--nats URL] [--approver WHO] [--repo DIR] [--bd PATH] <issue>
   software-factory serve    [--addr HOST:PORT]
+  software-factory login    [grok|xai|claude] …
+  software-factory logout   [grok|xai|claude|all]
+  software-factory auth     status
   software-factory version
 
 internal (run inside the sandbox by the image entrypoint, not by operators):

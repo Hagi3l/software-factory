@@ -11,13 +11,32 @@ software-factory run        run the in-process orchestrator + runner: the spec �
 software-factory approve    approve a parked integrate candidate (trusted-dev / TCB review gate)
 software-factory reject     reject a parked integrate candidate
 software-factory serve      start the control-room web server (no pipeline; static + read views)
-factory version    print the build version
-factory help       print usage
+software-factory login      Grok OAuth or Claude subscription-proxy registration
+software-factory logout     clear stored subscription credentials
+software-factory auth       status — show Grok / Claude auth
+software-factory version    print the build version
+software-factory help       print usage
 ```
 
 Exit codes: `0` success · `1` command error (failed validation, bad config, crashed
 run) · `2` usage error (unknown/missing command). Run any subcommand with `-h` for its
 flags.
+
+---
+
+## `software-factory login` / `logout` / `auth`
+
+Subscription credentials (see [selecting-provider.md](selecting-provider.md)).
+
+| Command | Meaning |
+|---------|---------|
+| `login` / `login grok` | SuperGrok / X Premium+ device-code OAuth → `~/.software-factory/auth.json` |
+| `login claude --proxy URL` | Register a Claude Pro/Max local subscription proxy (`--token`, `--mode` optional) |
+| `logout [grok\|claude\|all]` | Clear one or all stored credentials |
+| `auth status` | Print Grok and Claude login state |
+
+Environment API keys always override the login store. Grok OAuth tokens are refreshed
+on use during long `run` sessions.
 
 ---
 
