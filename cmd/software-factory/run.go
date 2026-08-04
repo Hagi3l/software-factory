@@ -66,6 +66,12 @@ func cmdRun(args []string) error {
 	if err != nil {
 		return err
 	}
+	// Fail loud before spinning the orchestrator: without a beads store the loop only
+	// spam-logs "no beads database found". Default --repo is ".", so running from the
+	// factory checkout (instead of --repo /path/to/target) is the usual footgun.
+	if st, err := os.Stat(filepath.Join(absRepo, ".beads")); err != nil || !st.IsDir() {
+		return fmt.Errorf("run: no beads database at %s/.beads — use --repo pointing at the integration project (not the factory checkout), then: cd <repo> && bd init --non-interactive\n  (or: software-factory bootstrap-repo --repo <repo>)", absRepo)
+	}
 
 	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
