@@ -1,0 +1,7 @@
+name:    test-author-python
+role:    test-author
+model:   claude-opus-4-8
+persona: souls/prompts/test-author.md
+tools:   [fs, shell, git]
+sandbox: python-toolchain
+selector: { lang: python }

@@ -12,12 +12,14 @@ specs are the truth — and term definitions live in
 1. **[Getting started](getting-started.md)** — prerequisites, building the binary, and
    running your first `spec → merged commit` loop.
 2. **[CLI reference](cli.md)** — every subcommand (`validate`, `seed`, `run`, `serve`,
-   `approve`, `reject`) and its flags.
-3. **[The pipeline](pipeline.md)** — how a spec becomes merged code: the DAG stages,
+   `approve`, `reject`, `login`, `profile`, …) and its flags.
+3. **[Stack profiles](profiles.md)** — multi-language targets (Go / Node / Python):
+   detect, images, and `--config profiles/<stack>`.
+4. **[The pipeline](pipeline.md)** — how a spec becomes merged code: the DAG stages,
    the trust model, dead-letters, approval, and Resolve mode.
-4. **[Configuration](configuration.md)** — the `config/` directory: `factory.yaml`
+5. **[Configuration](configuration.md)** — the `config/` directory: `factory.yaml`
    (the DAG, checks, policy), souls, and the infra overlay.
-5. **[The control room](control-room.md)** — the web UI: every view, the live feed,
+6. **[The control room](control-room.md)** — the web UI: every view, the live feed,
    and the Create-Task / Resolve wizard.
 
 ## The 60-second mental model

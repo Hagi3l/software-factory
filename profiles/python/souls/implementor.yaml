@@ -1,0 +1,7 @@
+name:    implementor-python
+role:    implementor
+model:   claude-opus-4-8
+persona: souls/prompts/implementor.md
+tools:   [fs, shell, git]
+sandbox: python-toolchain
+selector: { lang: python }

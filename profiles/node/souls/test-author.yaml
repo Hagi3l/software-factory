@@ -1,0 +1,7 @@
+name:    test-author-node
+role:    test-author
+model:   claude-opus-4-8
+persona: souls/prompts/test-author.md
+tools:   [fs, shell, git]
+sandbox: node-toolchain
+selector: { lang: typescript }

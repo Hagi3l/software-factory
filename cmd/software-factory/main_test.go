@@ -42,6 +42,9 @@ func TestDispatchExitCodes(t *testing.T) {
 		{"auth help", []string{"auth", "-h"}, 0},
 		{"auth missing subcommand", []string{"auth"}, 1},
 		{"login claude missing proxy", []string{"login", "claude"}, 1},
+		{"profile help", []string{"profile", "-h"}, 0},
+		{"profile list", []string{"profile", "list"}, 0},
+		{"profile detect missing repo", []string{"profile", "detect"}, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -79,6 +82,22 @@ func TestValidateDemoConfig(t *testing.T) {
 	}
 	if err := cfg.Validate(); err != nil {
 		t.Fatalf("demo config failed validation: %v", err)
+	}
+}
+
+// TestValidateStackProfiles guards multi-language profiles (node/python) the same way
+// as the bootstrap config — a schema drift should fail CI, not an operator's first run.
+func TestValidateStackProfiles(t *testing.T) {
+	for _, dir := range []string{"../../profiles/node", "../../profiles/python"} {
+		t.Run(dir, func(t *testing.T) {
+			cfg, err := loadConfig(dir, "dev")
+			if err != nil {
+				t.Fatalf("load: %v", err)
+			}
+			if err := cfg.Validate(); err != nil {
+				t.Fatalf("validate: %v", err)
+			}
+		})
 	}
 }
 

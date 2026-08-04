@@ -46,11 +46,20 @@ Every merged commit carries a provenance trailer: issue → soul → model → p
 evidence.
 
 The pipeline is configuration, not code: stages, souls, gate checks, budgets, and
-sandbox images are all declared in `config/` — a check is any command with an exit
-code, so the machinery itself is language-agnostic. The shipped configs target Go
-(a `go-toolchain` sandbox image, structured findings for `go test`/gosec/
-govulncheck/golangci-lint); another ecosystem is a new image and check set, not a
-fork.
+sandbox images are all declared in config trees — a check is any command with an exit
+code, so the machinery itself is language-agnostic. **Stack profiles** ship for:
+
+| Profile | Path | Ecosystems |
+|---------|------|------------|
+| go | `config/` | Go modules (self-host) |
+| node | `profiles/node/` | Node/TS, Next.js, pnpm monorepos |
+| python | `profiles/python/` | pyproject / pytest / ruff |
+
+```bash
+./bin/software-factory profile detect --repo /path/to/app
+```
+
+See [`profiles/README.md`](profiles/README.md) and [`docs/profiles.md`](docs/profiles.md).
 
 ## Quick start
 

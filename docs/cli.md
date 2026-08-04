@@ -14,6 +14,7 @@ software-factory serve      start the control-room web server (no pipeline; stat
 software-factory login      Grok OAuth or Claude subscription-proxy registration
 software-factory logout     clear stored subscription credentials
 software-factory auth       status — show Grok / Claude auth
+software-factory profile    list / detect / show stack profiles (go|node|python)
 software-factory version    print the build version
 software-factory help       print usage
 ```
@@ -21,6 +22,18 @@ software-factory help       print usage
 Exit codes: `0` success · `1` command error (failed validation, bad config, crashed
 run) · `2` usage error (unknown/missing command). Run any subcommand with `-h` for its
 flags.
+
+---
+
+## `software-factory profile`
+
+Stack profiles for multi-language targets ([profiles.md](profiles.md)).
+
+| Command | Meaning |
+|---------|---------|
+| `profile list` | Shipped profiles (`go` → `config/`, `node` → `profiles/node`, `python` → `profiles/python`) |
+| `profile detect --repo DIR` | Recommend a profile from lockfiles / manifests |
+| `profile show NAME` | Image, Dockerfile, config path |
 
 ---
 

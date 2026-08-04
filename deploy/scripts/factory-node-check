@@ -1,0 +1,137 @@
+#!/usr/bin/env bash
+# factory-node-check — adaptive Node/TS gate driver for the node-toolchain sandbox.
+#
+# Usage: factory-node-check <test|lint|typecheck|build|install>
+#
+# Detects pnpm / yarn / npm from lockfiles (or packageManager field) and runs the
+# project's declared scripts. Exit 0 = pass; non-zero = fail closed.
+# Optional checks (typecheck) exit 0 when the project has no matching script.
+set -euo pipefail
+
+action="${1:-}"
+if [[ -z "$action" ]]; then
+  echo "factory-node-check: usage: factory-node-check <test|lint|typecheck|build|install>" >&2
+  exit 2
+fi
+
+has_script() {
+  local name="$1"
+  node -e "
+    const fs=require('fs');
+    if (!fs.existsSync('package.json')) process.exit(1);
+    const p=JSON.parse(fs.readFileSync('package.json','utf8'));
+    process.exit(p.scripts && p.scripts['$name'] ? 0 : 1);
+  " 2>/dev/null
+}
+
+detect_pm() {
+  if [[ -f pnpm-lock.yaml ]] || [[ -f pnpm-workspace.yaml ]]; then
+    echo pnpm
+    return
+  fi
+  if [[ -f yarn.lock ]]; then
+    echo yarn
+    return
+  fi
+  if [[ -f package-lock.json ]] || [[ -f npm-shrinkwrap.json ]]; then
+    echo npm
+    return
+  fi
+  if [[ -f package.json ]] && grep -q '"packageManager"[[:space:]]*:[[:space:]]*"pnpm@' package.json 2>/dev/null; then
+    echo pnpm
+    return
+  fi
+  echo npm
+}
+
+run_pm() {
+  local pm="$1"
+  shift
+  case "$pm" in
+    pnpm)
+      if command -v corepack >/dev/null 2>&1; then
+        corepack enable >/dev/null 2>&1 || true
+      fi
+      pnpm "$@"
+      ;;
+    yarn) yarn "$@" ;;
+    npm)  npm "$@" ;;
+    *)
+      echo "factory-node-check: unknown package manager $pm" >&2
+      exit 2
+      ;;
+  esac
+}
+
+pm="$(detect_pm)"
+
+case "$action" in
+  install)
+    if [[ ! -f package.json ]]; then
+      echo "factory-node-check: no package.json in $(pwd)" >&2
+      exit 1
+    fi
+    # Prefer offline/cache when node_modules already present.
+    if [[ -d node_modules ]]; then
+      echo "factory-node-check: node_modules present; skip install"
+      exit 0
+    fi
+    case "$pm" in
+      pnpm) run_pm pnpm install --frozen-lockfile 2>/dev/null || run_pm pnpm install ;;
+      yarn) run_pm yarn install --frozen-lockfile 2>/dev/null || run_pm yarn install ;;
+      npm)  run_pm npm ci 2>/dev/null || run_pm npm install ;;
+    esac
+    ;;
+  test)
+    factory-node-check install
+    if has_script test; then
+      run_pm "$pm" test
+    elif has_script "test:unit"; then
+      run_pm "$pm" run test:unit
+    else
+      echo "factory-node-check: no test / test:unit script in package.json" >&2
+      echo "Add a test script (vitest/jest/node:test) so tests-red / tests-pass can grade." >&2
+      exit 1
+    fi
+    ;;
+  lint)
+    factory-node-check install
+    if has_script lint; then
+      run_pm "$pm" run lint
+    else
+      echo "factory-node-check: no lint script; running eslint if available" >&2
+      if command -v eslint >/dev/null 2>&1 && [[ -f eslint.config.mjs || -f eslint.config.js || -f .eslintrc.js || -f .eslintrc.cjs || -f .eslintrc.json ]]; then
+        eslint .
+      else
+        echo "factory-node-check: no lint tooling found" >&2
+        exit 1
+      fi
+    fi
+    ;;
+  typecheck)
+    factory-node-check install
+    if has_script typecheck; then
+      run_pm "$pm" run typecheck
+    elif has_script "type-check"; then
+      run_pm "$pm" run type-check
+    elif [[ -f tsconfig.json ]] && command -v tsc >/dev/null 2>&1; then
+      tsc --noEmit
+    else
+      echo "factory-node-check: no typecheck script or tsc; skipping (exit 0)"
+      exit 0
+    fi
+    ;;
+  build)
+    factory-node-check install
+    if has_script build; then
+      run_pm "$pm" run build
+    else
+      echo "factory-node-check: no build script in package.json" >&2
+      exit 1
+    fi
+    ;;
+  *)
+    echo "factory-node-check: unknown action $action" >&2
+    exit 2
+    ;;
+esac

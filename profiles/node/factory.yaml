@@ -1,0 +1,75 @@
+# Node / TypeScript stack profile.
+#
+# Same kernel DAG as config/factory.yaml (plan → author-tests → implement → qa →
+# integrate + resolve), with checks and postconditions that grade any repo with
+# package.json scripts via factory-node-check (baked into node-toolchain).
+#
+# Targets: get-chilld (Next.js), tourney-hub-ai (pnpm monorepo), and similar.
+# Use:  software-factory run --config profiles/node --repo /path/to/project
+#
+# See profiles/README.md.
+
+spec_depth: 1
+
+requirements_planner:
+  model:      claude-opus-4-8
+  persona:    souls/prompts/requirements-planner.md
+  max_tokens: 4096
+
+dag:
+  requirements:
+    kind: human
+  plan:
+    role: planner
+    kind: plan
+    precondition: blockers-closed
+    on_failure: plan
+    produces: [author-tests]
+  author-tests:
+    role: test-author
+    precondition: blockers-closed
+    postcondition: [tests-red]
+    on_failure: author-tests
+    produces: [implement]
+  implement:
+    role: implementor
+    precondition: blockers-closed
+    postcondition: [tests-red-then-green]
+    on_failure: implement
+    produces: [qa]
+  qa:
+    role: security
+    precondition: blockers-closed
+    # Node QA: tests + lint + typecheck + production build. No Go scanners/mutation.
+    postcondition: [tests-pass, lint, typecheck, build]
+    on_failure: implement
+    produces: [integrate]
+  integrate:
+    kind: trusted-merge
+    postcondition: [human-approved]
+  resolve:
+    role: merge-resolver
+    kind: resolve
+    precondition: blockers-closed
+    postcondition: [tests-pass, lint, typecheck, build]
+    on_failure: resolve
+    produces: [integrate]
+
+checks:
+  tests-pass: factory-node-check test
+  lint:       factory-node-check lint
+  typecheck:  factory-node-check typecheck
+  build:      factory-node-check build
+
+independent_checks: [lint, typecheck, build]
+
+policy:
+  max_retries: 3
+  budget: { tokens: 2_000_000, usd: 20, wall: 2h }
+  epic_budget: { usd: 200 }
+  dead_letter: factory.dlq
+  profile: trusted-dev
+  tcb_paths:
+    - package.json
+    - pnpm-workspace.yaml
+    - .github/workflows/**

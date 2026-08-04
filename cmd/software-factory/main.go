@@ -15,6 +15,7 @@
 //	software-factory login      — Grok OAuth or Claude subscription-proxy registration
 //	software-factory logout     — clear stored subscription credentials
 //	software-factory auth       — auth status (subscription credentials)
+//	software-factory profile    — list/detect language stack profiles (go|node|python)
 //
 // This is the composition root: it is the one place that wires every internal
 // package together. Nothing here enforces a guarantee — the components it assembles
@@ -65,6 +66,8 @@ func dispatch(args []string) int {
 		err = cmdLogout(rest)
 	case "auth":
 		err = cmdAuth(rest)
+	case "profile":
+		err = cmdProfile(rest)
 	case "sandbox-goproxy":
 		err = cmdSandboxGoproxy(rest)
 	case "version", "-v", "--version":
@@ -101,6 +104,7 @@ usage:
   software-factory login    [grok|xai|claude] …
   software-factory logout   [grok|xai|claude|all]
   software-factory auth     status
+  software-factory profile  list|detect|show …
   software-factory version
 
 internal (run inside the sandbox by the image entrypoint, not by operators):

@@ -27,6 +27,20 @@ API keys and OAuth tokens come **from the environment or `software-factory login
 ./bin/software-factory login claude --proxy http://127.0.0.1:PORT/v1
 ```
 
+### Multi-language target repos (not just Go)
+
+The default `config/` profile grades **Go**. For Node/TS or Python apps, pick a
+**stack profile** (same kernel, different image + checks + souls):
+
+```bash
+./bin/software-factory profile detect --repo /path/to/app
+# e.g. node → profiles/node , python → profiles/python
+docker build -f deploy/node-toolchain.Dockerfile -t factory/node-toolchain:dev .
+./bin/software-factory run --config profiles/node --repo /path/to/app ...
+```
+
+See [profiles.md](profiles.md) and [`profiles/README.md`](../profiles/README.md).
+
 ## Build
 
 ```bash

@@ -1,0 +1,7 @@
+name:    planner-python
+role:    planner
+model:   claude-opus-4-8
+persona: souls/prompts/planner.md
+tools:   [fs, shell, git]
+sandbox: python-toolchain
+selector: { lang: python }

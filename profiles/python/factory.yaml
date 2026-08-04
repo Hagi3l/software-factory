@@ -1,0 +1,71 @@
+# Python stack profile.
+#
+# Same kernel DAG as config/factory.yaml with pytest/ruff/mypy gates via
+# factory-python-check (baked into python-toolchain).
+#
+# Targets: f5-automation and similar Python services/libraries.
+# Use:  software-factory run --config profiles/python --repo /path/to/project
+#
+# See profiles/README.md.
+
+spec_depth: 1
+
+requirements_planner:
+  model:      claude-opus-4-8
+  persona:    souls/prompts/requirements-planner.md
+  max_tokens: 4096
+
+dag:
+  requirements:
+    kind: human
+  plan:
+    role: planner
+    kind: plan
+    precondition: blockers-closed
+    on_failure: plan
+    produces: [author-tests]
+  author-tests:
+    role: test-author
+    precondition: blockers-closed
+    postcondition: [tests-red]
+    on_failure: author-tests
+    produces: [implement]
+  implement:
+    role: implementor
+    precondition: blockers-closed
+    postcondition: [tests-red-then-green]
+    on_failure: implement
+    produces: [qa]
+  qa:
+    role: security
+    precondition: blockers-closed
+    postcondition: [tests-pass, lint, typecheck]
+    on_failure: implement
+    produces: [integrate]
+  integrate:
+    kind: trusted-merge
+    postcondition: [human-approved]
+  resolve:
+    role: merge-resolver
+    kind: resolve
+    precondition: blockers-closed
+    postcondition: [tests-pass, lint, typecheck]
+    on_failure: resolve
+    produces: [integrate]
+
+checks:
+  tests-pass: factory-python-check test
+  lint:       factory-python-check lint
+  typecheck:  factory-python-check typecheck
+
+independent_checks: [lint, typecheck]
+
+policy:
+  max_retries: 3
+  budget: { tokens: 2_000_000, usd: 20, wall: 2h }
+  epic_budget: { usd: 200 }
+  dead_letter: factory.dlq
+  profile: trusted-dev
+  tcb_paths:
+    - pyproject.toml
+    - .github/workflows/**
