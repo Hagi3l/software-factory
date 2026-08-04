@@ -1,6 +1,6 @@
 name:    security-node
 role:    security
-model:   claude-sonnet-4-6
+model:   grok-4-fast
 persona: souls/prompts/security.md
 tools:   [fs, shell, git]
 sandbox: node-toolchain

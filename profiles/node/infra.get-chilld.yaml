@@ -1,0 +1,42 @@
+# Infra overlay for get-chilld: same as infra.dev.yaml but uses the project-baked
+# image with warm node_modules (deploy/get-chilld.Dockerfile).
+#
+#   software-factory run --config profiles/node --env get-chilld --repo /path/to/get-chilld ...
+#
+# Requires: docker build of factory/node-toolchain:dev then factory/get-chilld:dev
+
+sandbox:
+  backend: docker
+  egress:  broker-only
+  limits:  { cpu: 2, mem: 2Gi, wall: 30m }
+  profiles:
+    node-toolchain:
+      image: factory/get-chilld:dev
+nats:
+  url: ""
+  jetstream: { replicas: 1, max_age: 168h }
+broker:
+  allowlist: [llm-api, nats, git, package-proxy]
+  package_proxy: https://proxy.golang.org
+artifacts:
+  backend: files
+  path: ./.software-factory/artifacts
+otel:
+  endpoint: localhost:4317
+models:
+  claude-opus-4-8:
+    provider: anthropic
+    cost: { input_per_mtok: 5, output_per_mtok: 25, cache_write_per_mtok: 6.25, cache_read_per_mtok: 0.5 }
+  claude-sonnet-4-6:
+    provider: anthropic
+    cost: { input_per_mtok: 3, output_per_mtok: 15, cache_write_per_mtok: 3.75, cache_read_per_mtok: 0.3 }
+  grok-4.5:
+    provider: openai-compat
+    endpoint: https://cli-chat-proxy.grok.com/v1
+    family: xai
+    cost: { input_per_mtok: 0.20, output_per_mtok: 0.50 }
+  grok-4-fast:
+    provider: openai-compat
+    endpoint: https://cli-chat-proxy.grok.com/v1
+    family: xai
+    cost: { input_per_mtok: 0.20, output_per_mtok: 0.50 }

@@ -16,6 +16,7 @@
 //	software-factory logout     — clear stored subscription credentials
 //	software-factory auth       — auth status (subscription credentials)
 //	software-factory profile    — list/detect language stack profiles (go|node|python)
+//	software-factory bootstrap-repo — prepare a target git repo (beads + next steps)
 //
 // This is the composition root: it is the one place that wires every internal
 // package together. Nothing here enforces a guarantee — the components it assembles
@@ -68,6 +69,8 @@ func dispatch(args []string) int {
 		err = cmdAuth(rest)
 	case "profile":
 		err = cmdProfile(rest)
+	case "bootstrap-repo":
+		err = cmdBootstrap(rest)
 	case "sandbox-goproxy":
 		err = cmdSandboxGoproxy(rest)
 	case "version", "-v", "--version":
@@ -105,6 +108,7 @@ usage:
   software-factory logout   [grok|xai|claude|all]
   software-factory auth     status
   software-factory profile  list|detect|show …
+  software-factory bootstrap-repo --repo DIR [--profile NAME]
   software-factory version
 
 internal (run inside the sandbox by the image entrypoint, not by operators):

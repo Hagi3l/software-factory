@@ -76,6 +76,12 @@ case "$action" in
       echo "factory-node-check: node_modules present; skip install"
       exit 0
     fi
+    # Project-baked images may set FACTORY_NODE_MODULES_CACHE (e.g. get-chilld Dockerfile).
+    if [[ -n "${FACTORY_NODE_MODULES_CACHE:-}" && -d "${FACTORY_NODE_MODULES_CACHE}" ]]; then
+      echo "factory-node-check: seeding node_modules from FACTORY_NODE_MODULES_CACHE"
+      cp -a "${FACTORY_NODE_MODULES_CACHE}" ./node_modules
+      exit 0
+    fi
     case "$pm" in
       pnpm) run_pm pnpm install --frozen-lockfile 2>/dev/null || run_pm pnpm install ;;
       yarn) run_pm yarn install --frozen-lockfile 2>/dev/null || run_pm yarn install ;;

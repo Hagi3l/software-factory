@@ -1,6 +1,6 @@
 name:    merge-resolver-node
 role:    merge-resolver
-model:   claude-opus-4-8
+model:   grok-4.5
 persona: souls/prompts/merge-resolver.md
 tools:   [fs, shell, git]
 sandbox: node-toolchain

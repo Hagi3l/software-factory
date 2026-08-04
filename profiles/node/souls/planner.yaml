@@ -1,6 +1,6 @@
 name:    planner-node
 role:    planner
-model:   claude-opus-4-8
+model:   grok-4.5
 persona: souls/prompts/planner.md
 tools:   [fs, shell, git]
 sandbox: node-toolchain

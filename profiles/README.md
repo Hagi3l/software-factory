@@ -14,25 +14,31 @@ grade a particular ecosystem.
 
 ```bash
 # From the software-factory checkout:
+make build
 ./bin/software-factory profile detect --repo /path/to/your-app
-./bin/software-factory profile list
+./bin/software-factory bootstrap-repo --repo /path/to/your-app   # detect + bd init + print commands
 
 # Build the recommended sandbox image (from factory repo root):
 docker build -f deploy/node-toolchain.Dockerfile -t factory/node-toolchain:dev .
 # or
 docker build -f deploy/python-toolchain.Dockerfile -t factory/python-toolchain:dev .
 
-# Target repo needs beads:
-cd /path/to/your-app && bd init --non-interactive
+# get-chilld (warm node_modules for zero-network):
+docker build -f deploy/get-chilld.Dockerfile -t factory/get-chilld:dev /path/to/get-chilld
 
-# Run the factory against that repo with the profile config:
-cd /path/to/software-factory
+# Auth (Grok sub) then run — node/python profiles default to Grok models:
+./bin/software-factory login
 ./bin/software-factory run \
   --config profiles/node \
+  --env get-chilld \          # only for get-chilld baked image; omit for generic node
   --repo /path/to/your-app \
   --serve-addr 127.0.0.1:8080 \
   --nats-addr 127.0.0.1:4222
 ```
+
+Node/Python souls use **`grok-4.5` / `grok-4-fast`** by default (Claude remains in the model
+registry if you switch souls back). Same-family diversity advisory is expected until you
+point the verifier at Claude.
 
 ## What each profile defines
 

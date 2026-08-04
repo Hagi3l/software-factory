@@ -45,6 +45,8 @@ func TestDispatchExitCodes(t *testing.T) {
 		{"profile help", []string{"profile", "-h"}, 0},
 		{"profile list", []string{"profile", "list"}, 0},
 		{"profile detect missing repo", []string{"profile", "detect"}, 1},
+		{"bootstrap-repo help", []string{"bootstrap-repo", "-h"}, 0},
+		{"bootstrap-repo missing repo", []string{"bootstrap-repo"}, 1},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

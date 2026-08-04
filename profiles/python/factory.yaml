@@ -11,7 +11,7 @@
 spec_depth: 1
 
 requirements_planner:
-  model:      claude-opus-4-8
+  model:      grok-4.5
   persona:    souls/prompts/requirements-planner.md
   max_tokens: 4096
 

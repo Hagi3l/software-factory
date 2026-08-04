@@ -22,11 +22,21 @@ software-factory profile show node
 ### get-chilld / tourney-hub-ai (Node)
 
 ```bash
-software-factory profile detect --repo /Users/ve/Projects/get-chilld
+software-factory bootstrap-repo --repo /Users/ve/Projects/get-chilld
 docker build -f deploy/node-toolchain.Dockerfile -t factory/node-toolchain:dev .
-# in target repo: bd init --non-interactive
-software-factory run --config profiles/node --repo /Users/ve/Projects/get-chilld \
+# get-chilld: bake deps into the sandbox image (zero-network install)
+docker build -f deploy/get-chilld.Dockerfile -t factory/get-chilld:dev /Users/ve/Projects/get-chilld
+software-factory login
+software-factory run --config profiles/node --env get-chilld \
+  --repo /Users/ve/Projects/get-chilld \
   --serve-addr 127.0.0.1:8080 --nats-addr 127.0.0.1:4222
+```
+
+tourney-hub-ai (generic node image; monorepo has its own pnpm lock — bake a project image similarly if install fails offline):
+
+```bash
+software-factory bootstrap-repo --repo /Users/ve/Projects/tourney-hub-ai
+software-factory run --config profiles/node --repo /Users/ve/Projects/tourney-hub-ai ...
 ```
 
 ### f5-automation (Python)
