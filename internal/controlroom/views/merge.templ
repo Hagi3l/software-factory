@@ -22,7 +22,7 @@ import (
 // backstop so a settled train still converges. The initial list renders inline so the page shows
 // data before htmx attaches.
 templ MergeQueuePage(rows []query.MergeRow) {
-	@Layout("Harness — Merge queue", "merge") {
+	@Layout("Factory — Merge queue", "merge") {
 		<div class="space-y-4">
 			<div class="flex items-baseline justify-between">
 				<h1 class="text-xl font-semibold tracking-tight">Merge queue</h1>
@@ -101,7 +101,7 @@ templ mergeRow(row query.MergeRow) {
 // used when the control room is not attached to a running factory (a standalone `software-factory serve`
 // has no live merge-state feed) or when the underlying read fails.
 templ MergeQueueMessage(msg string) {
-	@Layout("Harness — Merge queue", "merge") {
+	@Layout("Factory — Merge queue", "merge") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Merge queue</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

@@ -19,7 +19,7 @@ import (
 // not reachable, or could not be decoded) it renders a notice rather than failing, offering
 // the raw-bytes link when a hash is known.
 templ ReplayPage(rep query.Replay) {
-	@Layout("Harness — Replay "+rep.Issue.ID, "") {
+	@Layout("Factory — Replay "+rep.Issue.ID, "") {
 		<div class="mx-auto max-w-4xl space-y-6">
 			<div class="space-y-2">
 				<div class="flex flex-wrap items-center gap-3">
@@ -185,7 +185,7 @@ templ replayStopBadge(stop string) {
 // page-level fallback (a missing/undecodable transcript for a *known* issue is handled
 // inline by ReplayPage's notice, which still shows the issue header).
 templ ReplayNotAttached(msg string) {
-	@Layout("Harness — Replay", "") {
+	@Layout("Factory — Replay", "") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Replay</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

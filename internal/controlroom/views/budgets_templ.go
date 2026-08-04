@@ -87,7 +87,7 @@ func BudgetsPage(b query.Budgets) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Harness — Budgets", "budgets").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Factory — Budgets", "budgets").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -753,7 +753,7 @@ func BudgetsMessage(msg string) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Harness — Budgets", "budgets").Render(templ.WithChildren(ctx, templ_7745c5c3_Var33), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Factory — Budgets", "budgets").Render(templ.WithChildren(ctx, templ_7745c5c3_Var33), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

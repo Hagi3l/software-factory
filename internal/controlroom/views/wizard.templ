@@ -34,7 +34,7 @@ import (
 // values, so the render is unchanged from the prior blank-slate open. canApprove wires the
 // draft's APPROVE button (a Seeder present).
 templ CreatePage(sessionID, prefill string, msgs []wizard.Message, ledger []wizard.LedgerItem, draft wizard.Draft, specs []wizard.SpecFileDiff, canApprove bool) {
-	@Layout("Harness — Create Task", "create") {
+	@Layout("Factory — Create Task", "create") {
 		<script src="/static/wizard.js" defer></script>
 		<div class="mx-auto flex max-w-3xl flex-col gap-4">
 			<div class="flex items-start justify-between gap-4">
@@ -635,7 +635,7 @@ templ CreateApproveResult(res wizard.SeedResult, err string) {
 // omits the requirements_planner block), so the action surface degrades to an explanation
 // rather than a dead form.
 templ CreateMessage(msg string) {
-	@Layout("Harness — Create Task", "create") {
+	@Layout("Factory — Create Task", "create") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Create Task</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

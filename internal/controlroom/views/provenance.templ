@@ -14,7 +14,7 @@ import "github.com/Loxstomper/software-factory/internal/controlroom/query"
 // a manual refresh, so an agent-event nudges an htmx refetch of just the list (throttled, with
 // a slow backstop). git on main only changes on a merge, so the refetch is a bounded `git log`.
 templ ProvenancePage(commits []query.MergedCommit) {
-	@Layout("Harness — Provenance", "provenance") {
+	@Layout("Factory — Provenance", "provenance") {
 		<div class="space-y-4">
 			<div class="flex items-baseline justify-between gap-4">
 				<h1 class="text-xl font-semibold tracking-tight">Provenance</h1>
@@ -125,7 +125,7 @@ templ signatureBadge(s query.SignatureStatus) {
 // ProvenanceMessage renders the provenance chrome with a single notice instead of the list —
 // the not-attached / read-error fallback, mirroring the other views.
 templ ProvenanceMessage(msg string) {
-	@Layout("Harness — Provenance", "provenance") {
+	@Layout("Factory — Provenance", "provenance") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Provenance</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

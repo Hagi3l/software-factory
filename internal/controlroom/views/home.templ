@@ -1,11 +1,9 @@
 package views
 
-// Home is the landing page for the control room. T4.1 is the scaffold — the web
-// server, the asset pipeline, and this base layout — so the page deliberately renders
-// status and the view map rather than live data; the data-backed views (Board, DAG,
-// Activity, DLQ, Budgets, Provenance) attach in T4.2+ via the read/query layer and SSE.
+// Home is the landing page for the control room — the human's window into a
+// running factory (or a standalone serve for chrome/nav exploration).
 templ Home(version string) {
-	@Layout("Harness — Control Room", "home") {
+	@Layout("Factory — Control Room", "home") {
 		<div class="mx-auto max-w-3xl space-y-6">
 			<div>
 				<h1 class="text-2xl font-semibold tracking-tight">Control room</h1>
@@ -14,16 +12,34 @@ templ Home(version string) {
 					Build <span class="font-mono text-fg">{ version }</span>.
 				</p>
 			</div>
-			<div class="rounded-lg border border-border bg-surface p-4">
+			<div class="rounded-lg border border-border bg-surface p-4 space-y-2">
 				<p class="text-sm text-fg">
-					The server scaffold and asset pipeline are live (T4.1). The views below are
-					wired into the navigation and land in subsequent tasks.
+					Live data (board, activity feed, budgets, create-task wizard) attaches when you
+					start the factory with
+					<span class="font-mono text-xs text-fg">software-factory run --serve-addr 127.0.0.1:8080</span>
+					and a target <span class="font-mono text-xs text-fg">--repo</span> that has beads.
+				</p>
+				<p class="text-sm text-muted">
+					Standalone <span class="font-mono text-xs">serve</span> is for the UI chrome only —
+					views show a not-attached notice until a run is co-located.
 				</p>
 			</div>
 			<div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
 				for _, item := range NavItems {
 					<a href={ templ.SafeURL(item.Href) } class="block rounded-lg border border-border bg-surface p-4 hover:border-border-strong hover:bg-surface">
 						<span class="font-medium text-fg">{ item.Label }</span>
+						if item.Key == "board" {
+							<p class="mt-1 text-xs text-muted">Work columns by role</p>
+						}
+						if item.Key == "create" {
+							<p class="mt-1 text-xs text-muted">Spec wizard + seed issues</p>
+						}
+						if item.Key == "dlq" {
+							<p class="mt-1 text-xs text-muted">Dead-letters &amp; resolve</p>
+						}
+						if item.Key == "activity" {
+							<p class="mt-1 text-xs text-muted">Agent + system feed</p>
+						}
 					</a>
 				}
 			</div>
@@ -31,14 +47,12 @@ templ Home(version string) {
 	}
 }
 
-// Placeholder renders a not-yet-built view inside the chrome so every nav destination
-// resolves to a real page. Each is replaced by its data-backed implementation in T4.2+;
-// until then this keeps the navigation honest rather than dead-linking.
+// Placeholder is retained for rare unfinished destinations; prefer data views.
 templ Placeholder(label string, active string) {
-	@Layout("Harness — "+label, active) {
+	@Layout("Factory — "+label, active) {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-2xl font-semibold tracking-tight">{ label }</h1>
-			<p class="mt-2 text-muted">This view is not built yet — it lands in a later Phase 4 task.</p>
+			<p class="mt-2 text-muted">This view is not available in this build.</p>
 		</div>
 	}
 }

@@ -85,7 +85,7 @@ func BoardPage(board query.Board) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Harness — Board", "board").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Factory — Board", "board").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -962,7 +962,7 @@ func BoardMessage(msg string) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Harness — Board", "board").Render(templ.WithChildren(ctx, templ_7745c5c3_Var44), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Factory — Board", "board").Render(templ.WithChildren(ctx, templ_7745c5c3_Var44), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

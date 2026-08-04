@@ -15,7 +15,7 @@ import (
 // is the per-node anchor into the issue-detail view. The dim/active CSS is an inline <style>
 // so the SVG classes need no Tailwind toolchain pass.
 templ DAGPage(g dag.Graph) {
-	@Layout("Harness — DAG", "dag") {
+	@Layout("Factory — DAG", "dag") {
 		<style>
 			.dag-edge { transition: opacity .15s; }
 			.dag-node { cursor: pointer; transition: opacity .15s; }
@@ -63,7 +63,7 @@ templ DAGGraph(g dag.Graph) {
 // the control room is not attached to a running factory (a standalone `software-factory serve` has no
 // beads to read) or when the DAG read fails. Mirrors BoardMessage / DeadLetterMessage.
 templ DAGMessage(msg string) {
-	@Layout("Harness — DAG", "dag") {
+	@Layout("Factory — DAG", "dag") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">DAG</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

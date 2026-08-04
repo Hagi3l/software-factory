@@ -20,7 +20,7 @@ import (
 // converges. Mirrors the activity feed: server-render a fragment on the nudge, not sse-swap (the
 // raw payloads are a token firehose, not swappable rows).
 templ InvocationPage(inv query.Invocation, entries []live.Entry) {
-	@Layout("Harness — Invocation "+inv.ID, "") {
+	@Layout("Factory — Invocation "+inv.ID, "") {
 		<div class="space-y-4">
 			@invocationHeader(inv)
 			<div hx-ext="sse" sse-connect="/events">
@@ -156,7 +156,7 @@ templ invocationRow(e live.Entry) {
 // used when the control room is not attached to a running factory (standalone `software-factory serve` has
 // no live buffer) or when the issue read fails.
 templ InvocationMessage(msg string) {
-	@Layout("Harness — Invocation", "") {
+	@Layout("Factory — Invocation", "") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Invocation</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

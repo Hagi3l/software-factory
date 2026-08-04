@@ -325,7 +325,7 @@ func VerificationPage(v query.GateVerdictView) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Harness — Verification "+v.Issue.ID, "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Factory — Verification "+v.Issue.ID, "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -1076,7 +1076,7 @@ func VerificationNotAttached(msg string) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Harness — Verification", "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var39), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Factory — Verification", "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var39), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

@@ -21,7 +21,7 @@ import (
 // a slow periodic backstop so the queue still converges when the event stream is idle. The
 // initial list renders inline so the page shows data before htmx attaches.
 templ DeadLetterPage(items []query.DeadLetter) {
-	@Layout("Harness — Dead-letter", "dlq") {
+	@Layout("Factory — Dead-letter", "dlq") {
 		<div class="space-y-4">
 			<div class="flex items-baseline justify-between">
 				<h1 class="text-xl font-semibold tracking-tight">Dead-letter queue</h1>
@@ -108,7 +108,7 @@ templ deadLetterRow(dl query.DeadLetter) {
 // used when the control room is not attached to a running factory (a standalone `factory
 // serve` has no beads to read) or when the queue read fails.
 templ DeadLetterMessage(msg string) {
-	@Layout("Harness — Dead-letter", "dlq") {
+	@Layout("Factory — Dead-letter", "dlq") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Dead-letter queue</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

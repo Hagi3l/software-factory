@@ -19,7 +19,7 @@ import (
 // same redactions applied (configview, "effective config (redacted)"), never the file bytes —
 // so raw can never leak what rendered masks.
 templ ConfigPage(v configview.ConfigView) {
-	@Layout("Harness — Config", "config") {
+	@Layout("Factory — Config", "config") {
 		<style>
 			.cfg-svg .dag-node { cursor: default; }
 		</style>
@@ -431,7 +431,7 @@ templ kvXS(label, value string) {
 // when the control room is not attached to a running factory (a standalone `software-factory serve` has
 // no in-process config to show). Mirrors BoardMessage / BudgetsMessage.
 templ ConfigMessage(msg string) {
-	@Layout("Harness — Config", "config") {
+	@Layout("Factory — Config", "config") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Config</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

@@ -30,8 +30,11 @@ templ StatusBarShell() {
 }
 
 // StatusBarLoading is the neutral pre-load / not-attached placeholder.
+// When standalone serve cannot load /status/bar (503), htmx leaves this text in place.
 templ StatusBarLoading() {
-	<span class="text-faint">factory status —</span>
+	<span class="text-faint">factory status</span>
+	<span class="text-border-strong">·</span>
+	<span class="text-faint">standalone (no live run) — start with software-factory run --serve-addr to attach live metrics</span>
 }
 
 // StatusBar is the live fragment returned by GET /status/bar. activeAgents comes from the live

@@ -16,7 +16,7 @@ import (
 // reissue) before the consent gate commits. The human edits the spec; APPROVE refines it and
 // returns the issue to the ready pool.
 templ ResolvePage(sessionID string, rc query.ResolveContext, msgs []wizard.Message, canResolve bool) {
-	@Layout("Harness — Resolve", "dlq") {
+	@Layout("Factory — Resolve", "dlq") {
 		<script src="/static/wizard.js" defer></script>
 		<div class="mx-auto flex max-w-3xl flex-col gap-4">
 			<div>
@@ -242,7 +242,7 @@ templ ResolveApproveResult(res wizard.ResolveResult, err string) {
 // when no requirements planner is wired, the control room is not attached to a factory, or the
 // issue cannot be loaded — so the surface degrades to an explanation rather than a dead page.
 templ ResolveMessage(msg string) {
-	@Layout("Harness — Resolve", "dlq") {
+	@Layout("Factory — Resolve", "dlq") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Resolve</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

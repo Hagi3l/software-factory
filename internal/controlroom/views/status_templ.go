@@ -61,6 +61,7 @@ func StatusBarShell() templ.Component {
 }
 
 // StatusBarLoading is the neutral pre-load / not-attached placeholder.
+// When standalone serve cannot load /status/bar (503), htmx leaves this text in place.
 func StatusBarLoading() templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -82,7 +83,7 @@ func StatusBarLoading() templ.Component {
 			templ_7745c5c3_Var2 = templ.NopComponent
 		}
 		ctx = templ.ClearChildren(ctx)
-		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<span class=\"text-faint\">factory status —</span>")
+		templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 3, "<span class=\"text-faint\">factory status</span> <span class=\"text-border-strong\">·</span> <span class=\"text-faint\">standalone (no live run) — start with software-factory run --serve-addr to attach live metrics</span>")
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -120,7 +121,7 @@ func StatusBar(st query.Status, activeAgents int) templ.Component {
 		var templ_7745c5c3_Var4 string
 		templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(st.QueueDepth))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 40, Col: 108}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 43, Col: 108}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 		if templ_7745c5c3_Err != nil {
@@ -133,7 +134,7 @@ func StatusBar(st query.Status, activeAgents int) templ.Component {
 		var templ_7745c5c3_Var5 string
 		templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(activeAgents))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 42, Col: 108}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 45, Col: 108}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 		if templ_7745c5c3_Err != nil {
@@ -154,7 +155,7 @@ func StatusBar(st query.Status, activeAgents int) templ.Component {
 		var templ_7745c5c3_Var6 string
 		templ_7745c5c3_Var6, templ_7745c5c3_Err = templ.JoinStringErrs(healthTitle(st.BudgetHealth))
 		if templ_7745c5c3_Err != nil {
-			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 49, Col: 82}
+			return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 52, Col: 82}
 		}
 		_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var6))
 		if templ_7745c5c3_Err != nil {
@@ -180,7 +181,7 @@ func StatusBar(st query.Status, activeAgents int) templ.Component {
 			var templ_7745c5c3_Var7 templ.SafeURL
 			templ_7745c5c3_Var7, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL("/issue/" + st.LastMergeIssue))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 57, Col: 57}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 60, Col: 57}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var7))
 			if templ_7745c5c3_Err != nil {
@@ -193,7 +194,7 @@ func StatusBar(st query.Status, activeAgents int) templ.Component {
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(st.LastMergeIssue)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 57, Col: 136}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 60, Col: 136}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
@@ -247,7 +248,7 @@ func escalationCount(n int) templ.Component {
 			var templ_7745c5c3_Var10 string
 			templ_7745c5c3_Var10, templ_7745c5c3_Err = templ.JoinStringErrs(strconv.Itoa(n))
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 67, Col: 61}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/status.templ`, Line: 70, Col: 61}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var10))
 			if templ_7745c5c3_Err != nil {

@@ -15,7 +15,7 @@ import (
 // read surface. Unlike the board and the feed it is *not* live: a detail page is a
 // forensic snapshot of one issue, so it is plainly server-rendered with no SSE refresh.
 templ IssueDetailPage(d query.IssueDetail) {
-	@Layout("Harness — "+d.Issue.ID, "") {
+	@Layout("Factory — "+d.Issue.ID, "") {
 		<div class="mx-auto max-w-4xl space-y-6">
 			<div class="space-y-2">
 				<div class="flex flex-wrap items-center gap-3">
@@ -149,7 +149,7 @@ templ evidenceItem(e query.ArtifactLink) {
 // used when the control room is not attached to a running factory (a standalone `factory
 // serve` has no beads to read) or when the issue cannot be loaded (an unknown id).
 templ IssueDetailMessage(msg string) {
-	@Layout("Harness — Issue", "") {
+	@Layout("Factory — Issue", "") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Issue</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

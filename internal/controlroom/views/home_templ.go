@@ -8,10 +8,8 @@ package views
 import "github.com/a-h/templ"
 import templruntime "github.com/a-h/templ/runtime"
 
-// Home is the landing page for the control room. T4.1 is the scaffold — the web
-// server, the asset pipeline, and this base layout — so the page deliberately renders
-// status and the view map rather than live data; the data-backed views (Board, DAG,
-// Activity, DLQ, Budgets, Provenance) attach in T4.2+ via the read/query layer and SSE.
+// Home is the landing page for the control room — the human's window into a
+// running factory (or a standalone serve for chrome/nav exploration).
 func Home(version string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -52,13 +50,13 @@ func Home(version string) templ.Component {
 			var templ_7745c5c3_Var3 string
 			templ_7745c5c3_Var3, templ_7745c5c3_Err = templ.JoinStringErrs(version)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/home.templ`, Line: 14, Col: 52}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/home.templ`, Line: 12, Col: 52}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var3))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</span>.</p></div><div class=\"rounded-lg border border-border bg-surface p-4\"><p class=\"text-sm text-fg\">The server scaffold and asset pipeline are live (T4.1). The views below are wired into the navigation and land in subsequent tasks.</p></div><div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 2, "</span>.</p></div><div class=\"rounded-lg border border-border bg-surface p-4 space-y-2\"><p class=\"text-sm text-fg\">Live data (board, activity feed, budgets, create-task wizard) attaches when you start the factory with <span class=\"font-mono text-xs text-fg\">software-factory run --serve-addr 127.0.0.1:8080</span> and a target <span class=\"font-mono text-xs text-fg\">--repo</span> that has beads.</p><p class=\"text-sm text-muted\">Standalone <span class=\"font-mono text-xs\">serve</span> is for the UI chrome only — views show a not-attached notice until a run is co-located.</p></div><div class=\"grid grid-cols-1 gap-3 sm:grid-cols-2\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
@@ -70,7 +68,7 @@ func Home(version string) templ.Component {
 				var templ_7745c5c3_Var4 templ.SafeURL
 				templ_7745c5c3_Var4, templ_7745c5c3_Err = templ.JoinURLErrs(templ.SafeURL(item.Href))
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/home.templ`, Line: 25, Col: 39}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/home.templ`, Line: 29, Col: 39}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var4))
 				if templ_7745c5c3_Err != nil {
@@ -83,24 +81,52 @@ func Home(version string) templ.Component {
 				var templ_7745c5c3_Var5 string
 				templ_7745c5c3_Var5, templ_7745c5c3_Err = templ.JoinStringErrs(item.Label)
 				if templ_7745c5c3_Err != nil {
-					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/home.templ`, Line: 26, Col: 52}
+					return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/home.templ`, Line: 30, Col: 52}
 				}
 				_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var5))
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
-				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</span></a>")
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 5, "</span> ")
+				if templ_7745c5c3_Err != nil {
+					return templ_7745c5c3_Err
+				}
+				if item.Key == "board" {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "<p class=\"mt-1 text-xs text-muted\">Work columns by role</p>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				if item.Key == "create" {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<p class=\"mt-1 text-xs text-muted\">Spec wizard + seed issues</p>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				if item.Key == "dlq" {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "<p class=\"mt-1 text-xs text-muted\">Dead-letters &amp; resolve</p>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				if item.Key == "activity" {
+					templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 9, "<p class=\"mt-1 text-xs text-muted\">Agent + system feed</p>")
+					if templ_7745c5c3_Err != nil {
+						return templ_7745c5c3_Err
+					}
+				}
+				templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 10, "</a>")
 				if templ_7745c5c3_Err != nil {
 					return templ_7745c5c3_Err
 				}
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 6, "</div></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 11, "</div></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Harness — Control Room", "home").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Factory — Control Room", "home").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -108,9 +134,7 @@ func Home(version string) templ.Component {
 	})
 }
 
-// Placeholder renders a not-yet-built view inside the chrome so every nav destination
-// resolves to a real page. Each is replaced by its data-backed implementation in T4.2+;
-// until then this keeps the navigation honest rather than dead-linking.
+// Placeholder is retained for rare unfinished destinations; prefer data views.
 func Placeholder(label string, active string) templ.Component {
 	return templruntime.GeneratedTemplate(func(templ_7745c5c3_Input templruntime.GeneratedComponentInput) (templ_7745c5c3_Err error) {
 		templ_7745c5c3_W, ctx := templ_7745c5c3_Input.Writer, templ_7745c5c3_Input.Context
@@ -144,26 +168,26 @@ func Placeholder(label string, active string) templ.Component {
 				}()
 			}
 			ctx = templ.InitializeContext(ctx)
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 7, "<div class=\"mx-auto max-w-3xl\"><h1 class=\"text-2xl font-semibold tracking-tight\">")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 12, "<div class=\"mx-auto max-w-3xl\"><h1 class=\"text-2xl font-semibold tracking-tight\">")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			var templ_7745c5c3_Var8 string
 			templ_7745c5c3_Var8, templ_7745c5c3_Err = templ.JoinStringErrs(label)
 			if templ_7745c5c3_Err != nil {
-				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/home.templ`, Line: 40, Col: 60}
+				return templ.Error{Err: templ_7745c5c3_Err, FileName: `internal/controlroom/views/home.templ`, Line: 54, Col: 60}
 			}
 			_, templ_7745c5c3_Err = templ_7745c5c3_Buffer.WriteString(templ.EscapeString(templ_7745c5c3_Var8))
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
-			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 8, "</h1><p class=\"mt-2 text-muted\">This view is not built yet — it lands in a later Phase 4 task.</p></div>")
+			templ_7745c5c3_Err = templruntime.WriteString(templ_7745c5c3_Buffer, 13, "</h1><p class=\"mt-2 text-muted\">This view is not available in this build.</p></div>")
 			if templ_7745c5c3_Err != nil {
 				return templ_7745c5c3_Err
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Harness — "+label, active).Render(templ.WithChildren(ctx, templ_7745c5c3_Var7), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Factory — "+label, active).Render(templ.WithChildren(ctx, templ_7745c5c3_Var7), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

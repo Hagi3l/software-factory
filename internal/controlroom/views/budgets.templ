@@ -20,7 +20,7 @@ import (
 // slow periodic backstop so a settled run still converges. The initial body renders inline so
 // the page shows data before htmx attaches.
 templ BudgetsPage(b query.Budgets) {
-	@Layout("Harness — Budgets", "budgets") {
+	@Layout("Factory — Budgets", "budgets") {
 		<div class="space-y-6">
 			<div class="flex items-baseline justify-between gap-4">
 				<h1 class="text-xl font-semibold tracking-tight">Budgets</h1>
@@ -181,7 +181,7 @@ templ budgetPct(pct int, over bool, capped bool) {
 // used when the control room is not attached to a running factory (standalone `software-factory serve`
 // has no beads to read) or when the read fails.
 templ BudgetsMessage(msg string) {
-	@Layout("Harness — Budgets", "budgets") {
+	@Layout("Factory — Budgets", "budgets") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Budgets</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

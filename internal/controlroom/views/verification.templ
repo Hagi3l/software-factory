@@ -21,7 +21,7 @@ import (
 // to a notice (offering the raw-bytes link when a hash is known) rather than failing the page.
 // Artifact bytes it links (raw gate output) are served untrusted per security.md Control 7.
 templ VerificationPage(v query.GateVerdictView) {
-	@Layout("Harness — Verification "+v.Issue.ID, "") {
+	@Layout("Factory — Verification "+v.Issue.ID, "") {
 		<div class="mx-auto max-w-4xl space-y-6">
 			<div class="space-y-2">
 				<div class="flex flex-wrap items-center gap-3">
@@ -299,7 +299,7 @@ templ transformMechanismBadge(mech string) {
 // A missing/undecodable verdict for a *known* issue is handled inline by VerificationPage's
 // notice, which still shows the issue header and the soul split.
 templ VerificationNotAttached(msg string) {
-	@Layout("Harness — Verification", "") {
+	@Layout("Factory — Verification", "") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Verification</h1>
 			<p class="mt-2 text-muted">{ msg }</p>

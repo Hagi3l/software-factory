@@ -312,7 +312,7 @@ func IssueDetailPage(d query.IssueDetail) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Harness — "+d.Issue.ID, "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Factory — "+d.Issue.ID, "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var2), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}
@@ -579,7 +579,7 @@ func IssueDetailMessage(msg string) templ.Component {
 			}
 			return nil
 		})
-		templ_7745c5c3_Err = Layout("Harness — Issue", "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var22), templ_7745c5c3_Buffer)
+		templ_7745c5c3_Err = Layout("Factory — Issue", "").Render(templ.WithChildren(ctx, templ_7745c5c3_Var22), templ_7745c5c3_Buffer)
 		if templ_7745c5c3_Err != nil {
 			return templ_7745c5c3_Err
 		}

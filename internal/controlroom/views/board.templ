@@ -18,7 +18,7 @@ import (
 // view-transition-name; T4.18); the initial columns are rendered inline so the page shows
 // data immediately, before htmx attaches. The ticker.js script powers the per-card timers.
 templ BoardPage(board query.Board) {
-	@Layout("Harness — Board", "board") {
+	@Layout("Factory — Board", "board") {
 		<script src="/static/ticker.js" defer></script>
 		<script src="/static/board-autoscroll.js" defer></script>
 		<script src="/static/lineage.js" defer></script>
@@ -239,7 +239,7 @@ templ statusBadge(status string) {
 // when the control room is not attached to a running factory (a standalone `factory
 // serve` has no beads to read) or when the board read fails.
 templ BoardMessage(msg string) {
-	@Layout("Harness — Board", "board") {
+	@Layout("Factory — Board", "board") {
 		<div class="mx-auto max-w-3xl">
 			<h1 class="text-xl font-semibold tracking-tight">Board</h1>
 			<p class="mt-2 text-muted">{ msg }</p>
