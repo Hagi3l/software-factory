@@ -176,3 +176,22 @@ func TestNewAnthropicStillBuildsWithoutKeys(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGrokClientVersionEnvOverride(t *testing.T) {
+	t.Setenv(registry.EnvGrokClientVersion, "0.9.9")
+	// Re-read via building a model that needs the headers; version helper is package-internal
+	// so we only assert the env is accepted at New without error.
+	reg, err := registry.New(map[string]config.ModelProvider{
+		"grok-4.5": {
+			Provider: config.ProviderOpenAICompat,
+			Endpoint: "https://cli-chat-proxy.grok.com/v1",
+			Family:   "xai",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reg.Adapter("grok-4.5"); err != nil {
+		t.Fatal(err)
+	}
+}

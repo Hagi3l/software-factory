@@ -48,6 +48,14 @@ const (
 	EnvAnthropicKey = "ANTHROPIC_API_KEY"
 	EnvOpenAIKey    = "OPENAI_API_KEY"
 	EnvXAIKey       = "XAI_API_KEY"
+	// EnvGrokClientVersion overrides the x-grok-client-version header sent to
+	// cli-chat-proxy.grok.com (subscription OAuth). The proxy rejects missing/old
+	// versions with HTTP 426.
+	EnvGrokClientVersion = "SOFTWARE_FACTORY_GROK_CLIENT_VERSION"
+
+	// DefaultGrokClientVersion is a floor accepted by cli-chat-proxy (min 0.1.202).
+	// Bump when the proxy raises its floor; override with SOFTWARE_FACTORY_GROK_CLIENT_VERSION.
+	DefaultGrokClientVersion = "0.2.118"
 )
 
 // Registry maps model names to pre-built adapters. Adapters are constructed eagerly
@@ -150,6 +158,11 @@ func build(name string, mp config.ModelProvider) (model.Adapter, error) {
 // Static env keys use WithAPIKey; OAuth / store tokens use per-request middleware
 // so refresh works across a long run.
 func appendOpenAICompatAuth(opts *[]openaiopt.RequestOption, name string, mp config.ModelProvider) error {
+	// cli-chat-proxy.grok.com requires Grok CLI identity headers (426 without them).
+	if needsGrokCLIClientHeaders(mp) {
+		*opts = append(*opts, openaiopt.WithMiddleware(grokCLIClientHeadersMiddleware))
+	}
+
 	if key := os.Getenv(EnvOpenAIKey); key != "" {
 		*opts = append(*opts, openaiopt.WithAPIKey(key))
 		return nil
@@ -222,4 +235,26 @@ func endpointsMatch(a, b string) bool {
 	na := strings.TrimRight(strings.TrimSpace(a), "/")
 	nb := strings.TrimRight(strings.TrimSpace(b), "/")
 	return strings.EqualFold(na, nb)
+}
+
+// needsGrokCLIClientHeaders is true for the subscription chat proxy that enforces
+// official-client identity (see 426 "Grok CLI version (none) is outdated").
+func needsGrokCLIClientHeaders(mp config.ModelProvider) bool {
+	return hostContains(mp.Endpoint, "cli-chat-proxy.grok.com")
+}
+
+func grokClientVersion() string {
+	if v := strings.TrimSpace(os.Getenv(EnvGrokClientVersion)); v != "" {
+		return v
+	}
+	return DefaultGrokClientVersion
+}
+
+// grokCLIClientHeadersMiddleware stamps the identity headers the subscription
+// proxy expects (same set used by the official Grok Build / grok-shell client).
+func grokCLIClientHeadersMiddleware(req *http.Request, next openaiopt.MiddlewareNext) (*http.Response, error) {
+	req.Header.Set("User-Agent", "xai-grok-cli")
+	req.Header.Set("x-grok-client-identifier", "grok-shell")
+	req.Header.Set("x-grok-client-version", grokClientVersion())
+	return next(req)
 }

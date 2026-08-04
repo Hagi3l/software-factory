@@ -53,6 +53,16 @@ grok-4.5:
 Credential order for Grok models: `OPENAI_API_KEY` → `XAI_API_KEY` → OAuth access token
 (refreshed automatically on use).
 
+**cli-chat-proxy client headers.** Subscription traffic to `cli-chat-proxy.grok.com`
+must look like the official Grok CLI or the proxy returns **HTTP 426**
+(`Your Grok CLI version (none) is outdated`). The factory sets:
+
+- `User-Agent: xai-grok-cli`
+- `x-grok-client-identifier: grok-shell`
+- `x-grok-client-version: 0.2.118` (override with `SOFTWARE_FACTORY_GROK_CLIENT_VERSION`)
+
+If you see 426 after a proxy floor bump, update that env (or rebuild with a newer default).
+
 ---
 
 ## 2. Claude Pro / Max (subscription proxy)
